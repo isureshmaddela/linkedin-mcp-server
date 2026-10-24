@@ -1235,7 +1235,7 @@
     const content = h("div", { class: "ld-content", id: "ldContent", role: "region", "aria-label": label, tabindex: "-1" });
     const nav = h("nav", { class: "subnav ld-subnav", "aria-label": "Leads workspaces" }, ...TABS.map(([id, text]) => h("a", { href: link(id), "aria-current": id === tab ? "page" : "false" }, text)));
     main.replaceChildren(
-      h("div", { class: "page-head ld-head" }, h("div", {}, h("h1", { text: "Leads" }), h("p", { text: "Find people and companies to sell to from Google Maps, Google, your own LinkedIn Sales Navigator or a CSV file; score them against your ideal customer; add contact details from the company's own website; and keep track of who you contacted. Aira finds and organizes. It never messages anyone for you." }))),
+      h("div", { class: "page-head ld-head" }, h("div", {}, h("h1", { text: "Leads" }), h("p", { text: "Find people and businesses that need what you sell, from Google Maps, Google, public requests, your own LinkedIn Sales Navigator or a CSV file; score them against your ideal customer; add contact details from the company's own website; and keep track of who you contacted. Aira finds and prepares. An email is sent only after you approve it, through your own mail server; you place every call yourself." }))),
       nav, live, content);
     content.replaceChildren(ui.skeleton(5));
     let overview;
