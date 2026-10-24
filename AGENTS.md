@@ -9,6 +9,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Format: `uv run ruff format .`
 - Type check: `uv run ty check` (using ty, not mypy)
 - Tests: `uv run pytest` (with coverage: `uv run pytest --cov`)
+- Aira UI kit logic tests (plain node, no dependencies): `node tests/js/serp_kit.test.mjs`
 - Pre-commit: `uv run pre-commit install` then `uv run pre-commit run --all-files`
 - Run server locally: `uv run -m linkedin_mcp_server --no-headless`
 - Run via uvx (PyPI/package verification only): `uvx linkedin-scraper-mcp`
@@ -31,6 +32,7 @@ Optional additional keys:
 - `section_errors: {section_name: {error_type, error_message, issue_template_path, runtime, ...}}`
 - `unknown_sections: [name, ...]`
 - `job_ids: [id, ...]` (search_jobs only)
+- `search_sales_navigator` is the one structured tool: it returns `{url, pages_read, leads: [{name, first_name, last_name, title, company, company_url, company_sales_url, location, profile_url, linkedin_url, degree, tenure_in_role, tenure_in_company, raw_lines}], warnings: [...], section_errors}` instead of `sections`. Its in-page probe keys on `href` structure (`/sales/lead/`, `/sales/company/`) and is read only; the English line patterns that tell a title from a location are the documented locale table in `scraping/sales_navigator.py`.
 - `references["feed"]` (get_feed only) — every entry is `kind: "feed_post"`; non-post anchors (sidebar profiles, employer logos) are filtered. URLs may carry either `/feed/update/<urn>/` (DOM-anchor-derived) or `/posts/<slug>` (SDUI-derived) form; both are valid LinkedIn permalinks. Cap is 50 entries, matching `get_feed`'s `num_posts` ceiling.
 
 ## Verifying Bug Reports

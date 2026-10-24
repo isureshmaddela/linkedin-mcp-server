@@ -1,0 +1,116 @@
+{
+  "search_metadata": {
+    "id": "{{id}}",
+    "status": "Success",
+    "json_endpoint": "{{base}}/searches/{{id}}.json",
+    "created_at": "2026-10-22 12:00:00 UTC",
+    "processed_at": "2026-10-22 12:00:01 UTC",
+    "total_time_taken": 1.2,
+    "fixture": true,
+    "fixture_note": "Recorded-shape fixture for tests. Not live SerpApi data."
+  },
+  "shopping_results": [
+    {
+      "position": 1,
+      "title": "Fixture Pour-Over Kettle",
+      "product_link": "https://www.google.com/shopping/product/fixture0",
+      "product_id": "10000000000",
+      "serpapi_product_api": "{{base}}/search.json?engine=google_product&product_id=10000000000",
+      "source": "Fixture Store",
+      "price": "$39.99",
+      "extracted_price": 39.99,
+      "rating": 4.7,
+      "reviews": 1520,
+      "snippet": "Product result 1: a short description used only in test fixtures.",
+      "thumbnail": "https://example.com/product-0.jpg",
+      "delivery": "Free delivery"
+    },
+    {
+      "position": 2,
+      "title": "Gooseneck Electric Kettle",
+      "product_link": "https://www.google.com/shopping/product/fixture1",
+      "product_id": "10000000001",
+      "serpapi_product_api": "{{base}}/search.json?engine=google_product&product_id=10000000001",
+      "source": "Example Mart",
+      "price": "$54.00",
+      "extracted_price": 54.0,
+      "rating": 4.6,
+      "reviews": 880,
+      "snippet": "Product result 2: a short description used only in test fixtures.",
+      "thumbnail": "https://example.com/product-1.jpg",
+      "delivery": "Free shipping over $35"
+    },
+    {
+      "position": 3,
+      "title": "Burr Coffee Grinder",
+      "product_link": "https://www.google.com/shopping/product/fixture2",
+      "product_id": "10000000002",
+      "serpapi_product_api": "{{base}}/search.json?engine=google_product&product_id=10000000002",
+      "source": "Beanware",
+      "price": "$89.95",
+      "extracted_price": 89.95,
+      "rating": 4.8,
+      "reviews": 2310,
+      "snippet": "Product result 3: a short description used only in test fixtures.",
+      "thumbnail": "https://example.com/product-2.jpg",
+      "delivery": "Free delivery"
+    },
+    {
+      "position": 4,
+      "title": "Stainless French Press",
+      "product_link": "https://www.google.com/shopping/product/fixture3",
+      "product_id": "10000000003",
+      "serpapi_product_api": "{{base}}/search.json?engine=google_product&product_id=10000000003",
+      "source": "KitchenCo",
+      "price": "$24.50",
+      "extracted_price": 24.5,
+      "rating": 4.4,
+      "reviews": 640,
+      "snippet": "Product result 4: a short description used only in test fixtures.",
+      "thumbnail": "https://example.com/product-3.jpg",
+      "delivery": "Free shipping over $35"
+    },
+    {
+      "position": 5,
+      "title": "Digital Coffee Scale",
+      "product_link": "https://www.google.com/shopping/product/fixture4",
+      "product_id": "10000000004",
+      "serpapi_product_api": "{{base}}/search.json?engine=google_product&product_id=10000000004",
+      "source": "Gadget Hub",
+      "price": "$19.99",
+      "extracted_price": 19.99,
+      "rating": 4.5,
+      "reviews": 410,
+      "snippet": "Product result 5: a short description used only in test fixtures.",
+      "thumbnail": "https://example.com/product-4.jpg",
+      "delivery": "Free delivery"
+    }
+  ],
+  "filters": [
+    {
+      "type": "Price",
+      "options": [
+        {
+          "text": "Under $25",
+          "tbs": "mr:1,price:1,ppr_max:25"
+        },
+        {
+          "text": "$25 - $50",
+          "tbs": "mr:1,price:1,ppr_min:25,ppr_max:50"
+        }
+      ]
+    },
+    {
+      "type": "Brand",
+      "options": [
+        {
+          "text": "Fixture",
+          "tbs": "mr:1,brand:fixture"
+        }
+      ]
+    }
+  ],
+  "serpapi_pagination": {
+    "next": "{{base}}/search.json?engine=google_shopping&q=kettle&start=60"
+  }
+}

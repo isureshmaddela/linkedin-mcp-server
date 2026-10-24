@@ -1,0 +1,127 @@
+{
+  "engines": [
+    {
+      "id": "aira_jobs",
+      "name": "Aira Jobs",
+      "provider": "aira",
+      "category": "jobs",
+      "family": "Aira",
+      "description": "Aira's own job search: open roles from free, public job-board APIs (Himalayas, The Muse, Remotive, Jobicy, Arbeitnow), searched by Aira itself. No SerpApi key and no credits. Results use the Google Jobs shape (jobs_results with title, company_name, location, via, description, apply_options), so Careers, the Jobs tab and alerts work on them unchanged. Every result credits its board and links back to it.",
+      "docs_url": "https://himalayas.app/docs/remote-jobs-api",
+      "endpoint": "local",
+      "requires_any_of": [["q"]],
+      "pagination": {
+        "kind": "none",
+        "page_size": 100,
+        "notes": "One page of up to num results, newest first. Each board is cached on Aira's side to respect its terms, so repeating a search within hours costs the boards nothing."
+      },
+      "result_keys": ["jobs_results", "search_information"],
+      "result_item_fields": {
+        "jobs_results": [
+          "title",
+          "company_name",
+          "location",
+          "via",
+          "share_link",
+          "thumbnail",
+          "extensions",
+          "detected_extensions",
+          "description",
+          "apply_options",
+          "job_id",
+          "aira_source",
+          "attribution"
+        ],
+        "apply_options": ["title", "link"]
+      },
+      "aira_use": "Find open roles without a SerpApi key: the free source behind Jobs > Aira Jobs, Careers without a key and Auto-apply plans.",
+      "verified": "live",
+      "params": [
+        {
+          "name": "q",
+          "label": "Search query",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "The role to look for, e.g. 'cloud architect'. Every key word must appear in the job title.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "location",
+          "label": "Location",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "A city ('Austin, TX'), a country ('Germany') or 'Remote'. Remote jobs open to that country also match.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "country",
+          "label": "Country code",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two-letter country such as US or DE. Worked out from location when left empty.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "remote_only",
+          "label": "Remote only",
+          "type": "boolean",
+          "required": false,
+          "group": "Filters",
+          "help": "Only jobs that can be done from home.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "employment_type",
+          "label": "Employment type",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Keep only one kind of employment when the board says which.",
+          "default": null,
+          "requires_one_of": null,
+          "options": [
+            {"value": "full_time", "label": "Full-time"},
+            {"value": "part_time", "label": "Part-time"},
+            {"value": "contract", "label": "Contract"},
+            {"value": "internship", "label": "Internship"},
+            {"value": "temporary", "label": "Temporary"}
+          ]
+        },
+        {
+          "name": "boards",
+          "label": "Boards",
+          "type": "csv",
+          "required": false,
+          "group": "Sources",
+          "help": "Which boards to search; all of them when empty.",
+          "default": null,
+          "requires_one_of": null,
+          "options": [
+            {"value": "himalayas", "label": "Himalayas"},
+            {"value": "themuse", "label": "The Muse"},
+            {"value": "remotive", "label": "Remotive"},
+            {"value": "jobicy", "label": "Jobicy"},
+            {"value": "arbeitnow", "label": "Arbeitnow"}
+          ]
+        },
+        {
+          "name": "num",
+          "label": "Results",
+          "type": "integer",
+          "required": false,
+          "group": "Pagination",
+          "help": "Most results to return (1 to 100, default 40).",
+          "default": null,
+          "requires_one_of": null
+        }
+      ]
+    }
+  ]
+}

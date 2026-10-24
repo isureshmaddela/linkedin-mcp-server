@@ -1,0 +1,222 @@
+{
+  "search_metadata": {
+    "id": "{{id}}",
+    "status": "Success",
+    "json_endpoint": "{{base}}/searches/{{id}}.json",
+    "created_at": "2026-10-22 12:00:00 UTC",
+    "processed_at": "2026-10-22 12:00:01 UTC",
+    "total_time_taken": 1.2,
+    "fixture": true,
+    "fixture_note": "Recorded-shape fixture for tests. Not live SerpApi data."
+  },
+  "search_information": {
+    "jobs_results_state": "Results for exact spelling"
+  },
+  "jobs_results": [
+    {
+      "title": "Barista",
+      "company_name": "Blue Bottle Coffee",
+      "location": "New York, NY",
+      "via": "via LinkedIn",
+      "share_link": "https://www.google.com/search?q=Barista&ibp=htl;jobs",
+      "thumbnail": "https://example.com/logos/1.png",
+      "extensions": [
+        "3 days ago",
+        "Full-time"
+      ],
+      "detected_extensions": {
+        "posted_at": "3 days ago",
+        "schedule_type": "Full-time"
+      },
+      "description": "Blue Bottle Coffee is hiring a Barista. Make drinks, keep the bar clean and delight guests.",
+      "job_highlights": [
+        {
+          "title": "Qualifications",
+          "items": [
+            "1+ year of experience",
+            "Friendly and reliable"
+          ]
+        },
+        {
+          "title": "Benefits",
+          "items": [
+            "Health insurance",
+            "Free coffee"
+          ]
+        }
+      ],
+      "apply_options": [
+        {
+          "title": "LinkedIn",
+          "link": "https://www.linkedin.com/jobs/view/1000"
+        },
+        {
+          "title": "Company site",
+          "link": "https://careers.example.com/jobs/1000"
+        }
+      ],
+      "job_id": "eyJqb2JfdGl0bGUiOiJ0ZXN00In0="
+    },
+    {
+      "title": "Senior Barista",
+      "company_name": "Joe Coffee",
+      "location": "Brooklyn, NY",
+      "via": "via Indeed",
+      "share_link": "https://www.google.com/search?q=Senior+Barista&ibp=htl;jobs",
+      "thumbnail": "https://example.com/logos/2.png",
+      "extensions": [
+        "3 days ago",
+        "Full-time",
+        "$18-22 an hour"
+      ],
+      "detected_extensions": {
+        "posted_at": "3 days ago",
+        "schedule_type": "Full-time",
+        "salary": "$18-22 an hour"
+      },
+      "description": "Joe Coffee is hiring a Senior Barista. Make drinks, keep the bar clean and delight guests.",
+      "job_highlights": [
+        {
+          "title": "Qualifications",
+          "items": [
+            "1+ year of experience",
+            "Friendly and reliable"
+          ]
+        },
+        {
+          "title": "Benefits",
+          "items": [
+            "Health insurance",
+            "Free coffee"
+          ]
+        }
+      ],
+      "apply_options": [
+        {
+          "title": "LinkedIn",
+          "link": "https://www.linkedin.com/jobs/view/1001"
+        },
+        {
+          "title": "Company site",
+          "link": "https://careers.example.com/jobs/1001"
+        }
+      ],
+      "job_id": "eyJqb2JfdGl0bGUiOiJ0ZXN01In0="
+    },
+    {
+      "title": "Coffee Roaster",
+      "company_name": "Counter Culture",
+      "location": "Remote",
+      "via": "via ZipRecruiter",
+      "share_link": "https://www.google.com/search?q=Coffee+Roaster&ibp=htl;jobs",
+      "thumbnail": "https://example.com/logos/3.png",
+      "extensions": [
+        "3 days ago",
+        "Contractor"
+      ],
+      "detected_extensions": {
+        "posted_at": "3 days ago",
+        "schedule_type": "Contractor",
+        "work_from_home": true
+      },
+      "description": "Counter Culture is hiring a Coffee Roaster. Make drinks, keep the bar clean and delight guests.",
+      "job_highlights": [
+        {
+          "title": "Qualifications",
+          "items": [
+            "1+ year of experience",
+            "Friendly and reliable"
+          ]
+        },
+        {
+          "title": "Benefits",
+          "items": [
+            "Health insurance",
+            "Free coffee"
+          ]
+        }
+      ],
+      "apply_options": [
+        {
+          "title": "LinkedIn",
+          "link": "https://www.linkedin.com/jobs/view/1002"
+        },
+        {
+          "title": "Company site",
+          "link": "https://careers.example.com/jobs/1002"
+        }
+      ],
+      "job_id": "eyJqb2JfdGl0bGUiOiJ0ZXN02In0="
+    },
+    {
+      "title": "Cafe Manager",
+      "company_name": "Gregorys Coffee",
+      "location": "New York, NY",
+      "via": "via Glassdoor",
+      "share_link": "https://www.google.com/search?q=Cafe+Manager&ibp=htl;jobs",
+      "thumbnail": "https://example.com/logos/4.png",
+      "extensions": [
+        "3 days ago",
+        "Full-time",
+        "$60K-70K a year"
+      ],
+      "detected_extensions": {
+        "posted_at": "3 days ago",
+        "schedule_type": "Full-time",
+        "salary": "$60K-70K a year"
+      },
+      "description": "Gregorys Coffee is hiring a Cafe Manager. Make drinks, keep the bar clean and delight guests.",
+      "job_highlights": [
+        {
+          "title": "Qualifications",
+          "items": [
+            "1+ year of experience",
+            "Friendly and reliable"
+          ]
+        },
+        {
+          "title": "Benefits",
+          "items": [
+            "Health insurance",
+            "Free coffee"
+          ]
+        }
+      ],
+      "apply_options": [
+        {
+          "title": "LinkedIn",
+          "link": "https://www.linkedin.com/jobs/view/1003"
+        },
+        {
+          "title": "Company site",
+          "link": "https://careers.example.com/jobs/1003"
+        }
+      ],
+      "job_id": "eyJqb2JfdGl0bGUiOiJ0ZXN03In0="
+    }
+  ],
+  "filters": [
+    {
+      "name": "Date posted",
+      "parameters": {
+        "uds": "uds-date-posted-token",
+        "q": "barista"
+      },
+      "link": "https://www.google.com/search?q=barista&ibp=htl;jobs",
+      "serpapi_link": "{{base}}/search.json?engine=google_jobs&q=barista&uds=uds-date-posted-token"
+    },
+    {
+      "name": "Remote",
+      "parameters": {
+        "uds": "uds-remote-token",
+        "q": "barista"
+      },
+      "link": "https://www.google.com/search?q=barista&ibp=htl;jobs",
+      "serpapi_link": "{{base}}/search.json?engine=google_jobs&q=barista&uds=uds-remote-token"
+    }
+  ],
+  "serpapi_pagination": {
+    "next_page_token": "fixture-next-page-token",
+    "next": "{{base}}/search.json?engine=google_jobs&q=barista&next_page_token=fixture-next-page-token"
+  }
+}

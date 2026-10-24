@@ -1,0 +1,5844 @@
+{
+  "engines": [
+    {
+      "id": "google_maps",
+      "name": "Google Maps",
+      "category": "maps_local",
+      "family": "Google",
+      "description": "Scrapes Google Maps search results (local businesses and places) for a query, or the details of a single place identified by place_id or data_cid.",
+      "docs_url": "https://serpapi.com/google-maps-api",
+      "endpoint": "https://serpapi.com/search.json",
+      "params": [
+        {
+          "name": "q",
+          "label": "Search query",
+          "type": "string",
+          "required": false,
+          "group": "Search",
+          "help": "Anything you would type into Google Maps. Only required when type is search.",
+          "default": null,
+          "requires_one_of": "q_or_place_id_or_data_cid_or_data"
+        },
+        {
+          "name": "type",
+          "label": "Search type",
+          "type": "enum",
+          "required": false,
+          "group": "Search",
+          "help": "search lists results for q; place returns a specific place (use with place_id, data_cid or data). Not needed with place_id or data_cid.",
+          "default": null,
+          "options": [
+            {
+              "value": "search",
+              "label": "Search (list results for q)"
+            },
+            {
+              "value": "place",
+              "label": "Place (a specific place)"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "ll",
+          "label": "GPS origin (ll)",
+          "type": "string",
+          "required": false,
+          "group": "Search",
+          "help": "Search origin as @latitude,longitude,zoom (e.g. @40.7455096,-74.0083012,14z) or @latitude,longitude,map_height (e.g. @43.8521864,11.2168835,10410m). Only for type=search. Cannot be used with location, lat, lon, z or m.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "location",
+          "label": "Location name",
+          "type": "location",
+          "required": false,
+          "group": "Search",
+          "help": "Place name whose coordinates become the search origin (encoded into ll). Use with z or m. Cannot be used with ll, lat or lon.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "lat",
+          "label": "Latitude",
+          "type": "number",
+          "required": false,
+          "group": "Search",
+          "help": "Latitude of the origin; requires lon. Use with z or m. Cannot be used with ll or location.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "lon",
+          "label": "Longitude",
+          "type": "number",
+          "required": false,
+          "group": "Search",
+          "help": "Longitude of the origin; requires lat. Use with z or m. Cannot be used with ll or location.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "z",
+          "label": "Zoom level",
+          "type": "integer",
+          "required": false,
+          "group": "Search",
+          "help": "Zoom from 3 (fully zoomed out) to 30; most places support 18-23. Required with location or lat/lon unless m is given.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "m",
+          "label": "Map height (meters)",
+          "type": "integer",
+          "required": false,
+          "group": "Search",
+          "help": "Map height in meters, 1 to 15028132. Required with location or lat/lon unless z is given.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "nearby",
+          "label": "Nearby bias",
+          "type": "boolean",
+          "required": false,
+          "group": "Search",
+          "help": "Bias results toward the given location. Recommended when q contains 'near me'; not recommended when q already names a location.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "google_domain",
+          "label": "Google domain",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Google domain to use. Defaults to google.com.",
+          "default": "google.com",
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Language (hl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two or three letter language code, optionally with a region code, e.g. en, es, fr, en-gb, es-419. See the Google Maps languages page.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "gl",
+          "label": "Country (gl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two-letter country code, e.g. us, uk, fr. Affects only Place Results.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "data",
+          "label": "Data filter (deprecated)",
+          "type": "string",
+          "required": false,
+          "group": "Advanced",
+          "help": "Deprecated filter string copied from a Google Maps URL (!4m5!3m4!1s + data_id + !8m2!3d + lat + !4d + lon). Use place_id or data_cid instead. Required when type=place and neither place_id nor data_cid is used.",
+          "default": null,
+          "requires_one_of": "q_or_place_id_or_data_cid_or_data"
+        },
+        {
+          "name": "place_id",
+          "label": "Place ID",
+          "type": "string",
+          "required": false,
+          "group": "Advanced",
+          "help": "Unique Google Maps place reference; can be used alone. Cannot be combined with data_cid.",
+          "default": null,
+          "requires_one_of": "q_or_place_id_or_data_cid_or_data"
+        },
+        {
+          "name": "data_cid",
+          "label": "Data CID",
+          "type": "string",
+          "required": false,
+          "group": "Advanced",
+          "help": "Google customer identifier (CID) of a place; can be used alone. Cannot be combined with place_id.",
+          "default": null,
+          "requires_one_of": "q_or_place_id_or_data_cid_or_data"
+        },
+        {
+          "name": "min_price",
+          "label": "Minimum price",
+          "type": "integer",
+          "required": false,
+          "group": "Filters",
+          "help": "Lower bound of the price range, for places with numeric price data (cafes, restaurants, bars).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "max_price",
+          "label": "Maximum price",
+          "type": "integer",
+          "required": false,
+          "group": "Filters",
+          "help": "Upper bound of the price range, for places with numeric price data.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "min_rating",
+          "label": "Minimum rating",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Preferred minimum rating; lower or unrated places may still appear with reduced relevance.",
+          "default": null,
+          "options": [
+            {
+              "value": "2.0",
+              "label": "2.0+"
+            },
+            {
+              "value": "2.5",
+              "label": "2.5+"
+            },
+            {
+              "value": "3.0",
+              "label": "3.0+"
+            },
+            {
+              "value": "3.5",
+              "label": "3.5+"
+            },
+            {
+              "value": "4.0",
+              "label": "4.0+"
+            },
+            {
+              "value": "4.5",
+              "label": "4.5+"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "open_state",
+          "label": "Open state",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Filter by current status. Cannot be combined with open_on_day or open_at_hour.",
+          "default": null,
+          "options": [
+            {
+              "value": "now",
+              "label": "Open now"
+            },
+            {
+              "value": "24h",
+              "label": "Open 24 hours"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "open_on_day",
+          "label": "Open on day",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Filter by day of week open. Cannot be combined with open_state.",
+          "default": null,
+          "options": [
+            {
+              "value": "mon",
+              "label": "Monday"
+            },
+            {
+              "value": "tue",
+              "label": "Tuesday"
+            },
+            {
+              "value": "wed",
+              "label": "Wednesday"
+            },
+            {
+              "value": "thu",
+              "label": "Thursday"
+            },
+            {
+              "value": "fri",
+              "label": "Friday"
+            },
+            {
+              "value": "sat",
+              "label": "Saturday"
+            },
+            {
+              "value": "sun",
+              "label": "Sunday"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "open_at_hour",
+          "label": "Open at hour",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Hour of day (24h) the place must be open; use with open_on_day, not with open_state.",
+          "default": null,
+          "options": [
+            {
+              "value": "0",
+              "label": "Midnight"
+            },
+            {
+              "value": "1",
+              "label": "1 AM"
+            },
+            {
+              "value": "2",
+              "label": "2 AM"
+            },
+            {
+              "value": "3",
+              "label": "3 AM"
+            },
+            {
+              "value": "4",
+              "label": "4 AM"
+            },
+            {
+              "value": "5",
+              "label": "5 AM"
+            },
+            {
+              "value": "6",
+              "label": "6 AM"
+            },
+            {
+              "value": "7",
+              "label": "7 AM"
+            },
+            {
+              "value": "8",
+              "label": "8 AM"
+            },
+            {
+              "value": "9",
+              "label": "9 AM"
+            },
+            {
+              "value": "10",
+              "label": "10 AM"
+            },
+            {
+              "value": "11",
+              "label": "11 AM"
+            },
+            {
+              "value": "12",
+              "label": "Noon"
+            },
+            {
+              "value": "13",
+              "label": "1 PM"
+            },
+            {
+              "value": "14",
+              "label": "2 PM"
+            },
+            {
+              "value": "15",
+              "label": "3 PM"
+            },
+            {
+              "value": "16",
+              "label": "4 PM"
+            },
+            {
+              "value": "17",
+              "label": "5 PM"
+            },
+            {
+              "value": "18",
+              "label": "6 PM"
+            },
+            {
+              "value": "19",
+              "label": "7 PM"
+            },
+            {
+              "value": "20",
+              "label": "8 PM"
+            },
+            {
+              "value": "21",
+              "label": "9 PM"
+            },
+            {
+              "value": "22",
+              "label": "10 PM"
+            },
+            {
+              "value": "23",
+              "label": "11 PM"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "start",
+          "label": "Result offset",
+          "type": "integer",
+          "required": false,
+          "group": "Pagination",
+          "help": "Result offset in steps of 20 (0, 20, 40, ...). Recommended maximum is 100.",
+          "default": 0,
+          "requires_one_of": null
+        }
+      ],
+      "requires_any_of": [
+        [
+          "q",
+          "place_id",
+          "data_cid",
+          "data"
+        ]
+      ],
+      "pagination": {
+        "kind": "start",
+        "param": "start",
+        "page_size": 20,
+        "notes": "Steps of 20; recommended max offset 100. serpapi_pagination.next gives the next URL."
+      },
+      "result_keys": [
+        "search_information",
+        "local_results",
+        "place_results",
+        "serpapi_pagination"
+      ],
+      "result_item_fields": {
+        "local_results": [
+          "position",
+          "title",
+          "place_id",
+          "data_id",
+          "data_cid",
+          "reviews_link",
+          "photos_link",
+          "gps_coordinates",
+          "rating",
+          "reviews",
+          "price",
+          "type",
+          "types",
+          "address",
+          "phone",
+          "open_state",
+          "hours",
+          "operating_hours",
+          "service_options",
+          "thumbnail"
+        ]
+      },
+      "aira_use": "Find companies, offices, coworking spaces, recruiters and interview venues near a city, get their phone, hours and rating, and pull the data_id for reviews and photos lookups.",
+      "verified": "docs"
+    },
+    {
+      "id": "google_maps_reviews",
+      "name": "Google Maps Reviews",
+      "category": "maps_local",
+      "family": "Google",
+      "description": "Returns user reviews, topic keywords and place info for a Google Maps place identified by data_id or place_id.",
+      "docs_url": "https://serpapi.com/google-maps-reviews-api",
+      "endpoint": "https://serpapi.com/search.json",
+      "params": [
+        {
+          "name": "data_id",
+          "label": "Data ID",
+          "type": "string",
+          "required": false,
+          "group": "Search",
+          "help": "Google Maps data ID of the place (from the Google Maps API). One of data_id or place_id must be set.",
+          "default": null,
+          "requires_one_of": "data_id_or_place_id"
+        },
+        {
+          "name": "place_id",
+          "label": "Place ID",
+          "type": "string",
+          "required": false,
+          "group": "Search",
+          "help": "Unique Google Maps place reference (from Maps Local Results). One of data_id or place_id must be set.",
+          "default": null,
+          "requires_one_of": "data_id_or_place_id"
+        },
+        {
+          "name": "hl",
+          "label": "Language (hl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two or three letter language code, optionally with a region code, e.g. en, es, fr, en-gb, es-419.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "sort_by",
+          "label": "Sort by",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Sort and refine reviews. Total review count may vary by option.",
+          "default": "qualityScore",
+          "options": [
+            {
+              "value": "qualityScore",
+              "label": "Most relevant"
+            },
+            {
+              "value": "newestFirst",
+              "label": "Most recent"
+            },
+            {
+              "value": "ratingHigh",
+              "label": "Highest rating"
+            },
+            {
+              "value": "ratingLow",
+              "label": "Lowest rating"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "topic_id",
+          "label": "Topic ID",
+          "type": "string",
+          "required": false,
+          "group": "Filters",
+          "help": "Filter reviews by topic; topic IDs are in the JSON response (topics[].id). Cannot be used with query.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "query",
+          "label": "Text filter",
+          "type": "string",
+          "required": false,
+          "group": "Filters",
+          "help": "Filter reviews by text. Cannot be used with topic_id.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "num",
+          "label": "Results per page",
+          "type": "integer",
+          "required": false,
+          "group": "Pagination",
+          "help": "Maximum number of results, 1 to 20.",
+          "default": 10,
+          "requires_one_of": null
+        },
+        {
+          "name": "next_page_token",
+          "label": "Next page token",
+          "type": "string",
+          "required": false,
+          "group": "Pagination",
+          "help": "Token for the next page, found at serpapi_pagination.next_page_token. The start offset parameter is discontinued by Google.",
+          "default": null,
+          "requires_one_of": null
+        }
+      ],
+      "requires_any_of": [
+        [
+          "data_id",
+          "place_id"
+        ]
+      ],
+      "pagination": {
+        "kind": "next_page_token",
+        "param": "next_page_token",
+        "page_size": 10,
+        "notes": "num (1-20) controls page size; follow serpapi_pagination.next_page_token."
+      },
+      "result_keys": [
+        "place_info",
+        "topics",
+        "reviews",
+        "serpapi_pagination"
+      ],
+      "result_item_fields": {
+        "reviews": [
+          "position",
+          "link",
+          "rating",
+          "date",
+          "iso_date",
+          "snippet",
+          "extracted_snippet",
+          "details",
+          "likes",
+          "images",
+          "review_id",
+          "user",
+          "source"
+        ],
+        "topics": [
+          "keyword",
+          "mentions",
+          "id"
+        ]
+      },
+      "aira_use": "Read what employees and visitors say about a prospective employer's office, culture and management before applying or interviewing there.",
+      "verified": "docs"
+    },
+    {
+      "id": "google_maps_photos",
+      "name": "Google Maps Photos",
+      "category": "maps_local",
+      "family": "Google",
+      "description": "Extracts full-size images, thumbnails and user information of photos posted for a Google Maps place, optionally by category.",
+      "docs_url": "https://serpapi.com/google-maps-photos-api",
+      "endpoint": "https://serpapi.com/search.json",
+      "params": [
+        {
+          "name": "data_id",
+          "label": "Data ID",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "Google Maps data ID of the place (from the Google Maps API).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Language (hl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two or three letter language code, optionally with a region code, e.g. en, es, fr, en-gb, es-419.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "category_id",
+          "label": "Category ID",
+          "type": "string",
+          "required": false,
+          "group": "Filters",
+          "help": "ID of a photo category from the categories array of a previous response; available categories vary by place.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "next_page_token",
+          "label": "Next page token",
+          "type": "string",
+          "required": false,
+          "group": "Pagination",
+          "help": "Token for the next page, found at serpapi_pagination.next_page_token. Each page returns 20 results.",
+          "default": null,
+          "requires_one_of": null
+        }
+      ],
+      "requires_any_of": [],
+      "pagination": {
+        "kind": "next_page_token",
+        "param": "next_page_token",
+        "page_size": 20,
+        "notes": "20 photos per page."
+      },
+      "result_keys": [
+        "photos",
+        "categories",
+        "serpapi_pagination"
+      ],
+      "result_item_fields": {
+        "photos": [
+          "title",
+          "thumbnail",
+          "image",
+          "user"
+        ],
+        "categories": [
+          "title",
+          "id"
+        ]
+      },
+      "aira_use": "Preview the office, campus or interview venue before an onsite visit.",
+      "verified": "docs"
+    },
+    {
+      "id": "google_maps_photo_meta",
+      "name": "Google Maps Photo Meta",
+      "category": "maps_local",
+      "family": "Google",
+      "description": "Returns metadata for a single Google Maps photo: the user who posted it, the place location and the posting date.",
+      "docs_url": "https://serpapi.com/google-maps-photo-meta-api",
+      "endpoint": "https://serpapi.com/search.json",
+      "params": [
+        {
+          "name": "data_id",
+          "label": "Photo data ID",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "Google Maps Photos data ID (from the Google Maps Photos API).",
+          "default": null,
+          "requires_one_of": null
+        }
+      ],
+      "requires_any_of": [],
+      "pagination": {
+        "kind": "none",
+        "param": null,
+        "page_size": null,
+        "notes": ""
+      },
+      "result_keys": [
+        "user",
+        "location",
+        "date"
+      ],
+      "result_item_fields": {
+        "user": [
+          "name",
+          "link",
+          "image",
+          "user_id"
+        ],
+        "location": [
+          "latitude",
+          "longitude",
+          "name",
+          "type"
+        ]
+      },
+      "aira_use": "Verify when and where a workplace photo was taken to judge how current the office impression is.",
+      "verified": "docs",
+      "unlisted": true
+    },
+    {
+      "id": "google_maps_posts",
+      "name": "Google Maps Posts",
+      "category": "maps_local",
+      "family": "Google",
+      "description": "Returns the posts (updates, events, offers) a business published on its Google Business Profile.",
+      "docs_url": "https://serpapi.com/google-maps-posts-api",
+      "endpoint": "https://serpapi.com/search.json",
+      "params": [
+        {
+          "name": "data_id",
+          "label": "Data ID",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "Google Maps data ID of the place (from the Google Maps API).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "next_page_token",
+          "label": "Next page token",
+          "type": "string",
+          "required": false,
+          "group": "Pagination",
+          "help": "Token for the next page, found at serpapi_pagination.next_page_token. Each page returns 10 results.",
+          "default": null,
+          "requires_one_of": null
+        }
+      ],
+      "requires_any_of": [],
+      "pagination": {
+        "kind": "next_page_token",
+        "param": "next_page_token",
+        "page_size": 10,
+        "notes": "10 posts per page."
+      },
+      "result_keys": [
+        "posts",
+        "serpapi_pagination"
+      ],
+      "result_item_fields": {
+        "posts": [
+          "position",
+          "title",
+          "description",
+          "link",
+          "post_link",
+          "thumbnails",
+          "source",
+          "time",
+          "from",
+          "to",
+          "online_link",
+          "online_link_text",
+          "posted_at",
+          "posted_at_text"
+        ]
+      },
+      "aira_use": "Follow a target employer's recent announcements, hiring events and open days.",
+      "verified": "docs"
+    },
+    {
+      "id": "google_maps_directions",
+      "name": "Google Maps Directions",
+      "category": "maps_local",
+      "family": "Google",
+      "description": "Returns routes, step-by-step directions, distances and durations between two points for several travel modes.",
+      "docs_url": "https://serpapi.com/google-maps-directions-api",
+      "endpoint": "https://serpapi.com/search.json",
+      "params": [
+        {
+          "name": "start_addr",
+          "label": "Start address",
+          "type": "string",
+          "required": false,
+          "group": "Search",
+          "help": "Starting point; anything valid in a Google Maps directions search. Alternatives: start_data_id or start_coords.",
+          "default": null,
+          "requires_one_of": "start_addr_or_start_data_id_or_start_coords"
+        },
+        {
+          "name": "start_data_id",
+          "label": "Start data ID",
+          "type": "string",
+          "required": false,
+          "group": "Search",
+          "help": "Data ID of the starting place (from the Google Maps API). Alternatives: start_addr or start_coords.",
+          "default": null,
+          "requires_one_of": "start_addr_or_start_data_id_or_start_coords"
+        },
+        {
+          "name": "start_coords",
+          "label": "Start coordinates",
+          "type": "string",
+          "required": false,
+          "group": "Search",
+          "help": "Start GPS as latitude,longitude, e.g. 30.197471099,-97.66635289. Alternatives: start_addr or start_data_id.",
+          "default": null,
+          "requires_one_of": "start_addr_or_start_data_id_or_start_coords"
+        },
+        {
+          "name": "end_addr",
+          "label": "End address",
+          "type": "string",
+          "required": false,
+          "group": "Search",
+          "help": "Destination; anything valid in a Google Maps directions search. Alternatives: end_data_id or end_coords.",
+          "default": null,
+          "requires_one_of": "end_addr_or_end_data_id_or_end_coords"
+        },
+        {
+          "name": "end_data_id",
+          "label": "End data ID",
+          "type": "string",
+          "required": false,
+          "group": "Search",
+          "help": "Data ID of the destination place. Alternatives: end_addr or end_coords.",
+          "default": null,
+          "requires_one_of": "end_addr_or_end_data_id_or_end_coords"
+        },
+        {
+          "name": "end_coords",
+          "label": "End coordinates",
+          "type": "string",
+          "required": false,
+          "group": "Search",
+          "help": "Destination GPS as latitude,longitude. Alternatives: end_addr or end_data_id.",
+          "default": null,
+          "requires_one_of": "end_addr_or_end_data_id_or_end_coords"
+        },
+        {
+          "name": "gl",
+          "label": "Country (gl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two-letter country code, e.g. us, uk, fr.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Language (hl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two or three letter language code, optionally with a region code, e.g. en, es, fr, en-gb, es-419.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "travel_mode",
+          "label": "Travel mode",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Mode of travel.",
+          "default": "6",
+          "options": [
+            {
+              "value": "6",
+              "label": "Best"
+            },
+            {
+              "value": "0",
+              "label": "Driving"
+            },
+            {
+              "value": "9",
+              "label": "Two-wheeler"
+            },
+            {
+              "value": "3",
+              "label": "Transit"
+            },
+            {
+              "value": "2",
+              "label": "Walking"
+            },
+            {
+              "value": "1",
+              "label": "Cycling"
+            },
+            {
+              "value": "4",
+              "label": "Flight"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "distance_unit",
+          "label": "Distance unit",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Unit for displayed distances.",
+          "default": null,
+          "options": [
+            {
+              "value": "1",
+              "label": "Miles"
+            },
+            {
+              "value": "0",
+              "label": "Kilometers"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "avoid",
+          "label": "Avoid",
+          "type": "csv",
+          "required": false,
+          "group": "Filters",
+          "help": "Route features to avoid; comma-join multiple. Allowed: highways, tolls, ferries.",
+          "default": null,
+          "options": [
+            {
+              "value": "highways",
+              "label": "Highways"
+            },
+            {
+              "value": "tolls",
+              "label": "Tolls"
+            },
+            {
+              "value": "ferries",
+              "label": "Ferries"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "prefer",
+          "label": "Preferred transit types",
+          "type": "csv",
+          "required": false,
+          "group": "Filters",
+          "help": "Only with travel_mode=3; comma-join multiple. Allowed: bus, subway, train, tram_light_rail.",
+          "default": null,
+          "options": [
+            {
+              "value": "bus",
+              "label": "Bus"
+            },
+            {
+              "value": "subway",
+              "label": "Subway"
+            },
+            {
+              "value": "train",
+              "label": "Train"
+            },
+            {
+              "value": "tram_light_rail",
+              "label": "Tram / light rail"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "route",
+          "label": "Transit route preference",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Only with travel_mode=3.",
+          "default": null,
+          "options": [
+            {
+              "value": "2",
+              "label": "Fewer transfers"
+            },
+            {
+              "value": "3",
+              "label": "Less walking"
+            },
+            {
+              "value": "4",
+              "label": "Wheelchair accessible"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "time",
+          "label": "Departure / arrival time",
+          "type": "string",
+          "required": false,
+          "group": "Filters",
+          "help": "depart_at:<unix timestamp>, arrive_by:<unix timestamp>, or last_available (last transit; only with travel_mode=3).",
+          "default": null,
+          "requires_one_of": null
+        }
+      ],
+      "requires_any_of": [
+        [
+          "start_addr",
+          "start_data_id",
+          "start_coords"
+        ],
+        [
+          "end_addr",
+          "end_data_id",
+          "end_coords"
+        ]
+      ],
+      "pagination": {
+        "kind": "none",
+        "param": null,
+        "page_size": null,
+        "notes": ""
+      },
+      "result_keys": [
+        "places_info",
+        "directions",
+        "durations"
+      ],
+      "result_item_fields": {
+        "directions": [
+          "travel_mode",
+          "via",
+          "distance",
+          "duration",
+          "typical_duration_range",
+          "formatted_distance",
+          "formatted_duration",
+          "extensions",
+          "trips"
+        ],
+        "durations": [
+          "travel_mode",
+          "duration",
+          "formatted_duration"
+        ],
+        "places_info": [
+          "address",
+          "data_id",
+          "gps_coordinates"
+        ]
+      },
+      "aira_use": "Plan the commute or the trip to an onsite interview and compare driving, transit, cycling and walking times.",
+      "verified": "docs"
+    },
+    {
+      "id": "google_maps_autocomplete",
+      "name": "Google Maps Autocomplete",
+      "category": "maps_local",
+      "family": "Google",
+      "description": "Returns Google Maps autocomplete suggestions for a partial query around a given GPS origin.",
+      "docs_url": "https://serpapi.com/google-maps-autocomplete-api",
+      "endpoint": "https://serpapi.com/search.json",
+      "params": [
+        {
+          "name": "q",
+          "label": "Search query",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "Text used to generate completion suggestions.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "ll",
+          "label": "GPS origin (ll)",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "Required. @latitude,longitude,zoom (3z to 21z) or @latitude,longitude,map_height in meters, e.g. @40.7455096,-74.0083012,14z.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "gl",
+          "label": "Country (gl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two-letter country code, e.g. us, uk, fr.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Language (hl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two or three letter language code, optionally with a region code, e.g. en, es, fr, en-gb, es-419.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "cp",
+          "label": "Cursor position",
+          "type": "integer",
+          "required": false,
+          "group": "Advanced",
+          "help": "Cursor position within the query, starting at 0. Defaults to the end of the query.",
+          "default": null,
+          "requires_one_of": null
+        }
+      ],
+      "requires_any_of": [
+        [
+          "q"
+        ],
+        [
+          "ll"
+        ]
+      ],
+      "pagination": {
+        "kind": "none",
+        "param": null,
+        "page_size": null,
+        "notes": ""
+      },
+      "result_keys": [
+        "search_information",
+        "suggestions"
+      ],
+      "result_item_fields": {
+        "suggestions": [
+          "value",
+          "type",
+          "serpapi_link",
+          "maps_serpapi_link"
+        ]
+      },
+      "aira_use": "Type-ahead for company, office and venue names when building a search form for employers.",
+      "verified": "docs"
+    },
+    {
+      "id": "google_maps_contributor_reviews",
+      "name": "Google Maps Contributor Reviews",
+      "category": "maps_local",
+      "family": "Google",
+      "description": "Returns the reviews written by a single Google Maps contributor along with the contributor's profile and contribution counts.",
+      "docs_url": "https://serpapi.com/google-maps-contributor-reviews-api",
+      "endpoint": "https://serpapi.com/search.json",
+      "params": [
+        {
+          "name": "contributor_id",
+          "label": "Contributor ID",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "Google Maps contributor ID: the digits in the contributor reviews URL.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "gl",
+          "label": "Country (gl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two-letter country code, e.g. us, uk, fr.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Language (hl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two or three letter language code, optionally with a region code, e.g. en, es, fr, en-gb, es-419.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "num",
+          "label": "Results",
+          "type": "integer",
+          "required": false,
+          "group": "Pagination",
+          "help": "Maximum number of results to return. Must not exceed 200.",
+          "default": 10,
+          "requires_one_of": null
+        }
+      ],
+      "requires_any_of": [],
+      "pagination": {
+        "kind": "none",
+        "param": "num",
+        "page_size": 10,
+        "notes": "Only num (max 200) is documented; no page token is listed."
+      },
+      "result_keys": [
+        "contributor",
+        "reviews"
+      ],
+      "result_item_fields": {
+        "reviews": [
+          "place_info",
+          "date",
+          "snippet",
+          "review_id",
+          "rating",
+          "likes",
+          "link",
+          "details",
+          "images"
+        ],
+        "contributor": [
+          "name",
+          "thumbnail",
+          "points",
+          "level",
+          "local_guide",
+          "contributions"
+        ]
+      },
+      "aira_use": "Check whether a reviewer of an employer or venue is a credible local guide before trusting their feedback.",
+      "verified": "docs"
+    },
+    {
+      "id": "google_local",
+      "name": "Google Local",
+      "category": "maps_local",
+      "family": "Google",
+      "description": "Scrapes Google's local results (the tbm=lcl local finder) for a query, with optional place lookup by Google CID.",
+      "docs_url": "https://serpapi.com/google-local-api",
+      "endpoint": "https://serpapi.com/search.json",
+      "params": [
+        {
+          "name": "q",
+          "label": "Search query",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "Anything you could use in a regular Google Local search.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "location",
+          "label": "Location",
+          "type": "location",
+          "required": false,
+          "group": "Search",
+          "help": "Where the search originates; city level recommended. Cannot be used with uule. See the /locations.json API.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "uule",
+          "label": "UULE",
+          "type": "string",
+          "required": false,
+          "group": "Search",
+          "help": "Google-encoded location. Cannot be used with location. Coordinate-based uule needs a matching gl.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "google_domain",
+          "label": "Google domain",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Google domain to use. Defaults to google.com.",
+          "default": "google.com",
+          "requires_one_of": null
+        },
+        {
+          "name": "gl",
+          "label": "Country (gl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two-letter country code, e.g. us, uk, fr.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Language (hl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two or three letter language code, optionally with a region code, e.g. en, es, fr, en-gb, es-419.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "ludocid",
+          "label": "Google CID (ludocid)",
+          "type": "string",
+          "required": false,
+          "group": "Advanced",
+          "help": "Google CID of a place (place_id in Local/Search results, data_cid in Maps results), e.g. 14414772292044717666.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "tbs",
+          "label": "Advanced search options (tbs)",
+          "type": "string",
+          "required": false,
+          "group": "Filters",
+          "help": "Advanced search options that cannot be expressed in q.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "start",
+          "label": "Result offset",
+          "type": "integer",
+          "required": false,
+          "group": "Pagination",
+          "help": "Number of results to skip. Pages hold 10 or 20 results, so step by that amount. Using serpapi_pagination.next is recommended.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "device",
+          "label": "Device",
+          "type": "enum",
+          "required": false,
+          "group": "Advanced",
+          "help": "Device type to emulate.",
+          "default": "desktop",
+          "options": [
+            {
+              "value": "desktop",
+              "label": "Desktop"
+            },
+            {
+              "value": "tablet",
+              "label": "Tablet"
+            },
+            {
+              "value": "mobile",
+              "label": "Mobile"
+            }
+          ],
+          "requires_one_of": null
+        }
+      ],
+      "requires_any_of": [
+        [
+          "q"
+        ]
+      ],
+      "pagination": {
+        "kind": "start",
+        "param": "start",
+        "page_size": 20,
+        "notes": "Page sizes are 10 or 20 depending on device; prefer serpapi_pagination.next."
+      },
+      "result_keys": [
+        "local_map",
+        "local_results",
+        "serpapi_pagination"
+      ],
+      "result_item_fields": {
+        "local_results": [
+          "position",
+          "title",
+          "type",
+          "rating",
+          "reviews",
+          "price",
+          "description",
+          "thumbnail",
+          "thumbnail_large",
+          "place_id",
+          "place_id_search",
+          "provider_id",
+          "gps_coordinates",
+          "address",
+          "hours"
+        ]
+      },
+      "aira_use": "Discover local employers, staffing agencies and coworking spaces in a target city as an alternative to Maps.",
+      "verified": "docs"
+    },
+    {
+      "id": "google_local_services",
+      "name": "Google Local Services",
+      "category": "maps_local",
+      "family": "Google",
+      "description": "Returns Google Local Services Ads (Google Guaranteed / Screened providers) for a service near a place. US places only.",
+      "docs_url": "https://serpapi.com/google-local-services-api",
+      "endpoint": "https://serpapi.com/search.json",
+      "params": [
+        {
+          "name": "q",
+          "label": "Service",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "The service to search for (see the supported queries list), e.g. electrician.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "data_cid",
+          "label": "Place CID",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "Google CID of a city or district (place_id in Maps/Search/Local results), e.g. 14414772292044717666. Returns empty results outside the USA. Not the same as cid.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Language (hl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two or three letter language code, optionally with a region code, e.g. en, es, fr, en-gb, es-419.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "job_type",
+          "label": "Job type",
+          "type": "string",
+          "required": false,
+          "group": "Filters",
+          "help": "Subcategory of the searched service, e.g. restore_power for electrician (see the job types list).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "cid",
+          "label": "Business CID",
+          "type": "string",
+          "required": false,
+          "group": "Advanced",
+          "help": "Unique place ID from the JSON response; used with bid and pid to open a specific business.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "bid",
+          "label": "Business BID",
+          "type": "string",
+          "required": false,
+          "group": "Advanced",
+          "help": "Unique place ID from the JSON response; used with cid and pid.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "pid",
+          "label": "Business PID",
+          "type": "string",
+          "required": false,
+          "group": "Advanced",
+          "help": "Unique place ID from the JSON response; used with cid and bid.",
+          "default": null,
+          "requires_one_of": null
+        }
+      ],
+      "requires_any_of": [
+        [
+          "q"
+        ],
+        [
+          "data_cid"
+        ]
+      ],
+      "pagination": {
+        "kind": "none",
+        "param": null,
+        "page_size": null,
+        "notes": ""
+      },
+      "result_keys": [
+        "search_information",
+        "local_ads"
+      ],
+      "result_item_fields": {
+        "local_ads": [
+          "title",
+          "link",
+          "rating",
+          "reviews",
+          "phone",
+          "type",
+          "service_area",
+          "years_in_business",
+          "thumbnail",
+          "hours",
+          "cid",
+          "bid",
+          "pid",
+          "serpapi_link"
+        ]
+      },
+      "aira_use": "Find vetted local service providers for relocation, home-office setup or short-term moves when taking a new job.",
+      "verified": "docs"
+    },
+    {
+      "id": "google_flights",
+      "name": "Google Flights",
+      "category": "travel",
+      "family": "Google",
+      "description": "Returns flight options, prices, layovers, emissions and price insights from Google Flights, plus booking options for a selected itinerary.",
+      "docs_url": "https://serpapi.com/google-flights-api",
+      "endpoint": "https://serpapi.com/search.json",
+      "params": [
+        {
+          "name": "departure_id",
+          "label": "Departure",
+          "type": "csv",
+          "required": false,
+          "group": "Search",
+          "help": "Departure airport code (3 uppercase letters) or location kgmid (starts with /m/ or /g/). Comma-separate several, e.g. CDG,ORY,/m/04jpl.",
+          "default": null,
+          "requires_one_of": "departure_id_or_multi_city_json_or_selected_flights_json"
+        },
+        {
+          "name": "arrival_id",
+          "label": "Arrival",
+          "type": "csv",
+          "required": false,
+          "group": "Search",
+          "help": "Arrival airport code or location kgmid; comma-separate several.",
+          "default": null,
+          "requires_one_of": "arrival_id_or_multi_city_json_or_selected_flights_json"
+        },
+        {
+          "name": "gl",
+          "label": "Country (gl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two-letter country code, e.g. us, uk, fr.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Language (hl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two or three letter language code, optionally with a region code, e.g. en, es, fr, en-gb, es-419.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "currency",
+          "label": "Currency",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Currency code for returned prices (see the Google Travel Currencies page).",
+          "default": "USD",
+          "requires_one_of": null
+        },
+        {
+          "name": "type",
+          "label": "Trip type",
+          "type": "enum",
+          "required": false,
+          "group": "Search",
+          "help": "Trip type. Round-trip return flights require a departure_token. With 3 use multi_city_json.",
+          "default": "1",
+          "options": [
+            {
+              "value": "1",
+              "label": "Round trip"
+            },
+            {
+              "value": "2",
+              "label": "One way"
+            },
+            {
+              "value": "3",
+              "label": "Multi-city"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "outbound_date",
+          "label": "Outbound date",
+          "type": "date",
+          "required": false,
+          "group": "Search",
+          "help": "YYYY-MM-DD. Required when type is 1 or 2 (unless selected_flights_json is used). Not allowed when type is 3.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "return_date",
+          "label": "Return date",
+          "type": "date",
+          "required": false,
+          "group": "Search",
+          "help": "YYYY-MM-DD. Required when type is 1 (unless selected_flights_json is used). Not allowed when type is 2 or 3.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "travel_class",
+          "label": "Travel class",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Cabin class.",
+          "default": "1",
+          "options": [
+            {
+              "value": "1",
+              "label": "Economy"
+            },
+            {
+              "value": "2",
+              "label": "Premium economy"
+            },
+            {
+              "value": "3",
+              "label": "Business"
+            },
+            {
+              "value": "4",
+              "label": "First"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "multi_city_json",
+          "label": "Multi-city legs (JSON)",
+          "type": "string",
+          "required": false,
+          "group": "Advanced",
+          "help": "JSON array for type=3; each object has departure_id, arrival_id, date (YYYY-MM-DD) and optional times.",
+          "default": null,
+          "requires_one_of": "departure_id_or_multi_city_json_or_selected_flights_json"
+        },
+        {
+          "name": "show_hidden",
+          "label": "Show hidden results",
+          "type": "boolean",
+          "required": false,
+          "group": "Advanced",
+          "help": "Include hidden results ('View more flights' on Google Flights).",
+          "default": false,
+          "requires_one_of": null
+        },
+        {
+          "name": "exclude_basic",
+          "label": "Exclude basic economy",
+          "type": "boolean",
+          "required": false,
+          "group": "Advanced",
+          "help": "Exclude basic-economy fares. Works only for US domestic flights; requires gl=us and travel_class=1.",
+          "default": false,
+          "requires_one_of": null
+        },
+        {
+          "name": "deep_search",
+          "label": "Deep search",
+          "type": "boolean",
+          "required": false,
+          "group": "Advanced",
+          "help": "Return results matching the Google Flights browser at the cost of longer response times.",
+          "default": false,
+          "requires_one_of": null
+        },
+        {
+          "name": "adults",
+          "label": "Adults",
+          "type": "integer",
+          "required": false,
+          "group": "Filters",
+          "help": "Number of adults.",
+          "default": 1,
+          "requires_one_of": null
+        },
+        {
+          "name": "children",
+          "label": "Children",
+          "type": "integer",
+          "required": false,
+          "group": "Filters",
+          "help": "Number of children.",
+          "default": 0,
+          "requires_one_of": null
+        },
+        {
+          "name": "infants_in_seat",
+          "label": "Infants in seat",
+          "type": "integer",
+          "required": false,
+          "group": "Filters",
+          "help": "Number of infants in seat.",
+          "default": 0,
+          "requires_one_of": null
+        },
+        {
+          "name": "infants_on_lap",
+          "label": "Infants on lap",
+          "type": "integer",
+          "required": false,
+          "group": "Filters",
+          "help": "Number of infants on lap.",
+          "default": 0,
+          "requires_one_of": null
+        },
+        {
+          "name": "sort_by",
+          "label": "Sort by",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Result sort order.",
+          "default": "1",
+          "options": [
+            {
+              "value": "1",
+              "label": "Top flights"
+            },
+            {
+              "value": "2",
+              "label": "Price"
+            },
+            {
+              "value": "3",
+              "label": "Departure time"
+            },
+            {
+              "value": "4",
+              "label": "Arrival time"
+            },
+            {
+              "value": "5",
+              "label": "Duration"
+            },
+            {
+              "value": "6",
+              "label": "Emissions"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "stops",
+          "label": "Stops",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Stop limit.",
+          "default": "0",
+          "options": [
+            {
+              "value": "0",
+              "label": "Any number of stops"
+            },
+            {
+              "value": "1",
+              "label": "Nonstop only"
+            },
+            {
+              "value": "2",
+              "label": "1 stop or fewer"
+            },
+            {
+              "value": "3",
+              "label": "2 stops or fewer"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "exclude_airlines",
+          "label": "Exclude airlines",
+          "type": "csv",
+          "required": false,
+          "group": "Filters",
+          "help": "Comma-separated airline IATA codes, or alliances STAR_ALLIANCE, SKYTEAM, ONEWORLD. Cannot be used with include_airlines.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "include_airlines",
+          "label": "Include airlines",
+          "type": "csv",
+          "required": false,
+          "group": "Filters",
+          "help": "Comma-separated airline IATA codes, or alliances STAR_ALLIANCE, SKYTEAM, ONEWORLD. Cannot be used with exclude_airlines.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "bags",
+          "label": "Carry-on bags",
+          "type": "integer",
+          "required": false,
+          "group": "Filters",
+          "help": "Number of carry-on bags; must not exceed passengers with carry-on allowance (adults, children, infants_in_seat).",
+          "default": 0,
+          "requires_one_of": null
+        },
+        {
+          "name": "max_price",
+          "label": "Max price",
+          "type": "integer",
+          "required": false,
+          "group": "Filters",
+          "help": "Maximum ticket price. Unlimited by default.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "outbound_times",
+          "label": "Outbound times",
+          "type": "csv",
+          "required": false,
+          "group": "Filters",
+          "help": "2 numbers (departure window) or 4 numbers (departure and arrival windows), each an hour 0-23, e.g. 4,18,3,19.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "return_times",
+          "label": "Return times",
+          "type": "csv",
+          "required": false,
+          "group": "Filters",
+          "help": "Same format as outbound_times. Only valid when type is 1.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "emissions",
+          "label": "Emissions",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Emissions filter.",
+          "default": null,
+          "options": [
+            {
+              "value": "1",
+              "label": "Less emissions only"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "layover_duration",
+          "label": "Layover duration (min)",
+          "type": "csv",
+          "required": false,
+          "group": "Filters",
+          "help": "Layover range in minutes as two comma-separated numbers, e.g. 90,330.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "exclude_conns",
+          "label": "Exclude connections",
+          "type": "csv",
+          "required": false,
+          "group": "Filters",
+          "help": "Comma-separated connecting airport codes to exclude.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "max_duration",
+          "label": "Max duration (min)",
+          "type": "integer",
+          "required": false,
+          "group": "Filters",
+          "help": "Maximum flight duration in minutes, e.g. 1500. If no results come back, increase by up to 200.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "selected_flights_json",
+          "label": "Selected flights (JSON)",
+          "type": "string",
+          "required": false,
+          "group": "Advanced",
+          "help": "JSON object pinning the itinerary: outbound array (required) and return array (round trips); each segment has flight_number, departure_id, arrival_id, date. Cannot be used with departure_token, booking_token or multi_city_json.",
+          "default": null,
+          "requires_one_of": "departure_id_or_multi_city_json_or_selected_flights_json"
+        },
+        {
+          "name": "departure_token",
+          "label": "Departure token",
+          "type": "string",
+          "required": false,
+          "group": "Advanced",
+          "help": "Selects a flight from the departure results and returns the return flights (round trip) or next leg (multi-city). Cannot be used with booking_token.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "booking_token",
+          "label": "Booking token",
+          "type": "string",
+          "required": false,
+          "group": "Advanced",
+          "help": "Returns booking options for selected flights; date and advanced filters are ignored. Cannot be used with departure_token.",
+          "default": null,
+          "requires_one_of": null
+        }
+      ],
+      "requires_any_of": [
+        [
+          "departure_id",
+          "multi_city_json",
+          "selected_flights_json"
+        ],
+        [
+          "arrival_id",
+          "multi_city_json",
+          "selected_flights_json"
+        ]
+      ],
+      "pagination": {
+        "kind": "none",
+        "param": null,
+        "page_size": null,
+        "notes": "Not paginated; step through legs with departure_token and booking_token."
+      },
+      "result_keys": [
+        "best_flights",
+        "other_flights",
+        "price_insights",
+        "airports",
+        "booking_options"
+      ],
+      "result_item_fields": {
+        "best_flights": [
+          "flights",
+          "layovers",
+          "total_duration",
+          "carbon_emissions",
+          "price",
+          "type",
+          "airline_logo",
+          "extensions",
+          "booking_token"
+        ],
+        "other_flights": [
+          "flights",
+          "layovers",
+          "total_duration",
+          "carbon_emissions",
+          "price",
+          "type",
+          "airline_logo",
+          "extensions",
+          "booking_token"
+        ],
+        "price_insights": [
+          "lowest_price",
+          "price_level",
+          "typical_price_range",
+          "price_history"
+        ]
+      },
+      "aira_use": "Price flights to onsite interviews or relocation, see whether fares are low versus typical, and get booking options.",
+      "verified": "docs"
+    },
+    {
+      "id": "google_flights_autocomplete",
+      "name": "Google Flights Autocomplete",
+      "category": "travel",
+      "family": "Google",
+      "description": "Returns airport, city and region suggestions (with IDs usable as departure_id / arrival_id) for a partial query.",
+      "docs_url": "https://serpapi.com/google-flights-autocomplete-api",
+      "endpoint": "https://serpapi.com/search.json",
+      "params": [
+        {
+          "name": "q",
+          "label": "Search query",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "Text used to generate autocomplete suggestions.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "gl",
+          "label": "Country (gl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two-letter country code, e.g. us, uk, fr.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Language (hl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two or three letter language code, optionally with a region code, e.g. en, es, fr, en-gb, es-419.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "exclude_regions",
+          "label": "Exclude regions",
+          "type": "boolean",
+          "required": false,
+          "group": "Filters",
+          "help": "Remove region-level locations (countries, sub-national regions, multi-country areas) from suggestions.",
+          "default": false,
+          "requires_one_of": null
+        }
+      ],
+      "requires_any_of": [
+        [
+          "q"
+        ]
+      ],
+      "pagination": {
+        "kind": "none",
+        "param": null,
+        "page_size": null,
+        "notes": ""
+      },
+      "result_keys": [
+        "suggestions"
+      ],
+      "result_item_fields": {
+        "suggestions": [
+          "position",
+          "name",
+          "type",
+          "description",
+          "id",
+          "airports"
+        ]
+      },
+      "aira_use": "Resolve city or airport names to codes for the flight search form when planning interview travel.",
+      "verified": "docs"
+    },
+    {
+      "id": "google_flights_deals",
+      "name": "Google Flights Deals",
+      "category": "travel",
+      "family": "Google",
+      "description": "Returns flight deals from a departure point as shown in Google Flights Explore deals, optionally from a natural-language query or flexible dates.",
+      "docs_url": "https://serpapi.com/google-flights-deals-api",
+      "endpoint": "https://serpapi.com/search.json",
+      "params": [
+        {
+          "name": "departure_id",
+          "label": "Departure",
+          "type": "csv",
+          "required": false,
+          "group": "Search",
+          "help": "Departure airport code (3 uppercase letters) or location kgmid (/m/ or /g/); comma-separate several.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "query",
+          "label": "Natural-language query",
+          "type": "string",
+          "required": false,
+          "group": "Search",
+          "help": "e.g. 'beach vacation next month'. Cannot be combined with travel_duration or trip_length.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "gl",
+          "label": "Country (gl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two-letter country code, e.g. us, uk, fr.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Language (hl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two or three letter language code, optionally with a region code, e.g. en, es, fr, en-gb, es-419.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "currency",
+          "label": "Currency",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Currency code for returned prices (see the Google Travel Currencies page).",
+          "default": "USD",
+          "requires_one_of": null
+        },
+        {
+          "name": "type",
+          "label": "Trip type",
+          "type": "enum",
+          "required": false,
+          "group": "Search",
+          "help": "Flight type.",
+          "default": "1",
+          "options": [
+            {
+              "value": "1",
+              "label": "Round trip"
+            },
+            {
+              "value": "2",
+              "label": "One way"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "travel_class",
+          "label": "Travel class",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Cabin class.",
+          "default": "1",
+          "options": [
+            {
+              "value": "1",
+              "label": "Economy"
+            },
+            {
+              "value": "2",
+              "label": "Premium economy"
+            },
+            {
+              "value": "3",
+              "label": "Business"
+            },
+            {
+              "value": "4",
+              "label": "First"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "outbound_date",
+          "label": "Outbound date(s)",
+          "type": "csv",
+          "required": false,
+          "group": "Search",
+          "help": "One YYYY-MM-DD date (exact) or two comma-separated dates (flexible window). If omitted, deals for any date are returned.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "return_date",
+          "label": "Return date(s)",
+          "type": "csv",
+          "required": false,
+          "group": "Search",
+          "help": "One date or a two-date window. Not for one-way. Single pairs with a single outbound_date, range with a range. Cannot be combined with travel_duration or trip_length.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "travel_duration",
+          "label": "Trip duration",
+          "type": "enum",
+          "required": false,
+          "group": "Search",
+          "help": "Preset trip duration for flexible dates. Not for one-way; cannot be combined with return_date, trip_length or query.",
+          "default": "1",
+          "options": [
+            {
+              "value": "1",
+              "label": "1 week"
+            },
+            {
+              "value": "2",
+              "label": "Weekend"
+            },
+            {
+              "value": "3",
+              "label": "2 weeks"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "trip_length",
+          "label": "Trip length (days)",
+          "type": "csv",
+          "required": false,
+          "group": "Search",
+          "help": "Custom trip length in days: a single number or min,max range; each at least 1. Not for one-way; cannot be combined with return_date, travel_duration or query.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "adults",
+          "label": "Adults",
+          "type": "integer",
+          "required": false,
+          "group": "Filters",
+          "help": "Number of adults.",
+          "default": 1,
+          "requires_one_of": null
+        },
+        {
+          "name": "children",
+          "label": "Children",
+          "type": "integer",
+          "required": false,
+          "group": "Filters",
+          "help": "Number of children.",
+          "default": 0,
+          "requires_one_of": null
+        },
+        {
+          "name": "infants_in_seat",
+          "label": "Infants in seat",
+          "type": "integer",
+          "required": false,
+          "group": "Filters",
+          "help": "Number of infants in seat.",
+          "default": 0,
+          "requires_one_of": null
+        },
+        {
+          "name": "infants_on_lap",
+          "label": "Infants on lap",
+          "type": "integer",
+          "required": false,
+          "group": "Filters",
+          "help": "Number of infants on lap.",
+          "default": 0,
+          "requires_one_of": null
+        },
+        {
+          "name": "stops",
+          "label": "Stops",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Maximum number of stops.",
+          "default": "0",
+          "options": [
+            {
+              "value": "0",
+              "label": "Any number of stops"
+            },
+            {
+              "value": "1",
+              "label": "Nonstop only"
+            },
+            {
+              "value": "2",
+              "label": "1 stop or fewer"
+            },
+            {
+              "value": "3",
+              "label": "2 stops or fewer"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "exclude_airlines",
+          "label": "Exclude airlines",
+          "type": "csv",
+          "required": false,
+          "group": "Filters",
+          "help": "Comma-separated 2-character IATA codes or alliances STAR_ALLIANCE, SKYTEAM, ONEWORLD. Cannot be used with include_airlines.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "include_airlines",
+          "label": "Include airlines",
+          "type": "csv",
+          "required": false,
+          "group": "Filters",
+          "help": "Comma-separated 2-character IATA codes or alliances. Cannot be used with exclude_airlines.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "max_price",
+          "label": "Max price",
+          "type": "integer",
+          "required": false,
+          "group": "Filters",
+          "help": "Maximum ticket price. Unlimited by default.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "max_duration",
+          "label": "Max duration (min)",
+          "type": "integer",
+          "required": false,
+          "group": "Filters",
+          "help": "Maximum flight duration in minutes, e.g. 1500. If no results, increase by up to 200.",
+          "default": null,
+          "requires_one_of": null
+        }
+      ],
+      "requires_any_of": [],
+      "pagination": {
+        "kind": "none",
+        "param": null,
+        "page_size": null,
+        "notes": ""
+      },
+      "result_keys": [
+        "departure_informations",
+        "deals"
+      ],
+      "result_item_fields": {
+        "deals": [
+          "destination_id",
+          "name",
+          "country",
+          "price",
+          "average_price",
+          "discount_percentage",
+          "flight_link",
+          "serpapi_flight_link",
+          "thumbnail",
+          "start_date",
+          "end_date",
+          "departure_airport_code",
+          "arrival_airport_code",
+          "flight_duration",
+          "stops",
+          "airline",
+          "airline_code",
+          "description",
+          "highlights"
+        ]
+      },
+      "aira_use": "Spot discounted flights to cities where you are interviewing or considering relocating.",
+      "verified": "docs"
+    },
+    {
+      "id": "google_hotels",
+      "name": "Google Hotels",
+      "category": "travel",
+      "family": "Google",
+      "description": "Returns hotel and vacation-rental search results with prices, ratings and amenities from Google Hotels, or full details of one property via property_token.",
+      "docs_url": "https://serpapi.com/google-hotels-api",
+      "endpoint": "https://serpapi.com/search.json",
+      "params": [
+        {
+          "name": "q",
+          "label": "Search query",
+          "type": "string",
+          "required": false,
+          "group": "Search",
+          "help": "Anything you would use in a Google Hotels search. Not required when property_token is set; if both are set q is ignored.",
+          "default": null,
+          "requires_one_of": "q_or_property_token"
+        },
+        {
+          "name": "gl",
+          "label": "Country (gl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two-letter country code, e.g. us, uk, fr.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Language (hl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two or three letter language code, optionally with a region code, e.g. en, es, fr, en-gb, es-419.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "currency",
+          "label": "Currency",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Currency code for returned prices (see the Google Travel Currencies page).",
+          "default": "USD",
+          "requires_one_of": null
+        },
+        {
+          "name": "check_in_date",
+          "label": "Check-in date",
+          "type": "date",
+          "required": true,
+          "group": "Search",
+          "help": "YYYY-MM-DD.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "check_out_date",
+          "label": "Check-out date",
+          "type": "date",
+          "required": true,
+          "group": "Search",
+          "help": "YYYY-MM-DD.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "adults",
+          "label": "Adults",
+          "type": "integer",
+          "required": false,
+          "group": "Search",
+          "help": "Number of adults.",
+          "default": 2,
+          "requires_one_of": null
+        },
+        {
+          "name": "children",
+          "label": "Children",
+          "type": "integer",
+          "required": false,
+          "group": "Search",
+          "help": "Number of children.",
+          "default": 0,
+          "requires_one_of": null
+        },
+        {
+          "name": "children_ages",
+          "label": "Children ages",
+          "type": "csv",
+          "required": false,
+          "group": "Search",
+          "help": "Ages 1-17 (under 1 counts as 1), single value or comma-separated e.g. 5,8,10. Count must match children.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "sort_by",
+          "label": "Sort by",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Sort order. Default is relevance.",
+          "default": null,
+          "options": [
+            {
+              "value": "3",
+              "label": "Lowest price"
+            },
+            {
+              "value": "8",
+              "label": "Highest rating"
+            },
+            {
+              "value": "13",
+              "label": "Most reviewed"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "min_price",
+          "label": "Min price",
+          "type": "integer",
+          "required": false,
+          "group": "Filters",
+          "help": "Lower bound of the price range.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "max_price",
+          "label": "Max price",
+          "type": "integer",
+          "required": false,
+          "group": "Filters",
+          "help": "Upper bound of the price range.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "property_types",
+          "label": "Property types",
+          "type": "csv",
+          "required": false,
+          "group": "Filters",
+          "help": "Single ID or comma-separated IDs, e.g. 17 or 17,12,18. Hotel and vacation-rental ID lists are on the Property Types pages; the options shown may not be exhaustive.",
+          "default": null,
+          "options": [
+            {
+              "value": "12",
+              "label": "Hotel: Beach hotels"
+            },
+            {
+              "value": "13",
+              "label": "Hotel: Boutique hotels"
+            },
+            {
+              "value": "14",
+              "label": "Hotel: Hostels"
+            },
+            {
+              "value": "15",
+              "label": "Hotel: Inns"
+            },
+            {
+              "value": "16",
+              "label": "Hotel: Motels"
+            },
+            {
+              "value": "17",
+              "label": "Hotel: Resorts"
+            },
+            {
+              "value": "18",
+              "label": "Hotel: Spa hotels"
+            },
+            {
+              "value": "19",
+              "label": "Hotel: Bed and breakfasts"
+            },
+            {
+              "value": "20",
+              "label": "Hotel: Other"
+            },
+            {
+              "value": "21",
+              "label": "Apartment hotels"
+            },
+            {
+              "value": "22",
+              "label": "Hotel: Minshuku"
+            },
+            {
+              "value": "23",
+              "label": "Hotel: Japanese-style business hotels"
+            },
+            {
+              "value": "24",
+              "label": "Hotel: Ryokan"
+            },
+            {
+              "value": "1",
+              "label": "Rental: Apartments"
+            },
+            {
+              "value": "2",
+              "label": "Rental: Bungalows"
+            },
+            {
+              "value": "3",
+              "label": "Rental: Cabins"
+            },
+            {
+              "value": "4",
+              "label": "Rental: Chalets"
+            },
+            {
+              "value": "5",
+              "label": "Rental: Cottages"
+            },
+            {
+              "value": "6",
+              "label": "Rental: Gites"
+            },
+            {
+              "value": "7",
+              "label": "Rental: Holiday villages"
+            },
+            {
+              "value": "8",
+              "label": "Rental: Houses"
+            },
+            {
+              "value": "9",
+              "label": "Rental: Houseboats"
+            },
+            {
+              "value": "10",
+              "label": "Rental: Villas"
+            },
+            {
+              "value": "11",
+              "label": "Rental: Other"
+            }
+          ],
+          "options_truncated": true,
+          "requires_one_of": null
+        },
+        {
+          "name": "amenities",
+          "label": "Amenities",
+          "type": "csv",
+          "required": false,
+          "group": "Filters",
+          "help": "Single ID or comma-separated IDs, e.g. 35 or 35,9,19. Options shown are the hotel amenity IDs; vacation rentals use a different list (Hot tub 2, Air-conditioned 4, Outdoor grill 6, Fireplace 10, Patio or deck 12, Kitchen 15, Fitness centre 16, Cot 18, Beach access 20, Child-friendly 21, Pet-friendly 24, Free Wi-Fi 29, Pool 32).",
+          "default": null,
+          "options": [
+            {
+              "value": "1",
+              "label": "Free parking"
+            },
+            {
+              "value": "3",
+              "label": "Parking"
+            },
+            {
+              "value": "4",
+              "label": "Indoor pool"
+            },
+            {
+              "value": "5",
+              "label": "Outdoor pool"
+            },
+            {
+              "value": "6",
+              "label": "Pool"
+            },
+            {
+              "value": "7",
+              "label": "Fitness center"
+            },
+            {
+              "value": "8",
+              "label": "Restaurant"
+            },
+            {
+              "value": "9",
+              "label": "Free breakfast"
+            },
+            {
+              "value": "10",
+              "label": "Spa"
+            },
+            {
+              "value": "11",
+              "label": "Beach access"
+            },
+            {
+              "value": "12",
+              "label": "Child-friendly"
+            },
+            {
+              "value": "15",
+              "label": "Bar"
+            },
+            {
+              "value": "19",
+              "label": "Pet-friendly"
+            },
+            {
+              "value": "22",
+              "label": "Room service"
+            },
+            {
+              "value": "35",
+              "label": "Free Wi-Fi"
+            },
+            {
+              "value": "40",
+              "label": "Air-conditioned"
+            },
+            {
+              "value": "52",
+              "label": "All-inclusive available"
+            },
+            {
+              "value": "53",
+              "label": "Wheelchair accessible"
+            },
+            {
+              "value": "61",
+              "label": "EV charger"
+            }
+          ],
+          "options_truncated": true,
+          "requires_one_of": null
+        },
+        {
+          "name": "rating",
+          "label": "Minimum rating",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Minimum guest rating.",
+          "default": null,
+          "options": [
+            {
+              "value": "7",
+              "label": "3.5+"
+            },
+            {
+              "value": "8",
+              "label": "4.0+"
+            },
+            {
+              "value": "9",
+              "label": "4.5+"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "brands",
+          "label": "Brand IDs",
+          "type": "csv",
+          "required": false,
+          "group": "Filters",
+          "help": "Brand IDs to focus on, single or comma-separated e.g. 33,67,101 (from brands[].id). Hotels only.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "hotel_class",
+          "label": "Hotel class",
+          "type": "csv",
+          "required": false,
+          "group": "Filters",
+          "help": "Star class filter, single or comma-separated e.g. 2,3,4. Hotels only.",
+          "default": null,
+          "options": [
+            {
+              "value": "2",
+              "label": "2-star"
+            },
+            {
+              "value": "3",
+              "label": "3-star"
+            },
+            {
+              "value": "4",
+              "label": "4-star"
+            },
+            {
+              "value": "5",
+              "label": "5-star"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "free_cancellation",
+          "label": "Free cancellation",
+          "type": "boolean",
+          "required": false,
+          "group": "Filters",
+          "help": "Only results with free cancellation. Hotels only.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "special_offers",
+          "label": "Special offers",
+          "type": "boolean",
+          "required": false,
+          "group": "Filters",
+          "help": "Only results with special offers. Hotels only.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "eco_certified",
+          "label": "Eco-certified",
+          "type": "boolean",
+          "required": false,
+          "group": "Filters",
+          "help": "Only eco-certified results. Hotels only.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "vacation_rentals",
+          "label": "Vacation rentals",
+          "type": "boolean",
+          "required": false,
+          "group": "Advanced",
+          "help": "Switch the search to Vacation Rentals (default is Hotels).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "bedrooms",
+          "label": "Min bedrooms",
+          "type": "integer",
+          "required": false,
+          "group": "Filters",
+          "help": "Minimum bedrooms. Vacation rentals only.",
+          "default": 0,
+          "requires_one_of": null
+        },
+        {
+          "name": "bathrooms",
+          "label": "Min bathrooms",
+          "type": "integer",
+          "required": false,
+          "group": "Filters",
+          "help": "Minimum bathrooms. Vacation rentals only.",
+          "default": 0,
+          "requires_one_of": null
+        },
+        {
+          "name": "next_page_token",
+          "label": "Next page token",
+          "type": "string",
+          "required": false,
+          "group": "Pagination",
+          "help": "Token for the next page, found at serpapi_pagination.next_page_token.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "property_token",
+          "label": "Property token",
+          "type": "string",
+          "required": false,
+          "group": "Advanced",
+          "help": "Retrieve details (name, address, phone, prices, nearby places) of one property. Can be used without q; if both are set q is ignored.",
+          "default": null,
+          "requires_one_of": "q_or_property_token"
+        }
+      ],
+      "requires_any_of": [
+        [
+          "q",
+          "property_token"
+        ]
+      ],
+      "pagination": {
+        "kind": "next_page_token",
+        "param": "next_page_token",
+        "page_size": null,
+        "notes": "serpapi_pagination has current_from, current_to, next_page_token and next."
+      },
+      "result_keys": [
+        "search_information",
+        "brands",
+        "ads",
+        "properties",
+        "serpapi_pagination"
+      ],
+      "result_item_fields": {
+        "properties": [
+          "type",
+          "name",
+          "property_token",
+          "serpapi_property_details_link",
+          "gps_coordinates",
+          "check_in_time",
+          "check_out_time",
+          "rate_per_night",
+          "total_rate",
+          "prices",
+          "nearby_places",
+          "images",
+          "overall_rating",
+          "reviews",
+          "location_rating",
+          "amenities",
+          "excluded_amenities",
+          "essential_info",
+          "serpapi_google_hotels_reviews_link",
+          "serpapi_google_hotels_photos_link"
+        ],
+        "ads": [
+          "name",
+          "source",
+          "link",
+          "property_token",
+          "gps_coordinates",
+          "hotel_class",
+          "thumbnail",
+          "overall_rating",
+          "reviews",
+          "price",
+          "extracted_price",
+          "amenities",
+          "free_cancellation"
+        ]
+      },
+      "aira_use": "Find and price lodging near an interview location, a temporary-housing stay or a relocation trip.",
+      "verified": "docs"
+    },
+    {
+      "id": "google_hotels_reviews",
+      "name": "Google Hotels Reviews",
+      "category": "travel",
+      "family": "Google",
+      "description": "Returns guest reviews for a Google Hotels property with sub-ratings, highlights and owner responses.",
+      "docs_url": "https://serpapi.com/google-hotels-reviews-api",
+      "endpoint": "https://serpapi.com/search.json",
+      "params": [
+        {
+          "name": "property_token",
+          "label": "Property token",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "Unique property ID from the Google Hotels Properties API.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Language (hl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two or three letter language code, optionally with a region code, e.g. en, es, fr, en-gb, es-419.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "category_token",
+          "label": "Category token",
+          "type": "string",
+          "required": false,
+          "group": "Filters",
+          "help": "Filter reviews by category; values are in reviews_breakdown of the Google Hotels API.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "sort_by",
+          "label": "Sort by",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Sorting order.",
+          "default": "1",
+          "options": [
+            {
+              "value": "1",
+              "label": "Most helpful"
+            },
+            {
+              "value": "2",
+              "label": "Most recent"
+            },
+            {
+              "value": "3",
+              "label": "Highest score"
+            },
+            {
+              "value": "4",
+              "label": "Lowest score"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "source_number",
+          "label": "Review source",
+          "type": "integer",
+          "required": false,
+          "group": "Filters",
+          "help": "Filter by source. 0 = all reviews (default), -1 = Google; other source numbers appear in other_reviews of the property details and vary by property.",
+          "default": 0,
+          "requires_one_of": null
+        },
+        {
+          "name": "next_page_token",
+          "label": "Next page token",
+          "type": "string",
+          "required": false,
+          "group": "Pagination",
+          "help": "Token for the next page, found at serpapi_pagination.next_page_token.",
+          "default": null,
+          "requires_one_of": null
+        }
+      ],
+      "requires_any_of": [],
+      "pagination": {
+        "kind": "next_page_token",
+        "param": "next_page_token",
+        "page_size": null,
+        "notes": "serpapi_pagination.next_page_token."
+      },
+      "result_keys": [
+        "reviews",
+        "serpapi_pagination"
+      ],
+      "result_item_fields": {
+        "reviews": [
+          "user",
+          "source",
+          "source_icon",
+          "rating",
+          "best_rating",
+          "date",
+          "snippet",
+          "subratings",
+          "hotel_highlights",
+          "response"
+        ]
+      },
+      "aira_use": "Vet accommodation before booking onsite-interview or relocation stays.",
+      "verified": "docs"
+    },
+    {
+      "id": "google_hotels_photos",
+      "name": "Google Hotels Photos",
+      "category": "travel",
+      "family": "Google",
+      "description": "Returns photos of a Google Hotels property, paged by section.",
+      "docs_url": "https://serpapi.com/google-hotels-photos-api",
+      "endpoint": "https://serpapi.com/search.json",
+      "params": [
+        {
+          "name": "property_token",
+          "label": "Property token",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "Unique ID for a Google property, from the Google Hotels Properties API.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "next_page_token",
+          "label": "Next page token",
+          "type": "string",
+          "required": false,
+          "group": "Pagination",
+          "help": "Fetches the next batch of photos for a given section.",
+          "default": null,
+          "requires_one_of": null
+        }
+      ],
+      "requires_any_of": [],
+      "pagination": {
+        "kind": "next_page_token",
+        "param": "next_page_token",
+        "page_size": null,
+        "notes": "Token fetches the next batch for a given section."
+      },
+      "result_keys": [
+        "photos",
+        "serpapi_pagination"
+      ],
+      "result_item_fields": {
+        "photos": [
+          "thumbnail",
+          "image"
+        ]
+      },
+      "aira_use": "Preview a hotel or serviced apartment before booking travel for an onsite.",
+      "verified": "docs"
+    },
+    {
+      "id": "google_hotels_autocomplete",
+      "name": "Google Hotels Autocomplete",
+      "category": "travel",
+      "family": "Google",
+      "description": "Returns Google Hotels autocomplete suggestions (properties and locations) with tokens usable in Google Hotels searches.",
+      "docs_url": "https://serpapi.com/google-hotels-autocomplete-api",
+      "endpoint": "https://serpapi.com/search.json",
+      "params": [
+        {
+          "name": "q",
+          "label": "Search query",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "Text used to generate autocomplete suggestions.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "gl",
+          "label": "Country (gl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two-letter country code, e.g. us, uk, fr.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Language (hl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two or three letter language code, optionally with a region code, e.g. en, es, fr, en-gb, es-419.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "currency",
+          "label": "Currency",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Currency used in serpapi_google_hotels_link (see the Google Travel Currencies page).",
+          "default": "USD",
+          "requires_one_of": null
+        }
+      ],
+      "requires_any_of": [
+        [
+          "q"
+        ]
+      ],
+      "pagination": {
+        "kind": "none",
+        "param": null,
+        "page_size": null,
+        "notes": ""
+      },
+      "result_keys": [
+        "suggestions"
+      ],
+      "result_item_fields": {
+        "suggestions": [
+          "position",
+          "value",
+          "type",
+          "location",
+          "thumbnail",
+          "highlighted_words",
+          "autocomplete_suggestion",
+          "kgmid",
+          "data_cid",
+          "property_token",
+          "serpapi_google_hotels_link",
+          "serpapi_link"
+        ]
+      },
+      "aira_use": "Type-ahead for hotel and destination names in the Aira travel planner.",
+      "verified": "docs"
+    },
+    {
+      "id": "google_hotels_price_calendar",
+      "name": "Google Hotels Price Calendar",
+      "category": "travel",
+      "family": "Google",
+      "description": "Returns the best one-night price for each date in a range for a Google Hotels property.",
+      "docs_url": "https://serpapi.com/google-hotels-price-calendar-api",
+      "endpoint": "https://serpapi.com/search.json",
+      "params": [
+        {
+          "name": "property_token",
+          "label": "Property token",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "Identifies the property; obtain from the Google Hotels API.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "start_date",
+          "label": "Start date",
+          "type": "date",
+          "required": true,
+          "group": "Search",
+          "help": "First date of the calendar (YYYY-MM-DD). Each date shows the best price for a 1-night stay starting that day.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "end_date",
+          "label": "End date",
+          "type": "date",
+          "required": true,
+          "group": "Search",
+          "help": "Last date of the calendar (YYYY-MM-DD). Cannot be more than 3 years from today.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "adults",
+          "label": "Adults",
+          "type": "integer",
+          "required": false,
+          "group": "Advanced",
+          "help": "Number of adults.",
+          "default": 2,
+          "requires_one_of": null
+        },
+        {
+          "name": "children",
+          "label": "Children",
+          "type": "integer",
+          "required": false,
+          "group": "Advanced",
+          "help": "Number of children.",
+          "default": 0,
+          "requires_one_of": null
+        },
+        {
+          "name": "children_ages",
+          "label": "Children ages",
+          "type": "csv",
+          "required": false,
+          "group": "Advanced",
+          "help": "Ages 1-17 (under 1 counts as 1), single or comma-separated e.g. 5,8,10. Count must match children.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "gl",
+          "label": "Country (gl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two-letter country code, e.g. us, uk, fr.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Language (hl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two or three letter language code, optionally with a region code, e.g. en, es, fr, en-gb, es-419.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "currency",
+          "label": "Currency",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Currency code for returned prices (see the Google Travel Currencies page).",
+          "default": "USD",
+          "requires_one_of": null
+        }
+      ],
+      "requires_any_of": [],
+      "pagination": {
+        "kind": "none",
+        "param": null,
+        "page_size": null,
+        "notes": ""
+      },
+      "result_keys": [
+        "prices"
+      ],
+      "result_item_fields": {
+        "prices": [
+          "date",
+          "price",
+          "extracted_price",
+          "before_taxes_fees",
+          "extracted_before_taxes_fees",
+          "currency"
+        ]
+      },
+      "aira_use": "Pick the cheapest nights to book lodging around an interview or start date.",
+      "verified": "docs"
+    },
+    {
+      "id": "google_travel_explore",
+      "name": "Google Travel Explore",
+      "category": "travel",
+      "family": "Google",
+      "description": "Returns destinations with flight prices, trip dates and durations from Google Travel Explore for a departure airport or city.",
+      "docs_url": "https://serpapi.com/google-travel-explore-api",
+      "endpoint": "https://serpapi.com/search.json",
+      "params": [
+        {
+          "name": "departure_id",
+          "label": "Departure",
+          "type": "csv",
+          "required": true,
+          "group": "Search",
+          "help": "Departure airport IATA code (3 uppercase letters) or city kgmid (/m/ or /g/); comma-separate several.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "arrival_area_id",
+          "label": "Arrival area",
+          "type": "string",
+          "required": false,
+          "group": "Search",
+          "help": "Arrival region or country kgmid, e.g. /m/02j9z (Europe), /m/0f8l9c (France).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "arrival_id",
+          "label": "Arrival",
+          "type": "string",
+          "required": false,
+          "group": "Search",
+          "help": "Arrival airport IATA code or city kgmid, e.g. CDG, AUS, /m/0vzm.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "gl",
+          "label": "Country (gl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two-letter country code, e.g. us, uk, fr.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Language (hl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two or three letter language code, optionally with a region code, e.g. en, es, fr, en-gb, es-419.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "currency",
+          "label": "Currency",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Currency code for returned prices (see the Google Travel Currencies page).",
+          "default": "USD",
+          "requires_one_of": null
+        },
+        {
+          "name": "type",
+          "label": "Trip type",
+          "type": "enum",
+          "required": false,
+          "group": "Search",
+          "help": "Trip type. Multi-city requires multi_city_json.",
+          "default": "1",
+          "options": [
+            {
+              "value": "1",
+              "label": "Round trip"
+            },
+            {
+              "value": "2",
+              "label": "One way"
+            },
+            {
+              "value": "3",
+              "label": "Multi-city"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "outbound_date",
+          "label": "Outbound date",
+          "type": "date",
+          "required": false,
+          "group": "Search",
+          "help": "YYYY-MM-DD.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "return_date",
+          "label": "Return date",
+          "type": "date",
+          "required": false,
+          "group": "Search",
+          "help": "YYYY-MM-DD. Required when type is 1.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "month",
+          "label": "Month",
+          "type": "enum",
+          "required": false,
+          "group": "Search",
+          "help": "Trip month; only the next 6 months can be selected. 0 = all months in the next 6 months.",
+          "default": "0",
+          "options": [
+            {
+              "value": "0",
+              "label": "Any (next 6 months)"
+            },
+            {
+              "value": "1",
+              "label": "January"
+            },
+            {
+              "value": "2",
+              "label": "February"
+            },
+            {
+              "value": "3",
+              "label": "March"
+            },
+            {
+              "value": "4",
+              "label": "April"
+            },
+            {
+              "value": "5",
+              "label": "May"
+            },
+            {
+              "value": "6",
+              "label": "June"
+            },
+            {
+              "value": "7",
+              "label": "July"
+            },
+            {
+              "value": "8",
+              "label": "August"
+            },
+            {
+              "value": "9",
+              "label": "September"
+            },
+            {
+              "value": "10",
+              "label": "October"
+            },
+            {
+              "value": "11",
+              "label": "November"
+            },
+            {
+              "value": "12",
+              "label": "December"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "travel_duration",
+          "label": "Trip duration",
+          "type": "enum",
+          "required": false,
+          "group": "Search",
+          "help": "Trip length for flexible dates.",
+          "default": "2",
+          "options": [
+            {
+              "value": "1",
+              "label": "Weekend"
+            },
+            {
+              "value": "2",
+              "label": "1 week"
+            },
+            {
+              "value": "3",
+              "label": "2 weeks"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "travel_class",
+          "label": "Travel class",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Cabin class.",
+          "default": "1",
+          "options": [
+            {
+              "value": "1",
+              "label": "Economy"
+            },
+            {
+              "value": "2",
+              "label": "Premium economy"
+            },
+            {
+              "value": "3",
+              "label": "Business"
+            },
+            {
+              "value": "4",
+              "label": "First"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "adults",
+          "label": "Adults",
+          "type": "integer",
+          "required": false,
+          "group": "Filters",
+          "help": "Number of adults.",
+          "default": 1,
+          "requires_one_of": null
+        },
+        {
+          "name": "children",
+          "label": "Children",
+          "type": "integer",
+          "required": false,
+          "group": "Filters",
+          "help": "Number of children.",
+          "default": 0,
+          "requires_one_of": null
+        },
+        {
+          "name": "infants_in_seat",
+          "label": "Infants in seat",
+          "type": "integer",
+          "required": false,
+          "group": "Filters",
+          "help": "Number of infants in seat.",
+          "default": 0,
+          "requires_one_of": null
+        },
+        {
+          "name": "infants_on_lap",
+          "label": "Infants on lap",
+          "type": "integer",
+          "required": false,
+          "group": "Filters",
+          "help": "Number of infants on lap.",
+          "default": 0,
+          "requires_one_of": null
+        },
+        {
+          "name": "stops",
+          "label": "Stops",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Stop limit.",
+          "default": "0",
+          "options": [
+            {
+              "value": "0",
+              "label": "Any number of stops"
+            },
+            {
+              "value": "1",
+              "label": "Nonstop only"
+            },
+            {
+              "value": "2",
+              "label": "1 stop or fewer"
+            },
+            {
+              "value": "3",
+              "label": "2 stops or fewer"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "travel_mode",
+          "label": "Travel mode",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Cannot be combined with interest.",
+          "default": "0",
+          "options": [
+            {
+              "value": "0",
+              "label": "All"
+            },
+            {
+              "value": "1",
+              "label": "Flight only"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "interest",
+          "label": "Interest",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Destination interest. Cannot be combined with travel_mode.",
+          "default": "0",
+          "options": [
+            {
+              "value": "0",
+              "label": "Popular"
+            },
+            {
+              "value": "/g/11bc58l13w",
+              "label": "Outdoors"
+            },
+            {
+              "value": "/m/0b3yr",
+              "label": "Beaches"
+            },
+            {
+              "value": "/m/09cmq",
+              "label": "Museum"
+            },
+            {
+              "value": "/m/03g3w",
+              "label": "History"
+            },
+            {
+              "value": "/m/071k0",
+              "label": "Skiing"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "include_airlines",
+          "label": "Include airlines",
+          "type": "csv",
+          "required": false,
+          "group": "Filters",
+          "help": "Comma-separated 2-character IATA codes or alliances STAR_ALLIANCE, SKYTEAM, ONEWORLD. Cannot be combined with exclude_airlines.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "exclude_airlines",
+          "label": "Exclude airlines",
+          "type": "csv",
+          "required": false,
+          "group": "Filters",
+          "help": "Comma-separated 2-character IATA codes or alliances. Cannot be combined with include_airlines.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "bags",
+          "label": "Carry-on bags",
+          "type": "integer",
+          "required": false,
+          "group": "Filters",
+          "help": "Number of carry-on bags; must not exceed passengers with carry-on allowance.",
+          "default": 0,
+          "requires_one_of": null
+        },
+        {
+          "name": "max_price",
+          "label": "Max price",
+          "type": "integer",
+          "required": false,
+          "group": "Filters",
+          "help": "Maximum ticket price. Unlimited by default.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "max_duration",
+          "label": "Max duration (min)",
+          "type": "integer",
+          "required": false,
+          "group": "Filters",
+          "help": "Maximum flight duration in minutes, e.g. 1500. If no results, increase by up to 200.",
+          "default": null,
+          "requires_one_of": null
+        }
+      ],
+      "requires_any_of": [],
+      "pagination": {
+        "kind": "none",
+        "param": null,
+        "page_size": null,
+        "notes": ""
+      },
+      "result_keys": [
+        "destinations"
+      ],
+      "result_item_fields": {
+        "destinations": [
+          "destination_id",
+          "name",
+          "country",
+          "gps_coordinates",
+          "thumbnail",
+          "destination_airport",
+          "start_date",
+          "flight_price",
+          "flight_duration",
+          "number_of_stops",
+          "airline",
+          "airline_code"
+        ]
+      },
+      "aira_use": "Explore which cities are cheapest to fly to from home when weighing job locations or remote-work hubs.",
+      "verified": "docs"
+    },
+    {
+      "id": "apple_maps",
+      "name": "Apple Maps",
+      "category": "maps_local",
+      "family": "Apple",
+      "description": "Scrapes Apple Maps search results (places and guides) for a query around a center point or location.",
+      "docs_url": "https://serpapi.com/apple-maps-api",
+      "endpoint": "https://serpapi.com/search.json",
+      "params": [
+        {
+          "name": "query",
+          "label": "Search query",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "Anything you would use in a regular Apple Maps search.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "center",
+          "label": "Center (lat,lon)",
+          "type": "string",
+          "required": false,
+          "group": "Search",
+          "help": "Center of the search region as latitude,longitude, e.g. 30.324639,-97.7304611. Required unless location is used; cannot be used with location.",
+          "default": null,
+          "requires_one_of": "center_or_location"
+        },
+        {
+          "name": "location",
+          "label": "Location",
+          "type": "location",
+          "required": false,
+          "group": "Search",
+          "help": "GPS origin by name, e.g. Austin, Texas, United States. Required unless center is used; cannot be used with center.",
+          "default": null,
+          "requires_one_of": "center_or_location"
+        },
+        {
+          "name": "span",
+          "label": "Span",
+          "type": "string",
+          "required": false,
+          "group": "Search",
+          "help": "Search region size as latitudeDelta,longitudeDelta; smaller means higher zoom.",
+          "default": "0.5,0.5",
+          "requires_one_of": null
+        },
+        {
+          "name": "locale",
+          "label": "Locale",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Locale in <LANGUAGE>-<REGION> format (see serpapi.com/apple-maps-locales).",
+          "default": "en-US",
+          "requires_one_of": null
+        },
+        {
+          "name": "sort",
+          "label": "Sort",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Sorting refinement.",
+          "default": "default",
+          "options": [
+            {
+              "value": "default",
+              "label": "Best match"
+            },
+            {
+              "value": "distance",
+              "label": "Distance"
+            },
+            {
+              "value": "ratings",
+              "label": "Ratings"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "toggles",
+          "label": "Toggles",
+          "type": "csv",
+          "required": false,
+          "group": "Filters",
+          "help": "Comma-separated toggle keys from refinement.toggles in the response, e.g. OPEN_NOW, TOP_RATED, DRIVE_THRU, FEATURED_IN_GUIDES, WIFI_AVAILABLE_FREE.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "multi_select_options",
+          "label": "Multi-select options",
+          "type": "csv",
+          "required": false,
+          "group": "Filters",
+          "help": "Comma-separated option keys from refinement.multi_select.<type>.options in the response (long, search-specific strings).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "open_at",
+          "label": "Open at (timestamp)",
+          "type": "integer",
+          "required": false,
+          "group": "Filters",
+          "help": "Unix timestamp the place must be open at; must be in the future and within 24 hours.",
+          "default": null,
+          "requires_one_of": null
+        }
+      ],
+      "requires_any_of": [
+        [
+          "center",
+          "location"
+        ]
+      ],
+      "pagination": {
+        "kind": "none",
+        "param": null,
+        "page_size": null,
+        "notes": ""
+      },
+      "result_keys": [
+        "local_results",
+        "guide_results",
+        "refinement"
+      ],
+      "result_item_fields": {
+        "local_results": [
+          "position",
+          "place_id",
+          "muid",
+          "title",
+          "gps_coordinates",
+          "rating",
+          "reviews",
+          "address",
+          "phone",
+          "website",
+          "open_state",
+          "weekly_hours",
+          "types",
+          "images",
+          "amenities"
+        ]
+      },
+      "aira_use": "Second source for employer offices, coworking spaces and venues, with Apple ratings and hours.",
+      "verified": "docs"
+    },
+    {
+      "id": "apple_maps_places",
+      "name": "Apple Maps Places",
+      "category": "maps_local",
+      "family": "Apple",
+      "description": "Returns full details of one or more Apple Maps places identified by MUID.",
+      "docs_url": "https://serpapi.com/apple-maps-places-api",
+      "endpoint": "https://serpapi.com/search.json",
+      "params": [
+        {
+          "name": "muid",
+          "label": "MUID",
+          "type": "csv",
+          "required": true,
+          "group": "Search",
+          "help": "MUID of the place from an Apple Maps response; comma-separate up to 50, e.g. 18366846785603624515.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "locale",
+          "label": "Locale",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Locale in <LANGUAGE>-<REGION> format.",
+          "default": "en-US",
+          "requires_one_of": null
+        }
+      ],
+      "requires_any_of": [
+        [
+          "muid"
+        ]
+      ],
+      "pagination": {
+        "kind": "none",
+        "param": null,
+        "page_size": null,
+        "notes": ""
+      },
+      "result_keys": [
+        "place_results"
+      ],
+      "result_item_fields": {
+        "place_results": [
+          "muid",
+          "link",
+          "title",
+          "gps_coordinates",
+          "address",
+          "phone",
+          "website",
+          "rating",
+          "reviews",
+          "price",
+          "open_state",
+          "weekly_hours",
+          "amenities",
+          "types",
+          "images",
+          "user_reviews"
+        ]
+      },
+      "aira_use": "Pull full details, hours and reviews for an employer office or interview venue found on Apple Maps.",
+      "verified": "docs"
+    },
+    {
+      "id": "bing_maps",
+      "name": "Bing Maps",
+      "category": "maps_local",
+      "family": "Bing",
+      "description": "Scrapes Bing Maps local results for a query around GPS coordinates, or a place by place_id.",
+      "docs_url": "https://serpapi.com/bing-maps-api",
+      "endpoint": "https://serpapi.com/search.json",
+      "params": [
+        {
+          "name": "q",
+          "label": "Search query",
+          "type": "string",
+          "required": false,
+          "group": "Search",
+          "help": "Anything you would use in a regular Bing Maps search.",
+          "default": null,
+          "requires_one_of": "q_or_place_id"
+        },
+        {
+          "name": "cp",
+          "label": "Center point",
+          "type": "string",
+          "required": false,
+          "group": "Search",
+          "help": "GPS coordinates where q is applied: latitude~longitude, e.g. 40.7455096~-74.0083012.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "setlang",
+          "label": "Language",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "2-character ISO code for the search language, e.g. us, de, gb.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "place_id",
+          "label": "Place ID",
+          "type": "string",
+          "required": false,
+          "group": "Advanced",
+          "help": "Unique Bing Maps place reference; can be used alone without q.",
+          "default": null,
+          "requires_one_of": "q_or_place_id"
+        },
+        {
+          "name": "first",
+          "label": "Result offset",
+          "type": "integer",
+          "required": false,
+          "group": "Pagination",
+          "help": "Result offset; with count=10 page two starts at first=10.",
+          "default": 0,
+          "requires_one_of": null
+        },
+        {
+          "name": "count",
+          "label": "Results per page",
+          "type": "integer",
+          "required": false,
+          "group": "Pagination",
+          "help": "Suggested results per page, max 30; the returned count may differ.",
+          "default": null,
+          "requires_one_of": null
+        }
+      ],
+      "requires_any_of": [
+        [
+          "q",
+          "place_id"
+        ]
+      ],
+      "pagination": {
+        "kind": "offset",
+        "param": "first",
+        "page_size": 10,
+        "notes": "Use first with count (max 30)."
+      },
+      "result_keys": [
+        "local_results"
+      ],
+      "result_item_fields": {
+        "local_results": [
+          "place_id",
+          "title",
+          "address",
+          "gps_coordinates",
+          "phone",
+          "website",
+          "type",
+          "thumbnail",
+          "open_state"
+        ]
+      },
+      "aira_use": "Cross-check employer locations and contact details against a second maps source.",
+      "verified": "docs"
+    },
+    {
+      "id": "duckduckgo_maps",
+      "name": "DuckDuckGo Maps",
+      "category": "maps_local",
+      "family": "DuckDuckGo",
+      "description": "Scrapes DuckDuckGo Maps results for a query inside a bounding box or around a point.",
+      "docs_url": "https://serpapi.com/duckduckgo-maps-api",
+      "endpoint": "https://serpapi.com/search.json",
+      "params": [
+        {
+          "name": "q",
+          "label": "Search query",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "Anything valid in a regular DuckDuckGo Maps search.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "bbox",
+          "label": "Bounding box",
+          "type": "string",
+          "required": false,
+          "group": "Search",
+          "help": "latitude_tl,longitude_tl,latitude_br,longitude_br (top-left then bottom-right). Cannot be used with lat or lon.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "lat",
+          "label": "Latitude",
+          "type": "number",
+          "required": false,
+          "group": "Search",
+          "help": "GPS latitude of the search origin; requires lon.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "lon",
+          "label": "Longitude",
+          "type": "number",
+          "required": false,
+          "group": "Search",
+          "help": "GPS longitude of the search origin; requires lat.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "strict_bbox",
+          "label": "Strict bbox",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Whether results must strictly follow the bbox.",
+          "default": "1",
+          "options": [
+            {
+              "value": "1",
+              "label": "Strict"
+            },
+            {
+              "value": "0",
+              "label": "Off"
+            }
+          ],
+          "requires_one_of": null
+        }
+      ],
+      "requires_any_of": [
+        [
+          "q"
+        ]
+      ],
+      "pagination": {
+        "kind": "none",
+        "param": null,
+        "page_size": null,
+        "notes": ""
+      },
+      "result_keys": [
+        "local_results"
+      ],
+      "result_item_fields": {
+        "local_results": [
+          "position",
+          "title",
+          "gps_coordinates",
+          "type",
+          "address",
+          "city",
+          "timezone",
+          "phone",
+          "website",
+          "link",
+          "thumbnail",
+          "images",
+          "rating",
+          "reviews",
+          "profiles",
+          "source",
+          "review_details",
+          "price",
+          "hours",
+          "operating_hours"
+        ]
+      },
+      "aira_use": "Privacy-friendly local business lookup with social profile links for outreach research.",
+      "verified": "docs"
+    },
+    {
+      "id": "naver_maps",
+      "name": "Naver Maps",
+      "category": "maps_local",
+      "family": "Naver",
+      "description": "Scrapes Naver Maps place results (South Korea) for a query, with booking, coupon and accessibility filters.",
+      "docs_url": "https://serpapi.com/naver-maps-api",
+      "endpoint": "https://serpapi.com/search.json",
+      "params": [
+        {
+          "name": "query",
+          "label": "Search query",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "Any term you would use in a regular Naver Maps search.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "center",
+          "label": "Center (lat,lon)",
+          "type": "string",
+          "required": false,
+          "group": "Search",
+          "help": "Latitude,longitude of a point in South Korea, e.g. 35.1796,129.0756; distances are measured from it. Default is Seoul City Hall.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "sort_by",
+          "label": "Sort by",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Result order. Default is the Naver Maps list order.",
+          "default": null,
+          "options": [
+            {
+              "value": "distance",
+              "label": "Distance"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "open_state",
+          "label": "Open state",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Filter by open state (restaurants/cafes, hospitals, pharmacies, gyms, parks etc.).",
+          "default": null,
+          "options": [
+            {
+              "value": "now",
+              "label": "Open now"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "bookable",
+          "label": "Bookable on Naver",
+          "type": "boolean",
+          "required": false,
+          "group": "Filters",
+          "help": "Only places bookable on Naver.",
+          "default": false,
+          "requires_one_of": null
+        },
+        {
+          "name": "coupon",
+          "label": "Has coupon",
+          "type": "boolean",
+          "required": false,
+          "group": "Filters",
+          "help": "Only places with a coupon.",
+          "default": false,
+          "requires_one_of": null
+        },
+        {
+          "name": "naver_pay",
+          "label": "Naver Pay",
+          "type": "boolean",
+          "required": false,
+          "group": "Filters",
+          "help": "Only places accepting Naver Pay.",
+          "default": false,
+          "requires_one_of": null
+        },
+        {
+          "name": "wheelchair_accessible",
+          "label": "Wheelchair accessible",
+          "type": "boolean",
+          "required": false,
+          "group": "Filters",
+          "help": "Only places with a wheelchair-accessible entrance.",
+          "default": false,
+          "requires_one_of": null
+        },
+        {
+          "name": "check_in_date",
+          "label": "Check-in date",
+          "type": "date",
+          "required": false,
+          "group": "Search",
+          "help": "YYYY-MM-DD; for accommodation lists. Use with check_out_date.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "check_out_date",
+          "label": "Check-out date",
+          "type": "date",
+          "required": false,
+          "group": "Search",
+          "help": "YYYY-MM-DD; must be later than check_in_date.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "adults",
+          "label": "Adults",
+          "type": "integer",
+          "required": false,
+          "group": "Search",
+          "help": "Adult count; used only with both dates. Adults + children max 15.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "children",
+          "label": "Children",
+          "type": "integer",
+          "required": false,
+          "group": "Search",
+          "help": "Child count; used only with both dates.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "page",
+          "label": "Page",
+          "type": "integer",
+          "required": false,
+          "group": "Pagination",
+          "help": "Results page; up to 70 results per page and 300 total (5 pages).",
+          "default": 1,
+          "requires_one_of": null
+        }
+      ],
+      "requires_any_of": [],
+      "pagination": {
+        "kind": "page",
+        "param": "page",
+        "page_size": 70,
+        "notes": "Up to 5 pages / 300 results."
+      },
+      "result_keys": [
+        "search_information",
+        "local_results",
+        "serpapi_pagination"
+      ],
+      "result_item_fields": {
+        "local_results": [
+          "title",
+          "place_id",
+          "link",
+          "type",
+          "rating",
+          "reviews",
+          "description",
+          "address",
+          "road_address",
+          "lot_address",
+          "distance",
+          "phone",
+          "open_state",
+          "hours",
+          "naver_pay",
+          "thumbnail",
+          "image_count",
+          "images",
+          "gps_coordinates"
+        ]
+      },
+      "aira_use": "Research employers, offices and lodging in South Korea.",
+      "verified": "docs"
+    },
+    {
+      "id": "flightradar24",
+      "name": "Flightradar24",
+      "category": "travel",
+      "family": "Other",
+      "description": "Returns live flights from Flightradar24 filtered by airport, map area, flight number, callsign, airline, registration or aircraft type.",
+      "docs_url": "https://serpapi.com/flightradar24-api",
+      "endpoint": "https://serpapi.com/search.json",
+      "params": [
+        {
+          "name": "airport",
+          "label": "Airport",
+          "type": "csv",
+          "required": false,
+          "group": "Search",
+          "help": "Airport flights depart from or arrive at: 3-letter IATA code, comma-separate several, e.g. LHR,LGW.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "map_bounds",
+          "label": "Map bounds",
+          "type": "string",
+          "required": false,
+          "group": "Search",
+          "help": "north,east,south,west numbers; for antimeridian areas west is greater than east. Up to 1,500 flights.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "flight_number",
+          "label": "Flight number",
+          "type": "csv",
+          "required": false,
+          "group": "Filters",
+          "help": "Prefix match; comma-separate several, e.g. BA285,BA287.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "callsign",
+          "label": "Callsign",
+          "type": "csv",
+          "required": false,
+          "group": "Filters",
+          "help": "Prefix match; comma-separate several, e.g. BAW5L,BAW28K.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "airline",
+          "label": "Airline (ICAO)",
+          "type": "csv",
+          "required": false,
+          "group": "Filters",
+          "help": "3-letter ICAO airline code (not IATA); comma-separate several, e.g. BAW,VIR.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "registration",
+          "label": "Registration",
+          "type": "csv",
+          "required": false,
+          "group": "Filters",
+          "help": "Aircraft registration, prefix match; comma-separate several.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "aircraft_type",
+          "label": "Aircraft type",
+          "type": "csv",
+          "required": false,
+          "group": "Filters",
+          "help": "ICAO aircraft type designator, prefix match; comma-separate several, e.g. A388,B748.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "departure_id",
+          "label": "Departure airport",
+          "type": "csv",
+          "required": false,
+          "group": "Filters",
+          "help": "3-letter IATA code flights depart from; comma-separate several.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "arrival_id",
+          "label": "Arrival airport",
+          "type": "csv",
+          "required": false,
+          "group": "Filters",
+          "help": "3-letter IATA code flights arrive at; comma-separate several.",
+          "default": null,
+          "requires_one_of": null
+        }
+      ],
+      "requires_any_of": [],
+      "pagination": {
+        "kind": "none",
+        "param": null,
+        "page_size": null,
+        "notes": ""
+      },
+      "result_keys": [
+        "flights"
+      ],
+      "result_item_fields": {
+        "flights": [
+          "flight_id",
+          "flight_number",
+          "callsign",
+          "airline_icao_code",
+          "departure_airport",
+          "arrival_airport",
+          "aircraft_type",
+          "registration",
+          "gps_coordinates",
+          "altitude",
+          "ground_speed",
+          "on_ground",
+          "last_updated",
+          "link"
+        ]
+      },
+      "aira_use": "Track a live flight to an interview or relocation trip.",
+      "verified": "docs"
+    },
+    {
+      "id": "airbnb",
+      "name": "Airbnb Search",
+      "category": "travel",
+      "family": "Other",
+      "description": "Scrapes Airbnb stay listings for a destination or map area with dates, guests and filters.",
+      "docs_url": "https://serpapi.com/airbnb-search-api",
+      "endpoint": "https://serpapi.com/search.json",
+      "params": [
+        {
+          "name": "q",
+          "label": "Destination",
+          "type": "string",
+          "required": false,
+          "group": "Search",
+          "help": "City, region, neighborhood, address or landmark. Set either q or map_bounds.",
+          "default": null,
+          "requires_one_of": "q_or_map_bounds"
+        },
+        {
+          "name": "map_bounds",
+          "label": "Map bounds",
+          "type": "string",
+          "required": false,
+          "group": "Search",
+          "help": "north,east,south,west values; only places inside are returned. Set either q or map_bounds.",
+          "default": null,
+          "requires_one_of": "q_or_map_bounds"
+        },
+        {
+          "name": "airbnb_domain",
+          "label": "Airbnb domain",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Domain that sets language, region and default currency.",
+          "default": "airbnb.com",
+          "requires_one_of": null
+        },
+        {
+          "name": "currency",
+          "label": "Currency",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Currency for returned prices; defaults to the domain's currency.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "check_in_date",
+          "label": "Check-in date",
+          "type": "date",
+          "required": false,
+          "group": "Search",
+          "help": "YYYY-MM-DD; use with check_out_date. If omitted Airbnb suggests dates (usually 5 nights).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "check_out_date",
+          "label": "Check-out date",
+          "type": "date",
+          "required": false,
+          "group": "Search",
+          "help": "YYYY-MM-DD; must be later than check_in_date.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "adults",
+          "label": "Adults",
+          "type": "integer",
+          "required": false,
+          "group": "Search",
+          "help": "Adults, ages 13 and up.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "children",
+          "label": "Children",
+          "type": "integer",
+          "required": false,
+          "group": "Search",
+          "help": "Children, ages 2 to 12.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "infants",
+          "label": "Infants",
+          "type": "integer",
+          "required": false,
+          "group": "Search",
+          "help": "Infants under 2.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "pets",
+          "label": "Pets",
+          "type": "integer",
+          "required": false,
+          "group": "Search",
+          "help": "Number of pets; when set only pet-friendly places are returned.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "room_type",
+          "label": "Room type",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Type of place; for hotels use property_types=hotel.",
+          "default": null,
+          "options": [
+            {
+              "value": "entire_home",
+              "label": "Entire home"
+            },
+            {
+              "value": "private_room",
+              "label": "Private room"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "min_price",
+          "label": "Min total price",
+          "type": "integer",
+          "required": false,
+          "group": "Filters",
+          "help": "Minimum total trip price incl. fees; without dates applies to a 5-night stay.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "max_price",
+          "label": "Max total price",
+          "type": "integer",
+          "required": false,
+          "group": "Filters",
+          "help": "Maximum total trip price incl. fees; without dates applies to a 5-night stay.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "bedrooms",
+          "label": "Min bedrooms",
+          "type": "integer",
+          "required": false,
+          "group": "Filters",
+          "help": "Minimum number of bedrooms.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "beds",
+          "label": "Min beds",
+          "type": "integer",
+          "required": false,
+          "group": "Filters",
+          "help": "Minimum number of beds.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "bathrooms",
+          "label": "Min bathrooms",
+          "type": "integer",
+          "required": false,
+          "group": "Filters",
+          "help": "Minimum number of bathrooms.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "property_types",
+          "label": "Property types",
+          "type": "csv",
+          "required": false,
+          "group": "Filters",
+          "help": "Comma-separated, e.g. house,guesthouse.",
+          "default": null,
+          "options": [
+            {
+              "value": "house",
+              "label": "House"
+            },
+            {
+              "value": "apartment",
+              "label": "Apartment"
+            },
+            {
+              "value": "guesthouse",
+              "label": "Guesthouse"
+            },
+            {
+              "value": "hotel",
+              "label": "Hotel"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "amenities",
+          "label": "Amenities",
+          "type": "csv",
+          "required": false,
+          "group": "Filters",
+          "help": "Comma-separated amenities places must have, e.g. wifi,pool,free_parking (see the amenities page).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "accessibility_features",
+          "label": "Accessibility features",
+          "type": "csv",
+          "required": false,
+          "group": "Filters",
+          "help": "Comma-separated, e.g. step_free_access,step_free_shower (see the accessibility page).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "host_languages",
+          "label": "Host languages",
+          "type": "csv",
+          "required": false,
+          "group": "Filters",
+          "help": "Comma-separated language codes the host must speak, e.g. en,es.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "instant_book",
+          "label": "Instant book",
+          "type": "boolean",
+          "required": false,
+          "group": "Filters",
+          "help": "Only places bookable without host approval.",
+          "default": false,
+          "requires_one_of": null
+        },
+        {
+          "name": "self_check_in",
+          "label": "Self check-in",
+          "type": "boolean",
+          "required": false,
+          "group": "Filters",
+          "help": "Only places with self check-in.",
+          "default": false,
+          "requires_one_of": null
+        },
+        {
+          "name": "guest_favorite",
+          "label": "Guest favorite",
+          "type": "boolean",
+          "required": false,
+          "group": "Filters",
+          "help": "Only Guest favorites.",
+          "default": false,
+          "requires_one_of": null
+        },
+        {
+          "name": "luxe",
+          "label": "Airbnb Luxe",
+          "type": "boolean",
+          "required": false,
+          "group": "Filters",
+          "help": "Only Airbnb Luxe places.",
+          "default": false,
+          "requires_one_of": null
+        },
+        {
+          "name": "page",
+          "label": "Page",
+          "type": "integer",
+          "required": false,
+          "group": "Pagination",
+          "help": "Results page; up to 18 results per page, up to 15 pages.",
+          "default": 1,
+          "requires_one_of": null
+        }
+      ],
+      "requires_any_of": [
+        [
+          "q",
+          "map_bounds"
+        ]
+      ],
+      "pagination": {
+        "kind": "page",
+        "param": "page",
+        "page_size": 18,
+        "notes": "Up to 15 pages."
+      },
+      "result_keys": [
+        "search_information",
+        "organic_results",
+        "serpapi_pagination"
+      ],
+      "result_item_fields": {
+        "organic_results": [
+          "position",
+          "listing_id",
+          "title",
+          "name",
+          "description",
+          "link",
+          "rating",
+          "reviews",
+          "badges",
+          "price",
+          "extracted_price",
+          "old_price",
+          "price_qualifier",
+          "price_breakdown",
+          "check_in_date",
+          "check_out_date",
+          "bedrooms",
+          "beds",
+          "bathrooms",
+          "highlights",
+          "free_cancellation",
+          "gps_coordinates",
+          "thumbnail",
+          "images"
+        ]
+      },
+      "aira_use": "Find short-term housing for a new-job relocation or an extended onsite.",
+      "verified": "docs"
+    },
+    {
+      "id": "booking",
+      "name": "Booking.com Search",
+      "category": "travel",
+      "family": "Other",
+      "description": "Scrapes Booking.com property results for a destination with dates, guests, sorting and filters.",
+      "docs_url": "https://serpapi.com/booking-search-api",
+      "endpoint": "https://serpapi.com/search.json",
+      "params": [
+        {
+          "name": "q",
+          "label": "Destination",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "City, region, district, landmark or airport. Most street addresses return no results.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Language",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Language of the search.",
+          "default": "en-us",
+          "requires_one_of": null
+        },
+        {
+          "name": "currency",
+          "label": "Currency",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Currency of returned prices; hotel_currency uses each property's own currency.",
+          "default": "hotel_currency",
+          "requires_one_of": null
+        },
+        {
+          "name": "check_in_date",
+          "label": "Check-in date",
+          "type": "date",
+          "required": false,
+          "group": "Search",
+          "help": "YYYY-MM-DD; use with check_out_date. Without dates, no prices are returned.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "check_out_date",
+          "label": "Check-out date",
+          "type": "date",
+          "required": false,
+          "group": "Search",
+          "help": "YYYY-MM-DD; up to 90 nights after check-in.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "flex_window",
+          "label": "Flexible window",
+          "type": "enum",
+          "required": false,
+          "group": "Search",
+          "help": "Let dates shift for the best price; requires both dates.",
+          "default": null,
+          "options": [
+            {
+              "value": "1",
+              "label": "+/- 1 day"
+            },
+            {
+              "value": "2",
+              "label": "+/- 2 days"
+            },
+            {
+              "value": "3",
+              "label": "+/- 3 days"
+            },
+            {
+              "value": "7",
+              "label": "+/- 7 days"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "adults",
+          "label": "Adults",
+          "type": "integer",
+          "required": false,
+          "group": "Search",
+          "help": "1 to 30.",
+          "default": 2,
+          "requires_one_of": null
+        },
+        {
+          "name": "children",
+          "label": "Children",
+          "type": "integer",
+          "required": false,
+          "group": "Search",
+          "help": "0 to 10; ages set with children_ages.",
+          "default": 0,
+          "requires_one_of": null
+        },
+        {
+          "name": "children_ages",
+          "label": "Children ages",
+          "type": "csv",
+          "required": false,
+          "group": "Search",
+          "help": "Comma-separated ages 0-17, taken at check-out, e.g. 5,9.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "rooms",
+          "label": "Rooms",
+          "type": "integer",
+          "required": false,
+          "group": "Search",
+          "help": "1 to 30; cannot exceed adults.",
+          "default": 1,
+          "requires_one_of": null
+        },
+        {
+          "name": "sort_by",
+          "label": "Sort by",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Sort order.",
+          "default": "popularity",
+          "options": [
+            {
+              "value": "popularity",
+              "label": "Our top picks"
+            },
+            {
+              "value": "upsort_bh",
+              "label": "Homes & apartments first"
+            },
+            {
+              "value": "price",
+              "label": "Price (lowest first)"
+            },
+            {
+              "value": "price_from_high_to_low",
+              "label": "Price (highest first)"
+            },
+            {
+              "value": "review_score_and_price",
+              "label": "Best reviewed & lowest price"
+            },
+            {
+              "value": "bayesian_review_score",
+              "label": "Top reviewed"
+            },
+            {
+              "value": "class",
+              "label": "Property rating (high to low)"
+            },
+            {
+              "value": "class_asc",
+              "label": "Property rating (low to high)"
+            },
+            {
+              "value": "class_and_price",
+              "label": "Property rating and price"
+            },
+            {
+              "value": "distance_from_search",
+              "label": "Distance from downtown"
+            },
+            {
+              "value": "closest_beach_distance_v2",
+              "label": "Distance from closest beach"
+            },
+            {
+              "value": "closest_ski_lift_distance",
+              "label": "Distance to nearest ski lift"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "min_price",
+          "label": "Min price / night",
+          "type": "integer",
+          "required": false,
+          "group": "Filters",
+          "help": "Minimum price per night; requires currency.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "max_price",
+          "label": "Max price / night",
+          "type": "integer",
+          "required": false,
+          "group": "Filters",
+          "help": "Maximum price per night; requires currency.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "hotel_class",
+          "label": "Hotel class",
+          "type": "csv",
+          "required": false,
+          "group": "Filters",
+          "help": "Comma-separated ratings 1 to 5.",
+          "default": null,
+          "options": [
+            {
+              "value": "1",
+              "label": "1"
+            },
+            {
+              "value": "2",
+              "label": "2"
+            },
+            {
+              "value": "3",
+              "label": "3"
+            },
+            {
+              "value": "4",
+              "label": "4"
+            },
+            {
+              "value": "5",
+              "label": "5"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "rating",
+          "label": "Minimum review score",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Minimum review score.",
+          "default": null,
+          "options": [
+            {
+              "value": "9",
+              "label": "Wonderful: 9+"
+            },
+            {
+              "value": "8",
+              "label": "Very Good: 8+"
+            },
+            {
+              "value": "7",
+              "label": "Good: 7+"
+            },
+            {
+              "value": "6",
+              "label": "Pleasant: 6+"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "free_cancellation",
+          "label": "Free cancellation",
+          "type": "boolean",
+          "required": false,
+          "group": "Filters",
+          "help": "Only free-cancellation properties.",
+          "default": false,
+          "requires_one_of": null
+        },
+        {
+          "name": "property_types",
+          "label": "Property types",
+          "type": "csv",
+          "required": false,
+          "group": "Filters",
+          "help": "Comma-separated property type IDs, e.g. 204 (hotels), 201,220 (apartments and vacation homes).",
+          "default": null,
+          "options": [
+            {
+              "value": "204",
+              "label": "Hotels"
+            },
+            {
+              "value": "201",
+              "label": "Apartments"
+            },
+            {
+              "value": "220",
+              "label": "Vacation homes"
+            }
+          ],
+          "options_truncated": true,
+          "requires_one_of": null
+        },
+        {
+          "name": "nflt",
+          "label": "Raw filter string",
+          "type": "string",
+          "required": false,
+          "group": "Advanced",
+          "help": "Semicolon-separated Booking.com filters, e.g. hotelfacility=107;mealplan=1;di=2286 (see filters in results).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "offset",
+          "label": "Offset",
+          "type": "integer",
+          "required": false,
+          "group": "Pagination",
+          "help": "Results to skip; max 1000.",
+          "default": 0,
+          "requires_one_of": null
+        },
+        {
+          "name": "limit",
+          "label": "Limit",
+          "type": "integer",
+          "required": false,
+          "group": "Pagination",
+          "help": "Results per page, 1 to 100.",
+          "default": 25,
+          "requires_one_of": null
+        },
+        {
+          "name": "session_token",
+          "label": "Session token",
+          "type": "string",
+          "required": false,
+          "group": "Pagination",
+          "help": "Keeps the same visitor across searches; from serpapi_pagination.session_token.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "device",
+          "label": "Device",
+          "type": "enum",
+          "required": false,
+          "group": "Advanced",
+          "help": "Device to emulate.",
+          "default": "desktop",
+          "options": [
+            {
+              "value": "desktop",
+              "label": "Desktop"
+            },
+            {
+              "value": "tablet",
+              "label": "Tablet"
+            },
+            {
+              "value": "mobile",
+              "label": "Mobile"
+            }
+          ],
+          "requires_one_of": null
+        }
+      ],
+      "requires_any_of": [],
+      "pagination": {
+        "kind": "offset",
+        "param": "offset",
+        "page_size": 25,
+        "notes": "offset + limit (1-100); max offset 1000; pass session_token."
+      },
+      "result_keys": [
+        "search_information",
+        "properties",
+        "filters",
+        "serpapi_pagination"
+      ],
+      "result_item_fields": {
+        "properties": [
+          "position",
+          "property_id",
+          "name",
+          "link",
+          "type",
+          "hotel_class",
+          "location",
+          "address",
+          "distance",
+          "gps_coordinates",
+          "rating",
+          "rating_text",
+          "reviews",
+          "price",
+          "extracted_price",
+          "currency",
+          "price_per_night",
+          "deals",
+          "rooms",
+          "free_cancellation",
+          "thumbnail"
+        ]
+      },
+      "aira_use": "Compare hotels near an interview or relocation destination on Booking.com.",
+      "verified": "docs"
+    },
+    {
+      "id": "tripadvisor",
+      "name": "Tripadvisor Search",
+      "category": "travel",
+      "family": "Tripadvisor",
+      "description": "Scrapes Tripadvisor search results (restaurants, things to do, hotels, destinations, forums) for a query.",
+      "docs_url": "https://serpapi.com/tripadvisor-search-api",
+      "endpoint": "https://serpapi.com/search.json",
+      "params": [
+        {
+          "name": "q",
+          "label": "Search query",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "Any term you could use in a regular Tripadvisor search.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "lat",
+          "label": "Latitude",
+          "type": "number",
+          "required": false,
+          "group": "Search",
+          "help": "GPS latitude of the search origin; may not be supported for all queries.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "lon",
+          "label": "Longitude",
+          "type": "number",
+          "required": false,
+          "group": "Search",
+          "help": "GPS longitude of the search origin; may not be supported for all queries.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "tripadvisor_domain",
+          "label": "Tripadvisor domain",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Tripadvisor domain to use.",
+          "default": "tripadvisor.com",
+          "requires_one_of": null
+        },
+        {
+          "name": "ssrc",
+          "label": "Search filter",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Search filter. Vacation Rentals (v) was discontinued by Tripadvisor and may return incomplete results.",
+          "default": null,
+          "options": [
+            {
+              "value": "a",
+              "label": "All Results"
+            },
+            {
+              "value": "r",
+              "label": "Restaurants"
+            },
+            {
+              "value": "A",
+              "label": "Things to Do"
+            },
+            {
+              "value": "h",
+              "label": "Hotels"
+            },
+            {
+              "value": "g",
+              "label": "Destinations"
+            },
+            {
+              "value": "v",
+              "label": "Vacation Rentals"
+            },
+            {
+              "value": "f",
+              "label": "Forums"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "offset",
+          "label": "Offset",
+          "type": "integer",
+          "required": false,
+          "group": "Pagination",
+          "help": "Results to skip, e.g. 30 = page 2, 60 = page 3; may not be supported for all queries.",
+          "default": 0,
+          "requires_one_of": null
+        },
+        {
+          "name": "limit",
+          "label": "Limit",
+          "type": "integer",
+          "required": false,
+          "group": "Pagination",
+          "help": "Maximum number of results (e.g. 60, 100); no maximum stated.",
+          "default": 30,
+          "requires_one_of": null
+        }
+      ],
+      "requires_any_of": [
+        [
+          "q"
+        ]
+      ],
+      "pagination": {
+        "kind": "offset",
+        "param": "offset",
+        "page_size": 30,
+        "notes": "Use offset and limit."
+      },
+      "result_keys": [
+        "places",
+        "serpapi_pagination"
+      ],
+      "result_item_fields": {
+        "places": [
+          "position",
+          "title",
+          "place_type",
+          "place_id",
+          "link",
+          "serpapi_link",
+          "description",
+          "location",
+          "thumbnail"
+        ]
+      },
+      "aira_use": "Research destinations, hotels and venues for interview trips and relocation.",
+      "verified": "docs"
+    },
+    {
+      "id": "tripadvisor_place",
+      "name": "Tripadvisor Place",
+      "category": "travel",
+      "family": "Tripadvisor",
+      "description": "Returns detailed information about a Tripadvisor place: rating, ranking, contact data, hours, reviews and nearby places.",
+      "docs_url": "https://serpapi.com/tripadvisor-place-api",
+      "endpoint": "https://serpapi.com/search.json",
+      "params": [
+        {
+          "name": "place_id",
+          "label": "Place ID",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "Tripadvisor place ID from the Tripadvisor Search API. Vacation Rental IDs may return incomplete data.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "tripadvisor_domain",
+          "label": "Tripadvisor domain",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Tripadvisor domain to query.",
+          "default": "tripadvisor.com",
+          "requires_one_of": null
+        }
+      ],
+      "requires_any_of": [
+        [
+          "place_id"
+        ]
+      ],
+      "pagination": {
+        "kind": "none",
+        "param": null,
+        "page_size": null,
+        "notes": ""
+      },
+      "result_keys": [
+        "place_result"
+      ],
+      "result_item_fields": {
+        "place_result": [
+          "type",
+          "name",
+          "rating",
+          "reviews",
+          "ranking",
+          "price_level",
+          "website",
+          "phone",
+          "email",
+          "address",
+          "operation_hours",
+          "reviews_highlights",
+          "reviews_list",
+          "nearby"
+        ]
+      },
+      "aira_use": "Get full detail on a hotel or restaurant near an interview location.",
+      "verified": "docs"
+    },
+    {
+      "id": "tripadvisor_reviews",
+      "name": "Tripadvisor Reviews",
+      "category": "reviews",
+      "family": "Tripadvisor",
+      "description": "Returns user reviews for a Tripadvisor place with filters for rating, month and type of visit.",
+      "docs_url": "https://serpapi.com/tripadvisor-reviews-api",
+      "endpoint": "https://serpapi.com/search.json",
+      "params": [
+        {
+          "name": "place_id",
+          "label": "Place ID",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "Tripadvisor place ID from the Tripadvisor Search API.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "tripadvisor_domain",
+          "label": "Tripadvisor domain",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Tripadvisor domain to use.",
+          "default": "www.tripadvisor.com",
+          "requires_one_of": null
+        },
+        {
+          "name": "language",
+          "label": "Review language",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Language of the reviews (see the Tripadvisor reviews languages page).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "sort_by",
+          "label": "Sort by",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Sort order.",
+          "default": "most_recent",
+          "options": [
+            {
+              "value": "most_recent",
+              "label": "Most Recent"
+            },
+            {
+              "value": "detailed_review",
+              "label": "Detailed Reviews"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "rating",
+          "label": "Rating",
+          "type": "csv",
+          "required": false,
+          "group": "Filters",
+          "help": "Only reviews with these rating(s), single or comma-separated e.g. 5,3,2.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "month",
+          "label": "Month",
+          "type": "csv",
+          "required": false,
+          "group": "Filters",
+          "help": "Only reviews from these month(s), 1-12, single or comma-separated.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "type_of_visit",
+          "label": "Type of visit",
+          "type": "csv",
+          "required": false,
+          "group": "Filters",
+          "help": "Comma-separated visit types.",
+          "default": null,
+          "options": [
+            {
+              "value": "Business",
+              "label": "Business"
+            },
+            {
+              "value": "Couples",
+              "label": "Couples"
+            },
+            {
+              "value": "Family",
+              "label": "Family"
+            },
+            {
+              "value": "Friends",
+              "label": "Friends"
+            },
+            {
+              "value": "Solo",
+              "label": "Solo"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "offset",
+          "label": "Offset",
+          "type": "integer",
+          "required": false,
+          "group": "Pagination",
+          "help": "Reviews to skip: 0 = page 1, 10 = page 2.",
+          "default": 0,
+          "requires_one_of": null
+        },
+        {
+          "name": "limit",
+          "label": "Limit",
+          "type": "integer",
+          "required": false,
+          "group": "Pagination",
+          "help": "Maximum reviews to return (max 20).",
+          "default": 10,
+          "requires_one_of": null
+        }
+      ],
+      "requires_any_of": [
+        [
+          "place_id"
+        ]
+      ],
+      "pagination": {
+        "kind": "offset",
+        "param": "offset",
+        "page_size": 10,
+        "notes": "limit max 20."
+      },
+      "result_keys": [
+        "search_information",
+        "reviews",
+        "serpapi_pagination"
+      ],
+      "result_item_fields": {
+        "reviews": [
+          "position",
+          "title",
+          "snippet",
+          "rating",
+          "review_id",
+          "link",
+          "date",
+          "language",
+          "original_language",
+          "trip_info",
+          "votes",
+          "author",
+          "response"
+        ]
+      },
+      "aira_use": "Read business-traveler reviews of hotels before booking an onsite stay.",
+      "verified": "docs"
+    },
+    {
+      "id": "yelp",
+      "name": "Yelp Search",
+      "category": "maps_local",
+      "family": "Yelp",
+      "description": "Scrapes Yelp search results for businesses matching a query in a location.",
+      "docs_url": "https://serpapi.com/yelp-search-api",
+      "endpoint": "https://serpapi.com/search.json",
+      "params": [
+        {
+          "name": "find_desc",
+          "label": "Search query",
+          "type": "string",
+          "required": false,
+          "group": "Search",
+          "help": "Anything you would use in a regular Yelp search.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "find_loc",
+          "label": "Location",
+          "type": "location",
+          "required": true,
+          "group": "Search",
+          "help": "Street address, city and state, city/state/ZIP, or ZIP code.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "l",
+          "label": "Distance / neighborhood",
+          "type": "string",
+          "required": false,
+          "group": "Filters",
+          "help": "Map radius or neighborhoods; values come from filters.distance or filters.neighborhoods in the JSON. Distance and neighborhoods cannot be used together.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "yelp_domain",
+          "label": "Yelp domain",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Yelp domain to use.",
+          "default": "yelp.com",
+          "requires_one_of": null
+        },
+        {
+          "name": "cflt",
+          "label": "Category filter",
+          "type": "string",
+          "required": false,
+          "group": "Filters",
+          "help": "Category filter used with find_desc.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "sortby",
+          "label": "Sort by",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Sort order.",
+          "default": "recommended",
+          "options": [
+            {
+              "value": "recommended",
+              "label": "Recommended"
+            },
+            {
+              "value": "rating",
+              "label": "Highest Rated"
+            },
+            {
+              "value": "review_count",
+              "label": "Most Reviewed"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "attrs",
+          "label": "Attributes",
+          "type": "csv",
+          "required": false,
+          "group": "Filters",
+          "help": "Filters such as price or features, comma-separated (e.g. GoodForKids,DogsAllowed); values come from filters.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "start",
+          "label": "Result offset",
+          "type": "integer",
+          "required": false,
+          "group": "Pagination",
+          "help": "Results to skip: 10 = page 2, 20 = page 3.",
+          "default": 0,
+          "requires_one_of": null
+        }
+      ],
+      "requires_any_of": [],
+      "pagination": {
+        "kind": "start",
+        "param": "start",
+        "page_size": 10,
+        "notes": "Steps of 10."
+      },
+      "result_keys": [
+        "filters",
+        "ads_results",
+        "organic_results",
+        "pagination",
+        "serpapi_pagination"
+      ],
+      "result_item_fields": {
+        "organic_results": [
+          "position",
+          "place_ids",
+          "title",
+          "link",
+          "reviews_link",
+          "categories",
+          "price",
+          "rating",
+          "reviews",
+          "neighborhoods",
+          "phone",
+          "snippet",
+          "thumbnail"
+        ]
+      },
+      "aira_use": "Find local businesses, coworking cafes and meeting venues near a target city.",
+      "verified": "docs"
+    },
+    {
+      "id": "yelp_place",
+      "name": "Yelp Place",
+      "category": "maps_local",
+      "family": "Yelp",
+      "description": "Returns details of a Yelp business: rating, hours, features, review highlights, Q&A and optionally the full menu.",
+      "docs_url": "https://serpapi.com/yelp-place",
+      "endpoint": "https://serpapi.com/search.json",
+      "params": [
+        {
+          "name": "place_id",
+          "label": "Place ID",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "Yelp ID (e.g. ED7A7vDdg8yLNKJTSVHHmg) or alias (e.g. arabica-brooklyn) from the Yelp Search API.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "yelp_domain",
+          "label": "Yelp domain",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Yelp domain to use.",
+          "default": "yelp.com",
+          "requires_one_of": null
+        },
+        {
+          "name": "business_alert",
+          "label": "Business alert",
+          "type": "boolean",
+          "required": false,
+          "group": "Advanced",
+          "help": "Include business alert information when available.",
+          "default": false,
+          "requires_one_of": null
+        },
+        {
+          "name": "full_menu",
+          "label": "Full menu",
+          "type": "boolean",
+          "required": false,
+          "group": "Advanced",
+          "help": "Scrape the full menu when available; otherwise place_results is returned.",
+          "default": false,
+          "requires_one_of": null
+        },
+        {
+          "name": "menu_name",
+          "label": "Menu name",
+          "type": "string",
+          "required": false,
+          "group": "Advanced",
+          "help": "Which full menu to scrape when several exist; only valid with full_menu.",
+          "default": null,
+          "requires_one_of": null
+        }
+      ],
+      "requires_any_of": [
+        [
+          "place_id"
+        ]
+      ],
+      "pagination": {
+        "kind": "none",
+        "param": null,
+        "page_size": null,
+        "notes": ""
+      },
+      "result_keys": [
+        "search_information",
+        "place_results",
+        "full_menu_results"
+      ],
+      "result_item_fields": {
+        "place_results": [
+          "name",
+          "reviews",
+          "rating",
+          "is_claimed",
+          "price",
+          "website",
+          "phone",
+          "address",
+          "categories",
+          "operation_hours",
+          "review_highlights",
+          "features",
+          "community_questions"
+        ]
+      },
+      "aira_use": "Vet a local venue for networking meetups or interview lunches.",
+      "verified": "docs"
+    }
+  ]
+}

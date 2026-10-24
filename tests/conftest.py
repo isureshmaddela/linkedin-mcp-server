@@ -1,5 +1,7 @@
 import pytest
 
+from cloud_support import cloud  # noqa: F401  (the hosted-shell fixture, available to every test module)
+
 
 @pytest.fixture(autouse=True)
 def reset_singletons():
@@ -93,3 +95,24 @@ def mock_context():
     ctx = MagicMock()
     ctx.report_progress = AsyncMock()
     return ctx
+
+
+@pytest.fixture(autouse=True)
+def _drop_postgres_databases():
+    """With AIRA_TEST_DATABASE_URL set, every hosted-shell test gets its own PostgreSQL database; drop it afterwards."""
+    import pg_support
+
+    earlier = frozenset(
+        pg_support._created
+    )  # made by a module or session fixture: not this test's to drop
+    yield
+    if pg_support.enabled():
+        pg_support.drop_created(keep=earlier)
+
+
+def pytest_sessionfinish(session, exitstatus):  # noqa: ARG001
+    import pg_support
+
+    if pg_support.enabled():
+        pg_support.drop_created()
+        pg_support.drop_template()

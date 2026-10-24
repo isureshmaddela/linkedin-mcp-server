@@ -1,0 +1,8 @@
+# Apply with:  kubectl apply -k deploy/k8s     (after editing config.yaml, secret.example.yaml -> a real Secret, and the image names)
+apiVersion: v1
+kind: Namespace
+metadata:
+  name: aira
+  labels:
+    app.kubernetes.io/part-of: aira-cloud
+    pod-security.kubernetes.io/enforce: restricted

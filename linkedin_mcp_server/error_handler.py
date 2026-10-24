@@ -18,6 +18,7 @@ from linkedin_mcp_server.core.exceptions import (
     NetworkError,
     ProfileNotFoundError,
     RateLimitError,
+    SalesNavigatorAccessError,
     ScrapingError,
 )
 
@@ -140,6 +141,10 @@ def raise_tool_error(exception: Exception, context: str = "") -> NoReturn:
         raise ToolError(
             f"Rate limit detected. Wait {wait_time} seconds before trying again."
         ) from exception
+
+    elif isinstance(exception, SalesNavigatorAccessError):
+        logger.warning("Sales Navigator not available%s: %s", ctx, exception)
+        raise ToolError(str(exception)) from exception
 
     elif isinstance(exception, ProfileNotFoundError):
         logger.warning("Profile not found%s: %s", ctx, exception)

@@ -1,0 +1,370 @@
+{
+  "_meta": {
+    "generated": "2026-10-22",
+    "method": "Public documentation only (serpapi.com docs, blog, pricing, release notes). No login, no credentials used.",
+    "verification_legend": "Items tagged [unverified] were not confirmed on a public page and are best-effort design suggestions for the Aira clone."
+  },
+  "dashboard_pages": [
+    {
+      "id": "dashboard",
+      "title": "API Dashboard (overview)",
+      "purpose": "Landing page after sign-in: shows quota consumption, plan and throughput at a glance. Linked as 'Api Dashboard' in the account nav (serpapi.com/dashboard).",
+      "widgets": ["Searches used this month vs plan limit (progress bar)", "Plan searches left", "Extra credits balance", "Hourly throughput (this hour / last hour vs rate limit)", "Plan name and renewal date", "API key (masked, copy button)", "Usage chart by day/engine [unverified layout]"],
+      "actions": ["Copy API key", "Change plan", "Buy extra credits", "Jump to Playground", "Jump to My Searches"],
+      "data_fields": ["account_email", "account_status", "plan_name", "plan_monthly_price", "plan_renewal_date", "searches_per_month", "plan_searches_left", "extra_credits", "total_searches_left", "this_month_usage", "this_hour_searches", "last_hour_searches", "account_rate_limit_per_hour"]
+    },
+    {
+      "id": "playground",
+      "title": "Playground",
+      "purpose": "UI for trying searches and parameters against every engine and inspecting JSON/HTML/Markdown output (serpapi.com/playground).",
+      "widgets": ["Engine selector grouped by provider (Google: Search, Maps, Shopping, Flights, Scholar...; Bing, Baidu, Amazon, eBay, Yelp, YouTube, Airbnb...) with Google Search as default", "Parameter form generated per engine (q, location, gl, hl, device, etc.)", "Output tabs: JSON / HTML / visual preview [tab names partially unverified]", "Output URL fields: HTML URL, JSON URL, Markdown URL", "Engine History bar", "Docs link to the selected engine's documentation"],
+      "actions": ["Run search", "Export To Code (generates starter code in multiple languages)", "Open Engine History", "Copy JSON/HTML/Markdown URL", "Open engine docs"],
+      "data_fields": ["engine", "all engine parameters", "search_metadata.id", "search_metadata.status", "json_endpoint", "raw_html_file", "response body"]
+    },
+    {
+      "id": "my-searches",
+      "title": "My Searches (search history)",
+      "purpose": "Browse past searches stored for about 30 days (serpapi.com/searches). Same data as the Search Archive API.",
+      "widgets": ["Table of recent searches (query, engine, status, time) [column set unverified]", "Per-search detail view with JSON, raw HTML and prettified HTML", "Status badge: Queued / Processing / Success / Error / Cached"],
+      "actions": ["Open a search by id", "View JSON", "View raw HTML", "Re-run search", "Copy search id"],
+      "data_fields": ["search_metadata.id", "search_metadata.status", "created_at", "processed_at", "engine", "q", "total_time_taken"]
+    },
+    {
+      "id": "search-archive",
+      "title": "Search Archive",
+      "purpose": "Programmatic and UI access to completed searches by id for up to 31 days without spending credits again; backbone of async workflows.",
+      "widgets": ["Lookup by search id", "Status indicator (Queued/Processing/Success/Error)", "Download JSON / HTML"],
+      "actions": ["Fetch by id", "Switch output json/html/json_with_pixel_position"],
+      "data_fields": ["search_id", "output", "status", "retention 31 days"]
+    },
+    {
+      "id": "api-key",
+      "title": "API key management ('Your Account')",
+      "purpose": "Shows the private API key for the account; keys are per user, and each team member has their own key.",
+      "widgets": ["Masked API key with copy/reveal", "Key regeneration control [unverified]", "Security tab (password, 2FA) [unverified details]"],
+      "actions": ["Copy key", "Regenerate key [unverified]", "Edit profile", "Change password"],
+      "data_fields": ["api_key", "account_id", "account_email"]
+    },
+    {
+      "id": "plan",
+      "title": "Your Plan / subscription and billing",
+      "purpose": "Upgrade, downgrade, cancel, resubscribe or renew at serpapi.com/plan; toggle Ludicrous Speed / Ludicrous Speed Max under Change Plan.",
+      "widgets": ["Plan comparison table (Free to Cloud 54M)", "Current plan card with renewal date", "Ludicrous Speed toggle (2x price)", "Ludicrous Speed Max toggle (4x price)", "Auto Renew Early toggle", "Invoices/payment method [unverified]"],
+      "actions": ["Change plan", "Cancel plan (keep searches until renewal)", "Renew early", "Enable Auto Renew Early", "Request refund within 7 days if under 20 percent used"],
+      "data_fields": ["plan_id", "plan_name", "plan_monthly_price", "plan_renewal_date", "searches_per_month", "account_rate_limit_per_hour"]
+    },
+    {
+      "id": "extra-credits",
+      "title": "Extra Credits",
+      "purpose": "Balance of additional searches (including unused searches moved there on downgrade) and purchase flow.",
+      "widgets": ["Extra credits balance", "Purchase packs [unverified]"],
+      "actions": ["Buy credits"],
+      "data_fields": ["extra_credits", "total_searches_left"]
+    },
+    {
+      "id": "account-settings",
+      "title": "Edit Profile / account settings",
+      "purpose": "Profile details and security for the signed-in user.",
+      "widgets": ["Profile form (name, email)", "Password change", "Security options"],
+      "actions": ["Save profile", "Change password", "Delete account [unverified]"],
+      "data_fields": ["account_email", "account_status"]
+    },
+    {
+      "id": "team",
+      "title": "Team / organization members",
+      "purpose": "Invite members to a plan; each member gets a separate API key and separately tracked searches; one member can manage billing without sharing logins.",
+      "widgets": ["Member list with per-member usage", "Invite form"],
+      "actions": ["Invite member", "Remove member", "Assign billing manager"],
+      "data_fields": ["member email", "member api_key", "member searches used", "role"]
+    },
+    {
+      "id": "usage",
+      "title": "Usage charts",
+      "purpose": "Visualise searches consumed over time and against the hourly throughput limit.",
+      "widgets": ["This-month usage bar", "Hourly searches series (this hour / last hour)", "Per-engine breakdown [unverified]"],
+      "actions": ["Change date range [unverified]"],
+      "data_fields": ["this_month_usage", "this_hour_searches", "last_hour_searches", "account_rate_limit_per_hour", "plan_searches_left"]
+    },
+    {
+      "id": "status",
+      "title": "Status and API metrics",
+      "purpose": "Public page serpapi.com/status: 'API Metrics for All Engines', last 30 days at hourly granularity, per-engine selector. A separate hosted status page (status.serpapi.com, launched Jan 2026) carries incidents and subscriptions via email, SMS, Slack, Teams.",
+      "widgets": ["Engine selector (All Engines plus ~150 engines)", "Average success rate (about 98.8 percent seen)", "Average response time (about 1.7s seen)", "Hourly time series", "Link to external incident status page"],
+      "actions": ["Pick engine", "Subscribe to incident alerts (external page)"],
+      "data_fields": ["engine", "success_rate", "avg_response_time", "hour bucket"]
+    },
+    {
+      "id": "webhooks",
+      "title": "Webhooks",
+      "purpose": "No customer-facing webhook feature is publicly documented. Async results are collected by polling the Search Archive API. The Aira clone should add an optional local webhook notifier as an improvement.",
+      "widgets": [],
+      "actions": [],
+      "data_fields": []
+    },
+    {
+      "id": "locations-tool",
+      "title": "Locations tool",
+      "purpose": "Search supported locations (based on Google Ads geo targets) to get canonical names or ids for the location parameter, and GPS for maps.",
+      "widgets": ["Search box", "Results table: name, canonical_name, target_type, country_code, reach, gps"],
+      "actions": ["Search", "Copy canonical name", "Copy id"],
+      "data_fields": ["id", "google_id", "google_parent_id", "name", "canonical_name", "country_code", "target_type", "reach", "gps"]
+    },
+    {
+      "id": "docs",
+      "title": "Documentation",
+      "purpose": "Per-engine API docs (parameters, sample responses, code samples) plus shared references: Google domains, countries, languages lists, error codes page, Extra APIs.",
+      "widgets": ["Engine index", "Parameter tables", "Code snippets per language", "Markdown (.md) variants of pages"],
+      "actions": ["Browse engine", "Copy sample"],
+      "data_fields": ["engine", "parameter name", "required flag", "values"]
+    },
+    {
+      "id": "changelog",
+      "title": "Release Notes",
+      "purpose": "serpapi.com/release-notes: table of changes keyed by API.",
+      "widgets": ["Table columns: Release Date, Other (API name and description), Details (GitHub issue link)", "Status tag: Fixed / Other / New / Improved", "Pagination (Next Page)", "Links to Release Thread and GitHub"],
+      "actions": ["Open GitHub issue", "Next page"],
+      "data_fields": ["date (Mon DD, YYYY)", "api_name", "description", "tag", "issue_url"]
+    },
+    {
+      "id": "sdks",
+      "title": "SDK / integrations list",
+      "purpose": "serpapi.com/integrations lists official client libraries with install instructions and links.",
+      "widgets": ["Language cards"],
+      "actions": ["Open repo"],
+      "data_fields": ["language", "repo", "package"]
+    },
+    {
+      "id": "xray",
+      "title": "X-Ray (JSON path inspector)",
+      "purpose": "Tool included on all plans to find where a SERP element is extracted in the JSON or where a JSON value came from.",
+      "widgets": ["HTML preview with highlighted elements mapped to JSON paths"],
+      "actions": ["Click element to see path"],
+      "data_fields": ["json_path", "html element"]
+    }
+  ],
+  "common_parameters": [
+    {"name": "api_key", "type": "string", "description": "Required. Private API key from the account page.", "required": true},
+    {"name": "engine", "type": "string", "description": "Which engine to use (google, google_light, bing, ...). Google is the default on the Google search page.", "values": ["google", "google_light", "bing", "baidu", "amazon", "ebay", "yelp", "youtube", "..."]},
+    {"name": "output", "type": "string", "description": "Response format.", "values": ["json (default)", "html (raw HTML)", "md (markdown for LLMs and agents)"]},
+    {"name": "json_restrictor", "type": "string", "description": "Restrict which fields of the JSON are returned to reduce payload size and speed up responses (e.g. 'organic_results[].title')."},
+    {"name": "no_cache", "type": "boolean", "description": "false (default) allows cached results; true forces a fresh fetch. Cache is served only when query and all parameters are identical, expires after 1 hour, and cached searches are free. Must not be combined with async.", "values": ["false", "true"]},
+    {"name": "async", "type": "boolean", "description": "false (default) holds the connection until results arrive; true returns immediately with search_metadata only and results are fetched later via the Search Archive API. Do not use on accounts with Ludicrous Speed enabled, and do not combine with no_cache.", "values": ["false", "true"]},
+    {"name": "zero_trace", "type": "boolean", "description": "Enterprise only. When true SerpApi does not store search parameters, files or metadata (harder to debug; archive retrieval unavailable).", "values": ["false", "true"]},
+    {"name": "device", "type": "string", "description": "Device to emulate.", "values": ["desktop (default)", "tablet", "mobile"]},
+    {"name": "q", "type": "string", "description": "Query (required by most search engines; error 'Missing query q parameter' otherwise).", "required": true},
+    {"name": "location", "type": "string", "description": "Human readable location (canonical name from the Locations API). Cannot be combined with uule, lat or lon."},
+    {"name": "uule", "type": "string", "description": "Google-encoded location. Cannot be combined with location."},
+    {"name": "lat / lon", "type": "number", "description": "Coordinates, must be used together; pair with a matching gl."},
+    {"name": "radius", "type": "integer", "description": "Radius around lat/lon: 1..199 on desktop, 1..1000 on tablet and mobile."},
+    {"name": "google_domain", "type": "string", "description": "Google-family engines only (not global). Default google.com."},
+    {"name": "gl", "type": "string", "description": "Country code (Google engines)."},
+    {"name": "hl", "type": "string", "description": "Interface language (Google engines)."},
+    {"name": "lr / cr", "type": "string", "description": "Restrict result languages / countries (Google engines)."},
+    {"name": "safe", "type": "string", "description": "Adult content filter.", "values": ["active", "off"]},
+    {"name": "nfpr", "type": "integer", "description": "1 excludes auto-corrected results, 0 includes (default).", "values": ["0", "1"]},
+    {"name": "filter", "type": "integer", "description": "1 (default) enables similar/omitted results filters, 0 disables.", "values": ["0", "1"]},
+    {"name": "start", "type": "integer", "description": "Result offset for pagination (0, 10, 20...)."},
+    {"name": "tbm", "type": "string", "description": "Google search type (isch, lcl, vid, nws, shop, pts)."},
+    {"name": "tbs", "type": "string", "description": "Advanced Google filters (time range, etc.)."},
+    {"name": "color_scheme", "type": "string", "description": "light or dark (random if unset); Google engine only.", "values": ["light", "dark"]},
+    {"name": "engine=google_light", "type": "variant", "description": "'Light' variant of Google: faster organic results, knowledge graphs and answer boxes, skipping some special result types. Same endpoint /search; supports device, output, json_restrictor, no_cache, async, zero_trace."},
+    {"name": "Ludicrous Speed (plan option)", "type": "account option", "description": "Not a request parameter. Enabled under Dashboard > Change Plan on paid plans; costs 2x Best Effort; about 2.2x faster on average, 4.2x at p99 (SerpApi's own numbers); priority network, parallel requests, validators discard CAPTCHA/error pages. Do not use async with it."},
+    {"name": "Ludicrous Speed Max (plan option)", "type": "account option", "description": "Account option at 4x Best Effort price, 4x resources of Ludicrous Speed, 9.6 percent faster p50 and 35.4 percent faster p99 than Ludicrous Speed (SerpApi's numbers). Paid plans only."}
+  ],
+  "metadata_fields": {
+    "note": "The docs reviewed did not show a literal search_metadata block; field names below follow the task list and standard SerpApi responses. Only id and status are described in public docs; the rest are [unverified] meanings.",
+    "search_metadata": [
+      {"field": "id", "type": "string", "description": "Search id used with the Search Archive API (/searches/{id})."},
+      {"field": "status", "type": "string", "description": "Queued, Processing, Success, Error. 'Cached' also appears for cache hits."},
+      {"field": "json_endpoint", "type": "url", "description": "[unverified meaning] URL to fetch this search's JSON from the archive."},
+      {"field": "created_at", "type": "datetime", "description": "[unverified meaning] When the search was created."},
+      {"field": "processed_at", "type": "datetime", "description": "[unverified meaning] When processing finished."},
+      {"field": "google_url", "type": "url", "description": "[unverified meaning] Upstream engine URL that was fetched (engine-specific name)."},
+      {"field": "raw_html_file", "type": "url", "description": "[unverified meaning] Link to the raw HTML captured."},
+      {"field": "prettify_html_file", "type": "url", "description": "[unverified meaning] Link to prettified HTML."},
+      {"field": "total_time_taken", "type": "number", "description": "[unverified meaning] Seconds spent processing."}
+    ],
+    "search_parameters": "Echo of the parameters the search ran with (engine, q, location_requested, location_used, google_domain, hl, gl, device) [unverified exact keys]; plus no_cache/async as sent.",
+    "search_information": [
+      {"field": "query_displayed", "description": "Query as displayed by the engine."},
+      {"field": "total_results", "description": "Estimated total results."},
+      {"field": "time_taken_displayed", "description": "Engine-displayed time, parsed to a number."},
+      {"field": "organic_results_state", "description": "e.g. 'Results for exact spelling'."},
+      {"field": "results_for", "description": "Auto-corrected query, if any."}
+    ],
+    "top_level_error_key": "On failures or empty results the JSON contains an 'error' string (e.g. 'Google hasn't returned any results for this query.')."
+  },
+  "account_api": {
+    "endpoint": "GET https://serpapi.com/account.json  (docs example also shows https://serpapi.com/account?api_key=...)",
+    "cost": "Free; does not count toward monthly searches.",
+    "params": [{"name": "api_key", "required": true, "description": "Private API key."}],
+    "response_fields": [
+      {"field": "account_id", "type": "string"},
+      {"field": "api_key", "type": "string"},
+      {"field": "account_email", "type": "string"},
+      {"field": "account_status", "type": "string", "example": "Active"},
+      {"field": "plan_id", "type": "string", "example": "bigdata"},
+      {"field": "plan_name", "type": "string"},
+      {"field": "plan_monthly_price", "type": "number"},
+      {"field": "plan_renewal_date", "type": "date|null", "note": "null for enterprise credit-pool or cancelled subscriptions"},
+      {"field": "searches_per_month", "type": "integer"},
+      {"field": "plan_searches_left", "type": "integer"},
+      {"field": "extra_credits", "type": "integer"},
+      {"field": "total_searches_left", "type": "integer"},
+      {"field": "this_month_usage", "type": "integer"},
+      {"field": "this_hour_searches", "type": "integer"},
+      {"field": "last_hour_searches", "type": "integer"},
+      {"field": "account_rate_limit_per_hour", "type": "integer"}
+    ],
+    "example": {"account_id": "5ac54d6adefb2f1dba1663f5", "api_key": "SECRET_API_KEY", "account_email": "demo@serpapi.com", "account_status": "Active", "plan_id": "bigdata", "plan_name": "Big Data Plan", "plan_monthly_price": 250.0, "plan_renewal_date": "2026-11-22", "searches_per_month": 30000, "plan_searches_left": 5958, "extra_credits": 0, "total_searches_left": 5958, "this_month_usage": 24042, "this_hour_searches": 87, "last_hour_searches": 42, "account_rate_limit_per_hour": 6000}
+  },
+  "locations_api": {
+    "endpoint": "GET https://serpapi.com/locations.json",
+    "cost": "Free. The full list is downloadable at /locations.json. No api_key needed.",
+    "params": [
+      {"name": "q", "required": false, "description": "Substring match on location name (e.g. Austin matches 'Austin, TX' and 'The University of Texas at Austin')."},
+      {"name": "limit", "required": false, "description": "Max results, maximum 10; default not stated."}
+    ],
+    "response_fields": [
+      {"field": "id", "type": "string", "description": "Location id; usable as location in /search."},
+      {"field": "google_id", "type": "number"},
+      {"field": "google_parent_id", "type": "number"},
+      {"field": "name", "type": "string"},
+      {"field": "canonical_name", "type": "string", "description": "Usable as location in /search."},
+      {"field": "country_code", "type": "string"},
+      {"field": "target_type", "type": "string", "examples": ["City", "DMA Region", "County", "University"]},
+      {"field": "reach", "type": "number", "description": "Audience reach; results sorted by it descending."},
+      {"field": "gps", "type": "[lng, lat]", "optional": true}
+    ],
+    "example": {
+      "request": "GET https://serpapi.com/locations.json?q=Austin&limit=5",
+      "response": [
+        {"id": "585069bdee19ad271e9bc072", "google_id": 200635, "google_parent_id": 21176, "name": "Austin, TX", "canonical_name": "Austin, TX,Texas,United States", "country_code": "US", "target_type": "DMA Region", "reach": 5560000, "gps": [-97.7430608, 30.267153]},
+        {"id": "585069b8ee19ad271e9ba949", "google_id": 1026201, "google_parent_id": 21176, "name": "Austin", "canonical_name": "Austin,Texas,United States", "country_code": "US", "target_type": "City", "reach": 4870000, "gps": [-97.7430608, 30.267153]},
+        {"id": "585069bdee19ad271e9bc05e", "google_id": 200611, "google_parent_id": 2840, "name": "Rochester, MN-Mason City, IA-Austin, MN", "canonical_name": "Rochester, MN-Mason City, IA-Austin, MN,United States", "country_code": "US", "target_type": "DMA Region", "reach": 555000}
+      ]
+    }
+  },
+  "search_archive_api": {
+    "endpoint": "GET https://serpapi.com/searches/{search_id}  (also {search_id}.json)",
+    "params": [
+      {"name": "search_id", "required": true, "description": "From search_metadata.id."},
+      {"name": "api_key", "required": true, "description": "Private API key."},
+      {"name": "output", "required": false, "description": "json (default) or html; json_with_pixel_position (or .json_with_pixel_position suffix) runs Pixel Position on an archived search."}
+    ],
+    "response_fields": "Same JSON (or HTML) as the original search. search_metadata.status is Queued, Processing, Success, or an error. A search can be fetched before it completes.",
+    "examples": [
+      "https://serpapi.com/searches/5b50d58a304bda2fca30bac9.json?api_key=SECRET_API_KEY",
+      "https://serpapi.com/searches/5b50d58a304bda2fca30bac9?api_key=SECRET_API_KEY&output=html"
+    ],
+    "retention": "Docs: HTML/JSON retrievable up to 31 days after completion. A blog post says searches are stored 30 days. Expired searches return HTTP 410 Gone. Not available with zero_trace.",
+    "search_history": {
+      "ui": "My Searches at serpapi.com/searches lists recent searches for about 30 days.",
+      "listing_api": "No public listing endpoint is documented; the archive requires a search id. Store every search_metadata.id yourself (the Aira clone must keep its own index).",
+      "retrieval": "By id as JSON (default) or HTML; cached/archived retrieval does not consume credits."
+    }
+  },
+  "status_api": {
+    "public_json_endpoint": "None documented.",
+    "status_metrics_page": "https://serpapi.com/status shows 'API Metrics for All Engines': last 30 days, hourly granularity, per-engine selector, average success rate (about 98.8 percent) and average response time (about 1.7s).",
+    "incident_page": "status.serpapi.com (launched Jan 2026): incidents and outages, subscriptions by email, SMS, Slack, Microsoft Teams; recommended to subscribe to the API component. Minor bugs tracked on the public roadmap (GitHub).",
+    "aira_equivalent": "Aira should compute its own status from local run logs (success rate, p50/p95 latency per engine) and optionally poll the Account API as a key health check."
+  },
+  "async_and_webhooks": {
+    "flow": [
+      "Send search with async=true; HTTP returns immediately with search_metadata only (status Queued).",
+      "Store search_metadata.id for each submitted search.",
+      "Poll GET /searches/{id}.json until search_metadata.status is Success or Cached (re-queue if Queued/Processing).",
+      "Use output=html for raw HTML, or JSON for parsed results.",
+      "Results remain retrievable up to 31 days."
+    ],
+    "rules": ["Do not combine async with no_cache.", "Do not use async on accounts with Ludicrous Speed enabled.", "Failed searches are not billed."],
+    "webhooks": "No webhook delivery is publicly documented; completion is by polling. A Bulk Search API (1M+ searches, scheduled=true, 1 to 24h) is on the public roadmap but not available.",
+    "polling_advice": "Exponential backoff starting at 1s capped at ~10s; treat HTTP 410 as expired."
+  },
+  "errors": [
+    {"http_status": 200, "message": "Success with empty results: 'Google hasn't returned any results for this query.'", "meaning": "Search ran (status Success) but the engine returned nothing; not a SerpApi failure.", "advice": "Adjust the query/location; do not retry blindly."},
+    {"http_status": 400, "message": "Missing query `q` parameter.", "meaning": "Bad request, usually a missing required parameter.", "advice": "Provide all required parameters."},
+    {"http_status": 401, "message": "Invalid API key...", "meaning": "Key missing or wrong.", "advice": "Verify the key in settings."},
+    {"http_status": 403, "message": "Forbidden", "meaning": "Account lacks permission, usually deleted account.", "advice": "Check account status or contact support."},
+    {"http_status": 404, "message": "Not Found", "meaning": "Resource or endpoint does not exist.", "advice": "Check identifier or endpoint."},
+    {"http_status": 410, "message": "Gone", "meaning": "Archived search expired and was removed.", "advice": "Run the search again."},
+    {"http_status": 429, "message": "Your account has run out of searches. / hourly limit exceeded", "meaning": "Hourly throughput exceeded or no searches left.", "advice": "Wait for the hour to reset, enable throttling, add credits, or renew early."},
+    {"http_status": "500, 503", "message": "Server error", "meaning": "SerpApi-side failure.", "advice": "Retry with backoff; email support@serpapi.com if persistent."},
+    {"http_status": "200 (status Error)", "message": "We couldn't get valid results for this search...", "meaning": "Search failed before completion (e.g. proxy timeout); not billed.", "advice": "Retry later."}
+  ],
+  "plans": [
+    {"name": "Free", "price": 0, "searches_per_month": 250, "throughput_per_hour": 50, "notes": "No Legal Shield, ZeroTrace or Priority Support."},
+    {"name": "Starter", "price": 25, "searches_per_month": 1000, "throughput_per_hour": 200, "notes": "No Legal Shield."},
+    {"name": "Developer", "price": 75, "searches_per_month": 5000, "throughput_per_hour": 1000, "notes": "No Legal Shield."},
+    {"name": "Production", "price": 150, "searches_per_month": 15000, "throughput_per_hour": 3000, "notes": "Legal Shield."},
+    {"name": "Big Data", "price": 275, "searches_per_month": 30000, "throughput_per_hour": 6000, "notes": "Legal Shield."},
+    {"name": "Searcher", "price": 725, "searches_per_month": 100000, "throughput_per_hour": 20000, "notes": "Legal Shield."},
+    {"name": "Volume", "price": 1475, "searches_per_month": 250000, "throughput_per_hour": 50000, "notes": "Legal Shield."},
+    {"name": "Infrastructure", "price": 2750, "searches_per_month": 500000, "throughput_per_hour": 100000, "notes": "Legal Shield."},
+    {"name": "Cloud 1M", "price": 3750, "searches_per_month": 1000000, "throughput_per_hour": 110000, "notes": "Legal Shield, ZeroTrace, Priority Support."},
+    {"name": "Cloud 2M", "price": 5675, "searches_per_month": 2000000, "throughput_per_hour": 120000, "notes": "Same as Cloud 1M."},
+    {"name": "Cloud 3M", "price": 7600, "searches_per_month": 3000000, "throughput_per_hour": 130000, "notes": "Same as Cloud 1M."},
+    {"name": "Cloud 4M to 53M", "price": "9550 to 104100", "searches_per_month": "4M to 53M", "throughput_per_hour": "140000 to 630000", "notes": "Roughly 1M-search steps."},
+    {"name": "Cloud 54M", "price": 106050, "searches_per_month": 54000000, "throughput_per_hour": 640000, "notes": "Enterprise/custom via contact@serpapi.com."}
+  ],
+  "billing_rules": [
+    "Only successful searches count toward the monthly total.",
+    "Cached searches (identical params within 1 hour), errored and failed searches do not count.",
+    "Result volume does not matter: 100 results or an empty result set each count as one search.",
+    "Throughput is the guaranteed number of successful searches per hour; spread requests evenly.",
+    "Downgrade: renewal date kept, unused searches move to Extra Credits.",
+    "Upgrade: pay the price difference, renewal date kept. Cancel: keep searches until renewal.",
+    "Out of searches: Auto Renew Early or manual renew refills and resets the cycle.",
+    "Refund: full within 7 days unless more than 20 percent of searches used.",
+    "Ludicrous Speed costs 2x and Ludicrous Speed Max 4x the Best Effort price; both paid plans only.",
+    "Account API, Locations API and X-Ray are free."
+  ],
+  "sdks": [
+    {"language": "Python", "package": "serpapi (legacy: google-search-results)", "repo": "https://github.com/serpapi/serpapi-python"},
+    {"language": "JavaScript/Node", "package": "serpapi (npm; getJson, getHtml, getMd, getAccount, getLocations, uploadImage)", "repo": "https://github.com/serpapi/serpapi-javascript"},
+    {"language": "Ruby", "package": "serpapi (gem) [unverified]", "repo": "https://github.com/serpapi/serpapi-ruby"},
+    {"language": "Go", "package": "github.com/serpapi/serpapi-golang [unverified]", "repo": "https://github.com/serpapi/serpapi-golang"},
+    {"language": "PHP", "package": "serpapi/serpapi-php [unverified] (legacy serpapi/google-search-results-php)", "repo": "https://github.com/serpapi/serpapi-php"},
+    {"language": "Java", "package": "[unverified] maven artifact", "repo": "https://github.com/serpapi/serpapi-java"},
+    {"language": "Rust", "package": "[unverified] crate", "repo": "https://github.com/serpapi/serpapi-rust"},
+    {"language": ".NET", "package": "[unverified] nuget", "repo": "https://github.com/serpapi/serpapi-dotnet"},
+    {"language": "Swift", "package": "[unverified]", "repo": "https://github.com/serpapi/serpapi-swift"},
+    {"language": "C++", "package": "[unverified]", "repo": "https://github.com/serpapi/serpapi-cpp"},
+    {"language": "MCP server", "package": "[unverified]", "repo": "https://github.com/serpapi/serpapi-mcp"},
+    {"language": "CLI", "package": "[unverified]", "repo": "https://github.com/serpapi/serpapi-cli"}
+  ],
+  "ui_ideas": [
+    "Saved queries: name, tag and pin a parameter set per engine; one-click re-run and clone as template.",
+    "Run diff: compare two runs of the same query (added/removed/moved organic results, rank deltas, changed snippets) with a visual diff.",
+    "Cost estimator: before running, show credits consumed (cache hit = 0), batch cost, and monthly burn projection against plan and extra credits.",
+    "Scheduler: cron-style recurring searches (rank tracking, job alerts) with per-schedule budget caps and pause on error.",
+    "Export: CSV/XLSX/JSON/Markdown export of any result table or a JSONPath-selected subset, plus 'copy as curl/Python/JS' for every run.",
+    "Side-by-side engine compare: run the same q on Google, Bing, DuckDuckGo, google_light and show results in aligned columns with overlap score.",
+    "Local search history with full-text search over all stored responses, no 30-day expiry, plus tags and star ratings; archive viewer for JSON/raw HTML/rendered preview.",
+    "Usage dashboard: daily/hourly charts, per-engine and per-feature spend, throughput gauge with 429 early warning, and cache-hit ratio.",
+    "Async job board: queue of async searches with live status (Queued/Processing/Success), auto-poll with backoff, retry failed, and browser/desktop notifications or local webhooks on completion.",
+    "Result-to-action pipeline: send job results into Aira Careers (one click to add to pipeline, score against resume, draft outreach), plus a JSON path picker (X-Ray style) that builds json_restrictor strings visually."
+  ],
+  "sources": [
+    "https://serpapi.com/search-api",
+    "https://serpapi.com/account-api",
+    "https://serpapi.com/locations-api",
+    "https://serpapi.com/search-archive-api",
+    "https://serpapi.com/searches-archive-api",
+    "https://serpapi.com/pricing",
+    "https://serpapi.com/integrations",
+    "https://serpapi.com/integrations/python",
+    "https://serpapi.com/integrations/javascript",
+    "https://serpapi.com/status",
+    "https://serpapi.com/api-status-and-error-codes",
+    "https://serpapi.com/google-light-fast-api",
+    "https://serpapi.com/ludicrous-speed",
+    "https://serpapi.com/ludicrous-speed-max",
+    "https://serpapi.com/playground",
+    "https://serpapi.com/release-notes",
+    "https://serpapi.com/blog/serpapi-new-and-often-missed-features/",
+    "https://serpapi.com/blog/making-async-requests-with-serpapi/",
+    "https://serpapi.com/blog/serpapis-new-status-page-is-live/ (via search summary)"
+  ]
+}

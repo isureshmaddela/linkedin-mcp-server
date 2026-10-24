@@ -1,0 +1,63 @@
+Messaging
+Search messages
+Compose a new message
+Focused
+Conversation List
+Status is online
+Dana Lee
+11:42 AM
+11:42 AM
+
+Dana: May i know your current work authorization in USA?
+
+. Press return to go to conversation details
+Open the options list in your conversation with Jordan Example and Dana Lee
+Status is online
+Sam Rivera Kolli
+11:39 AM
+11:39 AM
+
+Sam Rivera: Dropped an email, please check and revert me back
+
+. Active conversation
+. Press return to go to conversation details
+Open the options list in your conversation with Sam Rivera Kolli and Jordan Example
+Load more conversations
+Sam Rivera Kolli
+Status is online
+Active now
+Open the options list in your conversation with Sam Rivera Kolli and Jordan Example
+AUG 7, 2025
+Sam Rivera Kolli sent the following message at 10:27 AM
+View Sam Rivera’s profile
+Sam Rivera Kolli   10:27 AM
+
+Hi Jordan
+We're currently hiring for direct client positions on our W2. Let’s connect!
+
+OCT 7
+Jordan Example sent the following message at 7:40 PM
+View Jordan’s profile
+Jordan Example  (She/Her)  7:40 PM
+
+Hi, I am a Senior Salesforce Developer. I am authorized to work in the U.S. and do not require visa sponsorship.
+Best Regards,
+Jordan Example
+
+TODAY
+Sam Rivera Kolli sent the following messages at 8:46 AM
+View Sam Rivera’s profile
+Sam Rivera Kolli   8:46 AM
+
+Can we connect today at 10 EST?
+
+View Sam Rivera’s profile
+Sam Rivera Kolli   11:39 AM
+
+Dropped an email, please check and revert me back
+
+Reply to conversation with “Sure”
+Sure
+Maximize compose field
+Attach a file to your conversation with Sam Rivera Kolli
+Send

@@ -56,6 +56,43 @@ class TestHandleAuthError:
 
 
 class TestGetReadyExtractor:
+    async def test_closed_browser_page_is_recreated(self):
+        closed_browser = MagicMock()
+        closed_browser.page.is_closed.return_value = True
+        live_browser = MagicMock()
+        live_browser.page.is_closed.return_value = False
+        extractor = object()
+        with (
+            patch(
+                "linkedin_mcp_server.dependencies.ensure_tool_ready_or_raise",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "linkedin_mcp_server.dependencies.get_or_create_browser",
+                new_callable=AsyncMock,
+                side_effect=[closed_browser, live_browser],
+            ) as mock_get_browser,
+            patch(
+                "linkedin_mcp_server.dependencies.ensure_authenticated",
+                new_callable=AsyncMock,
+            ) as mock_auth,
+            patch(
+                "linkedin_mcp_server.dependencies.close_browser",
+                new_callable=AsyncMock,
+            ) as mock_close,
+            patch(
+                "linkedin_mcp_server.dependencies.LinkedInExtractor",
+                return_value=extractor,
+            ) as mock_extractor,
+        ):
+            result = await get_ready_extractor(ctx=None, tool_name="search_jobs")
+
+        assert result is extractor
+        assert mock_get_browser.await_count == 2
+        assert mock_auth.await_count == 2
+        mock_close.assert_awaited_once()
+        mock_extractor.assert_called_once_with(live_browser.page)
+
     async def test_auth_error_triggers_relogin(self):
         """AuthenticationError from ensure_authenticated triggers relogin."""
         with (

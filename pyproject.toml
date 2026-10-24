@@ -36,7 +36,15 @@ dependencies = [
     "fastmcp>=3.0.0",
     "inquirer>=3.4.0",
     "patchright>=1.40.0",
+    "pypdf>=6.21.2",
     "python-dotenv>=1.1.1",
+]
+
+[project.optional-dependencies]
+cloud = [
+    "psycopg[binary,pool]>=3.3.6",
+    "signxml>=4",
+    "websockets>=14",
 ]
 
 [project.urls]
@@ -55,11 +63,12 @@ requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools.packages.find]
-include = ["linkedin_mcp_server*"]
+include = ["linkedin_mcp_server*", "aira*"]
 exclude = ["assets*", "docs*", "tests*"]
 
 [tool.setuptools.package-data]
 linkedin_mcp_server = ["py.typed"]
+"aira.airaapi" = ["catalog/*.json"]
 
 [dependency-groups]
 dev = [

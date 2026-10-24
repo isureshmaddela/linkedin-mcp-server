@@ -12,6 +12,7 @@ Available Tools:
 - Job tools: Job posting details and search functionality
 - Messaging tools: Inbox, conversations, search, and sending messages
 - Feed tools: Home feed scraping
+- Sales tools: Read-only Sales Navigator lead reading
 
 Architecture:
 - FastMCP integration for MCP-compliant tool registration

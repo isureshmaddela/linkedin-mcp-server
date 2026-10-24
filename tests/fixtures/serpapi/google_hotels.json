@@ -1,0 +1,235 @@
+{
+  "search_metadata": {
+    "id": "{{id}}",
+    "status": "Success",
+    "json_endpoint": "{{base}}/searches/{{id}}.json",
+    "created_at": "2026-10-22 12:00:00 UTC",
+    "processed_at": "2026-10-22 12:00:01 UTC",
+    "total_time_taken": 1.2,
+    "fixture": true,
+    "fixture_note": "Recorded-shape fixture for tests. Not live SerpApi data."
+  },
+  "brands": [
+    {
+      "id": 1,
+      "name": "Fixture Brands",
+      "children": [
+        {
+          "id": 11,
+          "name": "Fixture Select"
+        }
+      ]
+    }
+  ],
+  "properties": [
+    {
+      "type": "hotel",
+      "name": "Fixture Grand Hotel",
+      "description": "Fixture Grand Hotel offers comfortable rooms close to the city center.",
+      "link": "https://hotels.example.com/0",
+      "property_token": "fixture-property-token-0",
+      "serpapi_property_details_link": "{{base}}/search.json?engine=google_hotels&property_token=fixture-property-token-0",
+      "gps_coordinates": {
+        "latitude": 30.27,
+        "longitude": -97.74
+      },
+      "check_in_time": "3:00 PM",
+      "check_out_time": "11:00 AM",
+      "rate_per_night": {
+        "lowest": "$189",
+        "extracted_lowest": 189,
+        "before_taxes_fees": "$174",
+        "extracted_before_taxes_fees": 174
+      },
+      "total_rate": {
+        "lowest": "$567",
+        "extracted_lowest": 567
+      },
+      "hotel_class": "4-star hotel",
+      "extracted_hotel_class": 4,
+      "images": [
+        {
+          "thumbnail": "https://example.com/hotel-0.jpg",
+          "original_image": "https://example.com/hotel-0-large.jpg"
+        }
+      ],
+      "overall_rating": 4.5,
+      "reviews": 400,
+      "ratings": [
+        {
+          "stars": 5,
+          "count": 200
+        },
+        {
+          "stars": 4,
+          "count": 120
+        }
+      ],
+      "location_rating": 4.4,
+      "amenities": [
+        "Free Wi-Fi",
+        "Pool",
+        "Breakfast"
+      ],
+      "essential_info": [
+        "Pet-friendly"
+      ]
+    },
+    {
+      "type": "hotel",
+      "name": "Harbor Inn",
+      "description": "Harbor Inn offers comfortable rooms close to the city center.",
+      "link": "https://hotels.example.com/1",
+      "property_token": "fixture-property-token-1",
+      "serpapi_property_details_link": "{{base}}/search.json?engine=google_hotels&property_token=fixture-property-token-1",
+      "gps_coordinates": {
+        "latitude": 30.28,
+        "longitude": -97.75
+      },
+      "check_in_time": "3:00 PM",
+      "check_out_time": "11:00 AM",
+      "rate_per_night": {
+        "lowest": "$129",
+        "extracted_lowest": 129,
+        "before_taxes_fees": "$114",
+        "extracted_before_taxes_fees": 114
+      },
+      "total_rate": {
+        "lowest": "$387",
+        "extracted_lowest": 387
+      },
+      "hotel_class": "3-star hotel",
+      "extracted_hotel_class": 3,
+      "images": [
+        {
+          "thumbnail": "https://example.com/hotel-1.jpg",
+          "original_image": "https://example.com/hotel-1-large.jpg"
+        }
+      ],
+      "overall_rating": 4.1,
+      "reviews": 500,
+      "ratings": [
+        {
+          "stars": 5,
+          "count": 201
+        },
+        {
+          "stars": 4,
+          "count": 120
+        }
+      ],
+      "location_rating": 4.4,
+      "amenities": [
+        "Free Wi-Fi",
+        "Parking"
+      ],
+      "essential_info": []
+    },
+    {
+      "type": "hotel",
+      "name": "The Meridian",
+      "description": "The Meridian offers comfortable rooms close to the city center.",
+      "link": "https://hotels.example.com/2",
+      "property_token": "fixture-property-token-2",
+      "serpapi_property_details_link": "{{base}}/search.json?engine=google_hotels&property_token=fixture-property-token-2",
+      "gps_coordinates": {
+        "latitude": 30.29,
+        "longitude": -97.75999999999999
+      },
+      "check_in_time": "3:00 PM",
+      "check_out_time": "11:00 AM",
+      "rate_per_night": {
+        "lowest": "$249",
+        "extracted_lowest": 249,
+        "before_taxes_fees": "$234",
+        "extracted_before_taxes_fees": 234
+      },
+      "total_rate": {
+        "lowest": "$747",
+        "extracted_lowest": 747
+      },
+      "hotel_class": "5-star hotel",
+      "extracted_hotel_class": 5,
+      "images": [
+        {
+          "thumbnail": "https://example.com/hotel-2.jpg",
+          "original_image": "https://example.com/hotel-2-large.jpg"
+        }
+      ],
+      "overall_rating": 4.7,
+      "reviews": 600,
+      "ratings": [
+        {
+          "stars": 5,
+          "count": 202
+        },
+        {
+          "stars": 4,
+          "count": 120
+        }
+      ],
+      "location_rating": 4.4,
+      "amenities": [
+        "Free Wi-Fi",
+        "Spa",
+        "Gym"
+      ],
+      "essential_info": [
+        "Pet-friendly"
+      ]
+    },
+    {
+      "type": "hotel",
+      "name": "City Budget Stay",
+      "description": "City Budget Stay offers comfortable rooms close to the city center.",
+      "link": "https://hotels.example.com/3",
+      "property_token": "fixture-property-token-3",
+      "serpapi_property_details_link": "{{base}}/search.json?engine=google_hotels&property_token=fixture-property-token-3",
+      "gps_coordinates": {
+        "latitude": 30.3,
+        "longitude": -97.77
+      },
+      "check_in_time": "3:00 PM",
+      "check_out_time": "11:00 AM",
+      "rate_per_night": {
+        "lowest": "$89",
+        "extracted_lowest": 89,
+        "before_taxes_fees": "$74",
+        "extracted_before_taxes_fees": 74
+      },
+      "total_rate": {
+        "lowest": "$267",
+        "extracted_lowest": 267
+      },
+      "hotel_class": "2-star hotel",
+      "extracted_hotel_class": 2,
+      "images": [
+        {
+          "thumbnail": "https://example.com/hotel-3.jpg",
+          "original_image": "https://example.com/hotel-3-large.jpg"
+        }
+      ],
+      "overall_rating": 3.8,
+      "reviews": 700,
+      "ratings": [
+        {
+          "stars": 5,
+          "count": 203
+        },
+        {
+          "stars": 4,
+          "count": 120
+        }
+      ],
+      "location_rating": 4.4,
+      "amenities": [
+        "Free Wi-Fi"
+      ],
+      "essential_info": []
+    }
+  ],
+  "serpapi_pagination": {
+    "next_page_token": "fixture-hotels-token",
+    "next": "{{base}}/search.json?engine=google_hotels&next_page_token=fixture-hotels-token"
+  }
+}

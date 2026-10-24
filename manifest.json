@@ -90,6 +90,10 @@
       "description": "Search for people on LinkedIn by keywords, location, connection degree (1st/2nd/3rd), and current company"
     },
     {
+      "name": "search_sales_navigator",
+      "description": "Read leads from your own LinkedIn Sales Navigator (people search or lead list URL, or keywords); read only, needs a Sales Navigator subscription"
+    },
+    {
       "name": "get_inbox",
       "description": "List recent conversations from the LinkedIn messaging inbox"
     },
@@ -104,6 +108,10 @@
     {
       "name": "send_message",
       "description": "Send a message to a LinkedIn user with explicit confirmation and optional profile URN support"
+    },
+    {
+      "name": "reply_to_conversation",
+      "description": "Reply inside an existing LinkedIn messaging thread (including recruiter InMail) with explicit confirmation"
     },
     {
       "name": "get_feed",

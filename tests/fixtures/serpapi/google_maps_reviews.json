@@ -1,0 +1,107 @@
+{
+  "search_metadata": {
+    "id": "{{id}}",
+    "status": "Success",
+    "json_endpoint": "{{base}}/searches/{{id}}.json",
+    "created_at": "2026-10-22 12:00:00 UTC",
+    "processed_at": "2026-10-22 12:00:01 UTC",
+    "total_time_taken": 1.2,
+    "fixture": true,
+    "fixture_note": "Recorded-shape fixture for tests. Not live SerpApi data."
+  },
+  "place_info": {
+    "title": "Fixture Coffee Roasters",
+    "address": "100 Main St, New York, NY",
+    "rating": 4.7,
+    "reviews": 1280,
+    "type": [
+      "Coffee shop"
+    ]
+  },
+  "topics": [
+    {
+      "keyword": "espresso",
+      "mentions": 120,
+      "id": "/m/fixture1"
+    },
+    {
+      "keyword": "pastries",
+      "mentions": 64,
+      "id": "/m/fixture2"
+    }
+  ],
+  "reviews": [
+    {
+      "review_id": "fixture-review-0",
+      "link": "https://www.google.com/maps/reviews/fixture-0",
+      "user": {
+        "name": "Alex P.",
+        "link": "https://www.google.com/maps/contrib/fixture-0",
+        "contributor_id": "100000000",
+        "thumbnail": "https://example.com/avatar-0.png",
+        "local_guide": true,
+        "reviews": 10
+      },
+      "rating": 5,
+      "date": "2 weeks ago",
+      "iso_date": "2026-10-01T12:00:00Z",
+      "snippet": "Best flat white in the city and fast service.",
+      "likes": 0
+    },
+    {
+      "review_id": "fixture-review-1",
+      "link": "https://www.google.com/maps/reviews/fixture-1",
+      "user": {
+        "name": "Sam R.",
+        "link": "https://www.google.com/maps/contrib/fixture-1",
+        "contributor_id": "100000001",
+        "thumbnail": "https://example.com/avatar-1.png",
+        "local_guide": false,
+        "reviews": 11
+      },
+      "rating": 4,
+      "date": "2 weeks ago",
+      "iso_date": "2026-10-02T12:00:00Z",
+      "snippet": "Great beans, a little crowded at noon.",
+      "likes": 1
+    },
+    {
+      "review_id": "fixture-review-2",
+      "link": "https://www.google.com/maps/reviews/fixture-2",
+      "user": {
+        "name": "Jordan T.",
+        "link": "https://www.google.com/maps/contrib/fixture-2",
+        "contributor_id": "100000002",
+        "thumbnail": "https://example.com/avatar-2.png",
+        "local_guide": true,
+        "reviews": 12
+      },
+      "rating": 5,
+      "date": "2 weeks ago",
+      "iso_date": "2026-10-03T12:00:00Z",
+      "snippet": "Friendly staff and excellent pastries.",
+      "likes": 2
+    },
+    {
+      "review_id": "fixture-review-3",
+      "link": "https://www.google.com/maps/reviews/fixture-3",
+      "user": {
+        "name": "Casey L.",
+        "link": "https://www.google.com/maps/contrib/fixture-3",
+        "contributor_id": "100000003",
+        "thumbnail": "https://example.com/avatar-3.png",
+        "local_guide": false,
+        "reviews": 13
+      },
+      "rating": 3,
+      "date": "2 weeks ago",
+      "iso_date": "2026-10-04T12:00:00Z",
+      "snippet": "Good coffee but pricey.",
+      "likes": 3
+    }
+  ],
+  "serpapi_pagination": {
+    "next_page_token": "fixture-reviews-token",
+    "next": "{{base}}/search.json?engine=google_maps_reviews&next_page_token=fixture-reviews-token"
+  }
+}

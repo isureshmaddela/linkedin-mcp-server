@@ -1,0 +1,226 @@
+{
+  "search_metadata": {
+    "id": "{{id}}",
+    "status": "Success",
+    "json_endpoint": "{{base}}/searches/{{id}}.json",
+    "created_at": "2026-10-22 12:00:00 UTC",
+    "processed_at": "2026-10-22 12:00:01 UTC",
+    "total_time_taken": 1.2,
+    "fixture": true,
+    "fixture_note": "Recorded-shape fixture for tests. Not live SerpApi data."
+  },
+  "best_flights": [
+    {
+      "flights": [
+        {
+          "departure_airport": {
+            "name": "Austin-Bergstrom International Airport",
+            "id": "AUS",
+            "time": "2026-12-01 07:00"
+          },
+          "arrival_airport": {
+            "name": "John F. Kennedy International Airport",
+            "id": "JFK",
+            "time": "2026-12-01 11:30"
+          },
+          "duration": 210,
+          "airplane": "Airbus A320",
+          "airline": "Delta",
+          "airline_logo": "https://example.com/airlines/delta.png",
+          "travel_class": "Economy",
+          "flight_number": "DE 101",
+          "legroom": "30 in",
+          "extensions": [
+            "Average legroom (30 in)",
+            "Wi-Fi for a fee"
+          ]
+        }
+      ],
+      "total_duration": 210,
+      "carbon_emissions": {
+        "this_flight": 251000,
+        "typical_for_this_route": 260000,
+        "difference_percent": -4
+      },
+      "price": 289,
+      "type": "Round trip",
+      "airline_logo": "https://example.com/airlines/delta.png",
+      "departure_token": "fixture-departure-token-1"
+    },
+    {
+      "flights": [
+        {
+          "departure_airport": {
+            "name": "Austin-Bergstrom International Airport",
+            "id": "AUS",
+            "time": "2026-12-01 07:00"
+          },
+          "arrival_airport": {
+            "name": "John F. Kennedy International Airport",
+            "id": "JFK",
+            "time": "2026-12-01 11:30"
+          },
+          "duration": 210,
+          "airplane": "Airbus A320",
+          "airline": "American",
+          "airline_logo": "https://example.com/airlines/american.png",
+          "travel_class": "Economy",
+          "flight_number": "AM 102",
+          "legroom": "30 in",
+          "extensions": [
+            "Average legroom (30 in)",
+            "Wi-Fi for a fee"
+          ]
+        }
+      ],
+      "total_duration": 300,
+      "carbon_emissions": {
+        "this_flight": 252000,
+        "typical_for_this_route": 260000,
+        "difference_percent": -4
+      },
+      "price": 312,
+      "type": "Round trip",
+      "airline_logo": "https://example.com/airlines/american.png",
+      "departure_token": "fixture-departure-token-2",
+      "layovers": [
+        {
+          "duration": 90,
+          "name": "Dallas Fort Worth International Airport",
+          "id": "DFW"
+        }
+      ]
+    }
+  ],
+  "other_flights": [
+    {
+      "flights": [
+        {
+          "departure_airport": {
+            "name": "Austin-Bergstrom International Airport",
+            "id": "AUS",
+            "time": "2026-12-01 07:00"
+          },
+          "arrival_airport": {
+            "name": "John F. Kennedy International Airport",
+            "id": "JFK",
+            "time": "2026-12-01 11:30"
+          },
+          "duration": 210,
+          "airplane": "Airbus A320",
+          "airline": "United",
+          "airline_logo": "https://example.com/airlines/united.png",
+          "travel_class": "Economy",
+          "flight_number": "UN 103",
+          "legroom": "30 in",
+          "extensions": [
+            "Average legroom (30 in)",
+            "Wi-Fi for a fee"
+          ]
+        }
+      ],
+      "total_duration": 300,
+      "carbon_emissions": {
+        "this_flight": 253000,
+        "typical_for_this_route": 260000,
+        "difference_percent": -4
+      },
+      "price": 355,
+      "type": "Round trip",
+      "airline_logo": "https://example.com/airlines/united.png",
+      "departure_token": "fixture-departure-token-3",
+      "layovers": [
+        {
+          "duration": 90,
+          "name": "Dallas Fort Worth International Airport",
+          "id": "DFW"
+        }
+      ]
+    },
+    {
+      "flights": [
+        {
+          "departure_airport": {
+            "name": "Austin-Bergstrom International Airport",
+            "id": "AUS",
+            "time": "2026-12-01 07:00"
+          },
+          "arrival_airport": {
+            "name": "John F. Kennedy International Airport",
+            "id": "JFK",
+            "time": "2026-12-01 11:30"
+          },
+          "duration": 210,
+          "airplane": "Airbus A320",
+          "airline": "JetBlue",
+          "airline_logo": "https://example.com/airlines/jetblue.png",
+          "travel_class": "Economy",
+          "flight_number": "JE 104",
+          "legroom": "30 in",
+          "extensions": [
+            "Average legroom (30 in)",
+            "Wi-Fi for a fee"
+          ]
+        }
+      ],
+      "total_duration": 210,
+      "carbon_emissions": {
+        "this_flight": 254000,
+        "typical_for_this_route": 260000,
+        "difference_percent": -4
+      },
+      "price": 401,
+      "type": "Round trip",
+      "airline_logo": "https://example.com/airlines/jetblue.png",
+      "departure_token": "fixture-departure-token-4"
+    }
+  ],
+  "price_insights": {
+    "lowest_price": 289,
+    "price_level": "typical",
+    "typical_price_range": [
+      260,
+      380
+    ],
+    "price_history": [
+      [
+        1790000000,
+        300
+      ],
+      [
+        1790086400,
+        295
+      ],
+      [
+        1790172800,
+        289
+      ]
+    ]
+  },
+  "airports": [
+    {
+      "departure": [
+        {
+          "airport": {
+            "name": "Austin-Bergstrom International Airport",
+            "id": "AUS"
+          },
+          "city": "Austin",
+          "country": "United States",
+          "country_code": "US"
+        }
+      ],
+      "arrival": [
+        {
+          "airport": {
+            "name": "John F. Kennedy International Airport",
+            "id": "JFK"
+          },
+          "city": "New York",
+          "country": "United States",
+          "country_code": "US"
+        }
+      ]
+    }
+  ]
+}

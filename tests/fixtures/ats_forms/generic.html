@@ -1,0 +1,57 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Careers at Example Corp - Apply</title>
+<style>
+  body { font-family: Georgia, serif; margin: 0; color: #222; }
+  header { padding: 24px 32px; background: #123; color: #fff; }
+  main { max-width: 680px; padding: 24px 32px; }
+  p { margin: 0 0 16px; }
+  label { display: block; font-weight: bold; margin-bottom: 4px; }
+  input[type=text], input[type=email], input[type=tel], input[type=url], input[type=number], input[type=date], select, textarea { width: 100%; max-width: 460px; padding: 6px; box-sizing: border-box; }
+  fieldset { border: 1px solid #ccc; margin: 0 0 16px; }
+  fieldset label { display: inline; font-weight: normal; margin-right: 16px; }
+  .inline label { display: inline; font-weight: normal; }
+  button { background: #123; color: #fff; border: 0; padding: 10px 18px; font-size: 15px; }
+  .notice { background: #fff5d6; border: 1px solid #e8c764; padding: 16px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Enterprise Architect</h1>
+  <div>Example Corp · Hybrid, Seattle WA</div>
+</header>
+<main>
+  <h2>Application form</h2>
+  <form id="apply-form" action="submit" method="post" enctype="multipart/form-data" novalidate>
+    <p><label for="full-name">Full name *</label><input type="text" id="full-name" name="full_name" required></p>
+    <p><label for="email">Email address *</label><input type="email" id="email" name="email" required></p>
+    <p><label for="phone">Phone number *</label><input type="tel" id="phone" name="phone" required></p>
+    <p><label for="linkedin">LinkedIn profile</label><input type="url" id="linkedin" name="linkedin" placeholder="https://www.linkedin.com/in/your-name"></p>
+    <p><label for="resume">Resume (PDF or Word) *</label><input type="file" id="resume" name="resume" accept=".pdf,.docx" required></p>
+    <p><label for="cover">Cover letter</label><textarea id="cover" name="cover_letter" rows="6"></textarea></p>
+    <p><label for="start">Earliest start date</label><input type="date" id="start" name="start_date"></p>
+    <p><label for="years">Years of experience *</label><input type="number" id="years" name="years_experience" min="0" required></p>
+    <p><label for="arrangement">Preferred work arrangement</label>
+      <select id="arrangement" name="work_arrangement">
+        <option value="">Choose one</option>
+        <option>Remote</option>
+        <option>Hybrid</option>
+        <option>On-site</option>
+      </select>
+    </p>
+    <fieldset>
+      <legend>Are you legally authorized to work in the United States? *</legend>
+      <label><input type="radio" name="work_auth" value="yes" required> Yes</label>
+      <label><input type="radio" name="work_auth" value="no"> No</label>
+    </fieldset>
+    <p class="inline"><input type="checkbox" id="newsletter" name="newsletter" value="1"><label for="newsletter">Send me job alerts by email</label></p>
+    <!-- stub:extra-questions -->
+    <!-- stub:captcha -->
+    <p><button type="submit">Send application</button></p>
+  </form>
+</main>
+<footer style="padding:16px 32px;color:#777;font-size:12px">Example Corp careers (stand-in page for tests)</footer>
+</body>
+</html>

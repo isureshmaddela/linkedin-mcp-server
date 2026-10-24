@@ -1,0 +1,134 @@
+{
+  "search_metadata": {
+    "id": "{{id}}",
+    "status": "Success",
+    "json_endpoint": "{{base}}/searches/{{id}}.json",
+    "created_at": "2026-10-22 12:00:00 UTC",
+    "processed_at": "2026-10-22 12:00:01 UTC",
+    "total_time_taken": 1.2,
+    "fixture": true,
+    "fixture_note": "Recorded-shape fixture for tests. Not live SerpApi data.",
+    "google_url": "https://www.google.com/search?q=coffee"
+  },
+  "search_information": {
+    "query_displayed": "coffee",
+    "total_results": 2860000000,
+    "time_taken_displayed": 0.41,
+    "organic_results_state": "Results for exact spelling"
+  },
+  "knowledge_graph": {
+    "title": "Coffee",
+    "type": "Drink",
+    "description": "Coffee is a beverage brewed from roasted, ground coffee beans.",
+    "source": {
+      "name": "Wikipedia",
+      "link": "https://en.wikipedia.org/wiki/Coffee"
+    }
+  },
+  "ai_overview": {
+    "text_blocks": [
+      {
+        "type": "paragraph",
+        "snippet": "Coffee is brewed from roasted beans and is widely consumed."
+      }
+    ]
+  },
+  "organic_results": [
+    {
+      "position": 1,
+      "title": "Coffee - Example Source 1",
+      "link": "https://example.com/coffee",
+      "displayed_link": "https://example.com › coffee",
+      "favicon": "https://example.com/favicon.ico",
+      "snippet": "Coffee result 1: a short description used only in test fixtures.",
+      "snippet_highlighted_words": [
+        "coffee"
+      ],
+      "source": "Example"
+    },
+    {
+      "position": 2,
+      "title": "Espresso - Example Source 2",
+      "link": "https://example.com/espresso",
+      "displayed_link": "https://example.com › espresso",
+      "favicon": "https://example.com/favicon.ico",
+      "snippet": "Espresso result 2: a short description used only in test fixtures.",
+      "snippet_highlighted_words": [
+        "espresso"
+      ],
+      "source": "Example"
+    },
+    {
+      "position": 3,
+      "title": "Cold brew - Example Source 3",
+      "link": "https://example.com/cold-brew",
+      "displayed_link": "https://example.com › cold-brew",
+      "favicon": "https://example.com/favicon.ico",
+      "snippet": "Cold brew result 3: a short description used only in test fixtures.",
+      "snippet_highlighted_words": [
+        "cold"
+      ],
+      "source": "Example"
+    },
+    {
+      "position": 4,
+      "title": "Pour over - Example Source 4",
+      "link": "https://example.com/pour-over",
+      "displayed_link": "https://example.com › pour-over",
+      "favicon": "https://example.com/favicon.ico",
+      "snippet": "Pour over result 4: a short description used only in test fixtures.",
+      "snippet_highlighted_words": [
+        "pour"
+      ],
+      "source": "Example"
+    },
+    {
+      "position": 5,
+      "title": "Roasters - Example Source 5",
+      "link": "https://example.com/roasters",
+      "displayed_link": "https://example.com › roasters",
+      "favicon": "https://example.com/favicon.ico",
+      "snippet": "Roasters result 5: a short description used only in test fixtures.",
+      "snippet_highlighted_words": [
+        "roasters"
+      ],
+      "source": "Example"
+    }
+  ],
+  "related_questions": [
+    {
+      "question": "How is coffee made?",
+      "snippet": "Beans are roasted, ground and brewed with hot water.",
+      "title": "How coffee is made",
+      "link": "https://example.com/how-coffee-is-made"
+    },
+    {
+      "question": "Is coffee healthy?",
+      "snippet": "Moderate intake is generally considered safe for most adults.",
+      "title": "Coffee and health",
+      "link": "https://example.com/coffee-health"
+    }
+  ],
+  "related_searches": [
+    {
+      "query": "coffee near me",
+      "link": "https://www.google.com/search?q=coffee+near+me"
+    },
+    {
+      "query": "coffee beans",
+      "link": "https://www.google.com/search?q=coffee+beans"
+    },
+    {
+      "query": "coffee shop",
+      "link": "https://www.google.com/search?q=coffee+shop"
+    }
+  ],
+  "pagination": {
+    "current": 1,
+    "next": "{{base}}/search.json?engine=google&q=coffee&start=10"
+  },
+  "serpapi_pagination": {
+    "current": 1,
+    "next": "{{base}}/search.json?engine=google&q=coffee&start=10"
+  }
+}

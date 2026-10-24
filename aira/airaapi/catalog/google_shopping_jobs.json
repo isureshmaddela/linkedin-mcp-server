@@ -1,0 +1,835 @@
+{
+  "engines": [
+    {
+      "id": "google_shopping",
+      "name": "Google Shopping",
+      "category": "shopping",
+      "family": "Google",
+      "description": "Scrapes Google Shopping search results: products, prices, sellers, ratings and filter options. Returns the first page (about 40 items) of results.",
+      "docs_url": "https://serpapi.com/google-shopping-api",
+      "endpoint": "https://serpapi.com/search.json",
+      "params": [
+        {
+          "name": "q",
+          "label": "Search query",
+          "type": "string",
+          "required": false,
+          "group": "Search",
+          "help": "Search query as you would use in Google Shopping. Optional if shoprs is used.",
+          "default": null,
+          "requires_one_of": "shoprs"
+        },
+        {
+          "name": "location",
+          "label": "Location",
+          "type": "location",
+          "required": false,
+          "group": "Localization",
+          "help": "Where the search originates. City level recommended to simulate a real user. Cannot be combined with uule.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "uule",
+          "label": "Google-encoded location (uule)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Google-encoded location; cannot be combined with location. Coordinate-based uule requires a matching gl.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "google_domain",
+          "label": "Google domain",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Google domain to use.",
+          "default": "google.com",
+          "requires_one_of": null
+        },
+        {
+          "name": "gl",
+          "label": "Country (gl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two-letter country code, e.g. us, uk, fr.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Language (hl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Language code (two or three letters), optionally with region, e.g. en, es, fr, en-gb, es-419.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "shoprs",
+          "label": "Shopping filter token (shoprs)",
+          "type": "string",
+          "required": false,
+          "group": "Filters",
+          "help": "Token containing query and filter metadata. Combine multiple filters with ||. q is not required when using it.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "min_price",
+          "label": "Minimum price",
+          "type": "number",
+          "required": false,
+          "group": "Filters",
+          "help": "Lower price bound. Overrides the matching filter in shoprs.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "max_price",
+          "label": "Maximum price",
+          "type": "number",
+          "required": false,
+          "group": "Filters",
+          "help": "Upper price bound. Overrides the matching filter in shoprs.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "sort_by",
+          "label": "Sort by",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Sort order. Overrides shoprs.",
+          "default": null,
+          "options": [
+            {
+              "value": "1",
+              "label": "Price: low to high"
+            },
+            {
+              "value": "2",
+              "label": "Price: high to low"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "free_shipping",
+          "label": "Free shipping only",
+          "type": "boolean",
+          "required": false,
+          "group": "Filters",
+          "help": "Show only products with free shipping. Overrides shoprs.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "on_sale",
+          "label": "On sale only",
+          "type": "boolean",
+          "required": false,
+          "group": "Filters",
+          "help": "Show only products on sale. Overrides shoprs.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "small_business",
+          "label": "Small business only",
+          "type": "boolean",
+          "required": false,
+          "group": "Filters",
+          "help": "Show only small-business products. Overrides shoprs.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "safe",
+          "label": "Safe search",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Adult content filtering level. By default Google omits explicit content.",
+          "default": null,
+          "options": [
+            {
+              "value": "active",
+              "label": "Active"
+            },
+            {
+              "value": "off",
+              "label": "Off"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "start",
+          "label": "Result offset",
+          "type": "integer",
+          "required": false,
+          "group": "Pagination",
+          "help": "Currently ignored: Google Shopping's layout does not support offset pagination; every request returns the first page (~40 items).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "num",
+          "label": "Results per page",
+          "type": "integer",
+          "required": false,
+          "group": "Pagination",
+          "help": "Accepted and forwarded to Google but the page size is fixed, so it does not change the result count.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "device",
+          "label": "Device",
+          "type": "enum",
+          "required": false,
+          "group": "Advanced",
+          "help": "Device to emulate.",
+          "default": "desktop",
+          "options": [
+            {
+              "value": "desktop",
+              "label": "Desktop"
+            },
+            {
+              "value": "tablet",
+              "label": "Tablet (iPad)"
+            },
+            {
+              "value": "mobile",
+              "label": "Mobile"
+            }
+          ],
+          "requires_one_of": null
+        }
+      ],
+      "requires_any_of": [
+        [
+          "q",
+          "shoprs"
+        ]
+      ],
+      "pagination": {
+        "kind": "none",
+        "param": "start",
+        "page_size": 40,
+        "notes": "start and num are accepted but ignored; each request returns the first page (about 40 items)."
+      },
+      "result_keys": [
+        "search_information",
+        "shopping_results",
+        "filters"
+      ],
+      "result_item_fields": {
+        "shopping_results": [
+          "position",
+          "title",
+          "product_id",
+          "product_link",
+          "immersive_product_page_token",
+          "serpapi_immersive_product_api",
+          "source",
+          "source_icon",
+          "multiple_sources",
+          "price",
+          "extracted_price",
+          "rating",
+          "reviews",
+          "snippet",
+          "extensions",
+          "thumbnail",
+          "serpapi_thumbnail",
+          "delivery"
+        ],
+        "filters": [
+          "type",
+          "input_type",
+          "options"
+        ]
+      },
+      "aira_use": "Price-check gear for a home office, interview outfits or certification books, and compare sellers before buying.",
+      "verified": "docs"
+    },
+    {
+      "id": "google_shopping_light",
+      "name": "Google Shopping Light",
+      "category": "shopping",
+      "family": "Google",
+      "description": "A faster, lighter version of the Google Shopping API returning product results, categorized results and offset pagination.",
+      "docs_url": "https://serpapi.com/google-shopping-light-api",
+      "endpoint": "https://serpapi.com/search.json",
+      "params": [
+        {
+          "name": "q",
+          "label": "Search query",
+          "type": "string",
+          "required": false,
+          "group": "Search",
+          "help": "Search query as you would enter in Google Shopping. Optional if shoprs is used.",
+          "default": null,
+          "requires_one_of": "shoprs"
+        },
+        {
+          "name": "location",
+          "label": "Location",
+          "type": "location",
+          "required": false,
+          "group": "Localization",
+          "help": "Where the search originates. City level recommended to simulate a real user. Cannot be combined with uule.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "uule",
+          "label": "Google-encoded location (uule)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Google-encoded location; cannot be combined with location. Coordinate-based uule requires a matching gl.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "google_domain",
+          "label": "Google domain",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Google domain to use.",
+          "default": "google.com",
+          "requires_one_of": null
+        },
+        {
+          "name": "gl",
+          "label": "Country (gl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two-letter country code, e.g. us, uk, fr.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Language (hl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Language code (two or three letters), optionally with region, e.g. en, es, fr, en-gb, es-419.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "shoprs",
+          "label": "Shopping filter token (shoprs)",
+          "type": "string",
+          "required": false,
+          "group": "Filters",
+          "help": "Token carrying query and filter metadata; multiple filters joined with ||. q not required when provided. Obtain values from the Google Shopping API or a Google Shopping URL.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "min_price",
+          "label": "Minimum price",
+          "type": "number",
+          "required": false,
+          "group": "Filters",
+          "help": "Lower price bound. Overrides the matching filter in shoprs.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "max_price",
+          "label": "Maximum price",
+          "type": "number",
+          "required": false,
+          "group": "Filters",
+          "help": "Upper price bound. Overrides the matching filter in shoprs.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "sort_by",
+          "label": "Sort by",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Sort order. Overrides shoprs.",
+          "default": null,
+          "options": [
+            {
+              "value": "1",
+              "label": "Price: low to high"
+            },
+            {
+              "value": "2",
+              "label": "Price: high to low"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "free_shipping",
+          "label": "Free shipping only",
+          "type": "boolean",
+          "required": false,
+          "group": "Filters",
+          "help": "Show only products with free shipping. Overrides shoprs.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "on_sale",
+          "label": "On sale only",
+          "type": "boolean",
+          "required": false,
+          "group": "Filters",
+          "help": "Show only products on sale. Overrides shoprs.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "small_business",
+          "label": "Small business only",
+          "type": "boolean",
+          "required": false,
+          "group": "Filters",
+          "help": "Show only small-business products. Overrides shoprs.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "safe",
+          "label": "Safe search",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Adult content filtering level. By default Google omits explicit content.",
+          "default": null,
+          "options": [
+            {
+              "value": "active",
+              "label": "Active"
+            },
+            {
+              "value": "off",
+              "label": "Off"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "start",
+          "label": "Result offset",
+          "type": "integer",
+          "required": false,
+          "group": "Pagination",
+          "help": "Result offset. Default 0 (first page); 10 is page 2, 20 is page 3, and so on.",
+          "default": 0,
+          "requires_one_of": null
+        },
+        {
+          "name": "device",
+          "label": "Device",
+          "type": "enum",
+          "required": false,
+          "group": "Advanced",
+          "help": "Device to emulate.",
+          "default": "desktop",
+          "options": [
+            {
+              "value": "desktop",
+              "label": "Desktop"
+            },
+            {
+              "value": "tablet",
+              "label": "Tablet (iPad)"
+            },
+            {
+              "value": "mobile",
+              "label": "Mobile"
+            }
+          ],
+          "requires_one_of": null
+        }
+      ],
+      "requires_any_of": [
+        [
+          "q",
+          "shoprs"
+        ]
+      ],
+      "pagination": {
+        "kind": "start",
+        "param": "start",
+        "page_size": 10,
+        "notes": "Increment start by 10; response includes serpapi_pagination.next URL."
+      },
+      "result_keys": [
+        "search_information",
+        "shopping_results",
+        "categorized_shopping_results",
+        "serpapi_pagination"
+      ],
+      "result_item_fields": {
+        "shopping_results": [
+          "position",
+          "title",
+          "product_id",
+          "product_link",
+          "immersive_product_page_token",
+          "serpapi_immersive_product_api",
+          "source",
+          "source_icon",
+          "multiple_sources",
+          "price",
+          "extracted_price",
+          "rating",
+          "reviews",
+          "snippet",
+          "thumbnail",
+          "serpapi_thumbnail",
+          "delivery"
+        ],
+        "categorized_shopping_results": [
+          "title",
+          "shopping_results"
+        ]
+      },
+      "aira_use": "Quick, cheap product price lookups for work-from-home setup or study materials.",
+      "verified": "docs"
+    },
+    {
+      "id": "google_shopping_filters",
+      "name": "Google Shopping Filters",
+      "category": "shopping",
+      "family": "Google",
+      "description": "Returns the available Google Shopping filters (brand, price, sort, etc.) for a query, each with a shoprs token and a SerpApi link that applies it.",
+      "docs_url": "https://serpapi.com/google-shopping-filters-api",
+      "endpoint": "https://serpapi.com/search.json",
+      "params": [
+        {
+          "name": "q",
+          "label": "Search query",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "Anything valid in a regular Google Shopping search.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "location",
+          "label": "Location",
+          "type": "location",
+          "required": false,
+          "group": "Localization",
+          "help": "Where the search originates. City level recommended to simulate a real user. Cannot be combined with uule.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "uule",
+          "label": "Google-encoded location (uule)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Google-encoded location; cannot be combined with location. Coordinate-based uule requires a matching gl.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "google_domain",
+          "label": "Google domain",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Google domain to use.",
+          "default": "google.com",
+          "requires_one_of": null
+        },
+        {
+          "name": "gl",
+          "label": "Country (gl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two-letter country code, e.g. us, uk, fr.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Language (hl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Language code (two or three letters), optionally with region, e.g. en, es, fr, en-gb, es-419.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "shoprs",
+          "label": "Shopping filter token (shoprs)",
+          "type": "string",
+          "required": false,
+          "group": "Filters",
+          "help": "Token containing metadata about the query and search filter(s).",
+          "default": null,
+          "requires_one_of": null
+        }
+      ],
+      "requires_any_of": [],
+      "pagination": {
+        "kind": "none",
+        "param": "",
+        "page_size": 0,
+        "notes": "No pagination documented."
+      },
+      "result_keys": [
+        "search_information",
+        "filters"
+      ],
+      "result_item_fields": {
+        "filters": [
+          "type",
+          "input_type",
+          "options"
+        ],
+        "filters.options": [
+          "text",
+          "shoprs",
+          "serpapi_link",
+          "selected"
+        ]
+      },
+      "aira_use": "Build refinable shopping filters (brand, price range) when comparing equipment for a job search setup.",
+      "verified": "docs",
+      "unlisted": true
+    },
+    {
+      "id": "google_jobs",
+      "name": "Google Jobs",
+      "category": "jobs",
+      "family": "Google",
+      "description": "Scrapes Google Jobs search results: job postings with company, location, source site, highlights and apply options. Up to 10 results per page via next_page_token.",
+      "docs_url": "https://serpapi.com/google-jobs-api",
+      "endpoint": "https://serpapi.com/search.json",
+      "params": [
+        {
+          "name": "q",
+          "label": "Search query",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "The job search query, e.g. 'barista new york'.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "location",
+          "label": "Location",
+          "type": "location",
+          "required": false,
+          "group": "Localization",
+          "help": "Where the search originates. City level recommended to simulate a real user. Cannot be combined with uule.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "uule",
+          "label": "Google-encoded location (uule)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Google-encoded location; cannot be combined with location. Coordinate-based uule requires a matching gl.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "google_domain",
+          "label": "Google domain",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Google domain to use.",
+          "default": "google.com",
+          "requires_one_of": null
+        },
+        {
+          "name": "gl",
+          "label": "Country (gl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two-letter country code, e.g. us, uk, fr.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Language (hl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Language code (two or three letters), optionally with region, e.g. en, es, fr, en-gb, es-419.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "next_page_token",
+          "label": "Next page token",
+          "type": "string",
+          "required": false,
+          "group": "Pagination",
+          "help": "Token for the next page of results (up to 10 per page); returned at serpapi_pagination.next_page_token. Offset-based start is no longer supported.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "chips",
+          "label": "Chips",
+          "type": "string",
+          "required": false,
+          "group": "Filters",
+          "help": "Additional query conditions from job search page chips, e.g. city:Owg_06VPwoli_nfhBo8LyA== returns results for New York. Deprecated by Google.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "lrad",
+          "label": "Search radius (km)",
+          "type": "number",
+          "required": false,
+          "group": "Filters",
+          "help": "Search radius in kilometers. Does not strictly limit the radius.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "ltype",
+          "label": "Work from home",
+          "type": "string",
+          "required": false,
+          "group": "Filters",
+          "help": "Filters results by work from home (commonly 1). Deprecated by Google; docs list no values.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "uds",
+          "label": "Filter string (uds)",
+          "type": "string",
+          "required": false,
+          "group": "Filters",
+          "help": "Filter string provided by Google, found in the filters section of the response (filters[].parameters.uds).",
+          "default": null,
+          "requires_one_of": null
+        }
+      ],
+      "requires_any_of": [
+        [
+          "q"
+        ]
+      ],
+      "pagination": {
+        "kind": "next_page_token",
+        "param": "next_page_token",
+        "page_size": 10,
+        "notes": "Use serpapi_pagination.next_page_token; serpapi_pagination.next is a ready URL. start is discontinued."
+      },
+      "result_keys": [
+        "filters",
+        "jobs_results",
+        "serpapi_pagination"
+      ],
+      "result_item_fields": {
+        "jobs_results": [
+          "title",
+          "company_name",
+          "location",
+          "via",
+          "share_link",
+          "thumbnail",
+          "extensions",
+          "detected_extensions",
+          "description",
+          "job_highlights",
+          "apply_options",
+          "job_id"
+        ],
+        "filters": [
+          "name",
+          "parameters",
+          "link",
+          "serpapi_link"
+        ],
+        "apply_options": [
+          "title",
+          "link"
+        ]
+      },
+      "aira_use": "Discover open roles aggregated from many job boards with apply links, then feed job_id into listing lookups for company ratings.",
+      "verified": "docs"
+    },
+    {
+      "id": "google_jobs_listing",
+      "name": "Google Jobs Listing",
+      "category": "jobs",
+      "family": "Google",
+      "description": "Returns additional data for a Google Jobs listing identified by job_id, currently employer ratings from review sites such as Glassdoor and Indeed.",
+      "docs_url": "https://serpapi.com/google-jobs-listing-api",
+      "endpoint": "https://serpapi.com/search.json",
+      "params": [
+        {
+          "name": "q",
+          "label": "Job ID",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "The job_id string, obtainable from the Google Jobs API.",
+          "default": null,
+          "requires_one_of": null
+        }
+      ],
+      "requires_any_of": [
+        [
+          "q"
+        ]
+      ],
+      "pagination": {
+        "kind": "none",
+        "param": "",
+        "page_size": 0,
+        "notes": "No pagination documented."
+      },
+      "result_keys": [
+        "ratings"
+      ],
+      "result_item_fields": {
+        "ratings": [
+          "company_name",
+          "link",
+          "source",
+          "rating",
+          "reviews"
+        ]
+      },
+      "aira_use": "Check an employer's Glassdoor/Indeed ratings for a specific posting before applying or interviewing.",
+      "verified": "docs",
+      "unlisted": true
+    }
+  ]
+}

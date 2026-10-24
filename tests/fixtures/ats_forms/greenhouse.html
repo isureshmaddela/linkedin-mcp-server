@@ -1,0 +1,155 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Job Application for Senior Cloud Architect at Example Corp</title>
+<style>
+  body { font-family: Helvetica, Arial, sans-serif; margin: 0; color: #222; }
+  #header { padding: 24px 32px; border-bottom: 1px solid #ddd; }
+  #content, #application { padding: 24px 32px; max-width: 720px; }
+  .field { margin: 0 0 18px; }
+  .field > label { display: block; font-weight: 600; margin-bottom: 4px; }
+  .asterisk { color: #c00; }
+  input[type=text], input[type=email], input[type=tel], input[type=number], select, textarea { width: 100%; max-width: 480px; padding: 6px; box-sizing: border-box; }
+  textarea { min-height: 90px; }
+  .attach-or-paste { display: flex; flex-direction: column; gap: 6px; }
+  .radio-group label { display: inline; font-weight: 400; margin-right: 16px; }
+  #eeoc_fields { border-top: 1px solid #ddd; margin-top: 24px; padding-top: 16px; }
+  #submit_app { background: #2e8b57; color: #fff; border: 0; padding: 10px 18px; font-size: 15px; }
+  .already-applied { background: #fff5d6; border: 1px solid #e8c764; padding: 16px; }
+  .powered-by { padding: 16px 32px; color: #777; font-size: 12px; }
+</style>
+</head>
+<body>
+<div id="header">
+  <h1 class="app-title">Senior Cloud Architect</h1>
+  <div class="location">Remote - United States</div>
+  <div class="company-name">at Example Corp</div>
+</div>
+<div id="content">
+  <p>Example Corp is hiring a Senior Cloud Architect to lead platform modernisation across three business units.</p>
+</div>
+<div id="application">
+  <h1 class="section-header">Apply for this Job</h1>
+  <p class="required-fields"><span class="asterisk">*</span> Required</p>
+  <form id="application_form" action="submit" method="post" enctype="multipart/form-data" novalidate>
+    <div id="main_fields">
+      <div class="field">
+        <label for="first_name">First Name<span class="asterisk">*</span></label>
+        <input type="text" id="first_name" name="job_application[first_name]" autocomplete="given-name" required>
+      </div>
+      <div class="field">
+        <label for="last_name">Last Name<span class="asterisk">*</span></label>
+        <input type="text" id="last_name" name="job_application[last_name]" autocomplete="family-name" required>
+      </div>
+      <div class="field">
+        <label for="email">Email<span class="asterisk">*</span></label>
+        <input type="email" id="email" name="job_application[email]" autocomplete="email" required>
+      </div>
+      <div class="field">
+        <label for="phone">Phone<span class="asterisk">*</span></label>
+        <input type="tel" id="phone" name="job_application[phone]" autocomplete="tel" required>
+      </div>
+      <div class="field" id="resume_fieldset">
+        <label for="resume">Resume/CV<span class="asterisk">*</span></label>
+        <div class="attach-or-paste" data-field="resume">
+          <input type="file" id="resume" name="job_application[resume]" data-field="resume" accept=".pdf,.doc,.docx,.txt,.rtf" required>
+          <span class="or">or enter manually</span>
+          <textarea id="resume_text" name="job_application[resume_text]" data-field="resume" aria-label="Enter your resume manually" placeholder="Paste your resume here"></textarea>
+        </div>
+      </div>
+      <div class="field" id="cover_letter_fieldset">
+        <label for="cover_letter">Cover Letter</label>
+        <div class="attach-or-paste" data-field="cover_letter">
+          <input type="file" id="cover_letter" name="job_application[cover_letter]" data-field="cover_letter" accept=".pdf,.doc,.docx,.txt,.rtf">
+          <span class="or">or enter manually</span>
+          <textarea id="cover_letter_text" name="job_application[cover_letter_text]" data-field="cover_letter" aria-label="Enter your cover letter manually" placeholder="Paste your cover letter here"></textarea>
+        </div>
+      </div>
+    </div>
+    <div id="custom_fields">
+      <div class="field">
+        <label for="job_application_answers_attributes_0_text_value">LinkedIn Profile<span class="asterisk">*</span></label>
+        <input type="text" id="job_application_answers_attributes_0_text_value" name="job_application[answers_attributes][0][text_value]" required>
+      </div>
+      <div class="field">
+        <label for="question_1001">How did you hear about this job?<span class="asterisk">*</span></label>
+        <select id="question_1001" name="question_1001" required>
+          <option value="">--</option>
+          <option value="1001_1">LinkedIn</option>
+          <option value="1001_2">Referral</option>
+          <option value="1001_3">Job board</option>
+          <option value="1001_4">Other</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="question_1002">How many years of relevant experience do you have?<span class="asterisk">*</span></label>
+        <input type="number" id="question_1002" name="question_1002" min="0" max="60" required>
+      </div>
+      <div class="field">
+        <label>Are you willing to relocate?</label>
+        <div class="radio-group">
+          <input type="radio" id="question_1003_0" name="question_1003" value="1"><label for="question_1003_0">Yes</label>
+          <input type="radio" id="question_1003_1" name="question_1003" value="0"><label for="question_1003_1">No</label>
+        </div>
+      </div>
+      <div class="field">
+        <label for="question_1004">Why do you want to work here?</label>
+        <textarea id="question_1004" name="question_1004"></textarea>
+      </div>
+      <div class="field">
+        <input type="checkbox" id="question_1005" name="question_1005" value="1" required>
+        <label for="question_1005" style="display:inline">I acknowledge that I have read the privacy notice<span class="asterisk">*</span></label>
+      </div>
+      <!-- stub:extra-questions -->
+    </div>
+    <div id="eeoc_fields">
+      <h2>Voluntary Self-Identification</h2>
+      <p>Completion of this form is voluntary and will not affect your opportunity for employment.</p>
+      <div class="field">
+        <label for="gender">Gender</label>
+        <select id="gender" name="job_application[gender]">
+          <option value="">Please select</option>
+          <option value="1">Male</option>
+          <option value="2">Female</option>
+          <option value="3">Non-binary</option>
+          <option value="4">Decline To Self Identify</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="hispanic_ethnicity">Are you Hispanic/Latino?</label>
+        <select id="hispanic_ethnicity" name="job_application[hispanic_ethnicity]">
+          <option value="">Please select</option>
+          <option value="1">Yes</option>
+          <option value="2">No</option>
+          <option value="3">Decline To Self Identify</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="veteran_status">Veteran Status</label>
+        <select id="veteran_status" name="job_application[veteran_status]">
+          <option value="">Please select</option>
+          <option value="1">I am not a protected veteran</option>
+          <option value="2">I identify as one or more of the classifications of a protected veteran</option>
+          <option value="3">I don't wish to answer</option>
+        </select>
+      </div>
+      <div class="field">
+        <label for="disability_status">Disability Status</label>
+        <select id="disability_status" name="job_application[disability_status]">
+          <option value="">Please select</option>
+          <option value="1">Yes, I have a disability, or have had one in the past</option>
+          <option value="2">No, I do not have a disability and have not had one in the past</option>
+          <option value="3">I do not want to answer</option>
+        </select>
+      </div>
+    </div>
+    <!-- stub:captcha -->
+    <div id="submit_buttons">
+      <input type="submit" id="submit_app" value="Submit Application">
+    </div>
+  </form>
+</div>
+<div class="powered-by">Powered by Greenhouse (stand-in page for tests)</div>
+</body>
+</html>

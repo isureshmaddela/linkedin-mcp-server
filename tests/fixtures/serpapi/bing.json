@@ -1,0 +1,73 @@
+{
+  "search_metadata": {
+    "id": "{{id}}",
+    "status": "Success",
+    "json_endpoint": "{{base}}/searches/{{id}}.json",
+    "created_at": "2026-10-22 12:00:00 UTC",
+    "processed_at": "2026-10-22 12:00:01 UTC",
+    "total_time_taken": 1.2,
+    "fixture": true,
+    "fixture_note": "Recorded-shape fixture for tests. Not live SerpApi data.",
+    "bing_url": "https://www.bing.com/search?q=coffee"
+  },
+  "search_information": {
+    "query_displayed": "coffee",
+    "total_results": 1230000000
+  },
+  "organic_results": [
+    {
+      "position": 1,
+      "title": "Coffee | Example Bing Source 1",
+      "link": "https://bing.example.com/coffee",
+      "displayed_link": "https://bing.example.com › coffee",
+      "snippet": "Coffee result 1: a short description used only in test fixtures.",
+      "date": "Oct 1, 2026"
+    },
+    {
+      "position": 2,
+      "title": "Espresso | Example Bing Source 2",
+      "link": "https://bing.example.com/espresso",
+      "displayed_link": "https://bing.example.com › espresso",
+      "snippet": "Espresso result 2: a short description used only in test fixtures.",
+      "date": null
+    },
+    {
+      "position": 3,
+      "title": "Cold brew | Example Bing Source 3",
+      "link": "https://bing.example.com/cold-brew",
+      "displayed_link": "https://bing.example.com › cold-brew",
+      "snippet": "Cold brew result 3: a short description used only in test fixtures.",
+      "date": null
+    },
+    {
+      "position": 4,
+      "title": "Pour over | Example Bing Source 4",
+      "link": "https://bing.example.com/pour-over",
+      "displayed_link": "https://bing.example.com › pour-over",
+      "snippet": "Pour over result 4: a short description used only in test fixtures.",
+      "date": null
+    },
+    {
+      "position": 5,
+      "title": "Roasters | Example Bing Source 5",
+      "link": "https://bing.example.com/roasters",
+      "displayed_link": "https://bing.example.com › roasters",
+      "snippet": "Roasters result 5: a short description used only in test fixtures.",
+      "date": null
+    }
+  ],
+  "related_searches": [
+    {
+      "query": "coffee near me",
+      "link": "https://www.bing.com/search?q=coffee+near+me"
+    },
+    {
+      "query": "coffee shop",
+      "link": "https://www.bing.com/search?q=coffee+shop"
+    }
+  ],
+  "pagination": {
+    "current": 1,
+    "next": "{{base}}/search.json?engine=bing&q=coffee&first=11"
+  }
+}

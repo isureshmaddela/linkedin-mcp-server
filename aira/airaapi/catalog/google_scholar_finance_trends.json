@@ -1,0 +1,3645 @@
+{
+  "engines": [
+    {
+      "id": "google_scholar",
+      "name": "Google Scholar",
+      "category": "scholar_patents",
+      "family": "Google",
+      "description": "Scrapes Google Scholar results for scholarly literature, with Cited By, All Versions, year-range, review-only, patent and US case-law filters.",
+      "docs_url": "https://serpapi.com/google-scholar-api",
+      "params": [
+        {
+          "name": "q",
+          "label": "Search query",
+          "type": "string",
+          "required": false,
+          "group": "Search",
+          "help": "Search query. Supports helpers such as author: and source:. Optional when cites is used (then it searches within citing articles). Must not be used with cluster.",
+          "default": null,
+          "requires_one_of": "query"
+        },
+        {
+          "name": "cites",
+          "label": "Cited-by article ID",
+          "type": "string",
+          "required": false,
+          "group": "Advanced",
+          "help": "Article ID that triggers a Cited By search, e.g. 1275980731835430123. With q, searches within citing articles.",
+          "default": null,
+          "requires_one_of": "query"
+        },
+        {
+          "name": "cluster",
+          "label": "All-versions cluster ID",
+          "type": "string",
+          "required": false,
+          "group": "Advanced",
+          "help": "Article ID that triggers an All Versions search. Must be used alone: not with q or cites.",
+          "default": null,
+          "requires_one_of": "query"
+        },
+        {
+          "name": "as_ylo",
+          "label": "Year from",
+          "type": "integer",
+          "required": false,
+          "group": "Filters",
+          "help": "Excludes results before this year, e.g. 2018. Can be combined with as_yhi.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "as_yhi",
+          "label": "Year to",
+          "type": "integer",
+          "required": false,
+          "group": "Filters",
+          "help": "Excludes results after this year, e.g. 2018. Can be combined with as_ylo.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "scisbd",
+          "label": "Sort by date (last year)",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Limits to articles added in the last year, sorted by date.",
+          "default": "0",
+          "options": [
+            {
+              "value": "0",
+              "label": "Sort by relevance (default)"
+            },
+            {
+              "value": "1",
+              "label": "Newest, abstracts only"
+            },
+            {
+              "value": "2",
+              "label": "Newest, everything"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "as_sdt",
+          "label": "Search type / patents / court codes",
+          "type": "string",
+          "required": false,
+          "group": "Advanced",
+          "help": "As a filter (articles only): 0 excludes patents (default), 7 includes patents. As a search type: 4 selects US case law, followed by comma-separated court codes with 4 first, e.g. 4,33,192.",
+          "default": "0",
+          "suggestions": [
+            {
+              "value": "0",
+              "label": "Exclude patents"
+            },
+            {
+              "value": "7",
+              "label": "Include patents"
+            },
+            {
+              "value": "4",
+              "label": "Case law (all US courts)"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "as_vis",
+          "label": "Citations",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Whether to include citations in results.",
+          "default": "0",
+          "options": [
+            {
+              "value": "0",
+              "label": "Include citations (default)"
+            },
+            {
+              "value": "1",
+              "label": "Exclude citations"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "as_rr",
+          "label": "Review articles only",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Whether to show only review articles.",
+          "default": "0",
+          "options": [
+            {
+              "value": "0",
+              "label": "Show all (default)"
+            },
+            {
+              "value": "1",
+              "label": "Review articles only"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "safe",
+          "label": "SafeSearch",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Adult content filtering level. Google blurs explicit content by default.",
+          "default": null,
+          "options": [
+            {
+              "value": "active",
+              "label": "Active"
+            },
+            {
+              "value": "off",
+              "label": "Off"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "filter",
+          "label": "Similar/omitted results filter",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Toggles the Similar Results and Omitted Results filters.",
+          "default": "1",
+          "options": [
+            {
+              "value": "1",
+              "label": "On (default)"
+            },
+            {
+              "value": "0",
+              "label": "Off"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Interface language",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two or three-letter language code, optionally followed by a region code, e.g. en, es, fr, en-gb, es-419.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "lr",
+          "label": "Limit to languages",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Limits the search to one or more languages, separated by |, format lang_{code}, e.g. lang_fr|lang_de.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "start",
+          "label": "Result offset",
+          "type": "integer",
+          "required": false,
+          "group": "Pagination",
+          "help": "Result offset. 0 (default) is page 1, 10 is page 2, 20 is page 3.",
+          "default": 0,
+          "requires_one_of": null
+        },
+        {
+          "name": "num",
+          "label": "Results per page",
+          "type": "integer",
+          "required": false,
+          "group": "Pagination",
+          "help": "Maximum number of results, 1 to 20.",
+          "default": 10,
+          "requires_one_of": null
+        }
+      ],
+      "requires_any_of": [
+        [
+          "q",
+          "cites",
+          "cluster"
+        ]
+      ],
+      "pagination": {
+        "kind": "start",
+        "param": "start",
+        "page_size": 10,
+        "notes": "Advance start in steps of num (default 10). Response has pagination and serpapi_pagination objects."
+      },
+      "result_keys": [
+        "search_information",
+        "organic_results",
+        "related_searches",
+        "pagination",
+        "serpapi_pagination"
+      ],
+      "result_item_fields": {
+        "organic_results": [
+          "position",
+          "title",
+          "result_id",
+          "type",
+          "link",
+          "snippet",
+          "publication_info",
+          "inline_links"
+        ],
+        "organic_results.inline_links": [
+          "serpapi_cite_link",
+          "cited_by",
+          "related_pages_link",
+          "serpapi_related_pages_link",
+          "versions"
+        ]
+      },
+      "aira_use": "Find papers, authors and citation counts to prepare for research/PhD-track roles, interviews and technical credibility.",
+      "endpoint": "https://serpapi.com/search.json",
+      "verified": "docs"
+    },
+    {
+      "id": "google_scholar_author",
+      "name": "Google Scholar Author",
+      "category": "scholar_patents",
+      "family": "Google",
+      "description": "Retrieves a Google Scholar author profile: articles, citation table, co-authors and individual article citations.",
+      "docs_url": "https://serpapi.com/google-scholar-author-api",
+      "params": [
+        {
+          "name": "author_id",
+          "label": "Author ID",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "ID of the author. Get it from the Google Scholar Profiles API / Google Scholar API results or the author's Scholar profile URL.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Interface language",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two or three-letter language code, optionally followed by a region code, e.g. en, es, fr, en-gb, es-419.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "view_op",
+          "label": "View",
+          "type": "enum",
+          "required": false,
+          "group": "Advanced",
+          "help": "Which part of the page to view.",
+          "default": null,
+          "options": [
+            {
+              "value": "view_citation",
+              "label": "View a citation (requires citation_id)"
+            },
+            {
+              "value": "list_colleagues",
+              "label": "List co-authors"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "citation_id",
+          "label": "Citation ID",
+          "type": "string",
+          "required": false,
+          "group": "Advanced",
+          "help": "Retrieves an individual article's citation. Required when view_op=view_citation. IDs appear in the JSON response.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "sort",
+          "label": "Sort articles",
+          "type": "enum",
+          "required": false,
+          "group": "Advanced",
+          "help": "Sorts the article list. Default is by citation count.",
+          "default": null,
+          "options": [
+            {
+              "value": "title",
+              "label": "Title"
+            },
+            {
+              "value": "pubdate",
+              "label": "Publication date"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "start",
+          "label": "Result offset",
+          "type": "integer",
+          "required": false,
+          "group": "Pagination",
+          "help": "Result offset. Default 0; 20 is the second page, 40 the third.",
+          "default": 0,
+          "requires_one_of": null
+        },
+        {
+          "name": "num",
+          "label": "Results per page",
+          "type": "integer",
+          "required": false,
+          "group": "Pagination",
+          "help": "Number of results. Default 20, maximum 100.",
+          "default": 20,
+          "requires_one_of": null
+        }
+      ],
+      "pagination": {
+        "kind": "start",
+        "param": "start",
+        "page_size": 20,
+        "notes": "num max 100. Docs do not list response key names; keys below are standard SerpApi output (see gaps)."
+      },
+      "result_keys": [
+        "author",
+        "articles",
+        "cited_by",
+        "public_access",
+        "co_authors",
+        "citation",
+        "serpapi_pagination"
+      ],
+      "result_item_fields": {
+        "articles": [
+          "title",
+          "link",
+          "citation_id",
+          "authors",
+          "publication",
+          "cited_by",
+          "year"
+        ],
+        "author": [
+          "name",
+          "affiliations",
+          "email",
+          "interests",
+          "thumbnail"
+        ]
+      },
+      "aira_use": "Research a hiring manager, professor or potential collaborator's publications and citation record before an interview or outreach.",
+      "endpoint": "https://serpapi.com/search.json",
+      "requires_any_of": [],
+      "verified": "docs"
+    },
+    {
+      "id": "google_scholar_cite",
+      "name": "Google Scholar Cite",
+      "category": "scholar_patents",
+      "family": "Google",
+      "description": "Returns formatted citations (MLA, APA, Chicago, Harvard, Vancouver) and export links (BibTeX, EndNote, RefMan, RefWorks) for one Scholar result.",
+      "docs_url": "https://serpapi.com/google-scholar-cite-api",
+      "params": [
+        {
+          "name": "q",
+          "label": "Result ID",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "ID of an individual Google Scholar organic result: the result_id field of the Google Scholar API or the serpapi_cite_link.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Interface language",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two or three-letter language code, optionally followed by a region code, e.g. en, es, fr, en-gb, es-419.",
+          "default": null,
+          "requires_one_of": null
+        }
+      ],
+      "pagination": {
+        "kind": "none",
+        "param": "",
+        "page_size": 0,
+        "notes": "No pagination."
+      },
+      "result_keys": [
+        "citations",
+        "links",
+        "error"
+      ],
+      "result_item_fields": {
+        "citations": [
+          "title",
+          "snippet"
+        ],
+        "links": [
+          "name",
+          "link"
+        ]
+      },
+      "aira_use": "Copy ready-made citations of papers into a portfolio, CV publication list or cover letter.",
+      "endpoint": "https://serpapi.com/search.json",
+      "requires_any_of": [],
+      "verified": "docs",
+      "unlisted": true
+    },
+    {
+      "id": "google_scholar_profiles",
+      "name": "Google Scholar Profiles",
+      "category": "scholar_patents",
+      "family": "Google",
+      "description": "Searches Google Scholar author profiles by name or label: of. NOTE: the docs state this API is discontinued because Scholar now requires login for profiles.",
+      "docs_url": "https://serpapi.com/google-scholar-profiles-api",
+      "params": [
+        {
+          "name": "mauthors",
+          "label": "Author",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "The author to search for. Helpers such as label: can be used in the query.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Interface language",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two or three-letter language code, optionally followed by a region code, e.g. en, es, fr, en-gb, es-419.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "after_author",
+          "label": "Next page token",
+          "type": "string",
+          "required": false,
+          "group": "Pagination",
+          "help": "Next-page token (from the previous response's pagination) to retrieve the following page. Takes precedence over before_author.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "before_author",
+          "label": "Previous page token",
+          "type": "string",
+          "required": false,
+          "group": "Pagination",
+          "help": "Previous-page token (from the previous response's pagination) to retrieve the prior page.",
+          "default": null,
+          "requires_one_of": null
+        }
+      ],
+      "pagination": {
+        "kind": "author_token",
+        "param": "after_author",
+        "prev_param": "before_author",
+        "page_size": 10,
+        "notes": "Token pagination: pass the next token as after_author or the previous token as before_author; after_author takes precedence. Engine is documented as discontinued."
+      },
+      "result_keys": [
+        "profiles",
+        "pagination"
+      ],
+      "result_item_fields": {
+        "profiles": [
+          "name",
+          "link",
+          "serpapi_link",
+          "author_id",
+          "affiliations",
+          "email",
+          "cited_by",
+          "interests",
+          "thumbnail"
+        ]
+      },
+      "aira_use": "Look up researcher profiles (mark as discontinued in the UI) to find author_id values for the Author engine.",
+      "endpoint": "https://serpapi.com/search.json",
+      "requires_any_of": [],
+      "verified": "docs",
+      "deprecated": true,
+      "deprecated_reason": "SerpApi docs state the Google Scholar Profiles API is discontinued because Google Scholar now requires login to view profiles.",
+      "unlisted": true
+    },
+    {
+      "id": "google_scholar_case_law",
+      "name": "Google Scholar Case Law",
+      "category": "scholar_patents",
+      "family": "Google",
+      "description": "Retrieves details of a US case-law document from Google Scholar by case_id (case IDs come from Google Scholar results using as_sdt=4).",
+      "docs_url": "https://serpapi.com/google-scholar-case-law-api",
+      "params": [
+        {
+          "name": "case_id",
+          "label": "Case ID",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "ID of the case to scrape, taken from Google Scholar API results (e.g. 16467529).",
+          "default": null,
+          "requires_one_of": null
+        }
+      ],
+      "pagination": {
+        "kind": "none",
+        "param": "",
+        "page_size": 0,
+        "notes": "No pagination."
+      },
+      "result_keys": [
+        "case_results"
+      ],
+      "result_item_fields": {
+        "case_results": [
+          "case_id",
+          "title",
+          "name",
+          "court_name",
+          "first_page",
+          "last_page",
+          "dates",
+          "short_citations",
+          "case_numbers",
+          "cited_cases"
+        ]
+      },
+      "aira_use": "Review employment-law and non-compete case precedents when evaluating contracts or workplace disputes.",
+      "endpoint": "https://serpapi.com/search.json",
+      "requires_any_of": [],
+      "verified": "docs"
+    },
+    {
+      "id": "google_patents",
+      "name": "Google Patents",
+      "category": "scholar_patents",
+      "family": "Google",
+      "description": "Searches Google Patents (and optionally Scholar) with boolean/proximity/wildcard syntax, date, inventor, assignee, country, language, status, type and litigation filters.",
+      "docs_url": "https://serpapi.com/google-patents-api",
+      "params": [
+        {
+          "name": "q",
+          "label": "Search query",
+          "type": "string",
+          "required": false,
+          "group": "Search",
+          "help": "Search query. Separate multiple terms with semicolons (;). Supports Google Patents boolean, proximity and wildcard syntax.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "page",
+          "label": "Page",
+          "type": "integer",
+          "required": false,
+          "group": "Pagination",
+          "help": "Page number, default 1.",
+          "default": 1,
+          "requires_one_of": null
+        },
+        {
+          "name": "num",
+          "label": "Results per page",
+          "type": "integer",
+          "required": false,
+          "group": "Pagination",
+          "help": "Results per page: minimum 10, maximum 100.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "sort",
+          "label": "Sort",
+          "type": "enum",
+          "required": false,
+          "group": "Advanced",
+          "help": "Sort order. Default is relevance. Patent results sort by filing date, Scholar results by publication date.",
+          "default": null,
+          "options": [
+            {
+              "value": "new",
+              "label": "Newest first"
+            },
+            {
+              "value": "old",
+              "label": "Oldest first"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "clustered",
+          "label": "Cluster by classification",
+          "type": "enum",
+          "required": false,
+          "group": "Advanced",
+          "help": "true groups results by Classification.",
+          "default": null,
+          "options": [
+            {
+              "value": "true",
+              "label": "Group by classification"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "dups",
+          "label": "Deduplication",
+          "type": "enum",
+          "required": false,
+          "group": "Advanced",
+          "help": "Deduplication method.",
+          "default": "family",
+          "options": [
+            {
+              "value": "family",
+              "label": "Family"
+            },
+            {
+              "value": "language",
+              "label": "Publication"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "patents",
+          "label": "Include patents",
+          "type": "boolean",
+          "required": false,
+          "group": "Advanced",
+          "help": "Whether to include Google Patents results.",
+          "default": true,
+          "requires_one_of": null
+        },
+        {
+          "name": "scholar",
+          "label": "Include Scholar",
+          "type": "boolean",
+          "required": false,
+          "group": "Advanced",
+          "help": "Whether to include Google Scholar results.",
+          "default": false,
+          "requires_one_of": null
+        },
+        {
+          "name": "before",
+          "label": "Before date",
+          "type": "string",
+          "required": false,
+          "group": "Filters",
+          "help": "Maximum date, format type:YYYYMMDD where type is priority, filing or publication, e.g. priority:20221231.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "after",
+          "label": "After date",
+          "type": "string",
+          "required": false,
+          "group": "Filters",
+          "help": "Minimum date, format type:YYYYMMDD where type is priority, filing or publication, e.g. publication:20230101.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "inventor",
+          "label": "Inventor",
+          "type": "csv",
+          "required": false,
+          "group": "Filters",
+          "help": "Inventor names, comma-separated. Wrap names containing commas in parentheses, e.g. (Doe, John).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "assignee",
+          "label": "Assignee",
+          "type": "csv",
+          "required": false,
+          "group": "Filters",
+          "help": "Assignee names, comma-separated. Wrap names containing commas in parentheses, e.g. (Tesla, Inc).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "country",
+          "label": "Country codes",
+          "type": "csv",
+          "required": false,
+          "group": "Filters",
+          "help": "Patent office country codes, comma-separated, e.g. WO,US.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "language",
+          "label": "Language",
+          "type": "csv",
+          "required": false,
+          "group": "Filters",
+          "help": "Comma-separated languages.",
+          "default": null,
+          "options": [
+            {
+              "value": "ENGLISH",
+              "label": "English"
+            },
+            {
+              "value": "GERMAN",
+              "label": "German"
+            },
+            {
+              "value": "CHINESE",
+              "label": "Chinese"
+            },
+            {
+              "value": "FRENCH",
+              "label": "French"
+            },
+            {
+              "value": "SPANISH",
+              "label": "Spanish"
+            },
+            {
+              "value": "ARABIC",
+              "label": "Arabic"
+            },
+            {
+              "value": "JAPANESE",
+              "label": "Japanese"
+            },
+            {
+              "value": "KOREAN",
+              "label": "Korean"
+            },
+            {
+              "value": "PORTUGUESE",
+              "label": "Portuguese"
+            },
+            {
+              "value": "RUSSIAN",
+              "label": "Russian"
+            },
+            {
+              "value": "ITALIAN",
+              "label": "Italian"
+            },
+            {
+              "value": "DUTCH",
+              "label": "Dutch"
+            },
+            {
+              "value": "SWEDISH",
+              "label": "Swedish"
+            },
+            {
+              "value": "FINNISH",
+              "label": "Finnish"
+            },
+            {
+              "value": "NORWEGIAN",
+              "label": "Norwegian"
+            },
+            {
+              "value": "DANISH",
+              "label": "Danish"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "status",
+          "label": "Status",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Filter by status.",
+          "default": null,
+          "options": [
+            {
+              "value": "GRANT",
+              "label": "Granted"
+            },
+            {
+              "value": "APPLICATION",
+              "label": "Application"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "type",
+          "label": "Type",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Filter by type.",
+          "default": null,
+          "options": [
+            {
+              "value": "PATENT",
+              "label": "Patent"
+            },
+            {
+              "value": "DESIGN",
+              "label": "Design"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "litigation",
+          "label": "Litigation",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Filter by litigation status.",
+          "default": null,
+          "options": [
+            {
+              "value": "YES",
+              "label": "Has related litigation"
+            },
+            {
+              "value": "NO",
+              "label": "No known litigation"
+            }
+          ],
+          "requires_one_of": null
+        }
+      ],
+      "pagination": {
+        "kind": "page",
+        "param": "page",
+        "page_size": 10,
+        "notes": "page (default 1) and num (10-100). search_information has total_results, total_pages, page_number."
+      },
+      "result_keys": [
+        "search_information",
+        "organic_results",
+        "summary"
+      ],
+      "result_item_fields": {
+        "organic_results": [
+          "position",
+          "rank",
+          "patent_id",
+          "patent_link",
+          "serpapi_link",
+          "title",
+          "snippet",
+          "priority_date",
+          "filing_date",
+          "publication_date",
+          "inventor",
+          "assignee",
+          "publication_number",
+          "language",
+          "thumbnail",
+          "pdf",
+          "figures",
+          "country_status"
+        ],
+        "summary": [
+          "assignee",
+          "inventor",
+          "cpc"
+        ]
+      },
+      "aira_use": "Research a target company's patents and inventors to gauge R&D strength, tech focus and interview talking points.",
+      "endpoint": "https://serpapi.com/search.json",
+      "requires_any_of": [],
+      "verified": "docs"
+    },
+    {
+      "id": "google_patents_details",
+      "name": "Google Patents Details",
+      "category": "scholar_patents",
+      "family": "Google",
+      "description": "Retrieves full details of one patent or Scholar document: abstract, claims, classifications, citations, family, legal events.",
+      "docs_url": "https://serpapi.com/google-patents-details-api",
+      "params": [
+        {
+          "name": "patent_id",
+          "label": "Patent ID",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "patent/<publication number>/<optional 2-letter language>, e.g. patent/US11734097B1/en, or scholar/<scholar ID>. IDs come from Google Patents API results.",
+          "default": null,
+          "requires_one_of": null
+        }
+      ],
+      "pagination": {
+        "kind": "none",
+        "param": "",
+        "page_size": 0,
+        "notes": "No pagination."
+      },
+      "result_keys": [
+        "title",
+        "type",
+        "pdf",
+        "publication_number",
+        "country",
+        "prior_art_keywords",
+        "prior_art_date",
+        "application_number",
+        "inventors",
+        "assignees",
+        "priority_date",
+        "filing_date",
+        "publication_date",
+        "worldwide_applications",
+        "events",
+        "external_links",
+        "images",
+        "classifications",
+        "abstract",
+        "description_link",
+        "claims",
+        "child_applications",
+        "parent_applications",
+        "priority_applications",
+        "applications_claiming_priority",
+        "family_id",
+        "patent_citations",
+        "non_patent_citations",
+        "cited_by",
+        "similar_documents",
+        "legal_events"
+      ],
+      "result_item_fields": {
+        "inventors": [
+          "name",
+          "link",
+          "serpapi_link"
+        ],
+        "classifications": [
+          "code",
+          "description",
+          "leaf",
+          "first_code",
+          "is_cpc"
+        ],
+        "events": [
+          "date",
+          "title",
+          "type",
+          "document_id"
+        ],
+        "legal_events": [
+          "date",
+          "code",
+          "title",
+          "attributes"
+        ],
+        "similar_documents": [
+          "is_patent",
+          "publication_number",
+          "primary_language",
+          "publication_date",
+          "title",
+          "patent_id",
+          "serpapi_link"
+        ]
+      },
+      "aira_use": "Read a patent's claims and inventors to understand what a prospective employer actually builds.",
+      "endpoint": "https://serpapi.com/search.json",
+      "requires_any_of": [],
+      "verified": "docs"
+    },
+    {
+      "id": "google_trends",
+      "name": "Google Trends",
+      "category": "trends",
+      "family": "Google",
+      "description": "Google Trends data: interest over time, compared breakdown by region, interest by region, related topics and related queries for one or more search terms.",
+      "docs_url": "https://serpapi.com/google-trends-api",
+      "params": [
+        {
+          "name": "q",
+          "label": "Search term / topic",
+          "type": "csv",
+          "required": true,
+          "group": "Search",
+          "help": "Search term or topic (topic IDs like /m/0663v from Trends Autocomplete). Comma-separate multiple queries: max 5 for TIMESERIES and GEO_MAP, 1 for other types. Max 100 characters per query.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "data_type",
+          "label": "Data type",
+          "type": "enum",
+          "required": false,
+          "group": "Search",
+          "help": "Type of Trends data.",
+          "default": "TIMESERIES",
+          "options": [
+            {
+              "value": "TIMESERIES",
+              "label": "Interest over time"
+            },
+            {
+              "value": "GEO_MAP",
+              "label": "Compared breakdown by region (multiple queries)"
+            },
+            {
+              "value": "GEO_MAP_0",
+              "label": "Interest by region (single query)"
+            },
+            {
+              "value": "RELATED_TOPICS",
+              "label": "Related topics (single query)"
+            },
+            {
+              "value": "RELATED_QUERIES",
+              "label": "Related queries (single query)"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "geo",
+          "label": "Location",
+          "type": "csv",
+          "required": false,
+          "group": "Localization",
+          "help": "Trends location code (e.g. US, GB, IN, US-CA). Default Worldwide. Comma-separated list matching the order of q; multiple locations only for TIMESERIES; empty values not allowed in a list.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "region",
+          "label": "Region granularity",
+          "type": "enum",
+          "required": false,
+          "group": "Localization",
+          "help": "Only for GEO_MAP and GEO_MAP_0. Default depends on geo; not every option returns results for every geo.",
+          "default": null,
+          "options": [
+            {
+              "value": "COUNTRY",
+              "label": "Country"
+            },
+            {
+              "value": "REGION",
+              "label": "Subregion"
+            },
+            {
+              "value": "DMA",
+              "label": "Metro"
+            },
+            {
+              "value": "CITY",
+              "label": "City"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Interface language",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two or three-letter language code, optionally followed by a region code, e.g. en, es, fr, en-gb, es-419.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "tz",
+          "label": "Time zone offset (minutes)",
+          "type": "integer",
+          "required": false,
+          "group": "Localization",
+          "help": "Offset from UTC+0 in minutes, -1439 to 1439. Examples: 420 PDT, 600 Pacific/Tahiti, -540 Asia/Tokyo, -480 Canada/Pacific.",
+          "default": 420,
+          "requires_one_of": null
+        },
+        {
+          "name": "cat",
+          "label": "Category",
+          "type": "integer",
+          "required": false,
+          "group": "Filters",
+          "help": "Google Trends category ID (differs from Trending Now categories). Default 0 (all categories). 488+ categories exist; the most job-relevant are suggested.",
+          "default": 0,
+          "suggestions": [
+            {
+              "value": "0",
+              "label": "All categories"
+            },
+            {
+              "value": "3",
+              "label": "Arts & Entertainment"
+            },
+            {
+              "value": "5",
+              "label": "Computers & Electronics"
+            },
+            {
+              "value": "7",
+              "label": "Finance"
+            },
+            {
+              "value": "8",
+              "label": "Games"
+            },
+            {
+              "value": "12",
+              "label": "Business & Industrial"
+            },
+            {
+              "value": "13",
+              "label": "Internet & Telecom"
+            },
+            {
+              "value": "14",
+              "label": "People & Society"
+            },
+            {
+              "value": "16",
+              "label": "News"
+            },
+            {
+              "value": "18",
+              "label": "Shopping"
+            },
+            {
+              "value": "19",
+              "label": "Law & Government"
+            },
+            {
+              "value": "20",
+              "label": "Sports"
+            },
+            {
+              "value": "25",
+              "label": "Advertising & Marketing"
+            },
+            {
+              "value": "28",
+              "label": "Office Services"
+            },
+            {
+              "value": "29",
+              "label": "Real Estate"
+            },
+            {
+              "value": "31",
+              "label": "Programming"
+            },
+            {
+              "value": "32",
+              "label": "Software"
+            },
+            {
+              "value": "37",
+              "label": "Banking"
+            },
+            {
+              "value": "38",
+              "label": "Insurance"
+            },
+            {
+              "value": "44",
+              "label": "Beauty & Fitness"
+            },
+            {
+              "value": "45",
+              "label": "Health"
+            },
+            {
+              "value": "47",
+              "label": "Autos & Vehicles"
+            },
+            {
+              "value": "60",
+              "label": "Jobs"
+            },
+            {
+              "value": "65",
+              "label": "Hobbies & Leisure"
+            },
+            {
+              "value": "67",
+              "label": "Travel"
+            },
+            {
+              "value": "71",
+              "label": "Food & Drink"
+            },
+            {
+              "value": "74",
+              "label": "Education"
+            },
+            {
+              "value": "75",
+              "label": "Legal"
+            },
+            {
+              "value": "77",
+              "label": "Enterprise Technology"
+            },
+            {
+              "value": "107",
+              "label": "Investing"
+            },
+            {
+              "value": "157",
+              "label": "Human Resources"
+            },
+            {
+              "value": "174",
+              "label": "Science"
+            },
+            {
+              "value": "231",
+              "label": "Engineering & Technology"
+            },
+            {
+              "value": "233",
+              "label": "Energy & Utilities"
+            },
+            {
+              "value": "255",
+              "label": "Pharmaceuticals & Biotech"
+            },
+            {
+              "value": "278",
+              "label": "Accounting & Auditing"
+            },
+            {
+              "value": "279",
+              "label": "Credit & Lending"
+            },
+            {
+              "value": "314",
+              "label": "Computer Security"
+            },
+            {
+              "value": "329",
+              "label": "Business Services"
+            },
+            {
+              "value": "330",
+              "label": "Recruitment & Staffing"
+            },
+            {
+              "value": "331",
+              "label": "Corporate Training"
+            },
+            {
+              "value": "338",
+              "label": "Management"
+            },
+            {
+              "value": "343",
+              "label": "Data Management"
+            },
+            {
+              "value": "372",
+              "label": "Colleges & Universities"
+            },
+            {
+              "value": "422",
+              "label": "Web Design & Development"
+            },
+            {
+              "value": "555",
+              "label": "Visa & Immigration"
+            },
+            {
+              "value": "703",
+              "label": "Work & Labor Issues"
+            },
+            {
+              "value": "723",
+              "label": "Compensation & Benefits"
+            },
+            {
+              "value": "802",
+              "label": "Developer Jobs"
+            },
+            {
+              "value": "958",
+              "label": "Jobs & Education"
+            },
+            {
+              "value": "959",
+              "label": "Career Resources & Planning"
+            },
+            {
+              "value": "960",
+              "label": "Job Listings"
+            },
+            {
+              "value": "961",
+              "label": "Resumes & Portfolios"
+            },
+            {
+              "value": "367",
+              "label": "Distance Learning"
+            },
+            {
+              "value": "369",
+              "label": "Vocational & Continuing Education"
+            },
+            {
+              "value": "730",
+              "label": "Development Tools"
+            },
+            {
+              "value": "551",
+              "label": "Small Business"
+            },
+            {
+              "value": "718",
+              "label": "Outsourcing"
+            },
+            {
+              "value": "701",
+              "label": "Labor & Employment Law"
+            },
+            {
+              "value": "800",
+              "label": "Knowledge Management"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "gprop",
+          "label": "Property",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Search property. Omit for Web Search.",
+          "default": null,
+          "options": [
+            {
+              "value": "images",
+              "label": "Image Search"
+            },
+            {
+              "value": "news",
+              "label": "News Search"
+            },
+            {
+              "value": "froogle",
+              "label": "Google Shopping"
+            },
+            {
+              "value": "youtube",
+              "label": "YouTube Search"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "date",
+          "label": "Date range",
+          "type": "string",
+          "required": false,
+          "group": "Filters",
+          "help": "Presets: now 1-H, now 4-H, now 1-d, now 7-d, today 1-m, today 3-m, today 12-m, today 5-y, all (2004-present). Custom: 'yyyy-mm-dd yyyy-mm-dd' or 'yyyy-mm-ddThh yyyy-mm-ddThh' (within one week; hours depend on tz). Multiple comma-separated ranges only for TIMESERIES; count must match q and formats must match.",
+          "default": null,
+          "suggestions": [
+            {
+              "value": "now 1-H",
+              "label": "Past hour"
+            },
+            {
+              "value": "now 4-H",
+              "label": "Past 4 hours"
+            },
+            {
+              "value": "now 1-d",
+              "label": "Past day"
+            },
+            {
+              "value": "now 7-d",
+              "label": "Past 7 days"
+            },
+            {
+              "value": "today 1-m",
+              "label": "Past 30 days"
+            },
+            {
+              "value": "today 3-m",
+              "label": "Past 90 days"
+            },
+            {
+              "value": "today 12-m",
+              "label": "Past 12 months"
+            },
+            {
+              "value": "today 5-y",
+              "label": "Past 5 years"
+            },
+            {
+              "value": "all",
+              "label": "2004 to present"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "csv",
+          "label": "Return CSV",
+          "type": "boolean",
+          "required": false,
+          "group": "Advanced",
+          "help": "Set true to return CSV results as an array.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "include_low_search_volume",
+          "label": "Include low-volume regions",
+          "type": "boolean",
+          "required": false,
+          "group": "Advanced",
+          "help": "Include low search volume regions. Ignored unless data_type is GEO_MAP or GEO_MAP_0.",
+          "default": null,
+          "requires_one_of": null
+        }
+      ],
+      "pagination": {
+        "kind": "none",
+        "param": "",
+        "page_size": 0,
+        "notes": "No pagination. Result key depends on data_type."
+      },
+      "result_keys": [
+        "interest_over_time",
+        "compared_breakdown_by_region",
+        "interest_by_region",
+        "related_topics",
+        "related_queries"
+      ],
+      "result_item_fields": {
+        "interest_over_time.timeline_data": [
+          "date",
+          "timestamp",
+          "values"
+        ],
+        "interest_over_time.timeline_data.values": [
+          "query",
+          "query_index",
+          "value",
+          "extracted_value"
+        ]
+      },
+      "aira_use": "Compare demand for skills, job titles and technologies over time and by region to choose what to learn and where to apply.",
+      "endpoint": "https://serpapi.com/search.json",
+      "requires_any_of": [],
+      "verified": "docs"
+    },
+    {
+      "id": "google_trends_autocomplete",
+      "name": "Google Trends Autocomplete",
+      "category": "trends",
+      "family": "Google",
+      "description": "Suggested searches/topics for a Google Trends query, including topic IDs usable as q in the Trends engine.",
+      "docs_url": "https://serpapi.com/google-trends-autocomplete",
+      "params": [
+        {
+          "name": "q",
+          "label": "Query",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "Text you could use in a regular Google Trends search.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Interface language",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two or three-letter language code, optionally followed by a region code, e.g. en, es, fr, en-gb, es-419. Sets the autocomplete language.",
+          "default": null,
+          "requires_one_of": null
+        }
+      ],
+      "pagination": {
+        "kind": "none",
+        "param": "",
+        "page_size": 0,
+        "notes": "No pagination."
+      },
+      "result_keys": [
+        "suggestions"
+      ],
+      "result_item_fields": {
+        "suggestions": [
+          "q",
+          "title",
+          "type",
+          "link",
+          "serpapi_link"
+        ]
+      },
+      "aira_use": "Resolve skill or role names to exact Trends topics before comparing their popularity.",
+      "endpoint": "https://serpapi.com/search.json",
+      "requires_any_of": [],
+      "verified": "docs"
+    },
+    {
+      "id": "google_trends_trending_now",
+      "name": "Google Trends Trending Now",
+      "category": "trends",
+      "family": "Google",
+      "description": "Currently trending searches for a location over the past 4 hours to 7 days, with volume, growth, categories and breakdown.",
+      "docs_url": "https://serpapi.com/google-trends-trending-now",
+      "params": [
+        {
+          "name": "geo",
+          "label": "Location",
+          "type": "string",
+          "required": true,
+          "group": "Localization",
+          "help": "Location code, e.g. US, GB, IN, AR-C (region codes supported). US is used when unset.",
+          "default": "US",
+          "requires_one_of": null
+        },
+        {
+          "name": "hours",
+          "label": "Time window",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Number of past hours to retrieve.",
+          "default": "24",
+          "options": [
+            {
+              "value": "4",
+              "label": "Past 4 hours"
+            },
+            {
+              "value": "24",
+              "label": "Past 24 hours"
+            },
+            {
+              "value": "48",
+              "label": "Past 48 hours"
+            },
+            {
+              "value": "168",
+              "label": "Past 7 days"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "category_id",
+          "label": "Category",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Filters trends by Trending Now category (differs from Trends categories).",
+          "default": null,
+          "options": [
+            {
+              "value": "1",
+              "label": "Autos and Vehicles"
+            },
+            {
+              "value": "2",
+              "label": "Beauty and Fashion"
+            },
+            {
+              "value": "3",
+              "label": "Business and Finance"
+            },
+            {
+              "value": "20",
+              "label": "Climate"
+            },
+            {
+              "value": "4",
+              "label": "Entertainment"
+            },
+            {
+              "value": "5",
+              "label": "Food and Drink"
+            },
+            {
+              "value": "6",
+              "label": "Games"
+            },
+            {
+              "value": "7",
+              "label": "Health"
+            },
+            {
+              "value": "8",
+              "label": "Hobbies and Leisure"
+            },
+            {
+              "value": "9",
+              "label": "Jobs and Education"
+            },
+            {
+              "value": "10",
+              "label": "Law and Government"
+            },
+            {
+              "value": "11",
+              "label": "Other"
+            },
+            {
+              "value": "13",
+              "label": "Pets and Animals"
+            },
+            {
+              "value": "14",
+              "label": "Politics"
+            },
+            {
+              "value": "15",
+              "label": "Science"
+            },
+            {
+              "value": "16",
+              "label": "Shopping"
+            },
+            {
+              "value": "17",
+              "label": "Sports"
+            },
+            {
+              "value": "18",
+              "label": "Technology"
+            },
+            {
+              "value": "19",
+              "label": "Travel and Transportation"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "only_active",
+          "label": "Only active trends",
+          "type": "boolean",
+          "required": false,
+          "group": "Filters",
+          "help": "Filters results to only those currently active.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Interface language",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two or three-letter language code, optionally followed by a region code, e.g. en, es, fr, en-gb, es-419.",
+          "default": null,
+          "requires_one_of": null
+        }
+      ],
+      "pagination": {
+        "kind": "none",
+        "param": "",
+        "page_size": 0,
+        "notes": "No pagination."
+      },
+      "result_keys": [
+        "trending_searches"
+      ],
+      "result_item_fields": {
+        "trending_searches": [
+          "query",
+          "start_timestamp",
+          "active",
+          "search_volume",
+          "increase_percentage",
+          "categories",
+          "trend_breakdown",
+          "serpapi_google_trends_link",
+          "news_page_token",
+          "serpapi_news_link"
+        ]
+      },
+      "aira_use": "Spot hot industry topics and tech news to mention in networking messages and interviews.",
+      "endpoint": "https://serpapi.com/search.json",
+      "requires_any_of": [],
+      "verified": "docs"
+    },
+    {
+      "id": "google_trends_news",
+      "name": "Google Trends News",
+      "category": "news",
+      "family": "Google",
+      "description": "News articles associated with one trending search, fetched with the news_page_token from Trending Now.",
+      "docs_url": "https://serpapi.com/google-trends-news",
+      "params": [
+        {
+          "name": "page_token",
+          "label": "News page token",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "Token identifying which trending search's news to fetch: the news_page_token field of Google Trends Trending Now.",
+          "default": null,
+          "requires_one_of": null
+        }
+      ],
+      "pagination": {
+        "kind": "none",
+        "param": "",
+        "page_size": 0,
+        "notes": "No pagination."
+      },
+      "result_keys": [
+        "news"
+      ],
+      "result_item_fields": {
+        "news": [
+          "title",
+          "link",
+          "source",
+          "date",
+          "thumbnail"
+        ]
+      },
+      "aira_use": "Read the headlines behind a trend to speak about current events at interviews.",
+      "endpoint": "https://serpapi.com/search.json",
+      "requires_any_of": [],
+      "verified": "docs",
+      "unlisted": true
+    },
+    {
+      "id": "google_finance",
+      "name": "Google Finance",
+      "category": "finance",
+      "family": "Google",
+      "description": "Quote page for a stock, index, mutual fund, currency or futures contract: price graph, summary, key stats, financials and news.",
+      "docs_url": "https://serpapi.com/google-finance-api",
+      "params": [
+        {
+          "name": "q",
+          "label": "Ticker / query",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "Stock, index, mutual fund, currency or futures contract query, e.g. GOOGL:NASDAQ.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Interface language",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two or three-letter language code, optionally followed by a region code, e.g. en, es, fr, en-gb, es-419.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "window",
+          "label": "Graph window",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Time range for the graph.",
+          "default": "1D",
+          "options": [
+            {
+              "value": "1D",
+              "label": "1D"
+            },
+            {
+              "value": "5D",
+              "label": "5D"
+            },
+            {
+              "value": "1M",
+              "label": "1M"
+            },
+            {
+              "value": "6M",
+              "label": "6M"
+            },
+            {
+              "value": "YTD",
+              "label": "YTD"
+            },
+            {
+              "value": "1Y",
+              "label": "1Y"
+            },
+            {
+              "value": "5Y",
+              "label": "5Y"
+            },
+            {
+              "value": "MAX",
+              "label": "MAX"
+            }
+          ],
+          "requires_one_of": null
+        }
+      ],
+      "pagination": {
+        "kind": "none",
+        "param": "",
+        "page_size": 0,
+        "notes": "No pagination."
+      },
+      "result_keys": [
+        "graph",
+        "summary",
+        "knowledge_graph",
+        "news_results",
+        "financials",
+        "discover_more"
+      ],
+      "result_item_fields": {
+        "graph": [
+          "price",
+          "currency",
+          "date",
+          "volume"
+        ],
+        "summary": [
+          "title",
+          "stock",
+          "exchange",
+          "price",
+          "extracted_price",
+          "currency",
+          "date",
+          "price_movement",
+          "market",
+          "extensions"
+        ],
+        "news_results": [
+          "snippet",
+          "link",
+          "source",
+          "date",
+          "thumbnail"
+        ],
+        "financials": [
+          "title",
+          "results"
+        ],
+        "discover_more": [
+          "items"
+        ]
+      },
+      "aira_use": "Check an employer's stock trend and financials to judge stability before accepting an offer.",
+      "endpoint": "https://serpapi.com/search.json",
+      "requires_any_of": [],
+      "verified": "docs"
+    },
+    {
+      "id": "google_finance_markets",
+      "name": "Google Finance Markets",
+      "category": "finance",
+      "family": "Google",
+      "description": "Google Finance market overview: US, Europe, Asia, currencies, crypto and futures plus market news. Docs warn data is now limited.",
+      "docs_url": "https://serpapi.com/google-finance-markets",
+      "params": [
+        {
+          "name": "trend",
+          "label": "Market trend",
+          "type": "enum",
+          "required": true,
+          "group": "Search",
+          "help": "Market trend to retrieve. Only one value is accepted after a recent Google Finance update.",
+          "default": "indexes",
+          "options": [
+            {
+              "value": "indexes",
+              "label": "Indexes"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Interface language",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two or three-letter language code, optionally followed by a region code, e.g. en, es, fr, en-gb, es-419.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "gl",
+          "label": "Country",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two-letter country code, e.g. us, uk, fr.",
+          "default": null,
+          "requires_one_of": null
+        }
+      ],
+      "pagination": {
+        "kind": "none",
+        "param": "",
+        "page_size": 0,
+        "notes": "No pagination."
+      },
+      "result_keys": [
+        "markets",
+        "news_results"
+      ],
+      "result_item_fields": {
+        "markets": [
+          "stock",
+          "link",
+          "serpapi_link",
+          "name",
+          "price",
+          "currency",
+          "price_movement"
+        ],
+        "news_results": [
+          "snippet",
+          "link",
+          "source",
+          "date",
+          "thumbnail"
+        ]
+      },
+      "aira_use": "Get a quick macro view of markets that influence hiring and compensation in finance/tech.",
+      "endpoint": "https://serpapi.com/search.json",
+      "requires_any_of": [],
+      "verified": "docs"
+    },
+    {
+      "id": "google_play",
+      "name": "Google Play Store (Apps)",
+      "category": "app_store",
+      "family": "Google",
+      "description": "Searches the Google Play apps store by query, category, device or top chart.",
+      "docs_url": "https://serpapi.com/google-play-api",
+      "params": [
+        {
+          "name": "q",
+          "label": "Search query",
+          "type": "string",
+          "required": false,
+          "group": "Search",
+          "help": "Search query for the Google Play Apps Store. Cannot be combined with store_device.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "apps_category",
+          "label": "Apps category",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Apps store category. Cannot be combined with store_device.",
+          "default": null,
+          "options": [
+            {
+              "value": "ART_AND_DESIGN",
+              "label": "Art & Design"
+            },
+            {
+              "value": "AUTO_AND_VEHICLES",
+              "label": "Auto & Vehicles"
+            },
+            {
+              "value": "BEAUTY",
+              "label": "Beauty"
+            },
+            {
+              "value": "BOOKS_AND_REFERENCE",
+              "label": "Books & Reference"
+            },
+            {
+              "value": "BUSINESS",
+              "label": "Business"
+            },
+            {
+              "value": "COMICS",
+              "label": "Comics"
+            },
+            {
+              "value": "COMMUNICATION",
+              "label": "Communication"
+            },
+            {
+              "value": "DATING",
+              "label": "Dating"
+            },
+            {
+              "value": "EDUCATION",
+              "label": "Education"
+            },
+            {
+              "value": "ENTERTAINMENT",
+              "label": "Entertainment"
+            },
+            {
+              "value": "EVENTS",
+              "label": "Events"
+            },
+            {
+              "value": "FINANCE",
+              "label": "Finance"
+            },
+            {
+              "value": "FOOD_AND_DRINK",
+              "label": "Food & Drink"
+            },
+            {
+              "value": "HEALTH_AND_FITNESS",
+              "label": "Health & Fitness"
+            },
+            {
+              "value": "HOUSE_AND_HOME",
+              "label": "House & Home"
+            },
+            {
+              "value": "LIBRARIES_AND_DEMO",
+              "label": "Libraries & Demo"
+            },
+            {
+              "value": "LIFESTYLE",
+              "label": "Lifestyle"
+            },
+            {
+              "value": "MAPS_AND_NAVIGATION",
+              "label": "Maps & Navigation"
+            },
+            {
+              "value": "MEDICAL",
+              "label": "Medical"
+            },
+            {
+              "value": "MUSIC_AND_AUDIO",
+              "label": "Music & Audio"
+            },
+            {
+              "value": "NEWS_AND_MAGAZINES",
+              "label": "News & Magazines"
+            },
+            {
+              "value": "PARENTING",
+              "label": "Parenting"
+            },
+            {
+              "value": "PERSONALIZATION",
+              "label": "Personalization"
+            },
+            {
+              "value": "PHOTOGRAPHY",
+              "label": "Photography"
+            },
+            {
+              "value": "PRODUCTIVITY",
+              "label": "Productivity"
+            },
+            {
+              "value": "SHOPPING",
+              "label": "Shopping"
+            },
+            {
+              "value": "SOCIAL",
+              "label": "Social"
+            },
+            {
+              "value": "SPORTS",
+              "label": "Sports"
+            },
+            {
+              "value": "TOOLS",
+              "label": "Tools"
+            },
+            {
+              "value": "TRAVEL_AND_LOCAL",
+              "label": "Travel & Local"
+            },
+            {
+              "value": "VIDEO_PLAYERS",
+              "label": "Video Players & Editors"
+            },
+            {
+              "value": "ANDROID_WEAR",
+              "label": "Wear OS by Google"
+            },
+            {
+              "value": "WATCH_FACE",
+              "label": "Watch faces"
+            },
+            {
+              "value": "WEATHER",
+              "label": "Weather"
+            },
+            {
+              "value": "FAMILY",
+              "label": "Kids"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "store_device",
+          "label": "Device",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Device type used to sort results. Cannot be combined with apps_category or q.",
+          "default": "phone",
+          "options": [
+            {
+              "value": "phone",
+              "label": "Phone"
+            },
+            {
+              "value": "tablet",
+              "label": "Tablet"
+            },
+            {
+              "value": "tv",
+              "label": "TV"
+            },
+            {
+              "value": "chromebook",
+              "label": "Chromebook"
+            },
+            {
+              "value": "watch",
+              "label": "Watch"
+            },
+            {
+              "value": "car",
+              "label": "Car"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "age",
+          "label": "Age range",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Age subcategory. Only valid with apps_category=FAMILY (Kids). Default: all ages up to 12.",
+          "default": null,
+          "options": [
+            {
+              "value": "AGE_RANGE1",
+              "label": "Ages up to 5"
+            },
+            {
+              "value": "AGE_RANGE2",
+              "label": "Ages 6-8"
+            },
+            {
+              "value": "AGE_RANGE3",
+              "label": "Ages 9-12"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "chart",
+          "label": "Top chart",
+          "type": "string",
+          "required": false,
+          "group": "Filters",
+          "help": "Top charts, up to 50 results. Use a value from chart_options[index].value in a previous JSON output, e.g. topselling_free. Do not combine with pagination tokens.",
+          "default": null,
+          "suggestions": [
+            {
+              "value": "topselling_free",
+              "label": "Top free"
+            },
+            {
+              "value": "topselling_paid",
+              "label": "Top paid"
+            },
+            {
+              "value": "topgrossing",
+              "label": "Top grossing"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "gl",
+          "label": "Country",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two-letter country code, e.g. us, uk, fr. Default us.",
+          "default": "us",
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Interface language",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two or three-letter language code, optionally followed by a region code, e.g. en, es, fr, en-gb, es-419.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "next_page_token",
+          "label": "Next page token",
+          "type": "string",
+          "required": false,
+          "group": "Pagination",
+          "help": "Retrieves the next page. Do not combine with section_page_token, see_more_token or chart.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "section_page_token",
+          "label": "Section page token",
+          "type": "string",
+          "required": false,
+          "group": "Pagination",
+          "help": "Paginates within an individual section; found in each paginable row. Do not combine with next_page_token, see_more_token or chart.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "see_more_token",
+          "label": "See-more token",
+          "type": "string",
+          "required": false,
+          "group": "Pagination",
+          "help": "Paginates within a section; usually in next-page results. Do not combine with section_page_token, next_page_token or chart.",
+          "default": null,
+          "requires_one_of": null
+        }
+      ],
+      "pagination": {
+        "kind": "next_page_token",
+        "param": "next_page_token",
+        "page_size": 0,
+        "notes": "serpapi_pagination.next_page_token; also section_page_token / see_more_token for per-section paging."
+      },
+      "result_keys": [
+        "organic_results",
+        "serpapi_pagination"
+      ],
+      "result_item_fields": {
+        "organic_results[].items": [
+          "title",
+          "link",
+          "product_id",
+          "serpapi_link",
+          "rating",
+          "author",
+          "category",
+          "downloads",
+          "video",
+          "thumbnail",
+          "description"
+        ]
+      },
+      "aira_use": "Research a company's mobile app ratings, downloads and competitors before applying or interviewing.",
+      "endpoint": "https://serpapi.com/search.json",
+      "requires_any_of": [],
+      "verified": "docs"
+    },
+    {
+      "id": "google_play_product",
+      "name": "Google Play Product",
+      "category": "app_store",
+      "family": "Google",
+      "description": "Details of one Google Play app, movie, TV show, book or audiobook, with optional full review pagination.",
+      "docs_url": "https://serpapi.com/google-play-product-api",
+      "params": [
+        {
+          "name": "product_id",
+          "label": "Product ID",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "ID of the product to retrieve, e.g. an app package name like com.spotify.music.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "store",
+          "label": "Store",
+          "type": "enum",
+          "required": true,
+          "group": "Search",
+          "help": "Which Play store the product belongs to.",
+          "default": "apps",
+          "options": [
+            {
+              "value": "apps",
+              "label": "Apps"
+            },
+            {
+              "value": "movies",
+              "label": "Movies"
+            },
+            {
+              "value": "tv",
+              "label": "TV"
+            },
+            {
+              "value": "books",
+              "label": "Books"
+            },
+            {
+              "value": "audiobooks",
+              "label": "Audiobooks"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "season_id",
+          "label": "TV season ID",
+          "type": "string",
+          "required": false,
+          "group": "Advanced",
+          "help": "ID of a TV season. Use only when store=tv.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "gl",
+          "label": "Country",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two-letter country code, e.g. us, uk, fr. Default us.",
+          "default": "us",
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Interface language",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two or three-letter language code, optionally followed by a region code, e.g. en, es, fr, en-gb, es-419.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "all_reviews",
+          "label": "Fetch all reviews",
+          "type": "boolean",
+          "required": false,
+          "group": "Advanced",
+          "help": "true to retrieve all reviews.",
+          "default": false,
+          "requires_one_of": null
+        },
+        {
+          "name": "platform",
+          "label": "Review platform",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Use only when all_reviews=true.",
+          "default": "phone",
+          "options": [
+            {
+              "value": "phone",
+              "label": "Phone"
+            },
+            {
+              "value": "tablet",
+              "label": "Tablet"
+            },
+            {
+              "value": "watch",
+              "label": "Watch"
+            },
+            {
+              "value": "chromebook",
+              "label": "Chromebook"
+            },
+            {
+              "value": "tv",
+              "label": "TV"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "rating",
+          "label": "Review rating",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Filter reviews by star rating. Use only when all_reviews=true.",
+          "default": null,
+          "options": [
+            {
+              "value": "1",
+              "label": "1 star"
+            },
+            {
+              "value": "2",
+              "label": "2 stars"
+            },
+            {
+              "value": "3",
+              "label": "3 stars"
+            },
+            {
+              "value": "4",
+              "label": "4 stars"
+            },
+            {
+              "value": "5",
+              "label": "5 stars"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "sort_by",
+          "label": "Review sort",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Use only when all_reviews=true.",
+          "default": "1",
+          "options": [
+            {
+              "value": "1",
+              "label": "Most relevant"
+            },
+            {
+              "value": "2",
+              "label": "Newest"
+            },
+            {
+              "value": "3",
+              "label": "Rating"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "num",
+          "label": "Max reviews",
+          "type": "integer",
+          "required": false,
+          "group": "Pagination",
+          "help": "Maximum reviews to return, up to 199. Use only when all_reviews=true.",
+          "default": 40,
+          "requires_one_of": null
+        },
+        {
+          "name": "next_page_token",
+          "label": "Next page token",
+          "type": "string",
+          "required": false,
+          "group": "Pagination",
+          "help": "Token for the next page of reviews. Use only when all_reviews=true.",
+          "default": null,
+          "requires_one_of": null
+        }
+      ],
+      "pagination": {
+        "kind": "next_page_token",
+        "param": "next_page_token",
+        "page_size": 40,
+        "notes": "Review pagination only (all_reviews=true)."
+      },
+      "result_keys": [
+        "product_info",
+        "media",
+        "about_this_app",
+        "badges",
+        "categories",
+        "updated_on",
+        "data_safety",
+        "what_s_new",
+        "ratings",
+        "reviews",
+        "serpapi_pagination",
+        "developer_contact",
+        "similar_results"
+      ],
+      "result_item_fields": {
+        "product_info": [
+          "title",
+          "rating",
+          "reviews",
+          "downloads",
+          "thumbnail",
+          "extensions",
+          "authors",
+          "content_rating",
+          "offers"
+        ],
+        "reviews": [
+          "id",
+          "title",
+          "avatar",
+          "rating",
+          "snippet",
+          "likes",
+          "date",
+          "iso_date"
+        ],
+        "ratings": [
+          "stars",
+          "count"
+        ],
+        "similar_results.items": [
+          "title",
+          "link",
+          "product_id",
+          "serpapi_link",
+          "rating",
+          "extension",
+          "thumbnail"
+        ]
+      },
+      "aira_use": "Read app reviews and ratings to gauge product quality and user pain points of a target employer.",
+      "endpoint": "https://serpapi.com/search.json",
+      "requires_any_of": [],
+      "verified": "docs"
+    },
+    {
+      "id": "google_play_games",
+      "name": "Google Play Games",
+      "category": "app_store",
+      "family": "Google",
+      "description": "Searches the Google Play Games store by query, games category, device or top chart.",
+      "docs_url": "https://serpapi.com/google-play-games",
+      "params": [
+        {
+          "name": "q",
+          "label": "Search query",
+          "type": "string",
+          "required": false,
+          "group": "Search",
+          "help": "Query to search in the Google Play Games Store. Cannot be combined with store_device.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "games_category",
+          "label": "Games category",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Games Store category. Cannot be combined with store_device.",
+          "default": null,
+          "options": [
+            {
+              "value": "GAME",
+              "label": "Games"
+            },
+            {
+              "value": "GAME_ACTION",
+              "label": "Action"
+            },
+            {
+              "value": "GAME_ADVENTURE",
+              "label": "Adventure"
+            },
+            {
+              "value": "GAME_ARCADE",
+              "label": "Arcade"
+            },
+            {
+              "value": "GAME_BOARD",
+              "label": "Board"
+            },
+            {
+              "value": "GAME_CARD",
+              "label": "Card"
+            },
+            {
+              "value": "GAME_CASINO",
+              "label": "Casino"
+            },
+            {
+              "value": "GAME_CASUAL",
+              "label": "Casual"
+            },
+            {
+              "value": "GAME_EDUCATIONAL",
+              "label": "Educational"
+            },
+            {
+              "value": "GAME_MUSIC",
+              "label": "Music"
+            },
+            {
+              "value": "GAME_PUZZLE",
+              "label": "Puzzle"
+            },
+            {
+              "value": "GAME_RACING",
+              "label": "Racing"
+            },
+            {
+              "value": "GAME_ROLE_PLAYING",
+              "label": "Role Playing"
+            },
+            {
+              "value": "GAME_SIMULATION",
+              "label": "Simulation"
+            },
+            {
+              "value": "GAME_SPORTS",
+              "label": "Sports"
+            },
+            {
+              "value": "GAME_STRATEGY",
+              "label": "Strategy"
+            },
+            {
+              "value": "GAME_TRIVIA",
+              "label": "Trivia"
+            },
+            {
+              "value": "GAME_WORD",
+              "label": "Word"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "store_device",
+          "label": "Device",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Device used to sort results. Cannot be used with games_category or q.",
+          "default": "phone",
+          "options": [
+            {
+              "value": "phone",
+              "label": "Phone"
+            },
+            {
+              "value": "windows",
+              "label": "Windows"
+            },
+            {
+              "value": "tablet",
+              "label": "Tablet"
+            },
+            {
+              "value": "tv",
+              "label": "TV"
+            },
+            {
+              "value": "chromebook",
+              "label": "Chromebook"
+            },
+            {
+              "value": "watch",
+              "label": "Watch"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "chart",
+          "label": "Top chart",
+          "type": "string",
+          "required": false,
+          "group": "Filters",
+          "help": "Top charts, up to 50 results. Use a value from chart_options[index].value in a previous JSON output, e.g. topselling_free. Do not combine with pagination tokens.",
+          "default": null,
+          "suggestions": [
+            {
+              "value": "topselling_free",
+              "label": "Top free"
+            },
+            {
+              "value": "topselling_paid",
+              "label": "Top paid"
+            },
+            {
+              "value": "topgrossing",
+              "label": "Top grossing"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "gl",
+          "label": "Country",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two-letter country code, e.g. us, uk, fr. Default us.",
+          "default": "us",
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Interface language",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two or three-letter language code, optionally followed by a region code, e.g. en, es, fr, en-gb, es-419.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "next_page_token",
+          "label": "Next page token",
+          "type": "string",
+          "required": false,
+          "group": "Pagination",
+          "help": "Retrieves the next page. Do not combine with section_page_token, see_more_token or chart.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "section_page_token",
+          "label": "Section page token",
+          "type": "string",
+          "required": false,
+          "group": "Pagination",
+          "help": "Paginates within an individual section; found in each paginable row. Do not combine with next_page_token, see_more_token or chart.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "see_more_token",
+          "label": "See-more token",
+          "type": "string",
+          "required": false,
+          "group": "Pagination",
+          "help": "Paginates within a section; usually in next-page results. Do not combine with section_page_token, next_page_token or chart.",
+          "default": null,
+          "requires_one_of": null
+        }
+      ],
+      "pagination": {
+        "kind": "next_page_token",
+        "param": "next_page_token",
+        "page_size": 0,
+        "notes": "serpapi_pagination.next_page_token; also section_page_token / see_more_token for per-section paging."
+      },
+      "result_keys": [
+        "organic_results",
+        "serpapi_pagination"
+      ],
+      "result_item_fields": {
+        "organic_results[].items": [
+          "title",
+          "link",
+          "product_id",
+          "serpapi_link",
+          "rating",
+          "author",
+          "category",
+          "downloads",
+          "thumbnail",
+          "feature_image",
+          "description"
+        ]
+      },
+      "aira_use": "Scout game studios and their titles' ratings when targeting game-industry roles.",
+      "endpoint": "https://serpapi.com/search.json",
+      "requires_any_of": [],
+      "verified": "docs"
+    },
+    {
+      "id": "google_play_books",
+      "name": "Google Play Books",
+      "category": "app_store",
+      "family": "Google",
+      "description": "Searches the Google Play Books store by query, category, price or top chart (ebooks and audiobooks).",
+      "docs_url": "https://serpapi.com/google-play-books",
+      "params": [
+        {
+          "name": "q",
+          "label": "Search query",
+          "type": "string",
+          "required": false,
+          "group": "Search",
+          "help": "Book title or author. ISBNs without dashes or spaces may return exact matches.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "books_category",
+          "label": "Books category",
+          "type": "string",
+          "required": false,
+          "group": "Filters",
+          "help": "Book store category ID (coll_*, subj_*, audiobooks*). Full list at serpapi.com/google-play-books-categories; common ones are suggested.",
+          "default": null,
+          "suggestions": [
+            {
+              "value": "coll_1205",
+              "label": "Business & investing"
+            },
+            {
+              "value": "coll_1207",
+              "label": "Computers & technology"
+            },
+            {
+              "value": "coll_1670",
+              "label": "Education"
+            },
+            {
+              "value": "coll_1261",
+              "label": "Engineering"
+            },
+            {
+              "value": "coll_1605",
+              "label": "Health, mind & body"
+            },
+            {
+              "value": "coll_1209",
+              "label": "History"
+            },
+            {
+              "value": "coll_1214",
+              "label": "Parenting & families"
+            },
+            {
+              "value": "coll_1215",
+              "label": "Politics & current events"
+            },
+            {
+              "value": "coll_1671",
+              "label": "Science & math"
+            },
+            {
+              "value": "coll_1673",
+              "label": "Textbooks"
+            },
+            {
+              "value": "coll_1689",
+              "label": "Children's books"
+            },
+            {
+              "value": "coll_1204",
+              "label": "Biographies & memoirs"
+            },
+            {
+              "value": "coll_1665",
+              "label": "Arts & entertainment"
+            },
+            {
+              "value": "coll_1200",
+              "label": "Fiction & literature"
+            },
+            {
+              "value": "coll_1615",
+              "label": "Mystery & thrillers"
+            },
+            {
+              "value": "coll_1604",
+              "label": "Science fiction & fantasy"
+            },
+            {
+              "value": "coll_1224",
+              "label": "Travel"
+            },
+            {
+              "value": "coll_1672",
+              "label": "Young adult"
+            },
+            {
+              "value": "audiobooks",
+              "label": "Audiobooks"
+            },
+            {
+              "value": "subj_Business___Economics.Careers",
+              "label": "Business: Careers"
+            },
+            {
+              "value": "subj_Business___Economics.Leadership",
+              "label": "Business: Leadership"
+            },
+            {
+              "value": "subj_Business___Economics.Management",
+              "label": "Business: Management"
+            },
+            {
+              "value": "subj_Computers.Programming",
+              "label": "Computers: Programming"
+            },
+            {
+              "value": "subj_Computers.Security",
+              "label": "Computers: Security"
+            },
+            {
+              "value": "subj_Business___Economics.Human_Resources___Personnel_Management",
+              "label": "Business: Human resources"
+            },
+            {
+              "value": "audiobooks_coll_1205",
+              "label": "Audiobooks: Business & investing"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "price",
+          "label": "Price",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Sorts by price. Use only with q.",
+          "default": null,
+          "options": [
+            {
+              "value": "1",
+              "label": "Free"
+            },
+            {
+              "value": "2",
+              "label": "Paid"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "age",
+          "label": "Age range",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Age subcategory. Use only with books_category=coll_1689 (Children's books). Default: all ages up to 12.",
+          "default": null,
+          "options": [
+            {
+              "value": "AGE_RANGE1",
+              "label": "Ages up to 5"
+            },
+            {
+              "value": "AGE_RANGE2",
+              "label": "Ages 6-8"
+            },
+            {
+              "value": "AGE_RANGE3",
+              "label": "Ages 9-12"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "chart",
+          "label": "Top chart",
+          "type": "string",
+          "required": false,
+          "group": "Filters",
+          "help": "Top charts, up to 50 results. Use a value from chart_options[index].value in a previous JSON output, e.g. topselling_free. Do not combine with pagination tokens.",
+          "default": null,
+          "suggestions": [
+            {
+              "value": "topselling_free",
+              "label": "Top free"
+            },
+            {
+              "value": "topselling_paid",
+              "label": "Top paid"
+            },
+            {
+              "value": "topgrossing",
+              "label": "Top grossing"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "gl",
+          "label": "Country",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two-letter country code, e.g. us, uk, fr. Default us.",
+          "default": "us",
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Interface language",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two or three-letter language code, optionally followed by a region code, e.g. en, es, fr, en-gb, es-419.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "next_page_token",
+          "label": "Next page token",
+          "type": "string",
+          "required": false,
+          "group": "Pagination",
+          "help": "Retrieves the next page. Do not combine with section_page_token, see_more_token or chart.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "section_page_token",
+          "label": "Section page token",
+          "type": "string",
+          "required": false,
+          "group": "Pagination",
+          "help": "Paginates within an individual section; found in each paginable row. Do not combine with next_page_token, see_more_token or chart.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "see_more_token",
+          "label": "See-more token",
+          "type": "string",
+          "required": false,
+          "group": "Pagination",
+          "help": "Paginates within a section; usually in next-page results. Do not combine with section_page_token, next_page_token or chart.",
+          "default": null,
+          "requires_one_of": null
+        }
+      ],
+      "pagination": {
+        "kind": "next_page_token",
+        "param": "next_page_token",
+        "page_size": 0,
+        "notes": "serpapi_pagination.next_page_token; also section_page_token / see_more_token for per-section paging."
+      },
+      "result_keys": [
+        "organic_results",
+        "serpapi_pagination"
+      ],
+      "result_item_fields": {
+        "organic_results[].items": [
+          "title",
+          "link",
+          "product_id",
+          "serpapi_link",
+          "extension",
+          "thumbnail"
+        ],
+        "organic_results": [
+          "title",
+          "items"
+        ]
+      },
+      "aira_use": "Find career, leadership and technical books/audiobooks for learning and interview prep.",
+      "endpoint": "https://serpapi.com/search.json",
+      "requires_any_of": [],
+      "verified": "docs"
+    },
+    {
+      "id": "google_play_movies",
+      "name": "Google Play Movies & TV",
+      "category": "app_store",
+      "family": "Google",
+      "description": "Searches the Google Play Movies & TV store by query, category or top chart.",
+      "docs_url": "https://serpapi.com/google-play-movies",
+      "params": [
+        {
+          "name": "q",
+          "label": "Search query",
+          "type": "string",
+          "required": false,
+          "group": "Search",
+          "help": "Search query for the Google Play Movies Store.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "movies_category",
+          "label": "Movies category",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Movies store category.",
+          "default": null,
+          "options": [
+            {
+              "value": "MOVIE",
+              "label": "Movie"
+            },
+            {
+              "value": "1",
+              "label": "Movies - Action & adventure"
+            },
+            {
+              "value": "2",
+              "label": "Movies - Animation"
+            },
+            {
+              "value": "40",
+              "label": "Movies - Anime"
+            },
+            {
+              "value": "3",
+              "label": "Movies - Classics"
+            },
+            {
+              "value": "4",
+              "label": "Movies - Comedy"
+            },
+            {
+              "value": "5",
+              "label": "Movies - Crime"
+            },
+            {
+              "value": "7",
+              "label": "Movies - Documentary"
+            },
+            {
+              "value": "6",
+              "label": "Movies - Drama"
+            },
+            {
+              "value": "8",
+              "label": "Movies - Family"
+            },
+            {
+              "value": "27",
+              "label": "Movies - Independent"
+            },
+            {
+              "value": "18",
+              "label": "Movies - Indian cinema"
+            },
+            {
+              "value": "25",
+              "label": "Movies - Music"
+            },
+            {
+              "value": "11",
+              "label": "Movies - Mystery & suspense"
+            },
+            {
+              "value": "12",
+              "label": "Movies - Romance"
+            },
+            {
+              "value": "13",
+              "label": "Movies - Sci-fi & fantasy"
+            },
+            {
+              "value": "26",
+              "label": "Movies - Short films"
+            },
+            {
+              "value": "15",
+              "label": "Movies - Sports"
+            },
+            {
+              "value": "36",
+              "label": "Movies - Thriller"
+            },
+            {
+              "value": "9",
+              "label": "Movies - World cinema"
+            },
+            {
+              "value": "TV",
+              "label": "TV"
+            },
+            {
+              "value": "1001",
+              "label": "TV - Action & adventure"
+            },
+            {
+              "value": "1002",
+              "label": "TV - Animation"
+            },
+            {
+              "value": "1030",
+              "label": "TV - Anime"
+            },
+            {
+              "value": "1004",
+              "label": "TV - Comedy"
+            },
+            {
+              "value": "1017",
+              "label": "TV - Documentary"
+            },
+            {
+              "value": "1005",
+              "label": "TV - Drama"
+            },
+            {
+              "value": "1029",
+              "label": "TV - Family"
+            },
+            {
+              "value": "1025",
+              "label": "TV - Health & fitness"
+            },
+            {
+              "value": "1026",
+              "label": "TV - Learning & education"
+            },
+            {
+              "value": "1008",
+              "label": "TV - Reality & game shows"
+            },
+            {
+              "value": "1013",
+              "label": "TV - Sports"
+            },
+            {
+              "value": "FAMILY",
+              "label": "Family"
+            },
+            {
+              "value": "3001",
+              "label": "Family - TV"
+            },
+            {
+              "value": "2001",
+              "label": "Family - Action & adventure"
+            },
+            {
+              "value": "2002",
+              "label": "Family - Animation"
+            },
+            {
+              "value": "2003",
+              "label": "Family - Classics"
+            },
+            {
+              "value": "2004",
+              "label": "Family - Comedy"
+            },
+            {
+              "value": "2007",
+              "label": "Family - Education"
+            },
+            {
+              "value": "2005",
+              "label": "Family - Music"
+            },
+            {
+              "value": "2006",
+              "label": "Family - Sci-fi & fantasy"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "age",
+          "label": "Age range",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Age subcategory. Use only with movies_category=FAMILY. Default: all ages up to 12.",
+          "default": null,
+          "options": [
+            {
+              "value": "AGE_RANGE1",
+              "label": "Ages up to 5"
+            },
+            {
+              "value": "AGE_RANGE2",
+              "label": "Ages 6-8"
+            },
+            {
+              "value": "AGE_RANGE3",
+              "label": "Ages 9-12"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "chart",
+          "label": "Top chart",
+          "type": "string",
+          "required": false,
+          "group": "Filters",
+          "help": "Top charts, up to 50 results. Use a value from chart_options[index].value in a previous JSON output, e.g. topselling_free. Do not combine with pagination tokens.",
+          "default": null,
+          "suggestions": [
+            {
+              "value": "topselling_free",
+              "label": "Top free"
+            },
+            {
+              "value": "topselling_paid",
+              "label": "Top paid"
+            },
+            {
+              "value": "topgrossing",
+              "label": "Top grossing"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "gl",
+          "label": "Country",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two-letter country code, e.g. us, uk, fr. Default us.",
+          "default": "us",
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Interface language",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two or three-letter language code, optionally followed by a region code, e.g. en, es, fr, en-gb, es-419.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "next_page_token",
+          "label": "Next page token",
+          "type": "string",
+          "required": false,
+          "group": "Pagination",
+          "help": "Retrieves the next page. Do not combine with section_page_token, see_more_token or chart.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "section_page_token",
+          "label": "Section page token",
+          "type": "string",
+          "required": false,
+          "group": "Pagination",
+          "help": "Paginates within an individual section; found in each paginable row. Do not combine with next_page_token, see_more_token or chart.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "see_more_token",
+          "label": "See-more token",
+          "type": "string",
+          "required": false,
+          "group": "Pagination",
+          "help": "Paginates within a section; usually in next-page results. Do not combine with section_page_token, next_page_token or chart.",
+          "default": null,
+          "requires_one_of": null
+        }
+      ],
+      "pagination": {
+        "kind": "next_page_token",
+        "param": "next_page_token",
+        "page_size": 0,
+        "notes": "serpapi_pagination.next_page_token; also section_page_token / see_more_token for per-section paging."
+      },
+      "result_keys": [
+        "organic_results",
+        "chart_options",
+        "serpapi_pagination"
+      ],
+      "result_item_fields": {
+        "organic_results[].items": [
+          "title",
+          "link",
+          "product_id",
+          "serpapi_link",
+          "rating",
+          "category",
+          "price",
+          "thumbnail"
+        ]
+      },
+      "aira_use": "Low relevance: find documentaries and learning-oriented TV for career inspiration.",
+      "endpoint": "https://serpapi.com/search.json",
+      "requires_any_of": [],
+      "verified": "docs"
+    },
+    {
+      "id": "google_sports",
+      "name": "Google Sports",
+      "category": "web",
+      "family": "Google",
+      "description": "Google sports results (games, leagues, teams) for a Knowledge Graph entity: games, standings, players, brackets, stats, rankings.",
+      "docs_url": "https://serpapi.com/google-sports-api",
+      "params": [
+        {
+          "name": "kgmid",
+          "label": "Knowledge Graph ID",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "Knowledge Graph ID of the entity (from Google Search/Sports results or Wikidata Freebase ID).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "sp",
+          "label": "Sport",
+          "type": "enum",
+          "required": true,
+          "group": "Search",
+          "help": "Sport of the selected entity.",
+          "default": null,
+          "options": [
+            {
+              "value": "ft",
+              "label": "Football (soccer)"
+            },
+            {
+              "value": "bs",
+              "label": "Basketball"
+            },
+            {
+              "value": "bb",
+              "label": "Baseball"
+            },
+            {
+              "value": "cr",
+              "label": "Cricket"
+            },
+            {
+              "value": "af",
+              "label": "American football"
+            },
+            {
+              "value": "ih",
+              "label": "Ice hockey"
+            },
+            {
+              "value": "rg",
+              "label": "Rugby"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "type",
+          "label": "Entity type",
+          "type": "enum",
+          "required": true,
+          "group": "Search",
+          "help": "Entity type.",
+          "default": null,
+          "options": [
+            {
+              "value": "game",
+              "label": "Game"
+            },
+            {
+              "value": "league",
+              "label": "League"
+            },
+            {
+              "value": "team",
+              "label": "Team"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "tab",
+          "label": "Tab",
+          "type": "enum",
+          "required": false,
+          "group": "Search",
+          "help": "Required for league and team; optional for game (American football only).",
+          "default": null,
+          "options": [
+            {
+              "value": "gm",
+              "label": "Games (league/team)"
+            },
+            {
+              "value": "sn",
+              "label": "Standings (league/team)"
+            },
+            {
+              "value": "pl",
+              "label": "Players (league/team)"
+            },
+            {
+              "value": "br",
+              "label": "Brackets (league/team)"
+            },
+            {
+              "value": "st",
+              "label": "Stats (league only)"
+            },
+            {
+              "value": "rn",
+              "label": "Rankings (league only)"
+            },
+            {
+              "value": "ov",
+              "label": "Overview (American football game only)"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "season_kgmid",
+          "label": "Season KG ID",
+          "type": "string",
+          "required": false,
+          "group": "Filters",
+          "help": "Knowledge Graph ID of a specific standings season.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "mpd",
+          "label": "Middle time",
+          "type": "string",
+          "required": false,
+          "group": "Filters",
+          "help": "Middle time of league/team games, ISO 8601 UTC e.g. 2026-05-29T12:30:00Z. Cannot be used with moa or mob.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "moa",
+          "label": "Earliest time",
+          "type": "string",
+          "required": false,
+          "group": "Filters",
+          "help": "Earliest game time, ISO 8601 UTC. Cannot be used with mpd.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "mob",
+          "label": "Latest time",
+          "type": "string",
+          "required": false,
+          "group": "Filters",
+          "help": "Latest game time, ISO 8601 UTC. Cannot be used with mpd.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "gl",
+          "label": "Country",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two-letter country code, e.g. us, uk, fr.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Interface language",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two or three-letter language code, optionally followed by a region code, e.g. en, es, fr, en-gb, es-419.",
+          "default": null,
+          "requires_one_of": null
+        }
+      ],
+      "pagination": {
+        "kind": "none",
+        "param": "",
+        "page_size": 0,
+        "notes": "Docs page does not describe the JSON response."
+      },
+      "result_keys": [],
+      "result_item_fields": {},
+      "aira_use": "n/a",
+      "endpoint": "https://serpapi.com/search.json",
+      "requires_any_of": [],
+      "verified": "docs"
+    }
+  ]
+}

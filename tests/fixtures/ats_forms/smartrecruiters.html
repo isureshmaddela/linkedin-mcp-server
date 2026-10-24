@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Apply - Solutions Architect - Example Corp</title>
+<style>
+  body { font-family: Helvetica, Arial, sans-serif; margin: 0; color: #222; }
+  header { padding: 24px 32px; border-bottom: 1px solid #ddd; }
+  main { max-width: 720px; padding: 24px 32px; }
+  .st-field { margin: 0 0 18px; }
+  .st-field > label { display: block; font-weight: 600; margin-bottom: 4px; }
+  .st-field input[type=text], .st-field input[type=email], .st-field input[type=tel], .st-field select, .st-field textarea { width: 100%; max-width: 480px; padding: 6px; box-sizing: border-box; }
+  .st-consent label { display: inline; font-weight: 400; }
+  .st-submit { background: #0a7f5a; color: #fff; border: 0; padding: 10px 18px; font-size: 15px; }
+  .already-applied { background: #fff5d6; border: 1px solid #e8c764; padding: 16px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>Solutions Architect</h1>
+  <div>Example Corp · Austin, TX · Full-time</div>
+</header>
+<main>
+  <h2>Apply for this position</h2>
+  <form id="st-apply-form" action="submit" method="post" enctype="multipart/form-data" novalidate>
+    <div class="st-field">
+      <label for="firstName">First Name *</label>
+      <input type="text" id="firstName" name="firstName" required>
+    </div>
+    <div class="st-field">
+      <label for="lastName">Last Name *</label>
+      <input type="text" id="lastName" name="lastName" required>
+    </div>
+    <div class="st-field">
+      <label for="email">Email *</label>
+      <input type="email" id="email" name="email" required>
+    </div>
+    <div class="st-field">
+      <label for="phoneNumber">Phone Number</label>
+      <input type="tel" id="phoneNumber" name="phoneNumber">
+    </div>
+    <div class="st-field">
+      <label for="resume">Resume *</label>
+      <input type="file" id="resume" name="resume" accept=".pdf,.doc,.docx" required>
+    </div>
+    <div class="st-field">
+      <label for="linkedin">LinkedIn</label>
+      <input type="text" id="linkedin" name="webProfiles.linkedin">
+    </div>
+    <div class="st-field">
+      <label for="experienceYears">Years of Experience</label>
+      <input type="text" id="experienceYears" name="experienceYears">
+    </div>
+    <!-- stub:extra-questions -->
+    <div class="st-field st-consent">
+      <input type="checkbox" id="privacyPolicyConsent" name="privacyPolicyConsent" value="true" required>
+      <label for="privacyPolicyConsent">I acknowledge the Privacy Policy *</label>
+    </div>
+    <!-- stub:captcha -->
+    <button type="submit" class="st-submit">Submit application</button>
+  </form>
+</main>
+<footer style="padding:16px 32px;color:#777;font-size:12px">Powered by SmartRecruiters (stand-in page for tests)</footer>
+</body>
+</html>

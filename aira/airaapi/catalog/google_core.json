@@ -1,0 +1,5211 @@
+{
+  "engines": [
+    {
+      "id": "google",
+      "name": "Google Search",
+      "category": "web",
+      "description": "Scrapes Google web search results (organic results, knowledge graph, local pack, related questions, AI Overview token and more) as JSON, with location, date and language controls.",
+      "docs_url": "https://serpapi.com/search-api",
+      "params": [
+        {
+          "name": "q",
+          "label": "Search query",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "Query to search; supports operators such as inurl:, site:, intitle: and advanced params like as_dt/as_eq. site: cannot be used with tbm=nws.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "location",
+          "label": "Location",
+          "type": "location",
+          "required": false,
+          "group": "Localization",
+          "help": "Where the search originates. Most popular match is used if several match; city level recommended (see /locations.json). Cannot be used with uule. Can also be combined with gl for consistent country filtering.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "uule",
+          "label": "UULE (encoded location)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Google-encoded location. Cannot be used together with location. A matching gl is needed for coordinate-based uule. Use SerpApi's UULE Generator to create one.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "lat",
+          "label": "GPS latitude",
+          "type": "number",
+          "required": false,
+          "group": "Localization",
+          "help": "GPS latitude of the search origin. Required when lon is used; use a matching gl. Cannot be combined with location/uule.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "lon",
+          "label": "GPS longitude",
+          "type": "number",
+          "required": false,
+          "group": "Localization",
+          "help": "GPS longitude of the search origin. Required when lat is used; use a matching gl. Cannot be combined with location/uule.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "radius",
+          "label": "Radius (meters)",
+          "type": "integer",
+          "required": false,
+          "group": "Localization",
+          "help": "Distance in meters to bias results. Range per device: desktop 1..199, tablet 1..1000, mobile 1..1000. Usable with location or lat/lon.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "ludocid",
+          "label": "Place CID (ludocid)",
+          "type": "string",
+          "required": false,
+          "group": "Advanced",
+          "help": "Google CID (customer identifier) of a place; found as place_id in Google Search/Local results or data_cid in Google Maps results.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "lsig",
+          "label": "Knowledge graph map view (lsig)",
+          "type": "string",
+          "required": false,
+          "group": "Advanced",
+          "help": "Forces the knowledge graph map view to show up; the lsig ID is found via the Local Pack API or Google Local API.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "kgmid",
+          "label": "Knowledge Graph ID (kgmid)",
+          "type": "string",
+          "required": false,
+          "group": "Advanced",
+          "help": "Google Knowledge Graph ID (KGMID) of the listing to scrape. For some searches it overrides all other parameters except start.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "si",
+          "label": "Cached search params (si)",
+          "type": "string",
+          "required": false,
+          "group": "Advanced",
+          "help": "Cached search parameters of the Google search to scrape; for some searches overrides everything except start. Can scrape Knowledge Graph tabs.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "ibp",
+          "label": "Layout/expansion (ibp)",
+          "type": "string",
+          "required": false,
+          "group": "Advanced",
+          "help": "Renders layouts and expansions for some elements (e.g. gwp;0,7 to expand searches with ludocid for an expanded knowledge graph).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "uds",
+          "label": "Filter string (uds)",
+          "type": "string",
+          "required": false,
+          "group": "Advanced",
+          "help": "Google-provided filter string; values come from the filters section of a response (uds, q and serpapi_link per filter).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "color_scheme",
+          "label": "Color scheme",
+          "type": "enum",
+          "required": false,
+          "group": "Advanced",
+          "help": "Forces the color scheme of the results page. If unset a random scheme is returned.",
+          "default": null,
+          "options": [
+            {
+              "value": "light",
+              "label": "Light"
+            },
+            {
+              "value": "dark",
+              "label": "Dark"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "google_domain",
+          "label": "Google domain",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Google domain to use, e.g. google.com (default), google.co.uk, google.ca.",
+          "default": "google.com",
+          "requires_one_of": null
+        },
+        {
+          "name": "gl",
+          "label": "Country (gl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two-letter country code for the Google search (e.g. us, uk, fr).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Language (hl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Language code for the Google search: two or three letters (en, es, fr), optionally with region (en-gb, es-419).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "cr",
+          "label": "Limit to countries (cr)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "One or more countries to limit the search to, as country{ISO2 upper-case} delimited by | (e.g. countryFR|countryDE).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "lr",
+          "label": "Limit to languages (lr)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "One or more languages to limit the search to, as lang_{code} delimited by | (e.g. lang_fr|lang_de).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "tbs",
+          "label": "Advanced filters (tbs)",
+          "type": "string",
+          "required": false,
+          "group": "Filters",
+          "help": "(to be searched) Advanced search parameters not possible in the regular query field (e.g. date ranges, patents, news, videos, images, apps, text content).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "safe",
+          "label": "Adult content filter",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Level of filtering for adult content: active or off. By default Google blurs explicit content.",
+          "default": null,
+          "options": [
+            {
+              "value": "active",
+              "label": "Active (filter)"
+            },
+            {
+              "value": "off",
+              "label": "Off"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "nfpr",
+          "label": "Exclude auto-corrected results",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "1 excludes results from an auto-corrected query when the original is misspelled; 0 includes them (default). May not prevent auto-corrected results if nothing else is available.",
+          "default": "0",
+          "options": [
+            {
+              "value": "0",
+              "label": "Include (default)"
+            },
+            {
+              "value": "1",
+              "label": "Exclude"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "filter",
+          "label": "Similar/omitted results filter",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "1 (default) enables the 'Similar Results' and 'Omitted Results' filters; 0 disables them.",
+          "default": "1",
+          "options": [
+            {
+              "value": "1",
+              "label": "On (default)"
+            },
+            {
+              "value": "0",
+              "label": "Off"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "tbm",
+          "label": "Search type (tbm)",
+          "type": "enum",
+          "required": false,
+          "group": "Advanced",
+          "help": "Type of search: none = regular Google search; isch Images, lcl Local, vid Videos, nws News, shop Shopping, pts Patents, or any other Google service value.",
+          "default": null,
+          "options": [
+            {
+              "value": "isch",
+              "label": "Google Images"
+            },
+            {
+              "value": "lcl",
+              "label": "Google Local"
+            },
+            {
+              "value": "vid",
+              "label": "Google Videos"
+            },
+            {
+              "value": "nws",
+              "label": "Google News"
+            },
+            {
+              "value": "shop",
+              "label": "Google Shopping"
+            },
+            {
+              "value": "pts",
+              "label": "Google Patents"
+            }
+          ],
+          "options_truncated": true,
+          "requires_one_of": null
+        },
+        {
+          "name": "start",
+          "label": "Result offset (start)",
+          "type": "integer",
+          "required": false,
+          "group": "Pagination",
+          "help": "Result offset used for pagination: 0 (default) is page 1, 10 is page 2, 20 is page 3, etc.",
+          "default": 0,
+          "requires_one_of": null
+        },
+        {
+          "name": "device",
+          "label": "Device",
+          "type": "enum",
+          "required": false,
+          "group": "Advanced",
+          "help": "Device used to fetch results: desktop (default), tablet (iPad) or mobile.",
+          "default": "desktop",
+          "options": [
+            {
+              "value": "desktop",
+              "label": "Desktop"
+            },
+            {
+              "value": "tablet",
+              "label": "Tablet"
+            },
+            {
+              "value": "mobile",
+              "label": "Mobile"
+            }
+          ],
+          "requires_one_of": null
+        }
+      ],
+      "pagination": {
+        "kind": "start",
+        "param": "start",
+        "page_size": 10,
+        "notes": "0 = first page, 10 = second page, 20 = third, etc."
+      },
+      "result_keys": [
+        "search_information",
+        "local_map",
+        "local_results",
+        "knowledge_graph",
+        "immersive_products",
+        "related_questions",
+        "organic_results",
+        "perspectives",
+        "related_searches",
+        "refine_this_search",
+        "refine_search_filters",
+        "things_to_know",
+        "ai_overview",
+        "pagination",
+        "serpapi_pagination"
+      ],
+      "result_item_fields": {
+        "organic_results": [
+          "position",
+          "title",
+          "link",
+          "redirect_link",
+          "displayed_link",
+          "thumbnail",
+          "favicon",
+          "snippet",
+          "snippet_highlighted_words",
+          "sitelinks",
+          "source"
+        ],
+        "related_questions": [
+          "question",
+          "type",
+          "snippet",
+          "title",
+          "date",
+          "link",
+          "displayed_link",
+          "thumbnail",
+          "next_page_token",
+          "serpapi_link"
+        ],
+        "related_searches": [
+          "block_position",
+          "query",
+          "link",
+          "serpapi_link"
+        ],
+        "local_results.places": [
+          "position",
+          "title",
+          "type",
+          "address",
+          "rating",
+          "reviews",
+          "price",
+          "description",
+          "place_id",
+          "lsig",
+          "gps_coordinates",
+          "thumbnail"
+        ],
+        "perspectives": [
+          "author",
+          "author_description",
+          "source",
+          "title",
+          "link",
+          "date",
+          "extensions",
+          "thumbnails"
+        ]
+      },
+      "aira_use": "Research any employer, salary range, interview question or hiring manager with real Google results, and get the AI Overview, knowledge graph and People Also Ask for a company in one call.",
+      "endpoint": "https://serpapi.com/search.json",
+      "family": "Google",
+      "verified": "docs",
+      "requires_any_of": []
+    },
+    {
+      "id": "google_light",
+      "name": "Google Light Search",
+      "category": "web",
+      "description": "A faster, lighter version of Google Search that returns organic results, related questions and related searches while prioritizing speed over special features.",
+      "docs_url": "https://serpapi.com/google-light-api",
+      "params": [
+        {
+          "name": "q",
+          "label": "Search query",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "Query to search; supports operators such as inurl:, site:, intitle: and advanced params like as_dt/as_eq.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "location",
+          "label": "Location",
+          "type": "location",
+          "required": false,
+          "group": "Localization",
+          "help": "Where the search originates. Most popular match is used if several match; city level recommended (see /locations.json). Cannot be used with uule.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "uule",
+          "label": "UULE (encoded location)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Google-encoded location. Cannot be used together with location. A matching gl is needed for coordinate-based uule. Use SerpApi's UULE Generator to create one.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "google_domain",
+          "label": "Google domain",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Google domain to use, e.g. google.com (default), google.co.uk, google.ca.",
+          "default": "google.com",
+          "requires_one_of": null
+        },
+        {
+          "name": "gl",
+          "label": "Country (gl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two-letter country code for the Google search (e.g. us, uk, fr).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Language (hl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Language code for the Google search: two or three letters (en, es, fr), optionally with region (en-gb, es-419).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "lr",
+          "label": "Limit to languages (lr)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "One or more languages to limit the search to, as lang_{code} delimited by | (e.g. lang_fr|lang_de).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "safe",
+          "label": "Adult content filter",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Level of filtering for adult content: active or off. By default Google blurs explicit content.",
+          "default": null,
+          "options": [
+            {
+              "value": "active",
+              "label": "Active (filter)"
+            },
+            {
+              "value": "off",
+              "label": "Off"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "nfpr",
+          "label": "Exclude auto-corrected results",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "1 excludes results from an auto-corrected query when the original is misspelled; 0 includes them (default). May not prevent auto-corrected results if nothing else is available.",
+          "default": "0",
+          "options": [
+            {
+              "value": "0",
+              "label": "Include (default)"
+            },
+            {
+              "value": "1",
+              "label": "Exclude"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "filter",
+          "label": "Similar/omitted results filter",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "1 (default) enables the 'Similar Results' and 'Omitted Results' filters; 0 disables them.",
+          "default": "1",
+          "options": [
+            {
+              "value": "1",
+              "label": "On (default)"
+            },
+            {
+              "value": "0",
+              "label": "Off"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "start",
+          "label": "Result offset (start)",
+          "type": "integer",
+          "required": false,
+          "group": "Pagination",
+          "help": "Result offset used for pagination: 0 (default) is page 1, 10 is page 2, 20 is page 3, etc.",
+          "default": 0,
+          "requires_one_of": null
+        },
+        {
+          "name": "device",
+          "label": "Device",
+          "type": "enum",
+          "required": false,
+          "group": "Advanced",
+          "help": "Device used to fetch results: desktop (default), tablet (iPad) or mobile.",
+          "default": "desktop",
+          "options": [
+            {
+              "value": "desktop",
+              "label": "Desktop"
+            },
+            {
+              "value": "tablet",
+              "label": "Tablet"
+            },
+            {
+              "value": "mobile",
+              "label": "Mobile"
+            }
+          ],
+          "requires_one_of": null
+        }
+      ],
+      "pagination": {
+        "kind": "start",
+        "param": "start",
+        "page_size": 10,
+        "notes": "0 = first page, 10 = second page, 20 = third, etc."
+      },
+      "result_keys": [
+        "search_information",
+        "organic_results",
+        "related_questions",
+        "related_searches",
+        "serpapi_pagination"
+      ],
+      "result_item_fields": {
+        "organic_results": [
+          "position",
+          "title",
+          "link",
+          "displayed_link",
+          "snippet",
+          "sitelinks"
+        ],
+        "related_questions": [
+          "question",
+          "snippet",
+          "snippet_highlighted_words",
+          "title",
+          "link",
+          "displayed_link",
+          "more_results_link"
+        ],
+        "related_searches": [
+          "query",
+          "link",
+          "serpapi_link"
+        ]
+      },
+      "aira_use": "Run fast, cheap Google lookups in bulk (company names, job titles, salary pages) when you only need links and snippets.",
+      "endpoint": "https://serpapi.com/search.json",
+      "family": "Google",
+      "verified": "docs",
+      "requires_any_of": []
+    },
+    {
+      "id": "google_ai_mode",
+      "name": "Google AI Mode",
+      "category": "ai",
+      "description": "Scrapes Google AI Mode answers: generated text blocks, references, inline media and shopping results, with optional multi-turn follow-up conversations.",
+      "docs_url": "https://serpapi.com/google-ai-mode-api",
+      "params": [
+        {
+          "name": "q",
+          "label": "Prompt",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "Query/prompt for Google AI Mode. Multiple languages (including English) may be supported, though not all are available yet.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "location",
+          "label": "Location",
+          "type": "location",
+          "required": false,
+          "group": "Localization",
+          "help": "Where the search originates. Most popular match is used if several match; city level recommended (see /locations.json). Cannot be used with uule.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "uule",
+          "label": "UULE (encoded location)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Google-encoded location. Cannot be used together with location. A matching gl is needed for coordinate-based uule. Use SerpApi's UULE Generator to create one.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "gl",
+          "label": "Country (gl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two-letter country code for the Google search (e.g. us, uk, fr).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Language (hl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Language code for the Google search: two or three letters (en, es, fr), optionally with region (en-gb, es-419).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "continuable",
+          "label": "Make conversation continuable",
+          "type": "boolean",
+          "required": false,
+          "group": "Advanced",
+          "help": "Set true to receive a subsequent_request_token that lets you ask a follow-up (multi-turn). Defaults to false.",
+          "default": false,
+          "requires_one_of": null
+        },
+        {
+          "name": "subsequent_request_token",
+          "label": "Follow-up token",
+          "type": "string",
+          "required": false,
+          "group": "Advanced",
+          "help": "Token returned by a previous request (with continuable=true) used to send a follow-up in the same conversation. Include a new q and reuse the same gl, hl and location.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "image_url",
+          "label": "Image URL",
+          "type": "string",
+          "required": false,
+          "group": "Advanced",
+          "help": "URL of an image to include in the prompt as additional context for the AI answer.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "device",
+          "label": "Device",
+          "type": "enum",
+          "required": false,
+          "group": "Advanced",
+          "help": "Device used to fetch results: desktop (default), tablet (iPad) or mobile.",
+          "default": "desktop",
+          "options": [
+            {
+              "value": "desktop",
+              "label": "Desktop"
+            },
+            {
+              "value": "tablet",
+              "label": "Tablet"
+            },
+            {
+              "value": "mobile",
+              "label": "Mobile"
+            }
+          ],
+          "requires_one_of": null
+        }
+      ],
+      "pagination": {
+        "kind": "none",
+        "param": null,
+        "page_size": null,
+        "notes": "Use continuable + subsequent_request_token for multi-turn follow-ups."
+      },
+      "result_keys": [
+        "subsequent_request_token",
+        "shopping_results",
+        "text_blocks",
+        "reconstructed_markdown",
+        "references",
+        "related_questions"
+      ],
+      "result_item_fields": {
+        "text_blocks": [
+          "type",
+          "snippet",
+          "reference_indexes"
+        ],
+        "references": [
+          "title",
+          "link",
+          "snippet",
+          "source",
+          "thumbnail",
+          "source_icon",
+          "index"
+        ],
+        "shopping_results": [
+          "title",
+          "product_link",
+          "immersive_product_page_token",
+          "serpapi_immersive_product_api",
+          "thumbnail",
+          "price",
+          "extracted_price",
+          "old_price",
+          "extracted_old_price",
+          "index"
+        ],
+        "related_questions": [
+          "question",
+          "serpapi_link"
+        ]
+      },
+      "aira_use": "Ask Google's AI for a sourced briefing on a company, role, interview process or salary band, then chain follow-up questions in the same conversation.",
+      "endpoint": "https://serpapi.com/search.json",
+      "family": "Google",
+      "verified": "docs",
+      "requires_any_of": []
+    },
+    {
+      "id": "google_ai_overview",
+      "name": "Google AI Overview",
+      "category": "ai",
+      "description": "Fetches the full Google AI Overview for a search using the ai_overview.page_token returned by the Google Search API (token expires within 1 minute).",
+      "docs_url": "https://serpapi.com/google-ai-overview-api",
+      "params": [
+        {
+          "name": "page_token",
+          "label": "AI Overview page token",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "Token to fetch the AI Overview from: use ai_overview.page_token from a Google Search API response. It expires within 1 minute of the search, so use it immediately.",
+          "default": null,
+          "requires_one_of": null
+        }
+      ],
+      "pagination": {
+        "kind": "none",
+        "param": null,
+        "page_size": null,
+        "notes": "Single request per token."
+      },
+      "result_keys": [
+        "ai_overview"
+      ],
+      "result_item_fields": {
+        "ai_overview.text_blocks": [
+          "type",
+          "snippet",
+          "snippet_highlighted_words",
+          "list",
+          "reference_indexes"
+        ],
+        "ai_overview.references": [
+          "title",
+          "link",
+          "snippet",
+          "source",
+          "index"
+        ]
+      },
+      "aira_use": "Expand the AI summary Google shows for a company or role query into full text and cited sources for research notes.",
+      "endpoint": "https://serpapi.com/search.json",
+      "family": "Google",
+      "verified": "docs",
+      "requires_any_of": []
+    },
+    {
+      "id": "google_gemini",
+      "name": "Google Gemini",
+      "category": "ai",
+      "description": "Scrapes Google Gemini answers (text blocks, references, places, products, images, follow-up questions) with multi-turn conversation support.",
+      "docs_url": "https://serpapi.com/google-gemini-api",
+      "params": [
+        {
+          "name": "q",
+          "label": "Prompt",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "The prompt to send to Google Gemini.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "subsequent_request_token",
+          "label": "Follow-up token",
+          "type": "string",
+          "required": false,
+          "group": "Advanced",
+          "help": "Token returned by a previous Gemini request; pass it with a new q to send a follow-up with previous prompts and answers as context. Tokens expire, so follow up soon.",
+          "default": null,
+          "requires_one_of": null
+        }
+      ],
+      "pagination": {
+        "kind": "none",
+        "param": null,
+        "page_size": null,
+        "notes": "Use subsequent_request_token for multi-turn follow-ups."
+      },
+      "result_keys": [
+        "search_information",
+        "text_blocks",
+        "reconstructed_markdown",
+        "subsequent_request_token"
+      ],
+      "result_item_fields": {
+        "text_blocks": [
+          "type",
+          "snippet",
+          "snippet_highlighted_words"
+        ]
+      },
+      "aira_use": "Use Gemini as a second-opinion assistant for resume tips, interview prep and company summaries inside Aira.",
+      "endpoint": "https://serpapi.com/search.json",
+      "family": "Google",
+      "verified": "docs",
+      "requires_any_of": []
+    },
+    {
+      "id": "google_autocomplete",
+      "name": "Google Autocomplete",
+      "category": "utility",
+      "description": "Scrapes Google Autocomplete suggestions for a partial query, with support for several clients (Chrome, Safari, Firefox, YouTube and more).",
+      "docs_url": "https://serpapi.com/google-autocomplete-api",
+      "params": [
+        {
+          "name": "q",
+          "label": "Partial query",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "Search query for which completion options are returned.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "gl",
+          "label": "Country (gl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two-letter country code for the Google search (e.g. us, uk, fr).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Language (hl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Language code for the Google Autocomplete search: two or three letters (en, es, fr), optionally with region (en-gb, es-419).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "cp",
+          "label": "Cursor position",
+          "type": "integer",
+          "required": false,
+          "group": "Advanced",
+          "help": "Position of the cursor in the query; 0 places the cursor before the query. If omitted the cursor is at the end of the query.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "client",
+          "label": "Client",
+          "type": "enum",
+          "required": false,
+          "group": "Advanced",
+          "help": "Client used for autocomplete.",
+          "default": null,
+          "options": [
+            {
+              "value": "chrome",
+              "label": "Chrome"
+            },
+            {
+              "value": "chrome-omni",
+              "label": "Chrome omnibox"
+            },
+            {
+              "value": "gws-wiz",
+              "label": "Google home page"
+            },
+            {
+              "value": "safari",
+              "label": "Safari"
+            },
+            {
+              "value": "firefox",
+              "label": "Firefox"
+            },
+            {
+              "value": "psy-ab",
+              "label": "Google Chrome (psy-ab)"
+            },
+            {
+              "value": "toolbar",
+              "label": "Toolbar (returns XML)"
+            },
+            {
+              "value": "youtube",
+              "label": "YouTube (returns JSONP)"
+            },
+            {
+              "value": "gws-wiz-local",
+              "label": "Google Local"
+            }
+          ],
+          "requires_one_of": null
+        }
+      ],
+      "pagination": {
+        "kind": "none",
+        "param": null,
+        "page_size": null,
+        "notes": ""
+      },
+      "result_keys": [
+        "search_information",
+        "suggestions",
+        "verbatim_relevance"
+      ],
+      "result_item_fields": {
+        "suggestions": [
+          "value",
+          "relevance",
+          "type",
+          "serpapi_link"
+        ]
+      },
+      "aira_use": "Discover how people actually phrase job and salary searches ('software engineer salary in ...') to pick better keywords for job hunting and resumes.",
+      "endpoint": "https://serpapi.com/search.json",
+      "family": "Google",
+      "verified": "docs",
+      "requires_any_of": []
+    },
+    {
+      "id": "google_related_questions",
+      "name": "Google Related Questions",
+      "category": "web",
+      "description": "Expands a People Also Ask question into additional related questions with answers, using a next_page_token from a Google Search response.",
+      "docs_url": "https://serpapi.com/google-related-questions-api",
+      "params": [
+        {
+          "name": "next_page_token",
+          "label": "Next page token",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "Token that shows the extra related questions Google generates when a question is clicked; found in the related_questions block of a Google Search API response.",
+          "default": null,
+          "requires_one_of": null
+        }
+      ],
+      "pagination": {
+        "kind": "next_page_token",
+        "param": "next_page_token",
+        "page_size": null,
+        "notes": "Each returned question carries its own next_page_token."
+      },
+      "result_keys": [
+        "related_questions"
+      ],
+      "result_item_fields": {
+        "related_questions": [
+          "question",
+          "type",
+          "text_blocks",
+          "references",
+          "next_page_token",
+          "serpapi_link"
+        ]
+      },
+      "aira_use": "Drill into People Also Ask questions about a role or company to build interview-prep question lists.",
+      "endpoint": "https://serpapi.com/search.json",
+      "family": "Google",
+      "verified": "docs",
+      "requires_any_of": []
+    },
+    {
+      "id": "google_images",
+      "name": "Google Images",
+      "category": "images",
+      "description": "Scrapes Google Images results with titles, sources, original images, suggested searches and rich filters for size, color, type, license and time.",
+      "docs_url": "https://serpapi.com/google-images-api",
+      "params": [
+        {
+          "name": "q",
+          "label": "Search query",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "Query to search; supports operators such as inurl:, site:, intitle:.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "location",
+          "label": "Location",
+          "type": "location",
+          "required": false,
+          "group": "Localization",
+          "help": "Where the search originates. Most popular match is used if several match; city level recommended (see /locations.json). Cannot be used with uule.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "uule",
+          "label": "UULE (encoded location)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Google-encoded location. Cannot be used together with location. A matching gl is needed for coordinate-based uule. Use SerpApi's UULE Generator to create one.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "google_domain",
+          "label": "Google domain",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Google domain to use, e.g. google.com (default), google.co.uk, google.ca.",
+          "default": "google.com",
+          "requires_one_of": null
+        },
+        {
+          "name": "gl",
+          "label": "Country (gl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two-letter country code for the Google Images search (e.g. us, uk, fr).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Language (hl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Language code for the Google Images search: two or three letters (en, es, fr), optionally with region (en-gb, es-419).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "cr",
+          "label": "Limit to countries (cr)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "One or more countries to limit the search to, as country{ISO2 upper-case} delimited by | (e.g. countryFR|countryDE).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "period_unit",
+          "label": "Time period unit",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Time period unit to limit image results to recent results. Cannot be used with start_date/end_date.",
+          "default": null,
+          "options": [
+            {
+              "value": "s",
+              "label": "Second"
+            },
+            {
+              "value": "n",
+              "label": "Minute"
+            },
+            {
+              "value": "h",
+              "label": "Hour"
+            },
+            {
+              "value": "d",
+              "label": "Day"
+            },
+            {
+              "value": "w",
+              "label": "Week"
+            },
+            {
+              "value": "m",
+              "label": "Month"
+            },
+            {
+              "value": "y",
+              "label": "Year"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "period_value",
+          "label": "Time period value",
+          "type": "integer",
+          "required": false,
+          "group": "Filters",
+          "help": "Optional value used with period_unit, e.g. 15 seconds, 42 hours, 178 days. Range 1..2147483647.",
+          "default": 1,
+          "requires_one_of": null
+        },
+        {
+          "name": "start_date",
+          "label": "Start date",
+          "type": "date",
+          "required": false,
+          "group": "Filters",
+          "help": "Start of the date range, format YYYYMMDD (e.g. 20241201). Blank end_date means FROM start_date TO today. Cannot be used with period_unit/period_value.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "end_date",
+          "label": "End date",
+          "type": "date",
+          "required": false,
+          "group": "Filters",
+          "help": "End of the date range, format YYYYMMDD (e.g. 20241231). Blank start_date means BEFORE end_date. Cannot be used with period_unit/period_value.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "chips",
+          "label": "Suggested-search chips",
+          "type": "string",
+          "required": false,
+          "group": "Filters",
+          "help": "Filters image search using a chips string from the suggested_searches section (available when ijn=0).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "tbs",
+          "label": "Advanced filters (tbs)",
+          "type": "string",
+          "required": false,
+          "group": "Filters",
+          "help": "(to be searched) parameter defining advanced image-search filters not possible in the regular query field.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "imgar",
+          "label": "Aspect ratio",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Aspect ratio of images.",
+          "default": null,
+          "options": [
+            {
+              "value": "s",
+              "label": "Square"
+            },
+            {
+              "value": "t",
+              "label": "Tall"
+            },
+            {
+              "value": "w",
+              "label": "Wide"
+            },
+            {
+              "value": "xw",
+              "label": "Panoramic"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "imgsz",
+          "label": "Image size",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Size of images.",
+          "default": null,
+          "options": [
+            {
+              "value": "l",
+              "label": "Large"
+            },
+            {
+              "value": "m",
+              "label": "Medium"
+            },
+            {
+              "value": "i",
+              "label": "Icon"
+            },
+            {
+              "value": "qsvga",
+              "label": "Larger than 400x300"
+            },
+            {
+              "value": "vga",
+              "label": "Larger than 640x480"
+            },
+            {
+              "value": "svga",
+              "label": "Larger than 800x600"
+            },
+            {
+              "value": "xga",
+              "label": "Larger than 1024x768"
+            },
+            {
+              "value": "2mp",
+              "label": "Larger than 2 MP"
+            },
+            {
+              "value": "4mp",
+              "label": "Larger than 4 MP"
+            },
+            {
+              "value": "6mp",
+              "label": "Larger than 6 MP"
+            },
+            {
+              "value": "8mp",
+              "label": "Larger than 8 MP"
+            },
+            {
+              "value": "10mp",
+              "label": "Larger than 10 MP"
+            },
+            {
+              "value": "12mp",
+              "label": "Larger than 12 MP"
+            },
+            {
+              "value": "15mp",
+              "label": "Larger than 15 MP"
+            },
+            {
+              "value": "20mp",
+              "label": "Larger than 20 MP"
+            },
+            {
+              "value": "40mp",
+              "label": "Larger than 40 MP"
+            },
+            {
+              "value": "70mp",
+              "label": "Larger than 70 MP"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "image_color",
+          "label": "Image color",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Color of images. Overrides the ic and isc components of tbs.",
+          "default": null,
+          "options": [
+            {
+              "value": "bw",
+              "label": "Black and white"
+            },
+            {
+              "value": "trans",
+              "label": "Transparent"
+            },
+            {
+              "value": "red",
+              "label": "Red"
+            },
+            {
+              "value": "orange",
+              "label": "Orange"
+            },
+            {
+              "value": "yellow",
+              "label": "Yellow"
+            },
+            {
+              "value": "green",
+              "label": "Green"
+            },
+            {
+              "value": "teal",
+              "label": "Teal"
+            },
+            {
+              "value": "blue",
+              "label": "Blue"
+            },
+            {
+              "value": "purple",
+              "label": "Purple"
+            },
+            {
+              "value": "pink",
+              "label": "Pink"
+            },
+            {
+              "value": "white",
+              "label": "White"
+            },
+            {
+              "value": "gray",
+              "label": "Gray"
+            },
+            {
+              "value": "black",
+              "label": "Black"
+            },
+            {
+              "value": "brown",
+              "label": "Brown"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "image_type",
+          "label": "Image type",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Type of images. Overrides the itp component of tbs.",
+          "default": null,
+          "options": [
+            {
+              "value": "face",
+              "label": "Face"
+            },
+            {
+              "value": "photo",
+              "label": "Photo"
+            },
+            {
+              "value": "clipart",
+              "label": "Clip art"
+            },
+            {
+              "value": "lineart",
+              "label": "Line drawing"
+            },
+            {
+              "value": "animated",
+              "label": "Animated"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "licenses",
+          "label": "Usage rights",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Scope of image licenses. Overrides the sur component of tbs.",
+          "default": null,
+          "options": [
+            {
+              "value": "f",
+              "label": "Free to use or share"
+            },
+            {
+              "value": "fc",
+              "label": "Free to use or share, even commercially"
+            },
+            {
+              "value": "fm",
+              "label": "Free to use, share or modify"
+            },
+            {
+              "value": "fmc",
+              "label": "Free to use, share or modify, even commercially"
+            },
+            {
+              "value": "cl",
+              "label": "Creative Commons licenses"
+            },
+            {
+              "value": "ol",
+              "label": "Commercial and other licenses"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "safe",
+          "label": "Adult content filter",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Level of filtering for adult content: active or off. By default Google blurs explicit content.",
+          "default": null,
+          "options": [
+            {
+              "value": "active",
+              "label": "Active (filter)"
+            },
+            {
+              "value": "off",
+              "label": "Off"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "nfpr",
+          "label": "Exclude auto-corrected results",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "1 excludes results from an auto-corrected query when the original is misspelled; 0 includes them (default). May not prevent auto-corrected results if nothing else is available.",
+          "default": "0",
+          "options": [
+            {
+              "value": "0",
+              "label": "Include (default)"
+            },
+            {
+              "value": "1",
+              "label": "Exclude"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "filter",
+          "label": "Similar/omitted results filter",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "1 (default) enables the 'Similar Results' and 'Omitted Results' filters; 0 disables them.",
+          "default": "1",
+          "options": [
+            {
+              "value": "1",
+              "label": "On (default)"
+            },
+            {
+              "value": "0",
+              "label": "Off"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "ijn",
+          "label": "Page number (ijn)",
+          "type": "integer",
+          "required": false,
+          "group": "Pagination",
+          "help": "Page number of results; min 0, max 99.",
+          "default": 0,
+          "requires_one_of": null
+        },
+        {
+          "name": "device",
+          "label": "Device",
+          "type": "enum",
+          "required": false,
+          "group": "Advanced",
+          "help": "Device used to fetch results: desktop (default), tablet (iPad) or mobile.",
+          "default": "desktop",
+          "options": [
+            {
+              "value": "desktop",
+              "label": "Desktop"
+            },
+            {
+              "value": "tablet",
+              "label": "Tablet"
+            },
+            {
+              "value": "mobile",
+              "label": "Mobile"
+            }
+          ],
+          "requires_one_of": null
+        }
+      ],
+      "pagination": {
+        "kind": "page",
+        "param": "ijn",
+        "page_size": null,
+        "notes": "ijn is the zero-based page number (0..99)."
+      },
+      "result_keys": [
+        "search_information",
+        "shopping_results",
+        "suggested_searches",
+        "images_results",
+        "related_searches",
+        "serpapi_pagination"
+      ],
+      "result_item_fields": {
+        "images_results": [
+          "position",
+          "thumbnail",
+          "related_content_id",
+          "serpapi_related_content_link",
+          "source",
+          "source_logo",
+          "title",
+          "link",
+          "original",
+          "original_height",
+          "original_width",
+          "is_product"
+        ],
+        "suggested_searches": [
+          "name",
+          "link",
+          "uds",
+          "q",
+          "serpapi_link",
+          "thumbnail"
+        ],
+        "related_searches": [
+          "query",
+          "link",
+          "serpapi_link",
+          "highlighted_words",
+          "thumbnail"
+        ]
+      },
+      "aira_use": "Find company logos, office photos, brand imagery and portfolio inspiration for resumes, cover pages and interview research.",
+      "endpoint": "https://serpapi.com/search.json",
+      "family": "Google",
+      "verified": "docs",
+      "requires_any_of": []
+    },
+    {
+      "id": "google_images_light",
+      "name": "Google Images Light",
+      "category": "images",
+      "description": "A faster version of Google Images that returns image results (title, source, original and thumbnail URLs) with the same filters.",
+      "docs_url": "https://serpapi.com/google-images-light-api",
+      "params": [
+        {
+          "name": "q",
+          "label": "Search query",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "Query to search; supports operators such as inurl:, site:, intitle:.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "location",
+          "label": "Location",
+          "type": "location",
+          "required": false,
+          "group": "Localization",
+          "help": "Where the search originates. Most popular match is used if several match; city level recommended (see /locations.json). Cannot be used with uule.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "uule",
+          "label": "UULE (encoded location)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Google-encoded location. Cannot be used together with location. A matching gl is needed for coordinate-based uule. Use SerpApi's UULE Generator to create one.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "google_domain",
+          "label": "Google domain",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Google domain to use, e.g. google.com (default), google.co.uk, google.ca.",
+          "default": "google.com",
+          "requires_one_of": null
+        },
+        {
+          "name": "gl",
+          "label": "Country (gl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two-letter country code for the Google Images search (e.g. us, uk, fr).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Language (hl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Language code for the Google Images search: two or three letters (en, es, fr), optionally with region (en-gb, es-419).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "cr",
+          "label": "Limit to countries (cr)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "One or more countries to limit the search to, as country{ISO2 upper-case} delimited by | (e.g. countryFR|countryDE).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "period_unit",
+          "label": "Time period unit",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Time period unit to limit image results to recent results. Cannot be used with start_date/end_date.",
+          "default": null,
+          "options": [
+            {
+              "value": "s",
+              "label": "Second"
+            },
+            {
+              "value": "n",
+              "label": "Minute"
+            },
+            {
+              "value": "h",
+              "label": "Hour"
+            },
+            {
+              "value": "d",
+              "label": "Day"
+            },
+            {
+              "value": "w",
+              "label": "Week"
+            },
+            {
+              "value": "m",
+              "label": "Month"
+            },
+            {
+              "value": "y",
+              "label": "Year"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "period_value",
+          "label": "Time period value",
+          "type": "integer",
+          "required": false,
+          "group": "Filters",
+          "help": "Optional value used with period_unit, e.g. 15 seconds, 42 hours, 178 days. Range 1..2147483647.",
+          "default": 1,
+          "requires_one_of": null
+        },
+        {
+          "name": "start_date",
+          "label": "Start date",
+          "type": "date",
+          "required": false,
+          "group": "Filters",
+          "help": "Start of the date range, format YYYYMMDD (e.g. 20241201). Blank end_date means FROM start_date TO today. Cannot be used with period_unit/period_value.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "end_date",
+          "label": "End date",
+          "type": "date",
+          "required": false,
+          "group": "Filters",
+          "help": "End of the date range, format YYYYMMDD (e.g. 20241231). Blank start_date means BEFORE end_date. Cannot be used with period_unit/period_value.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "tbs",
+          "label": "Advanced filters (tbs)",
+          "type": "string",
+          "required": false,
+          "group": "Filters",
+          "help": "(to be searched) parameter defining advanced image-search filters not possible in the regular query field.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "imgar",
+          "label": "Aspect ratio",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Aspect ratio of images.",
+          "default": null,
+          "options": [
+            {
+              "value": "s",
+              "label": "Square"
+            },
+            {
+              "value": "t",
+              "label": "Tall"
+            },
+            {
+              "value": "w",
+              "label": "Wide"
+            },
+            {
+              "value": "xw",
+              "label": "Panoramic"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "imgsz",
+          "label": "Image size",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Size of images.",
+          "default": null,
+          "options": [
+            {
+              "value": "l",
+              "label": "Large"
+            },
+            {
+              "value": "m",
+              "label": "Medium"
+            },
+            {
+              "value": "i",
+              "label": "Icon"
+            },
+            {
+              "value": "qsvga",
+              "label": "Larger than 400x300"
+            },
+            {
+              "value": "vga",
+              "label": "Larger than 640x480"
+            },
+            {
+              "value": "svga",
+              "label": "Larger than 800x600"
+            },
+            {
+              "value": "xga",
+              "label": "Larger than 1024x768"
+            },
+            {
+              "value": "2mp",
+              "label": "Larger than 2 MP"
+            },
+            {
+              "value": "4mp",
+              "label": "Larger than 4 MP"
+            },
+            {
+              "value": "6mp",
+              "label": "Larger than 6 MP"
+            },
+            {
+              "value": "8mp",
+              "label": "Larger than 8 MP"
+            },
+            {
+              "value": "10mp",
+              "label": "Larger than 10 MP"
+            },
+            {
+              "value": "12mp",
+              "label": "Larger than 12 MP"
+            },
+            {
+              "value": "15mp",
+              "label": "Larger than 15 MP"
+            },
+            {
+              "value": "20mp",
+              "label": "Larger than 20 MP"
+            },
+            {
+              "value": "40mp",
+              "label": "Larger than 40 MP"
+            },
+            {
+              "value": "70mp",
+              "label": "Larger than 70 MP"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "image_color",
+          "label": "Image color",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Color of images. Overrides the ic and isc components of tbs.",
+          "default": null,
+          "options": [
+            {
+              "value": "bw",
+              "label": "Black and white"
+            },
+            {
+              "value": "trans",
+              "label": "Transparent"
+            },
+            {
+              "value": "red",
+              "label": "Red"
+            },
+            {
+              "value": "orange",
+              "label": "Orange"
+            },
+            {
+              "value": "yellow",
+              "label": "Yellow"
+            },
+            {
+              "value": "green",
+              "label": "Green"
+            },
+            {
+              "value": "teal",
+              "label": "Teal"
+            },
+            {
+              "value": "blue",
+              "label": "Blue"
+            },
+            {
+              "value": "purple",
+              "label": "Purple"
+            },
+            {
+              "value": "pink",
+              "label": "Pink"
+            },
+            {
+              "value": "white",
+              "label": "White"
+            },
+            {
+              "value": "gray",
+              "label": "Gray"
+            },
+            {
+              "value": "black",
+              "label": "Black"
+            },
+            {
+              "value": "brown",
+              "label": "Brown"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "image_type",
+          "label": "Image type",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Type of images. Overrides the itp component of tbs.",
+          "default": null,
+          "options": [
+            {
+              "value": "face",
+              "label": "Face"
+            },
+            {
+              "value": "photo",
+              "label": "Photo"
+            },
+            {
+              "value": "clipart",
+              "label": "Clip art"
+            },
+            {
+              "value": "lineart",
+              "label": "Line drawing"
+            },
+            {
+              "value": "animated",
+              "label": "Animated"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "licenses",
+          "label": "Usage rights",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Scope of image licenses. Overrides the sur component of tbs.",
+          "default": null,
+          "options": [
+            {
+              "value": "f",
+              "label": "Free to use or share"
+            },
+            {
+              "value": "fc",
+              "label": "Free to use or share, even commercially"
+            },
+            {
+              "value": "fm",
+              "label": "Free to use, share or modify"
+            },
+            {
+              "value": "fmc",
+              "label": "Free to use, share or modify, even commercially"
+            },
+            {
+              "value": "cl",
+              "label": "Creative Commons licenses"
+            },
+            {
+              "value": "ol",
+              "label": "Commercial and other licenses"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "safe",
+          "label": "Adult content filter",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Level of filtering for adult content: active or off. By default Google blurs explicit content.",
+          "default": null,
+          "options": [
+            {
+              "value": "active",
+              "label": "Active (filter)"
+            },
+            {
+              "value": "off",
+              "label": "Off"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "nfpr",
+          "label": "Exclude auto-corrected results",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "1 excludes results from an auto-corrected query when the original is misspelled; 0 includes them (default). May not prevent auto-corrected results if nothing else is available.",
+          "default": "0",
+          "options": [
+            {
+              "value": "0",
+              "label": "Include (default)"
+            },
+            {
+              "value": "1",
+              "label": "Exclude"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "filter",
+          "label": "Similar/omitted results filter",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "1 (default) enables the 'Similar Results' and 'Omitted Results' filters; 0 disables them.",
+          "default": "1",
+          "options": [
+            {
+              "value": "1",
+              "label": "On (default)"
+            },
+            {
+              "value": "0",
+              "label": "Off"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "start",
+          "label": "Result offset (start)",
+          "type": "integer",
+          "required": false,
+          "group": "Pagination",
+          "help": "Number of results to skip, for pagination. Min 0, max 999.",
+          "default": 0,
+          "requires_one_of": null
+        },
+        {
+          "name": "device",
+          "label": "Device",
+          "type": "enum",
+          "required": false,
+          "group": "Advanced",
+          "help": "Device used to fetch results: desktop (default), tablet (iPad) or mobile.",
+          "default": "desktop",
+          "options": [
+            {
+              "value": "desktop",
+              "label": "Desktop"
+            },
+            {
+              "value": "tablet",
+              "label": "Tablet"
+            },
+            {
+              "value": "mobile",
+              "label": "Mobile"
+            }
+          ],
+          "requires_one_of": null
+        }
+      ],
+      "pagination": {
+        "kind": "start",
+        "param": "start",
+        "page_size": null,
+        "notes": "Offset 0..999."
+      },
+      "result_keys": [
+        "search_information",
+        "images_results",
+        "serpapi_pagination"
+      ],
+      "result_item_fields": {
+        "images_results": [
+          "position",
+          "title",
+          "source",
+          "link",
+          "raw_link",
+          "original",
+          "original_width",
+          "original_height",
+          "thumbnail",
+          "serpapi_thumbnail",
+          "related_content_id",
+          "serpapi_related_content_link"
+        ]
+      },
+      "aira_use": "Quickly pull many company or brand images at low cost for dashboards and application packets.",
+      "endpoint": "https://serpapi.com/search.json",
+      "family": "Google",
+      "verified": "docs",
+      "requires_any_of": []
+    },
+    {
+      "id": "google_images_related_content",
+      "name": "Google Images Related Content",
+      "category": "images",
+      "description": "Returns images and searches related to a specific Google Images result, using the related_content_id from a Google Images search.",
+      "docs_url": "https://serpapi.com/google-images-related-content-api",
+      "params": [
+        {
+          "name": "related_content_id",
+          "label": "Related content ID",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "Unique ID for retrieving the related content of an image; obtained from the Google Images API.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "q",
+          "label": "Original query",
+          "type": "string",
+          "required": false,
+          "group": "Search",
+          "help": "Search query; for the most precise results use the same query as the original Google Images search.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Language (hl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Language code for the Google Images search: two or three letters (en, es, fr), optionally with region (en-gb, es-419).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "gl",
+          "label": "Country (gl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two-letter country code for the Google Images search (e.g. us, uk, fr).",
+          "default": null,
+          "requires_one_of": null
+        }
+      ],
+      "pagination": {
+        "kind": "none",
+        "param": null,
+        "page_size": null,
+        "notes": ""
+      },
+      "result_keys": [
+        "related_content",
+        "related_searches",
+        "see_more_link",
+        "serpapi_see_more_link"
+      ],
+      "result_item_fields": {
+        "related_content": [
+          "position",
+          "title",
+          "source",
+          "source_icon",
+          "link",
+          "original",
+          "original_width",
+          "original_height",
+          "thumbnail",
+          "thumbnail_width",
+          "thumbnail_height",
+          "related_content_id",
+          "serpapi_related_content_link"
+        ]
+      },
+      "aira_use": "Explore visually similar brand or workplace imagery once you find a relevant company picture.",
+      "endpoint": "https://serpapi.com/search.json",
+      "family": "Google",
+      "verified": "docs",
+      "requires_any_of": []
+    },
+    {
+      "id": "google_lens",
+      "name": "Google Lens",
+      "category": "images",
+      "description": "Runs a Google Lens search for an image URL (or uploaded image) and returns visual matches, exact matches, related content and organic results.",
+      "docs_url": "https://serpapi.com/google-lens-api",
+      "params": [
+        {
+          "name": "url",
+          "label": "Image URL",
+          "type": "string",
+          "required": false,
+          "group": "Search",
+          "help": "URL of the image for the Google Lens search. Alternatively use image_id to search with an uploaded image.",
+          "default": null,
+          "requires_one_of": "image_source"
+        },
+        {
+          "name": "image_id",
+          "label": "Uploaded image ID",
+          "type": "string",
+          "required": false,
+          "group": "Search",
+          "help": "Image ID of an image uploaded via SerpApi's Image API; when used, url can be omitted.",
+          "default": null,
+          "requires_one_of": "image_source"
+        },
+        {
+          "name": "type",
+          "label": "Search type",
+          "type": "enum",
+          "required": true,
+          "group": "Search",
+          "help": "Type of Lens search to perform; default is all. (products and about_this_image were discontinued by Google.)",
+          "default": "all",
+          "options": [
+            {
+              "value": "all",
+              "label": "All"
+            },
+            {
+              "value": "exact_matches",
+              "label": "Exact matches"
+            },
+            {
+              "value": "visual_matches",
+              "label": "Visual matches"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "q",
+          "label": "Extra query",
+          "type": "string",
+          "required": false,
+          "group": "Search",
+          "help": "Search query to use along with the Lens search; only applicable when type is all or visual_matches.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Language (hl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Language code for the Google Lens search: two or three letters (en, es, fr), optionally with region (en-gb, es-419).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "country",
+          "label": "Country",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two-letter country code for the Google Lens search (e.g. us, fr, de); see SerpApi's Google Lens countries list.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "safe",
+          "label": "Adult content filter",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Level of filtering for adult content: active or off. By default Google blurs explicit content.",
+          "default": null,
+          "options": [
+            {
+              "value": "active",
+              "label": "Active (filter)"
+            },
+            {
+              "value": "off",
+              "label": "Off"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "auto_crop",
+          "label": "Auto-crop to area of interest",
+          "type": "boolean",
+          "required": false,
+          "group": "Advanced",
+          "help": "Whether Google auto-crops the image to focus on the detected area of interest. Defaults to false.",
+          "default": false,
+          "requires_one_of": null
+        }
+      ],
+      "requires_any_of": [
+        [
+          "url",
+          "image_id"
+        ]
+      ],
+      "pagination": {
+        "kind": "none",
+        "param": null,
+        "page_size": null,
+        "notes": ""
+      },
+      "result_keys": [
+        "ai_overview",
+        "visual_matches",
+        "related_content",
+        "organic_results"
+      ],
+      "result_item_fields": {
+        "visual_matches": [
+          "position",
+          "title",
+          "link",
+          "source",
+          "source_icon",
+          "thumbnail",
+          "thumbnail_width",
+          "thumbnail_height",
+          "image",
+          "image_width",
+          "image_height"
+        ],
+        "related_content": [
+          "query",
+          "link",
+          "thumbnail",
+          "serpapi_link"
+        ],
+        "organic_results": [
+          "position",
+          "title",
+          "link",
+          "redirect_link",
+          "displayed_link",
+          "thumbnail",
+          "favicon",
+          "snippet",
+          "source",
+          "read_more_link",
+          "about_page_serpapi_link"
+        ]
+      },
+      "aira_use": "Identify a company logo, product screenshot, badge or business card photo and find the matching company page or profile.",
+      "endpoint": "https://serpapi.com/search.json",
+      "family": "Google",
+      "verified": "docs"
+    },
+    {
+      "id": "google_reverse_image",
+      "name": "Google Reverse Image",
+      "category": "images",
+      "description": "Performs a Google reverse image search with an image URL and returns pages that contain matching images.",
+      "docs_url": "https://serpapi.com/google-reverse-image",
+      "params": [
+        {
+          "name": "image_url",
+          "label": "Image URL",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "URL of the image to reverse-search.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "q",
+          "label": "Extra query",
+          "type": "string",
+          "required": false,
+          "group": "Search",
+          "help": "Query to search; include any location in the query because the location parameter does not work for this kind of search.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "location",
+          "label": "Location",
+          "type": "location",
+          "required": false,
+          "group": "Localization",
+          "help": "Where the search originates. Most popular match is used if several match; city level recommended (see /locations.json). Cannot be used with uule.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "uule",
+          "label": "UULE (encoded location)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Google-encoded location. Cannot be used together with location. A matching gl is needed for coordinate-based uule. Use SerpApi's UULE Generator to create one.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "google_domain",
+          "label": "Google domain",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Google domain to use, e.g. google.com (default), google.co.uk, google.ca.",
+          "default": "google.com",
+          "requires_one_of": null
+        },
+        {
+          "name": "gl",
+          "label": "Country (gl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two-letter country code for the Google search (e.g. us, uk, fr).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Language (hl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Language code for the Google Reverse Image search: two or three letters (en, es, fr), optionally with region (en-gb, es-419).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "lr",
+          "label": "Limit to languages (lr)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "One or more languages to limit the search to, as lang_{code} delimited by | (e.g. lang_fr|lang_de).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "tbs",
+          "label": "Advanced filters (tbs)",
+          "type": "string",
+          "required": false,
+          "group": "Filters",
+          "help": "(to be searched) parameter defining advanced search parameters not possible in the regular query field (e.g. dates, size).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "safe",
+          "label": "Adult content filter",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Level of filtering for adult content: active or off. By default Google blurs explicit content.",
+          "default": null,
+          "options": [
+            {
+              "value": "active",
+              "label": "Active (filter)"
+            },
+            {
+              "value": "off",
+              "label": "Off"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "start",
+          "label": "Result offset (start)",
+          "type": "integer",
+          "required": false,
+          "group": "Pagination",
+          "help": "Result offset used for pagination: 0 (default) is page 1, 10 is page 2, 20 is page 3, etc.",
+          "default": 0,
+          "requires_one_of": null
+        },
+        {
+          "name": "device",
+          "label": "Device",
+          "type": "enum",
+          "required": false,
+          "group": "Advanced",
+          "help": "Device used to fetch results: desktop (default), tablet (iPad) or mobile.",
+          "default": "desktop",
+          "options": [
+            {
+              "value": "desktop",
+              "label": "Desktop"
+            },
+            {
+              "value": "tablet",
+              "label": "Tablet"
+            },
+            {
+              "value": "mobile",
+              "label": "Mobile"
+            }
+          ],
+          "requires_one_of": null
+        }
+      ],
+      "pagination": {
+        "kind": "start",
+        "param": "start",
+        "page_size": 10,
+        "notes": "0 = first page, 10 = second page, etc."
+      },
+      "result_keys": [
+        "search_information",
+        "image_results"
+      ],
+      "result_item_fields": {
+        "image_results": [
+          "position",
+          "title",
+          "link",
+          "redirect_link",
+          "displayed_link",
+          "favicon",
+          "snippet",
+          "snippet_highlighted_words",
+          "source"
+        ]
+      },
+      "aira_use": "Verify recruiter or company profile photos and detect reused or fake recruiter images before engaging with an offer.",
+      "endpoint": "https://serpapi.com/search.json",
+      "family": "Google",
+      "verified": "docs",
+      "requires_any_of": []
+    },
+    {
+      "id": "google_videos",
+      "name": "Google Videos",
+      "category": "video",
+      "description": "Scrapes Google Videos results: titles, links, thumbnails, snippets, durations, upload dates and related searches.",
+      "docs_url": "https://serpapi.com/google-videos-api",
+      "params": [
+        {
+          "name": "q",
+          "label": "Search query",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "Query to search; supports operators such as inurl:, site:, intitle: and advanced params like as_dt/as_eq.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "location",
+          "label": "Location",
+          "type": "location",
+          "required": false,
+          "group": "Localization",
+          "help": "Where the search originates. Most popular match is used if several match; city level recommended (see /locations.json). Cannot be used with uule.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "uule",
+          "label": "UULE (encoded location)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Google-encoded location. Cannot be used together with location. A matching gl is needed for coordinate-based uule. Use SerpApi's UULE Generator to create one.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "google_domain",
+          "label": "Google domain",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Google domain to use, e.g. google.com (default), google.co.uk, google.ca.",
+          "default": "google.com",
+          "requires_one_of": null
+        },
+        {
+          "name": "gl",
+          "label": "Country (gl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two-letter country code for the Google search (e.g. us, uk, fr).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Language (hl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Language code for the Google search: two or three letters (en, es, fr), optionally with region (en-gb, es-419).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "lr",
+          "label": "Limit to languages (lr)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "One or more languages to limit the search to, as lang_{code} delimited by | (e.g. lang_fr|lang_de).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "tbs",
+          "label": "Advanced filters (tbs)",
+          "type": "string",
+          "required": false,
+          "group": "Filters",
+          "help": "(to be searched) parameter defining advanced search parameters not possible in the regular query field (e.g. patents, dates, news, videos, images, apps, text content).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "safe",
+          "label": "Adult content filter",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Level of filtering for adult content: active or off. By default Google blurs explicit content.",
+          "default": null,
+          "options": [
+            {
+              "value": "active",
+              "label": "Active (filter)"
+            },
+            {
+              "value": "off",
+              "label": "Off"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "nfpr",
+          "label": "Exclude auto-corrected results",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "1 excludes results from an auto-corrected query when the original is misspelled; 0 includes them (default). May not prevent auto-corrected results if nothing else is available.",
+          "default": "0",
+          "options": [
+            {
+              "value": "0",
+              "label": "Include (default)"
+            },
+            {
+              "value": "1",
+              "label": "Exclude"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "filter",
+          "label": "Similar/omitted results filter",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "1 (default) enables the 'Similar Results' and 'Omitted Results' filters; 0 disables them.",
+          "default": "1",
+          "options": [
+            {
+              "value": "1",
+              "label": "On (default)"
+            },
+            {
+              "value": "0",
+              "label": "Off"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "start",
+          "label": "Result offset (start)",
+          "type": "integer",
+          "required": false,
+          "group": "Pagination",
+          "help": "Result offset used for pagination: 0 (default) is page 1, 10 is page 2, 20 is page 3, etc.",
+          "default": 0,
+          "requires_one_of": null
+        },
+        {
+          "name": "device",
+          "label": "Device",
+          "type": "enum",
+          "required": false,
+          "group": "Advanced",
+          "help": "Device used to fetch results: desktop (default), tablet (iPad) or mobile.",
+          "default": "desktop",
+          "options": [
+            {
+              "value": "desktop",
+              "label": "Desktop"
+            },
+            {
+              "value": "tablet",
+              "label": "Tablet"
+            },
+            {
+              "value": "mobile",
+              "label": "Mobile"
+            }
+          ],
+          "requires_one_of": null
+        }
+      ],
+      "pagination": {
+        "kind": "start",
+        "param": "start",
+        "page_size": 10,
+        "notes": "0 = first page, 10 = second page, etc."
+      },
+      "result_keys": [
+        "search_information",
+        "video_results",
+        "related_searches",
+        "pagination",
+        "serpapi_pagination"
+      ],
+      "result_item_fields": {
+        "video_results": [
+          "position",
+          "title",
+          "link",
+          "displayed_link",
+          "thumbnail",
+          "snippet",
+          "duration",
+          "rich_snippet",
+          "extensions",
+          "detected_extensions"
+        ],
+        "related_searches": [
+          "block_position",
+          "query",
+          "link",
+          "serpapi_link"
+        ]
+      },
+      "aira_use": "Find interview walkthroughs, day-in-the-life videos, company culture videos and tutorials for skills a role requires.",
+      "endpoint": "https://serpapi.com/search.json",
+      "family": "Google",
+      "verified": "docs",
+      "requires_any_of": []
+    },
+    {
+      "id": "google_videos_light",
+      "name": "Google Videos Light",
+      "category": "video",
+      "description": "A faster version of Google Videos returning video titles, links, thumbnails, snippets, durations and dates, plus filters and related searches.",
+      "docs_url": "https://serpapi.com/google-videos-light-api",
+      "params": [
+        {
+          "name": "q",
+          "label": "Search query",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "Query to search; supports operators such as inurl:, site:, intitle: and advanced params like as_dt/as_eq.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "location",
+          "label": "Location",
+          "type": "location",
+          "required": false,
+          "group": "Localization",
+          "help": "Where the search originates. Most popular match is used if several match; city level recommended (see /locations.json). Cannot be used with uule.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "uule",
+          "label": "UULE (encoded location)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Google-encoded location. Cannot be used together with location. A matching gl is needed for coordinate-based uule. Use SerpApi's UULE Generator to create one.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "google_domain",
+          "label": "Google domain",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Google domain to use, e.g. google.com (default), google.co.uk, google.ca.",
+          "default": "google.com",
+          "requires_one_of": null
+        },
+        {
+          "name": "gl",
+          "label": "Country (gl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two-letter country code for the Google search (e.g. us, uk, fr).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Language (hl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Language code for the Google search: two or three letters (en, es, fr), optionally with region (en-gb, es-419).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "lr",
+          "label": "Limit to languages (lr)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "One or more languages to limit the search to, as lang_{code} delimited by | (e.g. lang_fr|lang_de).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "tbs",
+          "label": "Advanced filters (tbs)",
+          "type": "string",
+          "required": false,
+          "group": "Filters",
+          "help": "(to be searched) parameter defining advanced search parameters not possible in the regular query field (e.g. video duration, upload date, video quality, video source).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "safe",
+          "label": "Adult content filter",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Level of filtering for adult content: active or off. By default Google blurs explicit content.",
+          "default": null,
+          "options": [
+            {
+              "value": "active",
+              "label": "Active (filter)"
+            },
+            {
+              "value": "off",
+              "label": "Off"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "nfpr",
+          "label": "Exclude auto-corrected results",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "1 excludes results from an auto-corrected query when the original is misspelled; 0 includes them (default). May not prevent auto-corrected results if nothing else is available.",
+          "default": "0",
+          "options": [
+            {
+              "value": "0",
+              "label": "Include (default)"
+            },
+            {
+              "value": "1",
+              "label": "Exclude"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "filter",
+          "label": "Similar/omitted results filter",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "1 (default) enables the 'Similar Results' and 'Omitted Results' filters; 0 disables them.",
+          "default": "1",
+          "options": [
+            {
+              "value": "1",
+              "label": "On (default)"
+            },
+            {
+              "value": "0",
+              "label": "Off"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "start",
+          "label": "Result offset (start)",
+          "type": "integer",
+          "required": false,
+          "group": "Pagination",
+          "help": "Result offset used for pagination: 0 (default) is page 1, 10 is page 2, 20 is page 3, etc.",
+          "default": 0,
+          "requires_one_of": null
+        },
+        {
+          "name": "device",
+          "label": "Device",
+          "type": "enum",
+          "required": false,
+          "group": "Advanced",
+          "help": "Device used to fetch results: desktop (default), tablet (iPad) or mobile.",
+          "default": "desktop",
+          "options": [
+            {
+              "value": "desktop",
+              "label": "Desktop"
+            },
+            {
+              "value": "tablet",
+              "label": "Tablet"
+            },
+            {
+              "value": "mobile",
+              "label": "Mobile"
+            }
+          ],
+          "requires_one_of": null
+        }
+      ],
+      "pagination": {
+        "kind": "start",
+        "param": "start",
+        "page_size": 10,
+        "notes": "0 = first page, 10 = second page, etc."
+      },
+      "result_keys": [
+        "search_information",
+        "filters",
+        "video_results",
+        "related_searches",
+        "serpapi_pagination"
+      ],
+      "result_item_fields": {
+        "video_results": [
+          "position",
+          "title",
+          "link",
+          "displayed_link",
+          "thumbnail",
+          "snippet",
+          "duration",
+          "date"
+        ],
+        "related_searches": [
+          "text",
+          "link",
+          "serpapi_link"
+        ]
+      },
+      "aira_use": "Bulk-scan learning videos and interview prep content quickly for a skill or company.",
+      "endpoint": "https://serpapi.com/search.json",
+      "family": "Google",
+      "verified": "docs",
+      "requires_any_of": []
+    },
+    {
+      "id": "google_short_videos",
+      "name": "Google Short Videos",
+      "category": "video",
+      "description": "Scrapes Google Short Videos results: titles, links, thumbnails, clips, sources, channels and durations.",
+      "docs_url": "https://serpapi.com/google-short-videos-api",
+      "params": [
+        {
+          "name": "q",
+          "label": "Search query",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "Query to search; supports operators such as inurl:, site:, intitle: and advanced params like as_dt/as_eq.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "location",
+          "label": "Location",
+          "type": "location",
+          "required": false,
+          "group": "Localization",
+          "help": "Where the search originates. Most popular match is used if several match; city level recommended (see /locations.json). Cannot be used with uule.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "uule",
+          "label": "UULE (encoded location)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Google-encoded location. Cannot be used together with location. A matching gl is needed for coordinate-based uule. Use SerpApi's UULE Generator to create one.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "google_domain",
+          "label": "Google domain",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Google domain to use, e.g. google.com (default), google.co.uk, google.ca.",
+          "default": "google.com",
+          "requires_one_of": null
+        },
+        {
+          "name": "gl",
+          "label": "Country (gl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two-letter country code for the Google search (e.g. us, uk, fr).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Language (hl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Language code for the Google search: two or three letters (en, es, fr), optionally with region (en-gb, es-419).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "lr",
+          "label": "Limit to languages (lr)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "One or more languages to limit the search to, as lang_{code} delimited by | (e.g. lang_fr|lang_de).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "tbs",
+          "label": "Advanced filters (tbs)",
+          "type": "string",
+          "required": false,
+          "group": "Filters",
+          "help": "(to be searched) parameter defining advanced search parameters not possible in the regular query field.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "safe",
+          "label": "Adult content filter",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Level of filtering for adult content: active or off. By default Google blurs explicit content.",
+          "default": null,
+          "options": [
+            {
+              "value": "active",
+              "label": "Active (filter)"
+            },
+            {
+              "value": "off",
+              "label": "Off"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "nfpr",
+          "label": "Exclude auto-corrected results",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "1 excludes results from an auto-corrected query when the original is misspelled; 0 includes them (default). May not prevent auto-corrected results if nothing else is available.",
+          "default": "0",
+          "options": [
+            {
+              "value": "0",
+              "label": "Include (default)"
+            },
+            {
+              "value": "1",
+              "label": "Exclude"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "filter",
+          "label": "Similar/omitted results filter",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "1 (default) enables the 'Similar Results' and 'Omitted Results' filters; 0 disables them.",
+          "default": "1",
+          "options": [
+            {
+              "value": "1",
+              "label": "On (default)"
+            },
+            {
+              "value": "0",
+              "label": "Off"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "start",
+          "label": "Result offset (start)",
+          "type": "integer",
+          "required": false,
+          "group": "Pagination",
+          "help": "Result offset for pagination: 0 (default) is the first page; 12 (desktop) or 8 (mobile) is the second page, etc.",
+          "default": 0,
+          "requires_one_of": null
+        },
+        {
+          "name": "device",
+          "label": "Device",
+          "type": "enum",
+          "required": false,
+          "group": "Advanced",
+          "help": "Device used to fetch results: desktop (default), tablet (iPad) or mobile.",
+          "default": "desktop",
+          "options": [
+            {
+              "value": "desktop",
+              "label": "Desktop"
+            },
+            {
+              "value": "tablet",
+              "label": "Tablet"
+            },
+            {
+              "value": "mobile",
+              "label": "Mobile"
+            }
+          ],
+          "requires_one_of": null
+        }
+      ],
+      "pagination": {
+        "kind": "start",
+        "param": "start",
+        "page_size": 12,
+        "notes": "Page size is 12 on desktop and 8 on mobile."
+      },
+      "result_keys": [
+        "search_information",
+        "short_video_results",
+        "serpapi_pagination"
+      ],
+      "result_item_fields": {
+        "short_video_results": [
+          "position",
+          "title",
+          "link",
+          "thumbnail",
+          "clip",
+          "source",
+          "source_icon",
+          "channel",
+          "duration"
+        ]
+      },
+      "aira_use": "Surface bite-sized career tips, interview hacks and recruiter advice videos (Shorts/Reels/TikTok style) for quick learning.",
+      "endpoint": "https://serpapi.com/search.json",
+      "family": "Google",
+      "verified": "docs",
+      "requires_any_of": []
+    },
+    {
+      "id": "google_news",
+      "name": "Google News",
+      "category": "news",
+      "description": "Scrapes Google News results by query, topic, publication, section, story or knowledge-graph entity, with titles, sources, dates and thumbnails.",
+      "docs_url": "https://serpapi.com/google-news-api",
+      "params": [
+        {
+          "name": "q",
+          "label": "Search query",
+          "type": "string",
+          "required": false,
+          "group": "Search",
+          "help": "Query to search in Google News; supports operators such as site: and when:. Cannot be used together with any of the advanced token parameters.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "gl",
+          "label": "Country (gl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two-letter country code for the Google News search (e.g. us, uk, fr). Default is us.",
+          "default": "us",
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Language (hl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Language code for the Google News search: two or three letters (en, es, fr), optionally with region (en-gb, es-419).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "topic_token",
+          "label": "Topic token",
+          "type": "string",
+          "required": false,
+          "group": "Advanced",
+          "help": "Google News topic token for a topic (e.g. World, Business, Technology); found in the JSON response or in the Google News URL after /topics/. Can be used with section_token.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "kgmid",
+          "label": "Knowledge Graph ID (kgmid)",
+          "type": "string",
+          "required": false,
+          "group": "Advanced",
+          "help": "Knowledge Graph ID of a topic or location (starts with /m/ or /g/; Freebase ID from Wikidata, e.g. /m/0vzm for Austin, TX). Can only be used alone.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "publication_token",
+          "label": "Publication token",
+          "type": "string",
+          "required": false,
+          "group": "Advanced",
+          "help": "Google News publication token for a specific publisher (e.g. CNN, BBC); found in the JSON response or the URL after /publications/. Can be used with section_token.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "section_token",
+          "label": "Section token",
+          "type": "string",
+          "required": false,
+          "group": "Advanced",
+          "help": "Google News section token for a sub-section of a topic (e.g. Business -> Economy); found in the JSON response or the URL after /sections/. Can be used with topic_token, publication_token and so.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "story_token",
+          "label": "Story token",
+          "type": "string",
+          "required": false,
+          "group": "Advanced",
+          "help": "Google News story token for full coverage of a specific story; found in the JSON response or the URL after /stories/. Can be used with so.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "so",
+          "label": "Sort order",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Sorting method: 0 relevance (default) or 1 date. Can be used with story_token and section_token.",
+          "default": "0",
+          "options": [
+            {
+              "value": "0",
+              "label": "Relevance"
+            },
+            {
+              "value": "1",
+              "label": "Date"
+            }
+          ],
+          "requires_one_of": null
+        }
+      ],
+      "pagination": {
+        "kind": "none",
+        "param": null,
+        "page_size": null,
+        "notes": "No pagination parameter is documented; use tokens to navigate topics, sections and stories."
+      },
+      "result_keys": [
+        "news_results",
+        "menu_links",
+        "related_topics",
+        "related_publications"
+      ],
+      "result_item_fields": {
+        "news_results": [
+          "position",
+          "title",
+          "source",
+          "link",
+          "thumbnail",
+          "thumbnail_small",
+          "date",
+          "iso_date"
+        ],
+        "menu_links": [
+          "title",
+          "topic_token",
+          "serpapi_link"
+        ],
+        "related_topics": [
+          "title",
+          "topic_token",
+          "serpapi_link"
+        ],
+        "related_publications": [
+          "title",
+          "publication_token",
+          "serpapi_link",
+          "thumbnail"
+        ]
+      },
+      "aira_use": "Track layoffs, funding rounds, leadership changes and hiring news for target employers before applying or interviewing.",
+      "endpoint": "https://serpapi.com/search.json",
+      "family": "Google",
+      "verified": "docs",
+      "requires_any_of": []
+    },
+    {
+      "id": "google_news_light",
+      "name": "Google News Light",
+      "category": "news",
+      "description": "A faster Google News search returning news titles, links, sources, snippets, thumbnails and dates, plus top stories.",
+      "docs_url": "https://serpapi.com/google-news-light-api",
+      "params": [
+        {
+          "name": "q",
+          "label": "Search query",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "Query to search; supports operators such as inurl:, site:, intitle: and advanced params like as_dt/as_eq.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "location",
+          "label": "Location",
+          "type": "location",
+          "required": false,
+          "group": "Localization",
+          "help": "Where the search originates. Most popular match is used if several match; city level recommended (see /locations.json). Cannot be used with uule.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "uule",
+          "label": "UULE (encoded location)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Google-encoded location. Cannot be used together with location. A matching gl is needed for coordinate-based uule. Use SerpApi's UULE Generator to create one.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "google_domain",
+          "label": "Google domain",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Google domain to use, e.g. google.com (default), google.co.uk, google.ca.",
+          "default": "google.com",
+          "requires_one_of": null
+        },
+        {
+          "name": "gl",
+          "label": "Country (gl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two-letter country code for the Google search (e.g. us, uk, fr).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Language (hl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Language code for the Google search: two or three letters (en, es, fr), optionally with region (en-gb, es-419).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "lr",
+          "label": "Limit to languages (lr)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "One or more languages to limit the search to, as lang_{code} delimited by | (e.g. lang_fr|lang_de).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "safe",
+          "label": "Adult content filter",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Level of filtering for adult content: active or off. By default Google blurs explicit content.",
+          "default": null,
+          "options": [
+            {
+              "value": "active",
+              "label": "Active (filter)"
+            },
+            {
+              "value": "off",
+              "label": "Off"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "nfpr",
+          "label": "Exclude auto-corrected results",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "1 excludes results from an auto-corrected query when the original is misspelled; 0 includes them (default). May not prevent auto-corrected results if nothing else is available.",
+          "default": "0",
+          "options": [
+            {
+              "value": "0",
+              "label": "Include (default)"
+            },
+            {
+              "value": "1",
+              "label": "Exclude"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "filter",
+          "label": "Similar/omitted results filter",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "1 (default) enables the 'Similar Results' and 'Omitted Results' filters; 0 disables them.",
+          "default": "1",
+          "options": [
+            {
+              "value": "1",
+              "label": "On (default)"
+            },
+            {
+              "value": "0",
+              "label": "Off"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "start",
+          "label": "Result offset (start)",
+          "type": "integer",
+          "required": false,
+          "group": "Pagination",
+          "help": "Result offset used for pagination: 0 (default) is page 1, 10 is page 2, 20 is page 3, etc.",
+          "default": 0,
+          "requires_one_of": null
+        },
+        {
+          "name": "device",
+          "label": "Device",
+          "type": "enum",
+          "required": false,
+          "group": "Advanced",
+          "help": "Device used to fetch results: desktop (default), tablet (iPad) or mobile.",
+          "default": "desktop",
+          "options": [
+            {
+              "value": "desktop",
+              "label": "Desktop"
+            },
+            {
+              "value": "tablet",
+              "label": "Tablet"
+            },
+            {
+              "value": "mobile",
+              "label": "Mobile"
+            }
+          ],
+          "requires_one_of": null
+        }
+      ],
+      "pagination": {
+        "kind": "start",
+        "param": "start",
+        "page_size": 10,
+        "notes": "0 = first page, 10 = second page, etc."
+      },
+      "result_keys": [
+        "search_information",
+        "news_results",
+        "top_stories",
+        "serpapi_pagination"
+      ],
+      "result_item_fields": {
+        "news_results": [
+          "position",
+          "title",
+          "link",
+          "source",
+          "thumbnail",
+          "snippet",
+          "date"
+        ],
+        "top_stories": [
+          "title",
+          "stories"
+        ]
+      },
+      "aira_use": "Cheap, fast news monitoring for many employers at once (alerts on layoffs, acquisitions, hiring sprees).",
+      "endpoint": "https://serpapi.com/search.json",
+      "family": "Google",
+      "verified": "docs",
+      "requires_any_of": []
+    },
+    {
+      "id": "google_forums",
+      "name": "Google Forums",
+      "category": "social",
+      "description": "Scrapes Google's Forums (discussions) results such as Reddit and Quora threads with titles, dates, comment counts and sitelinks.",
+      "docs_url": "https://serpapi.com/google-forums-api",
+      "params": [
+        {
+          "name": "q",
+          "label": "Search query",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "Query to search in Google Forums; include a location in the query for location-specific discussions.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "location",
+          "label": "Location",
+          "type": "location",
+          "required": false,
+          "group": "Localization",
+          "help": "Where the search originates. Most popular match is used if several match; city level recommended (see /locations.json). Cannot be used with uule.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "uule",
+          "label": "UULE (encoded location)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Google-encoded location. Cannot be used together with location. A matching gl is needed for coordinate-based uule. Use SerpApi's UULE Generator to create one.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "gl",
+          "label": "Country (gl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two-letter country code for the Google Forums search (e.g. us, uk, fr).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Language (hl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Language code for the Google Forums search: two or three letters (en, es, fr), optionally with region (en-gb, es-419).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "period_unit",
+          "label": "Time period unit",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Time period unit to limit results to recent results. Cannot be used with start_date/end_date.",
+          "default": null,
+          "options": [
+            {
+              "value": "s",
+              "label": "Second"
+            },
+            {
+              "value": "n",
+              "label": "Minute"
+            },
+            {
+              "value": "h",
+              "label": "Hour"
+            },
+            {
+              "value": "d",
+              "label": "Day"
+            },
+            {
+              "value": "w",
+              "label": "Week"
+            },
+            {
+              "value": "m",
+              "label": "Month"
+            },
+            {
+              "value": "y",
+              "label": "Year"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "period_value",
+          "label": "Time period value",
+          "type": "integer",
+          "required": false,
+          "group": "Filters",
+          "help": "Optional value used with period_unit, e.g. 15 seconds, 42 hours, 178 days. Range 1..2147483647.",
+          "default": 1,
+          "requires_one_of": null
+        },
+        {
+          "name": "start_date",
+          "label": "Start date",
+          "type": "date",
+          "required": false,
+          "group": "Filters",
+          "help": "Start of the date range, format YYYYMMDD (e.g. 20241201). Blank end_date means FROM start_date TO today. Cannot be used with period_unit/period_value.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "end_date",
+          "label": "End date",
+          "type": "date",
+          "required": false,
+          "group": "Filters",
+          "help": "End of the date range, format YYYYMMDD (e.g. 20241231). Blank start_date means BEFORE end_date. Cannot be used with period_unit/period_value.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "start",
+          "label": "Result offset (start)",
+          "type": "integer",
+          "required": false,
+          "group": "Pagination",
+          "help": "Result offset used for pagination: 0 (default) is page 1, 10 is page 2, 20 is page 3, etc.",
+          "default": 0,
+          "requires_one_of": null
+        },
+        {
+          "name": "nfpr",
+          "label": "Exclude auto-corrected results",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "1 excludes results from an auto-corrected query when the original is misspelled; 0 includes them (default). May not prevent auto-corrected results if nothing else is available.",
+          "default": "0",
+          "options": [
+            {
+              "value": "0",
+              "label": "Include (default)"
+            },
+            {
+              "value": "1",
+              "label": "Exclude"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "filter",
+          "label": "Similar/omitted results filter",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "1 (default) enables the 'Similar Results' and 'Omitted Results' filters; 0 disables them.",
+          "default": "1",
+          "options": [
+            {
+              "value": "1",
+              "label": "On (default)"
+            },
+            {
+              "value": "0",
+              "label": "Off"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "tbs",
+          "label": "Advanced filters (tbs)",
+          "type": "string",
+          "required": false,
+          "group": "Filters",
+          "help": "(to be searched) parameter defining advanced search parameters not possible in the regular query field (e.g. dates, time period).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "device",
+          "label": "Device",
+          "type": "enum",
+          "required": false,
+          "group": "Advanced",
+          "help": "Device used to fetch results: desktop (default), tablet (iPad) or mobile.",
+          "default": "desktop",
+          "options": [
+            {
+              "value": "desktop",
+              "label": "Desktop"
+            },
+            {
+              "value": "tablet",
+              "label": "Tablet"
+            },
+            {
+              "value": "mobile",
+              "label": "Mobile"
+            }
+          ],
+          "requires_one_of": null
+        }
+      ],
+      "pagination": {
+        "kind": "start",
+        "param": "start",
+        "page_size": 10,
+        "notes": "0 = first page, 10 = second page, etc."
+      },
+      "result_keys": [
+        "search_information",
+        "organic_results",
+        "related_searches",
+        "serpapi_pagination"
+      ],
+      "result_item_fields": {
+        "organic_results": [
+          "position",
+          "title",
+          "link",
+          "redirect_link",
+          "displayed_meta",
+          "favicon",
+          "snippet",
+          "snippet_highlighted_words",
+          "sitelinks",
+          "source"
+        ],
+        "related_searches": [
+          "block_position",
+          "query",
+          "link",
+          "serpapi_link"
+        ]
+      },
+      "aira_use": "Read real employee discussions on Reddit/Quora about a company's interview process, culture, pay and layoffs before accepting an interview.",
+      "endpoint": "https://serpapi.com/search.json",
+      "family": "Google",
+      "verified": "docs",
+      "requires_any_of": []
+    },
+    {
+      "id": "google_events",
+      "name": "Google Events",
+      "category": "maps_local",
+      "description": "Scrapes Google's events platform: event titles, dates, venues, addresses, ticket info and thumbnails for a query like 'Events in Austin, TX'.",
+      "docs_url": "https://serpapi.com/google-events-api",
+      "params": [
+        {
+          "name": "q",
+          "label": "Search query",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "Query to search; to search events in a specific place include the location in the query (e.g. Events in Austin, TX).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "location",
+          "label": "Location",
+          "type": "location",
+          "required": false,
+          "group": "Localization",
+          "help": "Where the search originates. Most popular match is used if several match; city level recommended (see /locations.json). Cannot be used with uule.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "uule",
+          "label": "UULE (encoded location)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Google-encoded location. Cannot be used together with location. A matching gl is needed for coordinate-based uule. Use SerpApi's UULE Generator to create one.",
+          "default": null,
+          "requires_one_of": null
+        }
+      ],
+      "pagination": {
+        "kind": "none",
+        "param": null,
+        "page_size": null,
+        "notes": "No pagination parameter is documented."
+      },
+      "result_keys": [
+        "search_information",
+        "events_map",
+        "events_results"
+      ],
+      "result_item_fields": {
+        "events_results": [
+          "title",
+          "type",
+          "date",
+          "venue",
+          "address",
+          "event_location_map",
+          "ticket_info",
+          "thumbnail",
+          "event_token",
+          "serpapi_event_details_link"
+        ]
+      },
+      "aira_use": "Find networking meetups, career fairs, conferences and hiring events near you or near an on-site interview city.",
+      "endpoint": "https://serpapi.com/search.json",
+      "family": "Google",
+      "verified": "docs",
+      "requires_any_of": []
+    },
+    {
+      "id": "google_event_details",
+      "name": "Google Event Details",
+      "category": "maps_local",
+      "description": "Returns the full details of a single Google event (title, price, date, address, tickets, venue, description, map) using an event_token from Google events results.",
+      "docs_url": "https://serpapi.com/google-event-details-api",
+      "params": [
+        {
+          "name": "event_token",
+          "label": "Event token",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "Token of the event to retrieve; returned as event_token in events_results (time-sensitive: use soon after retrieving).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "gl",
+          "label": "Country (gl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two-letter country code for the Google Event Details search (e.g. us, uk, fr). Defaults to us. Sets date/time format, currency and may change ticket sellers; some fields (e.g. date.start_date) are unavailable for most European countries.",
+          "default": "us",
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Language (hl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Language code for the Google Event Details search: two or three letters (en, es, fr), optionally with region (en-gb, es-419). Defaults to en. The event About section and venue description are often only available in English.",
+          "default": "en",
+          "requires_one_of": null
+        },
+        {
+          "name": "nearby_places",
+          "label": "Include nearby places",
+          "type": "boolean",
+          "required": false,
+          "group": "Advanced",
+          "help": "Set to 1 or true to include up to 10 places near the event venue.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "similar_events",
+          "label": "Include similar events",
+          "type": "boolean",
+          "required": false,
+          "group": "Advanced",
+          "help": "Set to 1 or true to include a list of similar events, each with its own event_token.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "search_results",
+          "label": "Include search results",
+          "type": "boolean",
+          "required": false,
+          "group": "Advanced",
+          "help": "Set to 1 or true to include a short list of web results related to the event.",
+          "default": null,
+          "requires_one_of": null
+        }
+      ],
+      "pagination": {
+        "kind": "none",
+        "param": null,
+        "page_size": null,
+        "notes": ""
+      },
+      "result_keys": [
+        "event_details"
+      ],
+      "result_item_fields": {
+        "event_details": [
+          "title",
+          "price",
+          "extracted_price",
+          "date",
+          "address",
+          "local_map",
+          "description",
+          "description_source",
+          "ticket_info",
+          "venue",
+          "thumbnail",
+          "nearby_places",
+          "similar_events",
+          "search_results"
+        ]
+      },
+      "aira_use": "Get tickets, venue and schedule details for a networking event or conference before adding it to your calendar.",
+      "endpoint": "https://serpapi.com/search.json",
+      "family": "Google",
+      "verified": "docs",
+      "requires_any_of": [],
+      "unlisted": true
+    },
+    {
+      "id": "google_ads",
+      "name": "Google Ads (Sponsored Results)",
+      "category": "web",
+      "description": "Scrapes sponsored (ad) results from Google search pages at a higher rate than the standard Google Search API, plus inline videos, AI Overview and organic results.",
+      "docs_url": "https://serpapi.com/google-ads-api",
+      "params": [
+        {
+          "name": "q",
+          "label": "Search query",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "Query to search; supports operators such as inurl:, site:, intitle:.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "location",
+          "label": "Location",
+          "type": "location",
+          "required": true,
+          "group": "Localization",
+          "help": "Where the search originates (required). Most popular match is used if several match; see /locations.json for precise control.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Language (hl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Language code for the Google search: two or three letters (en, es, fr), optionally with region (en-gb, es-419).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "safe",
+          "label": "Adult content filter",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Level of filtering for adult content: active or off. By default Google blurs explicit content.",
+          "default": null,
+          "options": [
+            {
+              "value": "active",
+              "label": "Active (filter)"
+            },
+            {
+              "value": "off",
+              "label": "Off"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "nfpr",
+          "label": "Exclude auto-corrected results",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "1 excludes results from an auto-corrected query when the original is misspelled; 0 includes them (default). May not prevent auto-corrected results if nothing else is available.",
+          "default": "0",
+          "options": [
+            {
+              "value": "0",
+              "label": "Include (default)"
+            },
+            {
+              "value": "1",
+              "label": "Exclude"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "device",
+          "label": "Device",
+          "type": "enum",
+          "required": false,
+          "group": "Advanced",
+          "help": "Device used to fetch results: desktop (default), tablet (iPad) or mobile.",
+          "default": "desktop",
+          "options": [
+            {
+              "value": "desktop",
+              "label": "Desktop"
+            },
+            {
+              "value": "tablet",
+              "label": "Tablet"
+            },
+            {
+              "value": "mobile",
+              "label": "Mobile"
+            }
+          ],
+          "requires_one_of": null
+        }
+      ],
+      "pagination": {
+        "kind": "none",
+        "param": null,
+        "page_size": null,
+        "notes": ""
+      },
+      "result_keys": [
+        "search_information",
+        "ads",
+        "inline_videos",
+        "related_questions",
+        "ai_overview",
+        "organic_results",
+        "related_searches"
+      ],
+      "result_item_fields": {
+        "ads": [
+          "position",
+          "block_position",
+          "title",
+          "link",
+          "displayed_link",
+          "tracking_link",
+          "description",
+          "source",
+          "sitelinks"
+        ],
+        "organic_results": [
+          "position",
+          "title",
+          "link",
+          "redirect_link",
+          "displayed_link",
+          "favicon",
+          "date",
+          "snippet",
+          "source"
+        ]
+      },
+      "aira_use": "See which companies are paying to advertise hiring or recruiting keywords (e.g. 'software engineer jobs') to find actively hiring employers and staffing agencies.",
+      "endpoint": "https://serpapi.com/search.json",
+      "family": "Google",
+      "verified": "docs",
+      "requires_any_of": []
+    },
+    {
+      "id": "google_ads_transparency_center",
+      "name": "Google Ads Transparency Center",
+      "category": "web",
+      "description": "Scrapes Google Ads Transparency Center: ad creatives run by an advertiser (or matching a domain text), with formats, shown dates and regions.",
+      "docs_url": "https://serpapi.com/google-ads-transparency-center-api",
+      "params": [
+        {
+          "name": "advertiser_id",
+          "label": "Advertiser ID",
+          "type": "string",
+          "required": false,
+          "group": "Search",
+          "help": "Google Advertiser ID from the Ads Transparency Center advertiser URL (e.g. AR17828074650563772417). Accepts a single ID or several comma-separated IDs; alternatively use text.",
+          "default": null,
+          "requires_one_of": "advertiser_or_text"
+        },
+        {
+          "name": "text",
+          "label": "Free-text / domain",
+          "type": "string",
+          "required": false,
+          "group": "Advanced",
+          "help": "Text to search, typically a domain, as in a standard Ads Transparency Center search. Can replace advertiser_id.",
+          "default": null,
+          "requires_one_of": "advertiser_or_text"
+        },
+        {
+          "name": "platform",
+          "label": "Platform",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Platform where ads are displayed. When unset, results from all platforms are returned.",
+          "default": null,
+          "options": [
+            {
+              "value": "PLAY",
+              "label": "Google Play"
+            },
+            {
+              "value": "MAPS",
+              "label": "Google Maps"
+            },
+            {
+              "value": "SEARCH",
+              "label": "Google Search"
+            },
+            {
+              "value": "SHOPPING",
+              "label": "Google Shopping"
+            },
+            {
+              "value": "YOUTUBE",
+              "label": "YouTube"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "political_ads",
+          "label": "Political ads only",
+          "type": "boolean",
+          "required": false,
+          "group": "Filters",
+          "help": "When true only political advertisements are returned (a separate category). Defaults to false. Can only be used with region.",
+          "default": false,
+          "requires_one_of": null
+        },
+        {
+          "name": "get_advertiser",
+          "label": "Fetch advertiser details",
+          "type": "boolean",
+          "required": false,
+          "group": "Advanced",
+          "help": "When true an extra request returns the advertiser block (legal name and country of registration). Defaults to false. Only usable with a single advertiser_id.",
+          "default": false,
+          "requires_one_of": null
+        },
+        {
+          "name": "region",
+          "label": "Region",
+          "type": "enum",
+          "required": false,
+          "group": "Localization",
+          "help": "Region code to search from (numeric Google region ID); default is anywhere. See SerpApi's Ads Transparency Center regions list for all codes.",
+          "default": null,
+          "options": [
+            {
+              "value": "2840",
+              "label": "United States"
+            },
+            {
+              "value": "2356",
+              "label": "India"
+            },
+            {
+              "value": "2826",
+              "label": "United Kingdom"
+            },
+            {
+              "value": "2124",
+              "label": "Canada"
+            },
+            {
+              "value": "2036",
+              "label": "Australia"
+            },
+            {
+              "value": "2276",
+              "label": "Germany"
+            },
+            {
+              "value": "2250",
+              "label": "France"
+            },
+            {
+              "value": "2702",
+              "label": "Singapore"
+            },
+            {
+              "value": "2784",
+              "label": "United Arab Emirates"
+            },
+            {
+              "value": "2528",
+              "label": "Netherlands"
+            },
+            {
+              "value": "2724",
+              "label": "Spain"
+            },
+            {
+              "value": "2380",
+              "label": "Italy"
+            },
+            {
+              "value": "2392",
+              "label": "Japan"
+            },
+            {
+              "value": "2076",
+              "label": "Brazil"
+            },
+            {
+              "value": "2484",
+              "label": "Mexico"
+            },
+            {
+              "value": "2682",
+              "label": "Saudi Arabia"
+            },
+            {
+              "value": "2554",
+              "label": "New Zealand"
+            },
+            {
+              "value": "2376",
+              "label": "Israel"
+            },
+            {
+              "value": "2616",
+              "label": "Poland"
+            },
+            {
+              "value": "2752",
+              "label": "Sweden"
+            },
+            {
+              "value": "2756",
+              "label": "Switzerland"
+            },
+            {
+              "value": "2372",
+              "label": "Ireland"
+            },
+            {
+              "value": "2056",
+              "label": "Belgium"
+            },
+            {
+              "value": "2208",
+              "label": "Denmark"
+            },
+            {
+              "value": "2578",
+              "label": "Norway"
+            },
+            {
+              "value": "2246",
+              "label": "Finland"
+            },
+            {
+              "value": "2620",
+              "label": "Portugal"
+            },
+            {
+              "value": "2410",
+              "label": "South Korea"
+            },
+            {
+              "value": "2158",
+              "label": "Taiwan"
+            },
+            {
+              "value": "2344",
+              "label": "Hong Kong"
+            },
+            {
+              "value": "2008",
+              "label": "Albania"
+            },
+            {
+              "value": "2012",
+              "label": "Algeria"
+            },
+            {
+              "value": "2016",
+              "label": "American Samoa"
+            },
+            {
+              "value": "2020",
+              "label": "Andorra"
+            },
+            {
+              "value": "2024",
+              "label": "Angola"
+            },
+            {
+              "value": "2660",
+              "label": "Anguilla"
+            },
+            {
+              "value": "2010",
+              "label": "Antarctica"
+            },
+            {
+              "value": "2028",
+              "label": "Antigua and Barbuda"
+            },
+            {
+              "value": "2032",
+              "label": "Argentina"
+            },
+            {
+              "value": "2051",
+              "label": "Armenia"
+            },
+            {
+              "value": "2533",
+              "label": "Aruba"
+            },
+            {
+              "value": "2040",
+              "label": "Austria"
+            },
+            {
+              "value": "2031",
+              "label": "Azerbaijan"
+            },
+            {
+              "value": "2048",
+              "label": "Bahrain"
+            },
+            {
+              "value": "2050",
+              "label": "Bangladesh"
+            },
+            {
+              "value": "2052",
+              "label": "Barbados"
+            },
+            {
+              "value": "2112",
+              "label": "Belarus"
+            },
+            {
+              "value": "2084",
+              "label": "Belize"
+            },
+            {
+              "value": "2204",
+              "label": "Benin"
+            },
+            {
+              "value": "2060",
+              "label": "Bermuda"
+            },
+            {
+              "value": "2064",
+              "label": "Bhutan"
+            },
+            {
+              "value": "2068",
+              "label": "Bolivia"
+            },
+            {
+              "value": "2070",
+              "label": "Bosnia and Herzegovina"
+            },
+            {
+              "value": "2072",
+              "label": "Botswana"
+            },
+            {
+              "value": "2074",
+              "label": "Bouvet Island"
+            },
+            {
+              "value": "2086",
+              "label": "British Indian Ocean Territory"
+            },
+            {
+              "value": "2092",
+              "label": "British Virgin Islands"
+            },
+            {
+              "value": "2096",
+              "label": "Brunei"
+            },
+            {
+              "value": "2100",
+              "label": "Bulgaria"
+            },
+            {
+              "value": "2854",
+              "label": "Burkina Faso"
+            }
+          ],
+          "options_truncated": true,
+          "requires_one_of": null
+        },
+        {
+          "name": "start_date",
+          "label": "Start date",
+          "type": "date",
+          "required": false,
+          "group": "Filters",
+          "help": "Start date of the results, format YYYYMMDD (e.g. 20221201).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "end_date",
+          "label": "End date",
+          "type": "date",
+          "required": false,
+          "group": "Filters",
+          "help": "End date of the results, format YYYYMMDD (e.g. 20221231). For a single day set end_date to start_date + 1 day.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "creative_format",
+          "label": "Creative format",
+          "type": "enum",
+          "required": false,
+          "group": "Filters",
+          "help": "Only ads with this format are returned.",
+          "default": null,
+          "options": [
+            {
+              "value": "text",
+              "label": "Text"
+            },
+            {
+              "value": "image",
+              "label": "Image"
+            },
+            {
+              "value": "video",
+              "label": "Video"
+            }
+          ],
+          "requires_one_of": null
+        },
+        {
+          "name": "num",
+          "label": "Max results",
+          "type": "integer",
+          "required": false,
+          "group": "Pagination",
+          "help": "Maximum number of results to return (default 40).",
+          "default": 40,
+          "requires_one_of": null
+        },
+        {
+          "name": "next_page_token",
+          "label": "Next page token",
+          "type": "string",
+          "required": false,
+          "group": "Pagination",
+          "help": "Token to retrieve the next page of results.",
+          "default": null,
+          "requires_one_of": null
+        }
+      ],
+      "requires_any_of": [
+        [
+          "advertiser_id",
+          "text"
+        ]
+      ],
+      "pagination": {
+        "kind": "next_page_token",
+        "param": "next_page_token",
+        "page_size": 40,
+        "notes": "num sets the page size (default 40)."
+      },
+      "result_keys": [
+        "search_information",
+        "advertiser",
+        "ad_creatives",
+        "serpapi_pagination"
+      ],
+      "result_item_fields": {
+        "ad_creatives": [
+          "advertiser_id",
+          "advertiser",
+          "ad_creative_id",
+          "format",
+          "link",
+          "total_days_shown",
+          "first_shown",
+          "last_shown",
+          "details_link",
+          "serpapi_details_link"
+        ],
+        "advertiser": [
+          "id",
+          "name",
+          "legal_name",
+          "country_code",
+          "country"
+        ]
+      },
+      "aira_use": "Study how a target employer advertises (employer branding, recruiting campaigns, regions and duration) to judge hiring intent and company health.",
+      "endpoint": "https://serpapi.com/search.json",
+      "family": "Google",
+      "verified": "docs"
+    },
+    {
+      "id": "google_ads_transparency_center_ad_details",
+      "name": "Google Ads Transparency Center Ad Details",
+      "category": "web",
+      "description": "Returns detailed information about one ad creative from Google Ads Transparency Center (format, regions where shown, headline, snippet, sitelinks).",
+      "docs_url": "https://serpapi.com/google-ads-transparency-center-ad-details",
+      "params": [
+        {
+          "name": "advertiser_id",
+          "label": "Advertiser ID",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "Google Advertiser ID from the Ads Transparency Center advertiser URL (e.g. AR17828074650563772417).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "creative_id",
+          "label": "Creative ID",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "Google Creative ID from the creative URL (e.g. CR07110512387970564097).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "region",
+          "label": "Region",
+          "type": "enum",
+          "required": false,
+          "group": "Localization",
+          "help": "Region code to search from (numeric Google region ID); default is anywhere. See SerpApi's Ads Transparency Center regions list.",
+          "default": null,
+          "options": [
+            {
+              "value": "2840",
+              "label": "United States"
+            },
+            {
+              "value": "2356",
+              "label": "India"
+            },
+            {
+              "value": "2826",
+              "label": "United Kingdom"
+            },
+            {
+              "value": "2124",
+              "label": "Canada"
+            },
+            {
+              "value": "2036",
+              "label": "Australia"
+            },
+            {
+              "value": "2276",
+              "label": "Germany"
+            },
+            {
+              "value": "2250",
+              "label": "France"
+            },
+            {
+              "value": "2702",
+              "label": "Singapore"
+            },
+            {
+              "value": "2784",
+              "label": "United Arab Emirates"
+            },
+            {
+              "value": "2528",
+              "label": "Netherlands"
+            },
+            {
+              "value": "2724",
+              "label": "Spain"
+            },
+            {
+              "value": "2380",
+              "label": "Italy"
+            },
+            {
+              "value": "2392",
+              "label": "Japan"
+            },
+            {
+              "value": "2076",
+              "label": "Brazil"
+            },
+            {
+              "value": "2484",
+              "label": "Mexico"
+            },
+            {
+              "value": "2682",
+              "label": "Saudi Arabia"
+            },
+            {
+              "value": "2554",
+              "label": "New Zealand"
+            },
+            {
+              "value": "2376",
+              "label": "Israel"
+            },
+            {
+              "value": "2616",
+              "label": "Poland"
+            },
+            {
+              "value": "2752",
+              "label": "Sweden"
+            },
+            {
+              "value": "2756",
+              "label": "Switzerland"
+            },
+            {
+              "value": "2372",
+              "label": "Ireland"
+            },
+            {
+              "value": "2056",
+              "label": "Belgium"
+            },
+            {
+              "value": "2208",
+              "label": "Denmark"
+            },
+            {
+              "value": "2578",
+              "label": "Norway"
+            },
+            {
+              "value": "2246",
+              "label": "Finland"
+            },
+            {
+              "value": "2620",
+              "label": "Portugal"
+            },
+            {
+              "value": "2410",
+              "label": "South Korea"
+            },
+            {
+              "value": "2158",
+              "label": "Taiwan"
+            },
+            {
+              "value": "2344",
+              "label": "Hong Kong"
+            },
+            {
+              "value": "2008",
+              "label": "Albania"
+            },
+            {
+              "value": "2012",
+              "label": "Algeria"
+            },
+            {
+              "value": "2016",
+              "label": "American Samoa"
+            },
+            {
+              "value": "2020",
+              "label": "Andorra"
+            },
+            {
+              "value": "2024",
+              "label": "Angola"
+            },
+            {
+              "value": "2660",
+              "label": "Anguilla"
+            },
+            {
+              "value": "2010",
+              "label": "Antarctica"
+            },
+            {
+              "value": "2028",
+              "label": "Antigua and Barbuda"
+            },
+            {
+              "value": "2032",
+              "label": "Argentina"
+            },
+            {
+              "value": "2051",
+              "label": "Armenia"
+            },
+            {
+              "value": "2533",
+              "label": "Aruba"
+            },
+            {
+              "value": "2040",
+              "label": "Austria"
+            },
+            {
+              "value": "2031",
+              "label": "Azerbaijan"
+            },
+            {
+              "value": "2048",
+              "label": "Bahrain"
+            },
+            {
+              "value": "2050",
+              "label": "Bangladesh"
+            },
+            {
+              "value": "2052",
+              "label": "Barbados"
+            },
+            {
+              "value": "2112",
+              "label": "Belarus"
+            },
+            {
+              "value": "2084",
+              "label": "Belize"
+            },
+            {
+              "value": "2204",
+              "label": "Benin"
+            },
+            {
+              "value": "2060",
+              "label": "Bermuda"
+            },
+            {
+              "value": "2064",
+              "label": "Bhutan"
+            },
+            {
+              "value": "2068",
+              "label": "Bolivia"
+            },
+            {
+              "value": "2070",
+              "label": "Bosnia and Herzegovina"
+            },
+            {
+              "value": "2072",
+              "label": "Botswana"
+            },
+            {
+              "value": "2074",
+              "label": "Bouvet Island"
+            },
+            {
+              "value": "2086",
+              "label": "British Indian Ocean Territory"
+            },
+            {
+              "value": "2092",
+              "label": "British Virgin Islands"
+            },
+            {
+              "value": "2096",
+              "label": "Brunei"
+            },
+            {
+              "value": "2100",
+              "label": "Bulgaria"
+            },
+            {
+              "value": "2854",
+              "label": "Burkina Faso"
+            }
+          ],
+          "options_truncated": true,
+          "requires_one_of": null
+        }
+      ],
+      "pagination": {
+        "kind": "none",
+        "param": null,
+        "page_size": null,
+        "notes": ""
+      },
+      "result_keys": [
+        "search_information",
+        "ad_creatives"
+      ],
+      "result_item_fields": {
+        "search_information": [
+          "format",
+          "last_shown",
+          "region_name",
+          "more_ads_by_advertiser",
+          "regions"
+        ],
+        "ad_creatives": [
+          "title",
+          "headline",
+          "snippet",
+          "visible_link",
+          "advertiser_logo",
+          "advertiser_logo_alt",
+          "sitelink_texts",
+          "call_to_action"
+        ]
+      },
+      "aira_use": "Inspect the exact wording and regions of a company's recruiting or brand ad to understand how it positions itself.",
+      "endpoint": "https://serpapi.com/search.json",
+      "family": "Google",
+      "verified": "docs",
+      "requires_any_of": [],
+      "unlisted": true
+    },
+    {
+      "id": "google_about_this_result",
+      "name": "Google About This Result",
+      "category": "web",
+      "description": "Returns Google's 'About this result' information for a website (source description, web results about the source, social links, reviews and more).",
+      "docs_url": "https://serpapi.com/google-about-this-result",
+      "params": [
+        {
+          "name": "q",
+          "label": "Website URL",
+          "type": "string",
+          "required": false,
+          "group": "Search",
+          "help": "URL of the website to get results for (e.g. https://www.starbucks.com/). Required unless req_token is used; q and req_token cannot be used together.",
+          "default": null,
+          "requires_one_of": "target"
+        },
+        {
+          "name": "req_token",
+          "label": "Request token",
+          "type": "string",
+          "required": false,
+          "group": "Advanced",
+          "help": "Encoded request token Google uses to identify the website; found in about_page_link / about_page_serpapi_link of organic results. Can be used instead of q.",
+          "default": null,
+          "requires_one_of": "target"
+        },
+        {
+          "name": "google_domain",
+          "label": "Google domain",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Google domain to use, e.g. google.com (default), google.co.uk, google.ca.",
+          "default": "google.com",
+          "requires_one_of": null
+        },
+        {
+          "name": "gl",
+          "label": "Country (gl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two-letter country code for the Google About This Result search (e.g. us, uk, fr).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Language (hl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Language code for the Google About This Result search: two or three letters (en, es, fr), optionally with region (en-gb, es-419).",
+          "default": null,
+          "requires_one_of": null
+        }
+      ],
+      "requires_any_of": [
+        [
+          "q",
+          "req_token"
+        ]
+      ],
+      "pagination": {
+        "kind": "none",
+        "param": null,
+        "page_size": null,
+        "notes": ""
+      },
+      "result_keys": [
+        "about_this_result"
+      ],
+      "result_item_fields": {
+        "about_this_result": [
+          "link",
+          "favicon",
+          "about_the_source",
+          "web_results_about_the_source",
+          "in_their_own_words",
+          "social",
+          "reviews_from_the_web",
+          "store_insights",
+          "site_first_indexed_by_google",
+          "footnote"
+        ]
+      },
+      "aira_use": "Quickly vet an unfamiliar recruiter or company website (what Google knows about it, reviews, how old the site is) to spot scams and fake job postings.",
+      "endpoint": "https://serpapi.com/search.json",
+      "family": "Google",
+      "verified": "docs",
+      "unlisted": true
+    },
+    {
+      "id": "google_immersive_product",
+      "name": "Google Immersive Product",
+      "category": "shopping",
+      "description": "Returns the expanded product popup from Google: stores and prices, specs, reviews, videos and more options, using a page_token from a search result.",
+      "docs_url": "https://serpapi.com/google-immersive-product-api",
+      "params": [
+        {
+          "name": "page_token",
+          "label": "Page token",
+          "type": "string",
+          "required": true,
+          "group": "Search",
+          "help": "Token needed to show more product info in the Google immersive popup (immersive_product_page_token from search results).",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "more_stores",
+          "label": "More stores",
+          "type": "boolean",
+          "required": false,
+          "group": "Advanced",
+          "help": "Set to 1 or true to return up to 13 stores instead of the default 3 to 5.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "next_page_token",
+          "label": "Next page token",
+          "type": "string",
+          "required": false,
+          "group": "Pagination",
+          "help": "Token for the next page of store results; returned as stores_next_page_token.",
+          "default": null,
+          "requires_one_of": null
+        }
+      ],
+      "pagination": {
+        "kind": "next_page_token",
+        "param": "next_page_token",
+        "page_size": null,
+        "notes": "Token is returned as product_results.stores_next_page_token."
+      },
+      "result_keys": [
+        "product_results"
+      ],
+      "result_item_fields": {
+        "product_results.stores": [
+          "name",
+          "logo",
+          "link",
+          "title",
+          "rating",
+          "reviews",
+          "payment_methods",
+          "tag",
+          "details_and_offers",
+          "discount",
+          "price",
+          "extracted_price",
+          "original_price",
+          "shipping",
+          "total"
+        ],
+        "product_results.user_reviews": [
+          "title",
+          "text",
+          "user_name",
+          "source",
+          "rating",
+          "date",
+          "icon"
+        ],
+        "product_results.more_options": [
+          "title",
+          "thumbnail",
+          "price",
+          "extracted_price",
+          "reviews",
+          "rating",
+          "serpapi_link"
+        ]
+      },
+      "aira_use": "Price-compare home-office gear, laptops and certification materials needed for a new role or remote setup.",
+      "endpoint": "https://serpapi.com/search.json",
+      "family": "Google",
+      "verified": "docs",
+      "requires_any_of": []
+    },
+    {
+      "id": "google_product",
+      "name": "Google Product",
+      "category": "shopping",
+      "description": "Scrapes a Google Shopping product page: stores and prices, price insights, specifications, reviews, top insights and variants.",
+      "docs_url": "https://serpapi.com/google-product-api",
+      "params": [
+        {
+          "name": "product_id",
+          "label": "Product ID",
+          "type": "string",
+          "required": false,
+          "group": "Search",
+          "help": "Google product to get results for; the product_id returned by the Google Shopping API (also in product_link as prds=catalogid:{product_id}). Either product_id or page_token is required.",
+          "default": null,
+          "requires_one_of": "product_ref"
+        },
+        {
+          "name": "page_token",
+          "label": "Page token",
+          "type": "string",
+          "required": false,
+          "group": "Advanced",
+          "help": "Token of a specific product offer (immersive_product_page_token from Google Shopping, or page_token from this API); selects the exact offer, variant and reviews. Either product_id or page_token is required.",
+          "default": null,
+          "requires_one_of": "product_ref"
+        },
+        {
+          "name": "offer_view",
+          "label": "Offer view",
+          "type": "boolean",
+          "required": false,
+          "group": "Advanced",
+          "help": "Set to 1 or true to fetch the offer view of a product_id search (adds rating, reviews, ratings, user_reviews, top_insights, variants). Ignored for page_token searches.",
+          "default": null,
+          "requires_one_of": null
+        },
+        {
+          "name": "gl",
+          "label": "Country (gl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Two-letter country code for the Google Product search (e.g. us, uk, fr). Defaults to us.",
+          "default": "us",
+          "requires_one_of": null
+        },
+        {
+          "name": "hl",
+          "label": "Language (hl)",
+          "type": "string",
+          "required": false,
+          "group": "Localization",
+          "help": "Language code for the Google Product search: two or three letters (en, es, fr), optionally with region (en-gb, es-419). Defaults to en.",
+          "default": "en",
+          "requires_one_of": null
+        }
+      ],
+      "requires_any_of": [
+        [
+          "product_id",
+          "page_token"
+        ]
+      ],
+      "pagination": {
+        "kind": "none",
+        "param": null,
+        "page_size": null,
+        "notes": ""
+      },
+      "result_keys": [
+        "product_results"
+      ],
+      "result_item_fields": {
+        "product_results": [
+          "title",
+          "brand",
+          "rating",
+          "reviews",
+          "price_range",
+          "stores",
+          "about_the_product",
+          "top_insights",
+          "ratings",
+          "reviews_images",
+          "user_reviews",
+          "discussions_and_forums",
+          "more_options",
+          "variants",
+          "variant_thumbnails",
+          "product_attributes",
+          "price_insights"
+        ]
+      },
+      "aira_use": "Compare prices and reviews for tools, books or equipment you need to buy when starting a new job or course.",
+      "endpoint": "https://serpapi.com/search.json",
+      "family": "Google",
+      "verified": "docs"
+    }
+  ]
+}

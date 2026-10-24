@@ -1796,6 +1796,42 @@ class TestSearchJobs:
             ]
         }
 
+    async def test_uses_job_reference_when_result_markup_has_no_job_links(
+        self, mock_page
+    ):
+        extractor = LinkedInExtractor(mock_page)
+        mock_page.url = "https://www.linkedin.com/jobs/search?keywords=python"
+        with (
+            patch.object(
+                extractor,
+                "_extract_search_page",
+                new_callable=AsyncMock,
+                return_value=extracted(
+                    "Job 1",
+                    [{"kind": "job", "url": "/jobs/view/111/", "text": "Job 1"}],
+                ),
+            ),
+            patch.object(
+                extractor,
+                "_extract_job_ids",
+                new_callable=AsyncMock,
+                return_value=[],
+            ),
+            patch.object(
+                extractor,
+                "_get_total_search_pages",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+            patch(
+                "linkedin_mcp_server.scraping.extractor.asyncio.sleep",
+                new_callable=AsyncMock,
+            ),
+        ):
+            result = await extractor.search_jobs("python", max_pages=1)
+
+        assert result["job_ids"] == ["111"]
+
     async def test_pagination_uses_fixed_page_size(self, mock_page):
         """Pages use &start= with fixed 25-per-page offset."""
         extractor = LinkedInExtractor(mock_page)
@@ -4548,3 +4584,158 @@ class TestBuildFeedReferences:
             "/posts/alice_x-ugcPost-1-xx",
         ]
         assert kinds == {"feed_post"}
+
+
+class TestReplyToConversation:
+    """In-thread replies reuse the evaluate + keyboard path and verify delivery."""
+
+    THREAD_URL = "https://www.linkedin.com/messaging/thread/2-abc/"
+
+    def _patches(self, extractor, *, compose_box=True):
+        return (
+            patch.object(extractor, "_navigate_to_page", new_callable=AsyncMock),
+            patch(
+                "linkedin_mcp_server.scraping.extractor.detect_rate_limit",
+                new_callable=AsyncMock,
+            ),
+            patch(
+                "linkedin_mcp_server.scraping.extractor.handle_modal_close",
+                new_callable=AsyncMock,
+            ),
+            patch.object(
+                extractor,
+                "_resolve_message_compose_box",
+                new_callable=AsyncMock,
+                return_value=MagicMock() if compose_box else None,
+            ),
+            patch(
+                "linkedin_mcp_server.scraping.extractor.asyncio.sleep",
+                new_callable=AsyncMock,
+            ),
+        )
+
+    def _keyboard(self, mock_page):
+        keyboard = MagicMock()
+        keyboard.type = AsyncMock()
+        keyboard.press = AsyncMock()
+        mock_page.keyboard = keyboard
+        mock_page.wait_for_selector = AsyncMock()
+        return keyboard
+
+    async def test_navigates_by_thread_url_and_sends(self, mock_page):
+        extractor = LinkedInExtractor(mock_page)
+        keyboard = self._keyboard(mock_page)
+        mock_page.url = self.THREAD_URL
+        mock_page.evaluate = AsyncMock(side_effect=[{"ok": True, "existing": 0}, True])
+        p = self._patches(extractor)
+        with (
+            p[0] as navigate,
+            p[1],
+            p[2],
+            p[3],
+            p[4],
+            patch.object(
+                extractor, "_reply_delivered", new_callable=AsyncMock, return_value=True
+            ),
+        ):
+            result = await extractor.reply_to_conversation(
+                "2-abc", "Thanks!", confirm_send=True
+            )
+        navigate.assert_awaited_once_with(self.THREAD_URL)
+        keyboard.type.assert_awaited_once_with("Thanks!", delay=15)
+        keyboard.press.assert_not_awaited()
+        assert result["status"] == "sent"
+        assert result["sent"] is True
+
+    async def test_clears_existing_draft_before_typing(self, mock_page):
+        extractor = LinkedInExtractor(mock_page)
+        keyboard = self._keyboard(mock_page)
+        mock_page.url = self.THREAD_URL
+        mock_page.evaluate = AsyncMock(side_effect=[{"ok": True, "existing": 12}, True])
+        p = self._patches(extractor)
+        with (
+            p[0],
+            p[1],
+            p[2],
+            p[3],
+            p[4],
+            patch.object(
+                extractor, "_reply_delivered", new_callable=AsyncMock, return_value=True
+            ),
+        ):
+            await extractor.reply_to_conversation("2-abc", "Thanks!", confirm_send=True)
+        assert [call.args[0] for call in keyboard.press.await_args_list] == [
+            "ControlOrMeta+A",
+            "Backspace",
+        ]
+
+    async def test_dry_run_does_not_type(self, mock_page):
+        extractor = LinkedInExtractor(mock_page)
+        keyboard = self._keyboard(mock_page)
+        mock_page.url = self.THREAD_URL
+        mock_page.evaluate = AsyncMock()
+        p = self._patches(extractor)
+        with p[0], p[1], p[2], p[3], p[4]:
+            result = await extractor.reply_to_conversation(
+                "2-abc", "Thanks!", confirm_send=False
+            )
+        assert result["status"] == "confirmation_required"
+        assert result["sent"] is False
+        keyboard.type.assert_not_awaited()
+        mock_page.evaluate.assert_not_awaited()
+
+    async def test_reports_missing_composer(self, mock_page):
+        extractor = LinkedInExtractor(mock_page)
+        self._keyboard(mock_page)
+        mock_page.url = self.THREAD_URL
+        p = self._patches(extractor, compose_box=False)
+        with p[0], p[1], p[2], p[3], p[4]:
+            result = await extractor.reply_to_conversation(
+                "2-abc", "Thanks!", confirm_send=True
+            )
+        assert result["status"] == "composer_unavailable"
+        assert result["sent"] is False
+
+    async def test_reports_thread_redirect(self, mock_page):
+        extractor = LinkedInExtractor(mock_page)
+        self._keyboard(mock_page)
+        mock_page.url = "https://www.linkedin.com/messaging/"
+        p = self._patches(extractor)
+        with p[0], p[1], p[2], p[3], p[4]:
+            result = await extractor.reply_to_conversation(
+                "2-abc", "Thanks!", confirm_send=True
+            )
+        assert result["status"] == "thread_unavailable"
+
+    async def test_unconfirmed_delivery_is_not_reported_as_sent(self, mock_page):
+        extractor = LinkedInExtractor(mock_page)
+        keyboard = self._keyboard(mock_page)
+        mock_page.url = self.THREAD_URL
+        mock_page.evaluate = AsyncMock(side_effect=[{"ok": True, "existing": 0}, False])
+        p = self._patches(extractor)
+        with (
+            p[0],
+            p[1],
+            p[2],
+            p[3],
+            p[4],
+            patch.object(
+                extractor,
+                "_reply_delivered",
+                new_callable=AsyncMock,
+                return_value=False,
+            ),
+        ):
+            result = await extractor.reply_to_conversation(
+                "2-abc", "Thanks!", confirm_send=True
+            )
+        keyboard.press.assert_awaited_once_with("Enter")
+        assert result["status"] == "send_unavailable"
+        assert result["sent"] is False
+
+    async def test_rejects_invalid_thread_id(self, mock_page):
+        from linkedin_mcp_server.core.exceptions import LinkedInScraperException
+
+        extractor = LinkedInExtractor(mock_page)
+        with pytest.raises(LinkedInScraperException):
+            await extractor.reply_to_conversation("../../etc", "Hi", confirm_send=True)

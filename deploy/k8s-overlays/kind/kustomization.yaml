@@ -1,0 +1,44 @@
+# A single-node test cluster (kind) overlay: local images, a ReadWriteOnce volume, local document storage, no ingress.
+# Used by deploy/k8s_smoke.py; apply by hand with:  kubectl apply -k deploy/k8s-overlays/kind
+# The aira-secrets Secret is created by the script (it holds a generated master key) and is not part of the overlay.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../k8s
+images:
+  - name: registry.example.com/aira-cloud-web
+    newName: aira-deploy-web
+    newTag: latest
+  - name: registry.example.com/aira-cloud-worker
+    newName: aira-deploy-worker
+    newTag: latest
+patches:
+  - target: { kind: PersistentVolumeClaim, name: aira-data }
+    patch: |-
+      - { op: replace, path: /spec/accessModes, value: [ReadWriteOnce] }
+      - { op: replace, path: /spec/storageClassName, value: standard }
+      - { op: replace, path: /spec/resources/requests/storage, value: 2Gi }
+  - target: { kind: ConfigMap, name: aira-config }
+    patch: |-
+      - { op: replace, path: /data/AIRA_CLOUD_BASE_URL, value: "http://127.0.0.1:18780" }
+      - { op: replace, path: /data/AIRA_CLOUD_TRUST_PROXY, value: "0" }
+      - { op: replace, path: /data/AIRA_CLOUD_BILLING, value: standin }
+      - { op: replace, path: /data/AIRA_CLOUD_MODEL_PROVIDER, value: ollama }
+      - { op: replace, path: /data/AIRA_CLOUD_STORAGE, value: local }
+  - target: { kind: Deployment }
+    patch: |-
+      - { op: add, path: /spec/template/spec/containers/0/imagePullPolicy, value: IfNotPresent }
+  - target: { kind: CronJob }
+    patch: |-
+      - { op: add, path: /spec/jobTemplate/spec/template/spec/containers/0/imagePullPolicy, value: IfNotPresent }
+  - target: { kind: Deployment, name: aira-worker }
+    patch: |-
+      - { op: replace, path: /spec/replicas, value: 1 }
+      - { op: replace, path: /spec/template/spec/containers/0/resources/requests, value: { cpu: 250m, memory: 512Mi } }
+      - { op: replace, path: /spec/template/spec/containers/0/resources/limits, value: { memory: 2Gi } }
+  - target: { kind: Ingress }
+    patch: |-
+      $patch: delete
+      apiVersion: networking.k8s.io/v1
+      kind: Ingress
+      metadata: { name: aira }

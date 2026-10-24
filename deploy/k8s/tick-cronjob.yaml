@@ -1,0 +1,51 @@
+# One scheduler pass every minute: billing transitions, trial notices, plan migrations, support-access expiry, retention,
+# and enqueueing due work. Workers already run the same pass from their heartbeat; this job guarantees a pass
+# happens even when no worker is up (and a lease in the database makes overlapping passes harmless).
+apiVersion: batch/v1
+kind: CronJob
+metadata:
+  name: aira-tick
+  namespace: aira
+spec:
+  schedule: "* * * * *"
+  concurrencyPolicy: Forbid
+  startingDeadlineSeconds: 60
+  successfulJobsHistoryLimit: 1
+  failedJobsHistoryLimit: 3
+  jobTemplate:
+    spec:
+      backoffLimit: 0
+      activeDeadlineSeconds: 55
+      template:
+        spec:
+          restartPolicy: Never
+          securityContext:
+            runAsNonRoot: true
+            runAsUser: 10001
+            runAsGroup: 10001
+            fsGroup: 10001
+            seccompProfile: { type: RuntimeDefault }
+          containers:
+            - name: tick
+              image: registry.example.com/aira-cloud-web:1.0.0
+              args: ["tick"]
+              env:
+                - { name: HOME, value: /tmp }
+              envFrom:
+                - configMapRef: { name: aira-config }
+                - secretRef: { name: aira-secrets }
+              resources:
+                requests: { cpu: 50m, memory: 256Mi }
+                limits: { memory: 512Mi }
+              securityContext:
+                allowPrivilegeEscalation: false
+                readOnlyRootFilesystem: true
+                capabilities: { drop: [ALL] }
+              volumeMounts:
+                - { name: data, mountPath: /data }
+                - { name: tmp, mountPath: /tmp }
+          volumes:
+            - name: data
+              persistentVolumeClaim: { claimName: aira-data }
+            - name: tmp
+              emptyDir: {}

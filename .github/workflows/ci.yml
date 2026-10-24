@@ -41,6 +41,9 @@ jobs:
 
       - run: uv sync --group dev
 
+      - name: Check dashboard scripts parse
+        run: for f in auto_apply_assistant/*.js; do node --check "$f"; done
+
       - name: Run tests
         run: uv run pytest --cov --cov-report=term-missing -n auto -v -s
 

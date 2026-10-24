@@ -1,0 +1,242 @@
+/* ==== Leads (classes prefixed ld-) =====================================================================
+ * Uses the app's theme variables only, so light and dark follow the rest of Aira. */
+
+.ld-content { display: grid; gap: 16px; min-width: 0; outline: none; }
+.ld-head p { max-width: 78ch; }
+.ld-icon { display: inline-grid; place-items: center; width: 16px; height: 16px; flex: none; }
+.ld-icon svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.ld-panel .panel-head { flex-wrap: wrap; }
+.ld-panel .panel-head small { margin-left: auto; }
+
+/* ---- first run ---- */
+.ld-intro { border: 1px solid var(--line); border-radius: var(--radius); background: var(--brand-soft); padding: 16px 18px; }
+.ld-intro h2 { margin: 0 0 8px; font-size: 18px; }
+.ld-intro ol { margin: 0; padding-left: 20px; display: grid; gap: 6px; color: var(--ink-2); }
+
+/* ---- setup / notices ---- */
+.ld-setup { display: flex; gap: 14px; align-items: flex-start; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); padding: 16px 18px; }
+.ld-setup.compact { margin-bottom: 14px; padding: 12px 14px; }
+.ld-setup-mark { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; background: var(--brand-soft); color: var(--brand-ink); flex: none; }
+.ld-setup h2 { margin: 0 0 4px; font-size: 16px; }
+.ld-setup p { margin: 0 0 10px; }
+.ld-notice { display: flex; gap: 12px; align-items: flex-start; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); padding: 12px 14px; margin-bottom: 14px; }
+.ld-notice.warn { border-color: var(--warning); background: var(--warning-soft); }
+.ld-notice p { margin: 4px 0 0; }
+.ld-notice-ico { color: var(--brand); flex: none; padding-top: 2px; }
+.ld-notice.warn .ld-notice-ico { color: var(--warning); }
+.ld-notice-line { display: flex; gap: 8px; align-items: flex-start; margin: 0 0 12px; color: var(--ink-2); font-size: 13px; }
+.ld-warning { margin: 8px 0; padding: 8px 12px; border-radius: var(--radius-sm); background: var(--warning-soft); color: var(--warning); font-size: 13px; }
+
+/* ---- source picker ---- */
+.ld-sources { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 10px; margin-bottom: 16px; }
+.ld-source { display: flex; gap: 10px; align-items: center; text-align: left; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: var(--ink); cursor: pointer; min-width: 0; }
+.ld-source:hover { border-color: var(--line-strong); background: var(--surface-2); }
+.ld-source.on { border-color: var(--brand); background: var(--brand-soft); box-shadow: 0 0 0 2px color-mix(in srgb, var(--brand) 25%, transparent); }
+.ld-source.off:not(.on) { opacity: 0.75; }
+.ld-source-ico { display: grid; place-items: center; width: 32px; height: 32px; border-radius: 8px; background: var(--surface-3); color: var(--brand-ink); flex: none; }
+.ld-source.on .ld-source-ico { background: var(--brand); color: var(--on-brand); }
+.ld-source-text { display: grid; gap: 1px; min-width: 0; }
+.ld-source-text strong { font-size: 13.5px; }
+.ld-source-text small { color: var(--muted); font-size: 11.5px; line-height: 1.3; }
+.ld-source:focus-visible, .ld-open:focus-visible, .ld-list:focus-visible, .ld-score:focus-visible { outline: 3px solid color-mix(in srgb, var(--brand) 55%, transparent); outline-offset: 2px; }
+
+/* ---- forms ---- */
+.ld-form { display: grid; gap: 14px; }
+.ld-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; align-items: start; }
+.ld-grid .field.wide { grid-column: 1 / -1; }
+.ld-form .field.narrow { max-width: 220px; }
+.ld-cost { margin: 0; min-height: 1.3em; color: var(--ink-2); font-size: 13px; }
+.ld-formerror { margin: 0; min-height: 1.2em; color: var(--danger); font-size: 13px; font-weight: 600; }
+.ld-formerror.ok { color: var(--brand-ink); }
+.ld-hint-line { font-size: 12px; }
+.ld-fieldset { border: 1px solid var(--line); border-radius: var(--radius-sm); padding: 10px 14px; margin: 0; }
+.ld-fieldset legend { padding: 0 6px; font-size: 12px; font-weight: 700; color: var(--ink-2); }
+.ld-checks { display: flex; gap: 18px; flex-wrap: wrap; }
+.ld-checks .check { display: inline-flex; gap: 6px; align-items: center; font-size: 13.5px; }
+.ld-pick { display: inline-flex; gap: 8px; align-items: center; font-size: 12.5px; color: var(--ink-2); font-weight: 700; }
+.ld-pick > span { white-space: nowrap; }
+.ld-pick select { max-width: 220px; }
+
+/* ---- results ---- */
+.ld-summary { display: flex; gap: 6px 14px; flex-wrap: wrap; align-items: baseline; margin-bottom: 10px; font-size: 13.5px; }
+.ld-more { margin-top: 12px; }
+.ld-table-wrap { overflow-x: auto; }
+.ld-table td, .ld-table th { vertical-align: top; }
+.ld-table .ld-check { width: 36px; padding-right: 0; }
+.ld-table tr.dup td:not(.ld-check) { color: var(--muted); }
+.ld-name { display: flex; gap: 8px; align-items: flex-start; }
+.ld-name .ld-icon { margin-top: 2px; color: var(--muted); }
+.ld-name strong { overflow-wrap: anywhere; }
+.ld-dup { margin-top: 4px; background: var(--surface-3); color: var(--ink-2); }
+.ld-line { overflow-wrap: anywhere; font-size: 13px; }
+.ld-chip { display: inline-block; max-width: 100%; margin: 0 4px 4px 0; padding: 2px 8px; border-radius: 999px; background: var(--surface-3); color: var(--ink-2); font-size: 11.5px; font-weight: 600; overflow-wrap: anywhere; }
+.ld-chip.hot { background: var(--warning-soft); color: var(--warning); }
+.ld-chip.ok { background: var(--brand-soft); color: var(--brand-ink); }
+.ld-chip.warn { background: var(--warning-soft); color: var(--warning); }
+.ld-open { display: flex; gap: 8px; align-items: flex-start; padding: 0; border: 0; background: none; color: var(--ink); text-align: left; cursor: pointer; font: inherit; }
+.ld-open span { display: grid; }
+.ld-open:hover strong { text-decoration: underline; }
+.ld-open .ld-icon { margin-top: 2px; color: var(--muted); }
+
+/* ---- score with its reasons on hover and focus ---- */
+.ld-score { position: relative; display: inline-grid; place-items: center; min-width: 38px; height: 28px; padding: 0 8px; border-radius: 999px; background: var(--surface-3); color: var(--ink-2); font-weight: 800; font-size: 13px; cursor: help; }
+.ld-score.high { background: var(--brand-soft); color: var(--brand-ink); box-shadow: inset 0 0 0 1.5px var(--brand); }
+.ld-score.mid { background: var(--warning-soft); color: var(--warning); }
+.ld-score.low { background: var(--danger-soft); color: var(--danger); }
+.ld-tip { position: absolute; z-index: 30; left: 0; top: calc(100% + 6px); display: none; width: max-content; max-width: min(300px, 70vw); padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--ink); box-shadow: var(--shadow); font-size: 12px; font-weight: 500; line-height: 1.4; white-space: pre-line; text-align: left; }
+.ld-score:hover .ld-tip, .ld-score:focus .ld-tip, .ld-score:focus-within .ld-tip { display: block; }
+
+/* ---- saved searches ---- */
+.ld-saved-list { list-style: none; margin: 0; padding: 0; display: grid; }
+.ld-saved-list li { display: flex; gap: 12px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 10px 16px; border-top: 1px solid var(--line); }
+.ld-saved-list li:first-child { border-top: 0; }
+.ld-saved-main { display: grid; gap: 2px; min-width: 0; }
+.ld-csv-result { margin-top: 4px; }
+.ld-skipped { margin: 6px 0; padding-left: 18px; font-size: 12.5px; color: var(--muted); }
+
+/* ---- the Leads tab ---- */
+.ld-leads { display: grid; grid-template-columns: 220px minmax(0, 1fr); gap: 18px; align-items: start; }
+.ld-lists { display: grid; gap: 4px; position: sticky; top: calc(var(--topbar, 56px) + 12px); }
+.ld-side-title { margin: 0 0 4px; font-size: 12px; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.ld-list { display: flex; gap: 8px; align-items: center; justify-content: space-between; width: 100%; padding: 8px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-2); font: inherit; font-weight: 600; text-align: left; cursor: pointer; }
+.ld-list:hover { background: var(--surface-2); }
+.ld-list.on { background: var(--brand-soft); color: var(--brand-ink); }
+.ld-list-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ld-list .count { padding: 1px 7px; border-radius: 999px; background: var(--surface-3); font-size: 11px; }
+.ld-list.on .count { background: var(--brand); color: var(--on-brand); }
+.ld-list-actions { margin-top: 8px; }
+.ld-main { display: grid; gap: 12px; min-width: 0; }
+.ld-filters { display: grid; grid-template-columns: minmax(200px, 2fr) repeat(auto-fit, minmax(165px, 1fr)); gap: 8px; }
+.ld-toolbar { display: flex; justify-content: flex-end; }
+.ld-export { justify-content: flex-end; align-items: center; }
+.ld-bulk { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; padding: 10px 12px; border: 1px solid var(--brand); border-radius: var(--radius); background: var(--brand-soft); }
+.ld-bulk[hidden] { display: none; }
+.ld-bulk select, .ld-bulk input { max-width: 170px; min-height: 34px; }
+.ld-pager { display: flex; justify-content: space-between; align-items: center; gap: 10px; flex-wrap: wrap; }
+.ld-status { display: inline-block; padding: 2px 9px; border-radius: 999px; background: var(--surface-3); color: var(--ink-2); font-size: 11.5px; font-weight: 700; }
+.ld-status.contacted { background: var(--info-soft); color: var(--info-ink); }
+.ld-status.replied, .ld-status.qualified { background: var(--brand-soft); color: var(--brand-ink); }
+.ld-status.customer { background: var(--brand); color: var(--on-brand); }
+.ld-status.disqualified { background: var(--danger-soft); color: var(--danger); }
+
+/* ---- the drawer ---- */
+.ld-drawer { display: grid; gap: 18px; }
+.ld-block { display: grid; gap: 10px; padding-bottom: 16px; border-bottom: 1px solid var(--line); }
+.ld-block:last-child { border-bottom: 0; }
+.ld-block h3 { margin: 0; font-size: 14px; }
+.ld-fit { display: flex; gap: 12px; align-items: center; }
+.ld-fit p { margin: 2px 0 0; }
+.ld-reasons, .ld-signals { margin: 0; padding-left: 18px; display: grid; gap: 4px; font-size: 13px; }
+.ld-signals { list-style: none; padding-left: 0; }
+.ld-contacts { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 8px; }
+.ld-contacts li { display: flex; gap: 10px; justify-content: space-between; align-items: center; flex-wrap: wrap; padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); font-size: 13px; overflow-wrap: anywhere; }
+.ld-links { margin: 0; font-size: 13px; }
+.ld-actions .btn-row { justify-content: space-between; }
+.ld-draft { display: grid; gap: 10px; }
+
+/* ---- phones: tables become cards ---- */
+@media (max-width: 900px) {
+  .ld-leads { grid-template-columns: 1fr; }
+  .ld-lists { position: static; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); }
+  .ld-side-title, .ld-list-actions { grid-column: 1 / -1; }
+}
+@media (max-width: 720px) {
+  .ld-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
+  .ld-table, .ld-table tbody, .ld-table tr, .ld-table td { display: block; width: 100%; }
+  .ld-table tr { position: relative; margin: 0 0 10px; padding: 10px 12px 10px 44px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+  .ld-table td { padding: 4px 0; border: 0; }
+  .ld-table td.ld-check { position: absolute; left: 10px; top: 12px; width: auto; padding: 0; }
+  .ld-table td[data-label]::before { content: attr(data-label); display: block; font-size: 10.5px; font-weight: 800; letter-spacing: 0.05em; text-transform: uppercase; color: var(--muted); }
+  .ld-table td[data-label="Lead"]::before { display: none; }
+  .ld-filters { grid-template-columns: 1fr 1fr; }
+  .ld-filters input[type="search"] { grid-column: 1 / -1; }
+  .ld-panel .panel-head { align-items: flex-start; }
+  .ld-pick select { max-width: 160px; }
+  .ld-sources { grid-template-columns: 1fr 1fr; }
+  .ld-tip { left: auto; right: 0; }
+}
+@media (max-width: 420px) {
+  .ld-sources { grid-template-columns: 1fr; }
+  .ld-filters { grid-template-columns: 1fr 1fr; }
+  .ld-filters input[type="search"] { grid-column: 1 / -1; }
+  .ld-setup { flex-direction: column; }
+}
+
+/* ---- services, gaps and public requests (Find / Leads / drawer) ---- */
+.ld-needlist, .ld-findings, .ld-reminders, .ld-calls { margin: 0; padding-left: 0; list-style: none; display: grid; gap: 6px; font-size: 13px; }
+.ld-reminders { padding-left: 18px; list-style: disc; color: var(--ink-2); }
+.ld-calls li { padding: 8px 10px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); overflow-wrap: anywhere; }
+.ld-findings li { overflow-wrap: anywhere; }
+.ld-audit-summary { margin: 0; font-size: 13px; }
+.ld-says { margin: 0; padding: 10px 12px; border-left: 3px solid var(--brand); background: var(--surface-2); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13.5px; }
+.ld-badges { display: flex; flex-wrap: wrap; gap: 2px; }
+
+/* ---- the call panel: Aira never dials ---- */
+.ld-nodial { display: flex; gap: 10px; align-items: flex-start; margin: 0; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--surface-2); font-size: 12.5px; color: var(--ink-2); }
+.ld-nodial .ld-icon { color: var(--brand); margin-top: 2px; }
+.ld-nodial strong { display: block; color: var(--ink); font-size: 13.5px; }
+.ld-call-body { display: grid; gap: 12px; min-width: 0; }
+.ld-number { font-size: 18px; letter-spacing: 0.01em; }
+.ld-window { margin: 0; font-size: 13px; }
+.ld-script-box { display: grid; gap: 10px; }
+.ld-script { display: grid; gap: 10px; }
+.ld-script-part { display: grid; gap: 4px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); }
+.ld-script-part p, .ld-script-part ol { margin: 0; overflow-wrap: anywhere; font-size: 13.5px; }
+.ld-script-part ol { padding-left: 20px; display: grid; gap: 4px; }
+.ld-script-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; }
+.ld-objections { margin: 0; display: grid; gap: 4px; font-size: 13.5px; }
+.ld-objections dt { font-weight: 700; }
+.ld-objections dd { margin: 0 0 6px; color: var(--ink-2); overflow-wrap: anywhere; }
+.ld-logcall { display: grid; gap: 10px; padding-top: 10px; border-top: 1px solid var(--line); }
+.ld-logcall h4 { margin: 0; font-size: 13px; }
+.ld-logcall textarea { width: 100%; }
+.ld-followups { display: grid; gap: 8px; margin-right: auto; min-width: 0; }
+.ld-toolbar { gap: 10px; flex-wrap: wrap; align-items: flex-start; }
+.ld-followbtn[aria-expanded="true"] { background: var(--brand-soft); }
+.ld-followups .ld-calls li { display: flex; gap: 10px; justify-content: space-between; align-items: center; flex-wrap: wrap; }
+
+/* ---- the Outreach tab ---- */
+.ld-outreach { display: grid; gap: 16px; min-width: 0; }
+.ld-jump { display: flex; gap: 14px; flex-wrap: wrap; font-size: 13px; font-weight: 700; }
+.ld-strip { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.ld-stat { display: grid; gap: 2px; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.ld-stat strong { font-size: 22px; line-height: 1.1; }
+.ld-stat span { font-size: 12px; color: var(--muted); }
+.ld-stat.warn { border-color: var(--warning); background: var(--warning-soft); }
+.ld-stat.warn strong { color: var(--warning); font-size: 16px; }
+.ld-stat.ok { border-color: var(--brand); background: var(--brand-soft); }
+.ld-stat.ok strong { color: var(--brand-ink); font-size: 16px; }
+.ld-msgs { display: grid; gap: 12px; margin-top: 12px; }
+.ld-msg { display: grid; gap: 10px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); min-width: 0; }
+.ld-msg.approved { border-color: var(--brand); }
+.ld-msg.failed { border-color: var(--danger); }
+.ld-msg.sent, .ld-msg.rejected { background: var(--surface-2); }
+.ld-msg-head { display: flex; gap: 10px; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; }
+.ld-msg-head > div:first-child { min-width: 0; overflow-wrap: anywhere; }
+.ld-msg-chips { display: flex; gap: 4px; flex-wrap: wrap; }
+.ld-msg-subject { margin: 0; font-weight: 700; overflow-wrap: anywhere; }
+.ld-msg-body { margin: 6px 0 0; padding: 10px 12px; border-radius: var(--radius-sm); background: var(--surface-2); white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 13.5px; line-height: 1.5; max-height: 360px; overflow: auto; }
+.ld-msg-edit { display: grid; gap: 10px; }
+.ld-msg-edit textarea { width: 100%; }
+.ld-msg-actions { justify-content: flex-start; }
+.ld-rules { margin: 0; padding-left: 18px; display: grid; gap: 8px; font-size: 13.5px; color: var(--ink-2); }
+.ld-rules strong { color: var(--ink); }
+
+@media (max-width: 720px) {
+  .ld-strip { grid-template-columns: 1fr 1fr; }
+  .ld-msg-actions .btn { flex: 1 1 auto; }
+  .ld-followbtn { width: 100%; }
+}
+
+/* ---- Find: services I offer, role chips, gaps, public requests ---- */
+.ld-offered-line { margin: 0; font-size: 13px; color: var(--ink-2); }
+.ld-offer, .ld-gaptoggle { display: inline-flex; gap: 6px; align-items: center; font-size: 13.5px; }
+.ld-gaptoggle { margin-bottom: 10px; font-weight: 600; }
+.ld-rolechips { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.ld-rolechip { padding: 3px 10px; border: 1px solid var(--line-strong); border-radius: 999px; background: var(--surface); color: var(--brand-ink); font: inherit; font-size: 12px; font-weight: 600; cursor: pointer; }
+.ld-rolechip:hover { background: var(--brand-soft); border-color: var(--brand); }
+.ld-rolechip:focus-visible { outline: 3px solid color-mix(in srgb, var(--brand) 55%, transparent); outline-offset: 2px; }
+.ld-requests td { max-width: 360px; overflow-wrap: anywhere; }
+.ld-nogap { margin: 8px 0; }
+
+.ld-followbtn { justify-self: start; }

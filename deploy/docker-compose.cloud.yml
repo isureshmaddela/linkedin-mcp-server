@@ -1,0 +1,83 @@
+# Aira hosted build: a local or small-pilot stack.
+#
+#   cp deploy/.env.cloud.example deploy/.env.cloud      # then edit it
+#   docker compose --env-file deploy/.env.cloud -f deploy/docker-compose.cloud.yml up --build
+#
+# Web: http://127.0.0.1:8780     Mail catcher: http://127.0.0.1:8025     Object store (S3 API): http://127.0.0.1:8333
+# Create the first platform admin:
+#   docker compose --env-file deploy/.env.cloud -f deploy/docker-compose.cloud.yml run --rm web operator --email you@example.com
+# Demo data (development only):
+#   docker compose --env-file deploy/.env.cloud -f deploy/docker-compose.cloud.yml run --rm web seed-demo
+#
+# Run end to end by `python deploy/smoke.py` (build, start, sign up, MFA, S3 documents, worker job, backup and restore,
+# restart). Image tags are not pinned here; pin them in your own pipeline. SeaweedFS and the mail catcher stand in for a real object store and SMTP service.
+# web and worker must share the "aira-data" volume (the control-plane database and the tenants directory).
+
+name: aira-cloud
+
+x-aira: &aira
+  env_file: ["${AIRA_ENV_FILE:-.env.cloud}"]
+  environment:
+    AIRA_CLOUD_DATA: /data
+  volumes:
+    - aira-data:/data
+  restart: unless-stopped
+
+services:
+  web:
+    <<: *aira
+    build: { context: .., dockerfile: deploy/Dockerfile.cloud, target: web }
+    image: ${AIRA_WEB_IMAGE:-aira-cloud-web}
+    command: ["serve"]
+    ports: ["127.0.0.1:${AIRA_WEB_PORT:-8780}:8780"]
+    depends_on:
+      storage-init: { condition: service_completed_successfully }
+      mailpit: { condition: service_started }
+
+  worker:
+    <<: *aira
+    build: { context: .., dockerfile: deploy/Dockerfile.cloud, target: worker }
+    image: ${AIRA_WORKER_IMAGE:-aira-cloud-worker}
+    command: ["worker", "--threads", "4"]
+    shm_size: 1gb          # Chromium needs a larger /dev/shm than the Docker default
+    init: true
+    depends_on:
+      web: { condition: service_healthy }
+      storage-init: { condition: service_completed_successfully }
+
+  # An S3-compatible object store for local and pilot use. (MinIO stopped publishing container images, so the stack
+  # uses SeaweedFS; in production point AIRA_CLOUD_S3_* at S3, see deploy/terraform.) Credentials come from the
+  # same variables the application reads.
+  s3:
+    image: ${AIRA_S3_IMAGE:-chrislusf/seaweedfs:latest}
+    command: ["server", "-dir=/data", "-s3", "-ip.bind=0.0.0.0"]
+    environment:
+      AWS_ACCESS_KEY_ID: ${AIRA_CLOUD_S3_ACCESS_KEY:-aira-s3}
+      AWS_SECRET_ACCESS_KEY: ${AIRA_CLOUD_S3_SECRET_KEY:-change-me-s3-secret}
+    volumes: [s3-data:/data]
+    ports: ["127.0.0.1:${AIRA_S3_PORT:-8333}:8333"]
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:8333/status || wget -q -O /dev/null http://127.0.0.1:9333/cluster/status"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    restart: unless-stopped
+
+  storage-init:
+    <<: *aira
+    image: ${AIRA_WEB_IMAGE:-aira-cloud-web}
+    command: ["init-storage"]
+    restart: "no"
+    depends_on:
+      s3: { condition: service_healthy }
+
+  mailpit:
+    image: axllent/mailpit:latest
+    environment:
+      MP_SMTP_BIND_ADDR: 0.0.0.0:25     # port 25 so the application does not attempt STARTTLS
+    ports: ["127.0.0.1:${AIRA_MAIL_PORT:-8025}:8025"]
+    restart: unless-stopped
+
+volumes:
+  aira-data:
+  s3-data:

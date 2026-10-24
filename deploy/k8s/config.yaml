@@ -1,0 +1,26 @@
+# Non-secret settings. Every name is read by aira_cloud/config.py (see docs/multitenant-operations.md).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: aira-config
+  namespace: aira
+data:
+  AIRA_CLOUD_DATA: /data
+  AIRA_CLOUD_HOST: 0.0.0.0
+  AIRA_CLOUD_PORT: "8780"
+  AIRA_CLOUD_BASE_URL: https://aira.example.com
+  AIRA_CLOUD_ALLOWED_HOSTS: aira.example.com
+  AIRA_CLOUD_REGION: eu-1
+  AIRA_CLOUD_SECURITY_CONTACT: security@example.com
+  AIRA_CLOUD_TRUST_PROXY: "1"
+  AIRA_CLOUD_TRUSTED_PROXY_HOPS: "1"   # the ingress controller; add one per CDN or load balancer in front of it
+  AIRA_CLOUD_JSON_LOGS: "1"
+  AIRA_CLOUD_LOG_LEVEL: INFO
+  AIRA_CLOUD_BILLING: stripe
+  AIRA_CLOUD_MAIL_FROM: Aira <no-reply@example.com>
+  AIRA_CLOUD_MODEL_PROVIDER: anthropic
+  AIRA_CLOUD_MODEL_NAME: claude-sonnet-5-5
+  AIRA_CLOUD_STORAGE: s3
+  AIRA_CLOUD_S3_ENDPOINT: https://s3.eu-west-1.amazonaws.com
+  AIRA_CLOUD_S3_BUCKET: aira-documents-example
+  AIRA_CLOUD_S3_REGION: eu-west-1

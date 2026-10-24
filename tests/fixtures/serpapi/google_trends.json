@@ -1,0 +1,118 @@
+{
+  "search_metadata": {
+    "id": "{{id}}",
+    "status": "Success",
+    "json_endpoint": "{{base}}/searches/{{id}}.json",
+    "created_at": "2026-10-22 12:00:00 UTC",
+    "processed_at": "2026-10-22 12:00:01 UTC",
+    "total_time_taken": 1.2,
+    "fixture": true,
+    "fixture_note": "Recorded-shape fixture for tests. Not live SerpApi data."
+  },
+  "interest_over_time": {
+    "timeline_data": [
+      {
+        "date": "Sep 28 - Oct 4, 2026",
+        "timestamp": "1790000000",
+        "values": [
+          {
+            "query": "python",
+            "value": "41",
+            "extracted_value": 41
+          }
+        ]
+      },
+      {
+        "date": "Oct 5 - 11, 2026",
+        "timestamp": "1790604800",
+        "values": [
+          {
+            "query": "python",
+            "value": "47",
+            "extracted_value": 47
+          }
+        ]
+      },
+      {
+        "date": "Oct 12 - 18, 2026",
+        "timestamp": "1791209600",
+        "values": [
+          {
+            "query": "python",
+            "value": "52",
+            "extracted_value": 52
+          }
+        ]
+      },
+      {
+        "date": "Oct 19 - 25, 2026",
+        "timestamp": "1791814400",
+        "values": [
+          {
+            "query": "python",
+            "value": "58",
+            "extracted_value": 58
+          }
+        ]
+      },
+      {
+        "date": "Oct 26 - Nov 1, 2026",
+        "timestamp": "1792419200",
+        "values": [
+          {
+            "query": "python",
+            "value": "63",
+            "extracted_value": 63
+          }
+        ]
+      },
+      {
+        "date": "Nov 2 - 8, 2026",
+        "timestamp": "1793024000",
+        "values": [
+          {
+            "query": "python",
+            "value": "71",
+            "extracted_value": 71
+          }
+        ]
+      }
+    ],
+    "averages": [
+      {
+        "query": "python",
+        "value": 55
+      }
+    ]
+  },
+  "related_queries": {
+    "rising": [
+      {
+        "query": "python 3.14",
+        "value": "+450%",
+        "extracted_value": 450,
+        "link": "https://trends.google.com/trends/explore?q=python+3.14"
+      },
+      {
+        "query": "python asyncio",
+        "value": "+120%",
+        "extracted_value": 120,
+        "link": "https://trends.google.com/trends/explore?q=python+asyncio"
+      }
+    ],
+    "top": [
+      {
+        "query": "python tutorial",
+        "value": "100",
+        "extracted_value": 100,
+        "link": "https://trends.google.com/trends/explore?q=python+tutorial"
+      },
+      {
+        "query": "python download",
+        "value": "75",
+        "extracted_value": 75,
+        "link": "https://trends.google.com/trends/explore?q=python+download"
+      }
+    ]
+  }
+}

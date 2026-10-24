@@ -1,0 +1,132 @@
+/* Hosted build: organization administration screens (Overview, Candidates, Members, Coaches, Policy, Integrations, Audit, Data).
+   Reuses the app tokens from app.css (light and dark); everything here is prefixed .adm- so it cannot collide. */
+
+.adm-page { display: grid; gap: 16px; min-width: 0; }
+.adm-sub { color: var(--muted); font-size: 13px; margin: 0; }
+.adm-grid { display: grid; gap: 16px; grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+.adm-grid.three { grid-template-columns: repeat(3, minmax(0, 1fr)); }
+.adm-grid > * { min-width: 0; }
+.adm-wide { grid-column: 1 / -1; }
+@media (max-width: 1000px) { .adm-grid, .adm-grid.three { grid-template-columns: minmax(0, 1fr); } }
+
+/* Tiles, meters and mini bars -------------------------------------------------------------- */
+.adm-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 12px; }
+.adm-tile { display: flex; flex-direction: column; gap: 4px; padding: 13px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); color: inherit; text-decoration: none; min-width: 0; }
+a.adm-tile:hover { border-color: var(--brand); }
+.adm-tile .label { color: var(--muted); font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+.adm-tile .value { font: 600 26px/1.1 var(--font-num); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.adm-tile .sub { color: var(--muted); font-size: 12px; }
+.adm-tile.warn { border-color: var(--warning); background: var(--warning-soft); }
+.adm-tile.bad { border-color: var(--danger); background: var(--danger-soft); }
+.adm-meter { height: 8px; border-radius: 999px; background: var(--surface-3); overflow: hidden; margin: 4px 0 2px; }
+.adm-meter i { display: block; height: 100%; background: var(--brand); border-radius: 999px; }
+.adm-meter.warn i { background: var(--warning); }
+.adm-meter.bad i { background: var(--danger); }
+.adm-bars { display: flex; align-items: flex-end; gap: 6px; height: 54px; margin-top: 8px; }
+.adm-bars > div { flex: 1; min-width: 0; display: flex; flex-direction: column; justify-content: flex-end; align-items: center; height: 100%; gap: 3px; }
+.adm-bars i { display: block; width: 100%; max-width: 28px; min-height: 2px; background: var(--brand); border-radius: 3px 3px 0 0; }
+.adm-bars span { font-size: 10px; color: var(--muted); white-space: nowrap; }
+
+/* Pipeline ------------------------------------------------------------------------------------ */
+.adm-pipeline { display: grid; grid-template-columns: repeat(6, minmax(0, 1fr)); gap: 10px; }
+@media (max-width: 900px) { .adm-pipeline { grid-template-columns: repeat(3, minmax(0, 1fr)); } }
+.adm-stage { display: flex; flex-direction: column; gap: 3px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); text-decoration: none; color: inherit; }
+.adm-stage:hover { border-color: var(--brand); }
+.adm-stage .name { font-size: 12px; font-weight: 700; color: var(--muted); text-transform: capitalize; }
+.adm-stage .count { font: 600 26px/1.1 var(--font-num); }
+.adm-delta { font-size: 12px; font-weight: 700; color: var(--muted); }
+.adm-delta.up { color: var(--brand-ink); }
+.adm-delta.down { color: var(--danger); }
+
+/* Lists and tables ---------------------------------------------------------------------------- */
+.adm-list { display: grid; }
+.adm-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 14px; align-items: center; padding: 11px 16px; border-bottom: 1px solid var(--line); color: inherit; text-decoration: none; }
+.adm-item:last-child { border-bottom: 0; }
+a.adm-item:hover { background: var(--surface-2); }
+.adm-item .title { font-weight: 700; font-size: 14px; overflow-wrap: anywhere; }
+.adm-item .sub { color: var(--muted); font-size: 12.5px; overflow-wrap: anywhere; }
+.adm-item .meta { display: flex; flex-wrap: wrap; gap: 6px; margin-top: 5px; align-items: center; }
+.adm-item .aside { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; justify-content: flex-end; }
+@media (max-width: 640px) { .adm-item { grid-template-columns: minmax(0, 1fr); } .adm-item .aside { justify-content: flex-start; } }
+.adm-table { width: 100%; border-collapse: collapse; font-size: 13px; }
+.adm-table th, .adm-table td { padding: 8px 12px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+.adm-table th { color: var(--muted); font-size: 11.5px; text-transform: uppercase; letter-spacing: 0.04em; white-space: nowrap; }
+.adm-table td.num, .adm-table th.num { text-align: right; font-variant-numeric: tabular-nums; }
+.adm-table a { color: var(--brand-ink); font-weight: 600; }
+.adm-scroll { overflow-x: auto; max-width: 100%; }
+.adm-empty { padding: 18px 16px; color: var(--muted); font-size: 13.5px; }
+.adm-badge { display: inline-flex; align-items: center; gap: 4px; padding: 2px 8px; border-radius: 999px; font-size: 11px; font-weight: 700; white-space: nowrap; background: var(--surface-3); color: var(--ink-2); }
+.adm-badge.owner, .adm-badge.admin { background: var(--brand-soft); color: var(--brand-ink); }
+.adm-badge.coach { background: var(--info-soft); color: var(--info-ink); }
+.adm-badge.candidate { background: var(--accent); color: var(--accent-ink); }
+.adm-badge.auditor, .adm-badge.billing { background: #e6e0fb; color: #4a3aa7; }
+.adm-badge.warn { background: var(--warning-soft); color: var(--warning); }
+.adm-badge.bad { background: var(--danger-soft); color: var(--danger); }
+.adm-badge.good { background: #d9f4d9; color: #0a6b0a; }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) .adm-badge.good { background: #17361b; color: #8fe08f; }
+  :root:not([data-theme="light"]) .adm-badge.auditor, :root:not([data-theme="light"]) .adm-badge.billing { background: #2b2745; color: #b9acf2; }
+}
+:root[data-theme="dark"] .adm-badge.good { background: #17361b; color: #8fe08f; }
+:root[data-theme="dark"] .adm-badge.auditor, :root[data-theme="dark"] .adm-badge.billing { background: #2b2745; color: #b9acf2; }
+
+/* Forms ------------------------------------------------------------------------------------------ */
+.adm-form { display: grid; gap: 14px; }
+.adm-fields { display: grid; gap: 12px; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); }
+.adm-form textarea { min-height: 84px; resize: vertical; }
+.adm-check { display: flex; gap: 10px; align-items: flex-start; padding: 8px 0; }
+.adm-check input { margin-top: 3px; flex: none; width: 17px; height: 17px; }
+.adm-check .what { display: grid; gap: 2px; min-width: 0; }
+.adm-check .what b { font-size: 13.5px; }
+.adm-check .what span { color: var(--muted); font-size: 12.5px; }
+.adm-check.locked { opacity: 0.7; }
+.adm-note { padding: 10px 12px; border-radius: var(--radius-sm); background: var(--info-soft); color: var(--info-ink); font-size: 12.5px; }
+.adm-note.warn { background: var(--warning-soft); color: var(--warning); }
+.adm-note.bad { background: var(--danger-soft); color: var(--danger); }
+.adm-inline-error { color: var(--danger); font-size: 13px; font-weight: 600; min-height: 18px; }
+.adm-section-title { margin: 6px 0 0; font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: 0.06em; color: var(--muted); }
+.adm-savebar { position: sticky; bottom: 0; display: flex; gap: 10px; align-items: center; flex-wrap: wrap; padding: 12px 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow); z-index: 2; }
+.adm-savebar .grow { flex: 1; min-width: 120px; }
+.adm-radio { display: flex; gap: 10px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); cursor: pointer; }
+.adm-radio.on { border-color: var(--brand); background: var(--brand-soft); }
+.adm-radio input { margin-top: 3px; }
+.adm-radio .what { display: grid; gap: 2px; }
+.adm-radio .what span { color: var(--muted); font-size: 12.5px; }
+.adm-choices { display: grid; gap: 8px; }
+
+/* Matrix (coaches × candidates) ------------------------------------------------------------------- */
+.adm-matrix { border-collapse: separate; border-spacing: 0; font-size: 13px; }
+.adm-matrix th, .adm-matrix td { padding: 8px 10px; border-bottom: 1px solid var(--line); border-right: 1px solid var(--line); text-align: center; white-space: nowrap; }
+.adm-matrix th:first-child, .adm-matrix td:first-child { text-align: left; position: sticky; left: 0; background: var(--surface); z-index: 1; min-width: 150px; max-width: 220px; overflow: hidden; text-overflow: ellipsis; }
+.adm-matrix thead th { color: var(--muted); font-size: 11.5px; background: var(--surface); }
+.adm-matrix tr.hl td, .adm-matrix th.hl { background: var(--brand-soft); }
+.adm-scope { border: 1px solid var(--line-strong); border-radius: 999px; padding: 3px 10px; font-size: 12px; font-weight: 700; background: var(--surface); color: var(--ink); min-height: 28px; }
+.adm-scope.view { background: var(--info-soft); color: var(--info-ink); border-color: transparent; }
+.adm-scope.act { background: var(--warning-soft); color: var(--warning); border-color: transparent; }
+.adm-scope.approve { background: var(--brand-soft); color: var(--brand-ink); border-color: transparent; }
+.adm-scope.add { color: var(--muted); border-style: dashed; }
+.adm-scope:disabled { opacity: 0.5; cursor: not-allowed; }
+
+/* Detail page ------------------------------------------------------------------------------------------ */
+.adm-head { display: flex; gap: 14px; justify-content: space-between; align-items: flex-start; flex-wrap: wrap; }
+.adm-head h1 { margin: 0; overflow-wrap: anywhere; }
+.adm-checklist { display: grid; gap: 6px; margin: 0; padding: 0; list-style: none; }
+.adm-checklist li { display: flex; gap: 10px; align-items: center; font-size: 13.5px; }
+.adm-checklist .dot { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--line-strong); flex: none; display: inline-grid; place-items: center; font-size: 11px; line-height: 1; }
+.adm-checklist li.done .dot { background: var(--brand); border-color: var(--brand); color: var(--on-brand); }
+.adm-checklist li.done { color: var(--muted); }
+.adm-checklist a { color: var(--brand-ink); font-weight: 700; }
+.adm-crumb { display: flex; gap: 8px; align-items: center; font-size: 13px; color: var(--muted); }
+.adm-crumb a { color: var(--brand-ink); font-weight: 700; }
+.adm-code { font-family: var(--mono); font-size: 12px; background: var(--surface-3); padding: 2px 6px; border-radius: 4px; overflow-wrap: anywhere; }
+.adm-codeblock { font-family: var(--mono); font-size: 12px; background: var(--surface-2); border: 1px solid var(--line); padding: 10px 12px; border-radius: var(--radius-sm); overflow-wrap: anywhere; white-space: pre-wrap; }
+.adm-toolbar { display: flex; gap: 10px; flex-wrap: wrap; align-items: center; }
+.adm-toolbar .grow { flex: 1; }
+.adm-dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 6px 14px; margin: 0; font-size: 13.5px; }
+.adm-dl dt { color: var(--muted); }
+.adm-dl dd { margin: 0; overflow-wrap: anywhere; }
+@media (max-width: 520px) { .adm-dl { grid-template-columns: minmax(0, 1fr); } .adm-dl dt { margin-top: 6px; } }
+.adm-chain.ok { color: var(--brand-ink); }
+.adm-chain.bad { color: var(--danger); }
+.adm-btnrow { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
+.adm-skip { position: absolute; left: -9999px; }

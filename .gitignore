@@ -209,3 +209,12 @@ scripts/snapshot_dumps/
 
 # Debug artifacts
 .debug/
+
+# Personal documents dropped in the repo root (resumes) must never be committed
+/*.pdf
+
+# local hosted-build demo data and review screenshots
+.aira-cloud/
+.aira-shots/
+.aira-run*.txt
+.aira-test*/

@@ -10,6 +10,23 @@
 Through this LinkedIn MCP server, AI assistants like Claude can connect to your LinkedIn. Access profiles and companies, search for jobs, or get job details.
 
 
+## Aira Career Copilot (local dashboard)
+
+This repository also ships **Aira**, a local-first career copilot built on top of the MCP server: multi-source job discovery (LinkedIn, Google Jobs via SerpApi, Greenhouse, Lever, Ashby, SmartRecruiters), deduplication, explainable job scoring, tailored documents, application preparation and tracking, email-driven interview detection, calendar export, recruiter CRM, an encrypted document center, and analytics.
+
+```powershell
+uv sync --group dev
+.\scripts\start_aira.ps1 -OpenBrowser   # or: uv run python auto_apply_assistant.py
+```
+
+Two sections turn one SerpApi key into a research desk:
+
+- **Careers** (`g` then `c`): Google Jobs search with every filter Google returns and one-click, duplicate-safe import into Jobs; company, salary, market, interview-prep, travel and learning reports; job alerts that list only new postings.
+- **Leads** (`g` then `l`): find and organize sales leads from Google Maps (businesses with phone and website), Google (people and companies from LinkedIn pages), hiring signals, your own LinkedIn Sales Navigator searches (read only, in your own signed-in browser) and CSV; fit scores against your ideal customer profile with the reasons shown; one-click enrichment from a company's public website; outreach drafts that Aira never sends; lists, statuses and CSV or XLSX export. See `docs/leads.md`.
+- **Aira API** (`g` then `p`): a console for all 136 SerpApi engines (playground, engine catalog, searchable history with diff and export, locations, saved searches and monitors, account and plan, Aira API keys, docs, status), plus a SerpApi-compatible, cached endpoint at `http://127.0.0.1:8765/v1/search.json` for your own scripts. Paste the key once in Aira API > Account (it is checked with SerpApi and stored encrypted) or set `SERPAPI_API_KEY`; Google Jobs in Jobs, Careers and the Dashboard widgets all use it. Nothing here needs a key until you search, and repeated searches inside the cache window cost nothing.
+
+Open `http://127.0.0.1:8765`, create a local account, add your resume and profile under Settings, then search or import jobs. See `docs/runbook.md` for setup, `docs/api.md` for the API, `docs/architecture.md` for the design, and `docs/security.md` for the data and privacy model. Aira never submits applications or sends messages for you.
+
 ## Installation Methods
 
 [![uvx](https://img.shields.io/badge/uvx-Quick_Install-de5fe9?style=for-the-badge&logo=data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDEiIGhlaWdodD0iNDEiIHZpZXdCb3g9IjAgMCA0MSA0MSIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPHBhdGggZD0iTS01LjI4NjE5ZS0wNiAwLjE2ODYyOUwwLjA4NDMwOTggMjAuMTY4NUwwLjE1MTc2MiAzNi4xNjgzQzAuMTYxMDc1IDM4LjM3NzQgMS45NTk0NyA0MC4xNjA3IDQuMTY4NTkgNDAuMTUxNEwyMC4xNjg0IDQwLjA4NEwzMC4xNjg0IDQwLjA0MThMMzEuMTg1MiA0MC4wMzc1QzMzLjM4NzcgNDAuMDI4MiAzNS4xNjgzIDM4LjIwMjYgMzUuMTY4MyAzNlYzNkwzNy4wMDAzIDM2TDM3LjAwMDMgMzkuOTk5Mkw0MC4xNjgzIDM5Ljk5OTZMMzkuOTk5NiAtOS45NDY1M2UtMDdMMjEuNTk5OCAwLjA3NzU2ODlMMjEuNjc3NCAxNi4wMTg1TDIxLjY3NzQgMjUuOTk5OEwyMC4wNzc0IDI1Ljk5OThMMTguMzk5OCAyNS45OTk4TDE4LjQ3NzQgMTYuMDMyTDE4LjM5OTggMC4wOTEwNTkzTC01LjI4NjE5ZS0wNiAwLjE2ODYyOVoiIGZpbGw9IiNERTVGRTkiLz4KPC9zdmc+Cg==)](#-uvx-setup-recommended---universal)
@@ -36,6 +53,7 @@ Through this LinkedIn MCP server, AI assistants like Claude can connect to your 
 | `get_conversation` | Read a specific messaging conversation by username or thread ID | working |
 | `search_conversations` | Search messages by keyword | working |
 | `send_message` | Send a message to a LinkedIn user (requires confirmation) | working |
+| `reply_to_conversation` | Reply inside an existing conversation thread, including recruiter InMail (requires confirmation) | working |
 | `get_company_profile` | Extract company information with explicit section selection (posts, jobs); about-section references may include a `company_urn` entry carrying the numeric id used by LinkedIn's people-search `currentCompany` URL facet | working |
 | `get_company_posts` | Get recent posts from a company's LinkedIn feed | working |
 | `search_companies` | Search for companies on LinkedIn by keywords | working |
@@ -43,6 +61,7 @@ Through this LinkedIn MCP server, AI assistants like Claude can connect to your 
 | `search_jobs` | Search for jobs with keywords and location filters | working |
 | `search_people` | Search for people by keywords, location, connection degree (1st/2nd/3rd), and current company | working |
 | `get_job_details` | Get detailed information about a specific job posting | working |
+| `search_sales_navigator` | Read leads from your own LinkedIn Sales Navigator (needs a Sales Navigator subscription): a people search or lead list URL you built, or plain keywords. Read only: it never connects, messages, saves or likes. Returns name, title, company, location, profile URL and connection degree for each lead | working |
 | `get_feed` | Get recent posts from the authenticated user's home feed | working |
 | `close_session` | Close browser session and clean up resources | working |
 
@@ -460,3 +479,16 @@ Use in accordance with [LinkedIn's Terms of Service](https://www.linkedin.com/le
 This project is licensed under the Apache 2.0 license.
 
 <br>
+
+## Hosted (multi-tenant) build
+
+Besides the local single-user Aira app (`auto_apply_assistant.py`, loopback only, one database per account), this repository contains a hosted shell, `aira_cloud/`, that runs the same domain code for many organizations at once: organizations as tenants, seven roles, plans and entitlements, billing, an organization dashboard, a platform console, a tenant-fair worker queue, SSO and SCIM. The local build is unchanged and keeps its own tests.
+
+```bash
+uv sync --group dev --extra cloud
+uv run python -m aira_cloud seed-demo                                  # demo organizations (development only)
+uv run python -m aira_cloud operator --email you@example.com           # first platform admin
+uv run python -m aira_cloud serve --worker                             # web tier + workers + scheduler on 127.0.0.1:8780
+```
+
+On Windows, `.\scripts\start_aira_cloud.ps1 -SeedDemo -OpenBrowser` does the same. Documentation: [what it does and what it does not (as built)](docs/multitenant.md), [operations runbook](docs/multitenant-operations.md), [security controls and threat model](docs/multitenant-security.md), [plans and pricing rules](docs/pricing.md), [API reference](docs/hosted-api.md), and the legal templates in [docs/legal](docs/legal/terms.md) (templates, not reviewed by counsel). Container, Kubernetes and Terraform starting points are in [deploy/](deploy/docker-compose.cloud.yml); they have not been built or applied.

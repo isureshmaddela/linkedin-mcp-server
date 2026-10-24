@@ -1,0 +1,104 @@
+/* Aira hosted build: sign-in, onboarding, candidate and coach screens, and the banners every role sees.
+   Uses the design tokens from app.css, so light, dark and the mobile layout follow the rest of the app. */
+
+/* ---- banners above the page (acting for, paused, trial, billing, announcements) ------------------------------- */
+.cloud-slot { display: grid; gap: 8px; padding: 10px clamp(12px, 3vw, 28px) 0; }
+.cloud-slot[hidden] { display: none; }
+.cloud-banner { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; padding: 9px 14px; border: 1px solid var(--line-strong); border-left-width: 4px; border-radius: var(--radius-sm); background: var(--surface); font-size: 13.5px; }
+.cloud-banner > strong { flex: none; }
+.cloud-banner > span { flex: 1 1 240px; min-width: 0; color: var(--ink-2); overflow-wrap: anywhere; }
+.cloud-banner > .btn { margin-left: auto; }
+.cloud-banner.info { border-left-color: var(--info); background: var(--info-soft); }
+.cloud-banner.warning { border-left-color: var(--warning); background: var(--warning-soft); }
+.cloud-banner.danger { border-left-color: var(--danger); background: var(--danger-soft); }
+.cloud-banner.success { border-left-color: var(--good); }
+.cloud-banner.acting { border-left-color: var(--brand); background: var(--brand-soft); }
+.cloud-banner.acting .muted { color: var(--ink-2); }
+
+/* ---- sign-in screens ------------------------------------------------------------------------------------------------ */
+.cloud-auth { width: min(100%, 460px); }
+.cloud-auth h1 { font-size: 24px; margin-bottom: 4px; }
+.cloud-auth form { margin-top: 6px; }
+.cloud-auth .switch + .switch { margin-top: 8px; }
+.cloud-auth .ca-staff { font-size: 12px; }
+.cloud-auth .ca-staff a { color: var(--muted); }
+.ca-notice { min-height: 20px; margin: 10px 0 0; font-size: 13px; color: var(--ink-2); }
+.ca-notice.bad { color: var(--danger); }
+.ca-sso { display: grid; }
+.ca-strength { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.ca-meter { display: inline-grid; grid-template-columns: repeat(3, 26px); gap: 4px; }
+.ca-meter i { height: 5px; border-radius: 3px; background: var(--surface-3); }
+.ca-meter[data-level="1"] i:nth-child(1) { background: var(--danger); }
+.ca-meter[data-level="2"] i:nth-child(-n + 2) { background: var(--warning); }
+.ca-meter[data-level="3"] i { background: var(--good); }
+.ca-meter-text { font-size: 12px; color: var(--muted); }
+.ca-meter-text.ok { color: var(--ink-2); }
+.ca-steps { margin: 14px 0; padding-left: 20px; display: grid; gap: 12px; font-size: 14px; }
+.ca-secret-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; margin-top: 6px; }
+.ca-secret { padding: 8px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--surface-2); font: 600 15px var(--mono); letter-spacing: 0.08em; overflow-wrap: anywhere; }
+.ca-recovery h2 { margin: 14px 0 4px; }
+.ca-codes { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 6px; margin: 12px 0; }
+.ca-codes code { padding: 6px 8px; border: 1px dashed var(--line-strong); border-radius: var(--radius-sm); background: var(--surface-2); font: 600 13px var(--mono); text-align: center; }
+.ca-check { display: flex; align-items: center; gap: 8px; margin-top: 12px; font-size: 13.5px; }
+.ca-check input { width: 18px; height: 18px; }
+
+/* ---- consent and onboarding --------------------------------------------------------------------------------------- */
+.ca-consent { display: grid; grid-template-columns: 22px minmax(0, 1fr); gap: 12px; align-items: start; padding: 12px 14px; margin-bottom: 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); cursor: pointer; }
+.ca-consent input { width: 18px; height: 18px; margin-top: 2px; }
+.ca-consent span { display: grid; gap: 4px; font-size: 13.5px; color: var(--ink-2); }
+.ca-consent strong { color: var(--ink); font-size: 14px; }
+.ca-consent.optional { background: transparent; border-style: dashed; }
+.ca-rules { margin: 0; padding-left: 18px; display: grid; gap: 6px; font-size: 13.5px; color: var(--ink-2); }
+
+/* ---- candidate dashboard cards ----------------------------------------------------------------------------------------- */
+.ca-top { margin-bottom: 18px; }
+.ca-cards { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 16px; align-items: start; }
+.ca-progress { height: 6px; margin-bottom: 12px; border-radius: 3px; background: var(--surface-3); overflow: hidden; }
+.ca-progress i { display: block; height: 100%; background: var(--brand); border-radius: 3px; }
+/* The Dashboard's own checklist sits on a brand-coloured hero; on a panel it needs ink colours. */
+.ca-cards .checklist { min-width: 0; }
+.ca-cards .checklist a, .ca-static { display: flex; align-items: center; gap: 10px; padding: 8px 10px; border-radius: 8px; background: var(--surface-2); color: var(--ink); text-decoration: none; font-size: 13px; }
+.ca-cards .checklist a:hover { background: var(--brand-soft); }
+.ca-cards .checklist a i, .ca-static i { width: 18px; height: 18px; border-radius: 50%; border: 2px solid var(--line-strong); display: grid; place-items: center; font-size: 11px; font-style: normal; flex: none; }
+.ca-cards .checklist a.done i, .ca-static.done i { background: var(--brand); border-color: var(--brand); color: var(--on-brand); }
+.ca-static { margin-bottom: 6px; }
+.ca-coaches { display: grid; gap: 6px; margin-top: 12px; font-size: 13.5px; }
+.ca-coaches > div { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.ca-chip { display: inline-flex; align-items: center; padding: 2px 9px; border-radius: 999px; background: var(--surface-3); color: var(--ink-2); font-size: 11.5px; font-weight: 700; }
+.ca-chip.ok { background: var(--brand-soft); color: var(--brand-ink); }
+.ca-chip.warn { background: var(--warning-soft); color: var(--warning); }
+.ca-chip.bad { background: var(--danger-soft); color: var(--danger); }
+.badge.scope-view { background: var(--info-soft); color: var(--info-ink); }
+.badge.scope-act { background: var(--warning-soft); color: var(--warning); }
+.badge.scope-approve { background: var(--brand-soft); color: var(--brand-ink); }
+.badge.ca-stage { text-transform: capitalize; background: var(--surface-3); }
+.ca-actor.me { font-weight: 700; }
+.ca-actor.other { font-weight: 700; color: var(--brand-ink); }
+.ca-warn { color: var(--warning); }
+
+/* ---- coach ------------------------------------------------------------------------------------------------------------------- */
+.ca-toolbar { display: flex; flex-wrap: wrap; align-items: center; gap: 12px; margin-bottom: 16px; }
+.ca-toolbar input[type="search"] { flex: 1 1 220px; max-width: 360px; }
+.ca-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(300px, 1fr)); gap: 16px; }
+.ca-candidate { display: grid; gap: 12px; align-content: start; }
+.ca-candidate-head { display: flex; align-items: flex-start; justify-content: space-between; gap: 10px; }
+.ca-candidate-head strong { overflow-wrap: anywhere; }
+.ca-chips { display: flex; flex-wrap: wrap; gap: 6px; }
+.ca-kv { margin: 0; }
+.ca-section { margin-top: 18px; }
+.ca-section h3 { margin: 0 0 6px; font-size: 14px; }
+.ca-queue-row.stale { box-shadow: inset 3px 0 var(--warning); }
+.ca-questions { margin: 8px 0 0; padding-left: 18px; font-size: 12.5px; color: var(--ink-2); display: grid; gap: 2px; }
+
+@media (max-width: 900px) {
+  .ca-cards { grid-template-columns: minmax(0, 1fr); }
+  .cloud-banner > .btn { margin-left: 0; }
+}
+@media (max-width: 480px) {
+  .cloud-auth { padding: 22px 18px; }
+  .ca-codes { grid-template-columns: minmax(0, 1fr); }
+  .ca-grid { grid-template-columns: minmax(0, 1fr); }
+}
+
+/* organization-branded sign-in */
+.ca-org-logo { width: 40px; height: 40px; border-radius: 10px; object-fit: contain; background: var(--surface, #fff); }

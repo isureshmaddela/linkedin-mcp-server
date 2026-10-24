@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <meta name="theme-color" content="#0c4932">
+  <meta name="description" content="Aira Career Copilot: discover jobs across sources, score fit, prepare applications, and track interviews, recruiters, and documents.">
+  <title>Aira Career Copilot</title>
+  <link rel="stylesheet" href="/static/app.css">
+  <link rel="stylesheet" href="/static/leads.css">
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <div id="progress" role="progressbar" aria-label="Loading" aria-hidden="true"></div>
+  <div id="boot" class="boot">Aira</div>
+
+  <section id="authScreen" class="auth-screen" hidden>
+    <form id="authForm" class="auth-panel" novalidate>
+      <div class="brand"><span class="brand-mark">A</span><span>AIRA<small>Career Copilot</small></span></div>
+      <h1 id="authTitle" style="margin-top:18px">Sign in</h1>
+      <p class="muted" id="authIntro">Your workspace stays on this computer. LinkedIn sign-in happens separately in your own browser session.</p>
+      <div class="field"><label for="authEmail">Email</label><input id="authEmail" type="email" autocomplete="username" required maxlength="254"></div>
+      <div class="field"><label for="authPassword">Aira password</label><input id="authPassword" type="password" autocomplete="current-password" required minlength="12" maxlength="1024"><span class="hint" id="authHint"></span></div>
+      <p id="authNotice" class="muted" role="status" aria-live="polite" style="min-height:20px;margin:10px 0 0"></p>
+      <button id="authSubmit" class="btn" type="submit" style="width:100%;margin-top:8px">Sign in</button>
+      <p class="switch"><span id="authSwitchText">New to Aira?</span> <button id="authSwitch" type="button">Create an account</button></p>
+    </form>
+  </section>
+
+  <div id="app" class="app" hidden>
+    <aside id="sidebar" class="sidebar" aria-label="Primary">
+      <div class="brand"><span class="brand-mark">A</span><span>AIRA<small>Career Copilot</small></span></div>
+      <nav class="nav" id="primaryNav" aria-label="Primary navigation"></nav>
+      <div class="sidebar-foot">
+        <div class="account"><span id="accountEmail"></span></div>
+        <div class="btn-row">
+          <button id="themeToggle" class="btn ghost sm" type="button" aria-label="Toggle dark mode">Theme</button>
+          <button id="shortcutsBtn" class="btn ghost sm" type="button">Shortcuts</button>
+          <button id="logoutBtn" class="btn ghost sm" type="button">Sign out</button>
+        </div>
+      </div>
+    </aside>
+    <div class="main">
+      <header class="topbar">
+        <button id="menuBtn" class="btn ghost icon menu-btn" type="button" aria-label="Open navigation" aria-controls="sidebar" aria-expanded="false">
+          <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
+        </button>
+        <div class="crumbs" id="crumbs"><span>Dashboard</span></div>
+        <div class="spacer"></div>
+        <div class="status-strip" id="statusStrip" aria-live="polite"></div>
+      </header>
+      <main id="main" class="content" tabindex="-1"></main>
+    </div>
+    <nav class="bottom-nav" id="bottomNav" aria-label="Quick navigation"></nav>
+  </div>
+
+  <div id="overlay"></div>
+  <div id="toasts" class="toasts" role="region" aria-live="polite" aria-label="Notifications"></div>
+  <script src="/static/app.js"></script>
+  <script src="/static/views-jobs.js"></script>
+  <script src="/static/views-applications.js"></script>
+  <script src="/static/views-crm.js"></script>
+  <script src="/static/views-messages.js"></script>
+  <script src="/static/views-analytics.js"></script>
+  <script src="/static/views-settings.js"></script>
+  <script src="/static/views-serp-kit.js"></script>
+  <script src="/static/views-autopilot.js"></script>
+  <script src="/static/views-airaapi.js"></script>
+  <script src="/static/views-playground.js"></script>
+  <script src="/static/views-careers.js"></script>
+  <script src="/static/views-leads.js"></script>
+  <script src="/static/views-leads-outreach.js"></script>
+  <script src="/static/views-widgets.js"></script>
+  <!--aira:cloud-->
+</body>
+</html>

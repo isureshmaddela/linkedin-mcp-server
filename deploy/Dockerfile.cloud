@@ -1,0 +1,77 @@
+# Aira hosted build: one image definition, two targets.
+#
+#   docker build -f deploy/Dockerfile.cloud --target web    -t aira-cloud-web    .
+#   docker build -f deploy/Dockerfile.cloud --target worker -t aira-cloud-worker .
+#
+# web    python -m aira_cloud serve     the gateway and web interface (no browser)
+# worker python -m aira_cloud worker    job threads, the scheduler tick, Chromium for applications
+#
+# Both run as a non-root user and keep all state under /data (AIRA_CLOUD_DATA), which web and worker must share.
+# Built and exercised end to end by deploy/smoke.py (sign-up, MFA, S3 documents, worker job, backup/restore, restart).
+#
+# Build argument UV_EXTRAS adds optional dependency groups; "--extra cloud" (the default) installs signxml for SAML.
+
+# -- Stage 1: dependencies -------------------------------------------------------------------------
+FROM python:3.13.13-slim-bookworm@sha256:eabbb62836ee44c18d350821e9f78488bcf65134bf763ae9989d63e611fa04d9 AS builder
+
+COPY --from=ghcr.io/astral-sh/uv:latest@sha256:3b7b60a81d3c57ef471703e5c83fd4aaa33abcd403596fb22ab07db85ae91347 /uv /uvx /bin/
+
+ARG UV_EXTRAS="--extra cloud"
+WORKDIR /app
+COPY pyproject.toml uv.lock README.md ./
+# The project is run from source (auto_apply_assistant.py and the web interface are not part of the wheel),
+# so install only the dependencies.
+RUN uv sync --frozen --no-install-project --no-dev --no-editable --compile-bytecode ${UV_EXTRAS}
+
+
+# -- Stage 2: the application, shared by both targets ------------------------------------------------
+FROM python:3.13.13-slim-bookworm@sha256:eabbb62836ee44c18d350821e9f78488bcf65134bf763ae9989d63e611fa04d9 AS base
+
+RUN groupadd --gid 10001 aira && useradd --uid 10001 --gid aira --create-home --shell /usr/sbin/nologin aira \
+    && mkdir -p /data && chown aira:aira /data
+
+WORKDIR /app
+COPY --from=builder /app/.venv /app/.venv
+COPY aira ./aira
+COPY aira_cloud ./aira_cloud
+COPY linkedin_mcp_server ./linkedin_mcp_server
+COPY auto_apply_assistant.py ./
+COPY auto_apply_assistant ./auto_apply_assistant
+COPY docs/legal ./docs/legal
+# Nothing under /app needs to be writable by anyone (state lives in /data).
+RUN chmod -R go-w /app
+
+ENV PATH="/app/.venv/bin:$PATH" \
+    PYTHONPATH=/app \
+    PYTHONUNBUFFERED=1 \
+    AIRA_CLOUD_DATA=/data \
+    AIRA_CLOUD_HOST=0.0.0.0 \
+    AIRA_CLOUD_PORT=8780 \
+    AIRA_CLOUD_JSON_LOGS=1
+
+VOLUME ["/data"]
+EXPOSE 8780
+
+
+# -- Target: web ---------------------------------------------------------------------------------------
+FROM base AS web
+USER aira
+HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
+    CMD ["python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8780/api/ready', timeout=4).status == 200 else 1)"]
+ENTRYPOINT ["python", "-m", "aira_cloud"]
+CMD ["serve"]
+
+
+# -- Target: worker (Chromium for the form engine and LinkedIn sessions) ----------------------------------
+FROM base AS worker
+ENV PLAYWRIGHT_BROWSERS_PATH=/opt/patchright
+RUN patchright install-deps chromium \
+    && patchright install chromium \
+    && chmod -R a+rX /opt/patchright \
+    && rm -rf /var/lib/apt/lists/*
+USER aira
+# The worker serves no HTTP; a pass of "check" proves it can open the control plane.
+HEALTHCHECK --interval=60s --timeout=20s --start-period=30s --retries=3 \
+    CMD ["python", "-m", "aira_cloud", "check"]
+ENTRYPOINT ["python", "-m", "aira_cloud"]
+CMD ["worker"]

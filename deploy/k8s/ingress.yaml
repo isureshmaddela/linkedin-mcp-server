@@ -1,0 +1,28 @@
+# TLS terminates here. The application sets no Strict-Transport-Security header: enable HSTS on the controller
+# (ingress-nginx: `hsts: "true"` in its ConfigMap) or add the header at your edge.
+# The application accepts bodies up to 25 MB (resume and document uploads); keep the proxy limit at or above it.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: aira
+  namespace: aira
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: 25m
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [aira.example.com]
+      secretName: aira-tls
+  rules:
+    - host: aira.example.com
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: aira-web
+                port: { name: http }

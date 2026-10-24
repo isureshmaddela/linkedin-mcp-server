@@ -3,9 +3,13 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+from collections.abc import Mapping
 from dataclasses import dataclass
 import json
 import logging
+from pathlib import Path
+import random
 import re
 from typing import TYPE_CHECKING, Any, Literal
 from urllib.parse import parse_qs, quote_plus, urljoin, urlparse
@@ -20,6 +24,7 @@ from linkedin_mcp_server.core import (
 from linkedin_mcp_server.core.exceptions import (
     AuthenticationError,
     LinkedInScraperException,
+    SalesNavigatorAccessError,
 )
 from linkedin_mcp_server.debug_trace import record_page_trace
 from linkedin_mcp_server.debug_utils import stabilize_navigation
@@ -31,6 +36,8 @@ from linkedin_mcp_server.core.utils import (
     scroll_to_bottom,
 )
 from linkedin_mcp_server.scraping.connection import ActionSignals
+from linkedin_mcp_server.scraping import easy_apply as _ea
+from linkedin_mcp_server.scraping import sales_navigator as _sn
 from linkedin_mcp_server.scraping.link_metadata import (
     Reference,
     build_references,
@@ -57,6 +64,14 @@ _RATE_LIMITED_MSG = "[Rate limited] LinkedIn blocked this section. Try again lat
 
 # LinkedIn shows 25 results per page
 _PAGE_SIZE = 25
+
+# Sales Navigator reading: randomized pause between result pages (seconds), how long to wait for the first
+# lead row, and the scroll loop that makes a lazily rendered page of ~25 rows appear in full.
+_SALES_NAV_PACE_SECONDS = (1.5, 3.5)
+_SALES_NAV_RESULT_WAIT_MS = 8000
+_SALES_NAV_SCROLL_PAUSE_SECONDS = 0.6
+_SALES_NAV_SCROLL_FRACTION = 0.8
+_SALES_NAV_MAX_SCROLL_STEPS = 24
 
 # Normalization maps for job search filters
 _DATE_POSTED_MAP = {
@@ -95,6 +110,449 @@ _NETWORK_TOKENS = ("F", "S", "O")
 
 _DIALOG_SELECTOR = 'dialog[open], [role="dialog"]'
 _DIALOG_TEXTAREA_SELECTOR = '[role="dialog"] textarea, dialog textarea'
+
+# Origin used by the Easy Apply flow. A module constant (rather than an
+# inline literal) so the stand-in LinkedIn server in tests can be swapped in
+# without the extractor ever contacting linkedin.com.
+_LINKEDIN_ORIGIN = "https://www.linkedin.com"
+
+# Easy Apply timing. The dialog/popup budgets mirror the other action tools;
+# the submit budget is longer because LinkedIn posts the application before
+# rendering the confirmation dialog.
+_EASY_APPLY_OBSERVE_SECONDS = 8.0
+_EASY_APPLY_DIALOG_TIMEOUT_MS = 10000
+_EASY_APPLY_SUBMIT_TIMEOUT_MS = 20000
+_EASY_APPLY_ADVANCE_WAIT_SECONDS = 1.5
+_EASY_APPLY_KEY_ATTR = "data-easy-apply-key"
+_EASY_APPLY_HEADER_WAIT_SECONDS = 15.0
+_EASY_APPLY_HEADER_POLL_SECONDS = 0.5
+
+# Shared JS prologue for the Easy Apply probes: whitespace normalisation and
+# a visibility test that ignores controls LinkedIn hides inside collapsed
+# steps (a [hidden] ancestor or display:none) but keeps visually-hidden
+# custom radios/checkboxes and file inputs, which keep a 1px box.
+_EASY_APPLY_JS_PROLOGUE = r"""
+    const normalize = value => (value || '').replace(/\s+/g, ' ').trim();
+    const textOf = node => normalize(node ? (node.innerText || node.textContent) : '');
+    const isShown = el => {
+        if (!el || el.hidden) return false;
+        const style = window.getComputedStyle(el);
+        if (style.display === 'none' || style.visibility === 'hidden') return false;
+        const rect = el.getBoundingClientRect();
+        return rect.width > 0 || rect.height > 0;
+    };
+    const inDisplayedTree = (el, stop) => {
+        let node = el.parentElement;
+        while (node && node !== stop) {
+            if (node.hidden) return false;
+            if (window.getComputedStyle(node).display === 'none') return false;
+            node = node.parentElement;
+        }
+        return true;
+    };
+    const visibleDialogs = () => Array.from(
+        document.querySelectorAll('dialog[open], [role="dialog"]')
+    ).filter(isShown);
+"""
+
+# Job header probe: find the <h1> (job title), walk up to the smallest
+# ancestor that contains a visible <button> (the top card with the action
+# row), mark every interactive element there with a key attribute and return
+# their structural facts. The header text is returned without anchor text so
+# "Applied" detection cannot trip over a company name link.
+_EASY_APPLY_HEADER_JS = (
+    "({ keyAttr }) => {"
+    + _EASY_APPLY_JS_PROLOGUE
+    + r"""
+    document.querySelectorAll('[' + keyAttr + ']').forEach(el => {
+        el.removeAttribute(keyAttr);
+        el.removeAttribute(keyAttr + '-option');
+    });
+    const main = document.querySelector('main') || document.body;
+    // The job title: an <h1> when LinkedIn uses one, else a level-1 heading, else the element
+    // that shows exactly the title the tab carries ("Title | Company | LinkedIn").
+    const findTitleElement = () => {
+        const headings = [
+            main.querySelector('h1'),
+            document.querySelector('h1'),
+            document.querySelector('[role="heading"][aria-level="1"]'),
+        ];
+        for (const heading of headings) {
+            if (heading && isShown(heading) && textOf(heading)) return heading;
+        }
+        const title = normalize(document.title)
+            .replace(/^\(\d+\)\s*/, '')
+            .split(/\s+[|\u2013\u2014-]\s+/)[0]
+            .toLowerCase();
+        if (!title) return null;
+        const sameText = el => isShown(el) && textOf(el).toLowerCase() === title;
+        const chrome = el => Boolean(el.closest('nav, header, [role="banner"], [role="navigation"], footer'));
+        let match = Array.from(main.querySelectorAll('*')).find(el => sameText(el) && !chrome(el));
+        if (!match) return null;
+        for (;;) {
+            const inner = Array.from(match.children).find(sameText);
+            if (!inner) return match;
+            match = inner;
+        }
+    };
+    const h1 = findTitleElement();
+    if (!h1) return null;
+    const interactive = 'button, a[href], [role="button"]';
+    const controlsOf = root => Array.from(root.querySelectorAll(interactive))
+        .filter(el => !h1.contains(el) && isShown(el));
+    let root = h1.parentElement;
+    while (root && root !== main) {
+        if (controlsOf(root).some(el => el.tagName === 'BUTTON' || el.getAttribute('role') === 'button')) break;
+        root = root.parentElement;
+    }
+    if (!root) root = main;
+    const controls = controlsOf(root).slice(0, 40).map((el, index) => {
+        const key = 'apply' + index;
+        el.setAttribute(keyAttr, key);
+        return {
+            key,
+            tag: el.tagName.toLowerCase(),
+            text: textOf(el),
+            aria_label: normalize(el.getAttribute('aria-label')),
+            href: el.href || el.getAttribute('href') || '',
+            target: el.getAttribute('target') || '',
+            disabled: Boolean(el.disabled) || el.getAttribute('aria-disabled') === 'true',
+            expanded: el.hasAttribute('aria-expanded'),
+            pressed: el.hasAttribute('aria-pressed'),
+        };
+    });
+    const lines = [];
+    root.querySelectorAll('*').forEach(el => {
+        if (el.children.length || el.closest('a') || !isShown(el)) return;
+        const text = textOf(el);
+        if (text) lines.push(text);
+    });
+    return { title: textOf(h1), text: lines.join('\n'), controls };
+}"""
+)
+
+# Dialog probe: read every question of the visible (topmost) dialog with its
+# label, kind, required marker, options, current value and inline error, mark
+# each control with a key attribute for later actions, and report the footer's
+# primary button (last text button), the dismiss control (icon-only labelled
+# button) and the progress bar.
+_EASY_APPLY_DIALOG_JS = (
+    "({ keyAttr }) => {"
+    + _EASY_APPLY_JS_PROLOGUE
+    + r"""
+    const dialogs = visibleDialogs();
+    const dialog = dialogs[dialogs.length - 1];
+    if (!dialog) return null;
+    document.querySelectorAll('[' + keyAttr + ']').forEach(el => {
+        el.removeAttribute(keyAttr);
+        el.removeAttribute(keyAttr + '-option');
+    });
+    const controlSelector = 'input, select, textarea';
+    const SKIP = new Set(['hidden', 'submit', 'button', 'reset', 'image']);
+    const typeOf = el => {
+        const tag = el.tagName.toLowerCase();
+        if (tag !== 'input') return tag;
+        return (el.getAttribute('type') || 'text').toLowerCase();
+    };
+    const controls = Array.from(dialog.querySelectorAll(controlSelector)).filter(el => {
+        const type = typeOf(el);
+        if (SKIP.has(type)) return false;
+        if (!inDisplayedTree(el, dialog)) return false;
+        if (type === 'file' || type === 'radio' || type === 'checkbox') return true;
+        return isShown(el);
+    });
+    const labelledBy = el => (el.getAttribute('aria-labelledby') || '')
+        .split(/\s+/).filter(Boolean)
+        .map(id => textOf(document.getElementById(id))).filter(Boolean).join(' ');
+    const explicitLabel = el => {
+        if (el.id) {
+            const label = dialog.querySelector('label[for="' + CSS.escape(el.id) + '"]');
+            if (label) return textOf(label);
+        }
+        const wrapping = el.closest('label');
+        return wrapping ? textOf(wrapping) : '';
+    };
+    const groupLabel = el => {
+        const group = el.closest('fieldset, [role="radiogroup"], [role="group"]');
+        if (!group) return '';
+        const legend = group.querySelector('legend');
+        if (legend) return textOf(legend);
+        return labelledBy(group) || normalize(group.getAttribute('aria-label'));
+    };
+    const precedingText = el => {
+        let node = el;
+        for (let depth = 0; node && node !== dialog && depth < 4; depth += 1) {
+            let sibling = node.previousElementSibling;
+            while (sibling) {
+                if (!sibling.querySelector(controlSelector) && !sibling.matches(controlSelector)) {
+                    const text = textOf(sibling);
+                    if (text) return text;
+                }
+                sibling = sibling.previousElementSibling;
+            }
+            node = node.parentElement;
+        }
+        return '';
+    };
+    const labelOf = el => labelledBy(el)
+        || normalize(el.getAttribute('aria-label'))
+        || explicitLabel(el)
+        || groupLabel(el)
+        || normalize(el.getAttribute('placeholder'))
+        || precedingText(el)
+        || normalize(el.getAttribute('name'));
+    const requiredOf = (el, label) => Boolean(el.required)
+        || el.getAttribute('aria-required') === 'true'
+        || /\*\s*$/.test(label || '');
+    const sameGroup = (a, b) => a.name && a.name === b.name && typeOf(a) === typeOf(b);
+    const containerOf = el => {
+        let container = el.parentElement;
+        let node = el.parentElement;
+        while (node && node !== dialog) {
+            const foreign = Array.from(node.querySelectorAll(controlSelector))
+                .some(other => other !== el && !sameGroup(other, el));
+            if (foreign) break;
+            container = node;
+            node = node.parentElement;
+        }
+        return container || el.parentElement || dialog;
+    };
+    const alertIn = container => {
+        const alert = Array.from(container.querySelectorAll('[role="alert"]')).find(isShown);
+        return textOf(alert);
+    };
+    const errorOf = el => {
+        const ids = (el.getAttribute('aria-describedby') || '').split(/\s+/).filter(Boolean);
+        for (const id of ids) {
+            const node = document.getElementById(id);
+            if (!node || !isShown(node)) continue;
+            const flagged = node.getAttribute('role') === 'alert'
+                || node.hasAttribute('aria-live')
+                || el.getAttribute('aria-invalid') === 'true';
+            if (flagged && textOf(node)) return textOf(node);
+        }
+        const alert = alertIn(containerOf(el));
+        if (alert) return alert;
+        if (el.getAttribute('aria-invalid') === 'true') {
+            return 'LinkedIn marked this answer as missing or invalid.';
+        }
+        return '';
+    };
+    const questions = [];
+    const groups = new Map();
+    let counter = 0;
+    controls.forEach(el => {
+        const type = typeOf(el);
+        const isGroup = type === 'radio' || (type === 'checkbox' && el.name
+            && dialog.querySelectorAll('input[type="checkbox"][name="' + CSS.escape(el.name) + '"]').length > 1);
+        if (isGroup) {
+            const groupKey = type + ':' + (el.name || ('anon' + counter));
+            const optionLabel = explicitLabel(el) || normalize(el.getAttribute('aria-label')) || normalize(el.value);
+            let question = groups.get(groupKey);
+            if (!question) {
+                const key = 'q' + (counter++);
+                question = {
+                    key, label: groupLabel(el) || precedingText(el) || optionLabel, kind: type,
+                    required: false, options: [], option_values: [], checked: [],
+                    control_id: el.id || '', name: el.name || '',
+                    autocomplete: el.getAttribute('autocomplete') || '', input_type: type,
+                    error: '', combobox: false, group: true,
+                };
+                groups.set(groupKey, question);
+                questions.push(question);
+            }
+            el.setAttribute(keyAttr, question.key);
+            el.setAttribute(keyAttr + '-option', optionLabel);
+            question.options.push(optionLabel);
+            question.option_values.push(el.value || '');
+            if (el.checked) question.checked.push(optionLabel);
+            question.required = question.required || requiredOf(el, question.label);
+            question.error = question.error || errorOf(el);
+            return;
+        }
+        const key = 'q' + (counter++);
+        el.setAttribute(keyAttr, key);
+        const label = labelOf(el);
+        const question = {
+            key, label, kind: 'unknown', required: requiredOf(el, label),
+            options: [], option_values: [], value: null,
+            control_id: el.id || '', name: el.name || '',
+            autocomplete: el.getAttribute('autocomplete') || '', input_type: type,
+            error: errorOf(el),
+            combobox: el.getAttribute('role') === 'combobox'
+                || Boolean(el.getAttribute('aria-autocomplete'))
+                || Boolean(el.getAttribute('list')),
+            group: false,
+        };
+        if (type === 'select') {
+            question.kind = 'select';
+            Array.from(el.options).forEach(option => {
+                question.options.push(textOf(option) || normalize(option.value));
+                question.option_values.push(option.value);
+            });
+            const selected = el.options[el.selectedIndex];
+            question.value = selected ? (textOf(selected) || normalize(selected.value)) : null;
+            question.selected_index = el.selectedIndex;
+            question.selected_value = selected ? selected.value : '';
+            question.selected_disabled = selected ? Boolean(selected.disabled) : false;
+        } else if (type === 'textarea') {
+            question.kind = 'textarea';
+            question.value = el.value || null;
+        } else if (type === 'checkbox') {
+            question.kind = 'checkbox';
+            question.value = el.checked ? 'true' : 'false';
+        } else if (type === 'file') {
+            question.kind = 'file';
+            question.value = el.files && el.files.length ? el.files[0].name : null;
+        } else {
+            const known = ['text', 'email', 'tel', 'url', 'number', 'date', 'search'];
+            question.kind = known.includes(type) ? (type === 'search' ? 'text' : type) : 'unknown';
+            question.value = el.value || null;
+        }
+        questions.push(question);
+    });
+    questions.forEach(question => {
+        if (question.group) {
+            question.value = question.checked.length ? question.checked.join(', ') : null;
+            delete question.checked;
+        }
+    });
+    const footer = dialog.querySelector('footer') || dialog;
+    const buttons = Array.from(footer.querySelectorAll('button, [role="button"]'))
+        .filter(b => isShown(b) && !b.disabled && b.getAttribute('aria-disabled') !== 'true');
+    const textButtons = buttons.filter(b => textOf(b));
+    const primary = textButtons[textButtons.length - 1] || null;
+    if (primary) primary.setAttribute(keyAttr, 'primary');
+    const dismiss = Array.from(dialog.querySelectorAll('button'))
+        .find(b => isShown(b) && b.getAttribute('aria-label') && !textOf(b));
+    if (dismiss) dismiss.setAttribute(keyAttr, 'dismiss');
+    const progressEl = dialog.querySelector('progress, [role="progressbar"]');
+    let progress = null;
+    if (progressEl) {
+        const value = parseFloat(progressEl.getAttribute('value') ?? progressEl.getAttribute('aria-valuenow'));
+        const max = parseFloat(progressEl.getAttribute('max') ?? progressEl.getAttribute('aria-valuemax') ?? '100');
+        if (!Number.isNaN(value) && max > 0) progress = value / max;
+    }
+    const heading = dialog.querySelector('h1, h2, h3');
+    return {
+        title: textOf(heading),
+        text: normalize(dialog.innerText),
+        questions,
+        primary: primary ? { text: textOf(primary), aria_label: normalize(primary.getAttribute('aria-label')) } : null,
+        progress,
+        control_count: controls.length,
+        has_progress: Boolean(progressEl),
+        button_texts: textButtons.map(textOf),
+    };
+}"""
+)
+
+# Post-submit probe used with wait_for_function: resolves when the dialog is
+# gone, when its text carries the per-locale confirmation wording, or when
+# (structurally) the form controls and the progress bar have disappeared.
+_EASY_APPLY_POST_SUBMIT_JS = (
+    "({ sentLabels, previousText }) => {"
+    + _EASY_APPLY_JS_PROLOGUE
+    + r"""
+    const dialogs = visibleDialogs();
+    const dialog = dialogs[dialogs.length - 1];
+    if (!dialog) return { state: 'closed', text: '' };
+    const text = normalize(dialog.innerText);
+    const lower = text.toLowerCase();
+    if (sentLabels.some(label => lower.includes(label.toLowerCase()))) {
+        return { state: 'sent', text };
+    }
+    const controls = dialog.querySelectorAll(
+        'input:not([type="hidden"]):not([type="submit"]):not([type="button"]), select, textarea'
+    ).length;
+    const progress = dialog.querySelector('progress, [role="progressbar"]');
+    if (controls === 0 && !progress && text && text !== previousText) {
+        return { state: 'sent_structural', text };
+    }
+    return false;
+}"""
+)
+
+_EASY_APPLY_VISIBLE_DIALOG_JS = (
+    "() => {"
+    + _EASY_APPLY_JS_PROLOGUE
+    + r"""
+    const dialogs = visibleDialogs();
+    const dialog = dialogs[dialogs.length - 1];
+    if (!dialog) return null;
+    return {
+        text: normalize(dialog.innerText),
+        control_count: dialog.querySelectorAll(
+            'input:not([type="hidden"]):not([type="submit"]):not([type="button"]), select, textarea'
+        ).length,
+    };
+}"""
+)
+
+_EASY_APPLY_CLICK_KEY_JS = r"""({ keyAttr, key }) => {
+    const el = document.querySelector('[' + keyAttr + '="' + key + '"]');
+    if (!el) return false;
+    el.click();
+    return true;
+}"""
+
+# Radios and checkboxes: LinkedIn renders custom-styled controls whose <input>
+# is visually hidden, so a native click through the element is the reliable
+# path (it toggles the state and fires the click/change events React listens
+# to). ``option`` selects a member of a group by its label.
+_EASY_APPLY_SET_CHOICE_JS = r"""({ keyAttr, key, option, checked }) => {
+    const members = Array.from(document.querySelectorAll('[' + keyAttr + '="' + key + '"]'));
+    const target = option
+        ? members.find(el => el.getAttribute(keyAttr + '-option') === option)
+        : members[0];
+    if (!target) return false;
+    if (target.type === 'radio') {
+        if (!target.checked) target.click();
+        return target.checked;
+    }
+    if (Boolean(target.checked) !== Boolean(checked)) target.click();
+    return Boolean(target.checked) === Boolean(checked);
+}"""
+
+# Fallback for fill(): set the value through the native setter so React's
+# value tracker notices, then dispatch input/change.
+_EASY_APPLY_SET_VALUE_JS = r"""({ keyAttr, key, value }) => {
+    const el = document.querySelector('[' + keyAttr + '="' + key + '"]');
+    if (!el) return false;
+    const proto = el.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+    const descriptor = Object.getOwnPropertyDescriptor(proto, 'value');
+    el.focus();
+    if (descriptor && descriptor.set) descriptor.set.call(el, value); else el.value = value;
+    el.dispatchEvent(new Event('input', { bubbles: true }));
+    el.dispatchEvent(new Event('change', { bubbles: true }));
+    return true;
+}"""
+
+# Typeahead inputs (role=combobox): pick the suggestion that starts with the
+# typed value, else the first suggestion, so the value is one LinkedIn knows.
+_EASY_APPLY_PICK_OPTION_JS = (
+    "({ value }) => {"
+    + _EASY_APPLY_JS_PROLOGUE
+    + r"""
+    const options = Array.from(document.querySelectorAll('[role="option"]')).filter(isShown);
+    if (!options.length) return null;
+    const wanted = normalize(value).toLowerCase();
+    const match = options.find(o => textOf(o).toLowerCase().startsWith(wanted)) || options[0];
+    match.click();
+    return textOf(match);
+}"""
+)
+
+_EASY_APPLY_EVIDENCE_TEXT_JS = (
+    "() => {"
+    + _EASY_APPLY_JS_PROLOGUE
+    + r"""
+    const parts = visibleDialogs().map(d => d.innerText || '');
+    const main = document.querySelector('main') || document.body;
+    parts.push(main ? (main.innerText || '') : '');
+    return parts.join('\n\n');
+}"""
+)
 
 _MESSAGING_COMPOSE_LINK_SELECTOR = 'main a[href*="/messaging/compose/"]'
 _MESSAGING_COMPOSE_SELECTOR = (
@@ -2722,8 +3180,10 @@ class LinkedInExtractor:
                             logger.debug("LinkedIn reports %d total pages", total_pages)
 
                 # Extract job IDs from hrefs (page is already loaded)
-                if not self._page.url.startswith(
-                    "https://www.linkedin.com/jobs/search/"
+                page_url = urlparse(self._page.url)
+                if (
+                    page_url.netloc.lower() not in {"linkedin.com", "www.linkedin.com"}
+                    or page_url.path.rstrip("/") != "/jobs/search"
                 ):
                     logger.debug(
                         "Unexpected page URL after extraction: %s — "
@@ -2735,6 +3195,17 @@ class LinkedInExtractor:
                         page_references.extend(extracted.references)
                     break
                 page_ids = await self._extract_job_ids()
+                reference_ids = []
+                for reference in extracted.references or []:
+                    if reference.get("kind") != "job":
+                        continue
+                    job_match = re.search(
+                        r"/jobs/view/(\d+)(?:/|$)",
+                        urlparse(reference["url"]).path,
+                    )
+                    if job_match:
+                        reference_ids.append(job_match.group(1))
+                page_ids = list(dict.fromkeys([*page_ids, *reference_ids]))
                 new_ids = [jid for jid in page_ids if jid not in seen_ids]
 
                 if not new_ids:
@@ -2853,6 +3324,185 @@ class LinkedInExtractor:
             result["section_errors"] = section_errors
         return result
 
+    async def search_sales_navigator_leads(
+        self,
+        url: str | None = None,
+        keywords: str | None = None,
+        location: str | None = None,
+        max_pages: int = 2,
+        lead_list: bool = False,
+    ) -> dict[str, Any]:
+        """Read leads from the signed-in person's own Sales Navigator, read only.
+
+        The reliable input is ``url``: a Sales Navigator people search (or a people lead list) the person built
+        in the product, with its filters. ``keywords`` (and ``location``, folded into the keywords) builds a
+        plain keyword search. The reader navigates, scrolls and reads rows; it never clicks connect, message,
+        InMail, save or like.
+
+        Args:
+            url: ``https://www.linkedin.com/sales/search/people?...`` or ``/sales/lists/people/<id>``.
+            keywords: Plain keyword search when no url is given.
+            location: Added to the keywords (Sales Navigator filters locations by id).
+            max_pages: Result pages to read (1-5); about 25 leads each.
+            lead_list: The url must be a people lead list.
+
+        Returns:
+            ``{url, pages_read, leads: [...], warnings: [...], section_errors: {...}}``. Each lead has name,
+            first_name, last_name, title, company, company_url, company_sales_url, location, profile_url,
+            linkedin_url, degree, tenure_in_role, tenure_in_company and raw_lines.
+
+        Raises:
+            FilterValidationError: bad input.
+            SalesNavigatorAccessError: the account cannot open Sales Navigator people search.
+            AuthenticationError / RateLimitError: signed out, checkpoint, or throttled on the first page.
+        """
+        if not 1 <= int(max_pages) <= _sn.MAX_PAGES:
+            raise FilterValidationError(
+                f"max_pages must be from 1 to {_sn.MAX_PAGES}; got {max_pages!r}."
+            )
+        try:
+            base_url, _is_list, warnings = _sn.build_search_url(
+                _LINKEDIN_ORIGIN,
+                url=url,
+                keywords=keywords,
+                location=location,
+                lead_list=lead_list,
+            )
+        except ValueError as exc:
+            raise FilterValidationError(str(exc)) from exc
+
+        leads: list[dict[str, Any]] = []
+        seen: set[str] = set()
+        section_errors: dict[str, dict[str, Any]] = {}
+        pages_read = 0
+
+        for page_number in range(1, int(max_pages) + 1):
+            page_url = _sn.with_page(base_url, page_number)
+            if page_number > 1:
+                await asyncio.sleep(random.uniform(*_SALES_NAV_PACE_SECONDS))
+            try:
+                await self._navigate_to_page(page_url)
+                await detect_rate_limit(self._page)
+                rows = await self._read_sales_navigator_page(page_number)
+            except LinkedInScraperException as exc:
+                if page_number == 1:
+                    raise
+                # Pages already read are real: keep them and say why the run stopped.
+                logger.warning(
+                    "Sales Navigator stopped on page %d: %s", page_number, exc
+                )
+                warnings.append(f"Stopped before page {page_number}: {exc}")
+                section_errors["sales_navigator"] = build_issue_diagnostics(
+                    exc,
+                    context="search_sales_navigator",
+                    target_url=page_url,
+                    section_name="sales_navigator",
+                )
+                break
+            except Exception as exc:
+                logger.warning("Error on Sales Navigator page %d: %s", page_number, exc)
+                section_errors["sales_navigator"] = build_issue_diagnostics(
+                    exc,
+                    context="search_sales_navigator",
+                    target_url=page_url,
+                    section_name="sales_navigator",
+                )
+                break
+
+            pages_read += 1
+            fresh = []
+            for row in rows:
+                lead = _sn.classify_row(row)
+                key = lead["profile_url"] or row.get("key", "")
+                if not key or key in seen or not lead["name"]:
+                    continue
+                seen.add(key)
+                fresh.append(lead)
+            leads.extend(fresh)
+            if not rows:
+                warnings.append(
+                    f"Page {page_number} had no leads."
+                    if page_number > 1
+                    else "The search returned no leads."
+                )
+                break
+            if not fresh:
+                warnings.append(
+                    f"Page {page_number} repeated leads already read; stopped."
+                )
+                break
+
+        result: dict[str, Any] = {
+            "url": base_url,
+            "pages_read": pages_read,
+            "leads": leads,
+            "warnings": warnings,
+            "section_errors": section_errors,
+        }
+        return result
+
+    async def _read_sales_navigator_page(
+        self, page_number: int
+    ) -> list[dict[str, Any]]:
+        """Wait for, scroll through and read one Sales Navigator result page (never clicks)."""
+        try:
+            await self._page.wait_for_selector(
+                'a[href*="/sales/lead/"]', timeout=_SALES_NAV_RESULT_WAIT_MS
+            )
+        except PlaywrightTimeoutError:
+            logger.debug(
+                "No lead rows appeared on Sales Navigator page %d", page_number
+            )
+
+        state = await self._page.evaluate(_sn.STATE_JS)
+        state = state if isinstance(state, dict) else {}
+        path = str(state.get("path") or urlparse(self._page.url).path)
+        origin_host = urlparse(_LINKEDIN_ORIGIN).netloc.lower()
+        landed_host = str(state.get("host") or urlparse(self._page.url).netloc).lower()
+        if landed_host.removeprefix("www.") != origin_host.removeprefix(
+            "www."
+        ) or not _sn.is_results_path(path):
+            raise SalesNavigatorAccessError(
+                "This LinkedIn account has no Sales Navigator access: LinkedIn sent the people search to "
+                f"{landed_host}{path} instead of the lead search. Open the search in your browser to check "
+                "the subscription, then try again."
+            )
+        if _sn.looks_like_upsell(state):
+            raise SalesNavigatorAccessError(
+                "This LinkedIn account has no Sales Navigator access: the page offers Sales Navigator "
+                "instead of showing search results."
+            )
+        if not state.get("lead_count"):
+            return []
+
+        rows: dict[str, dict[str, Any]] = {}
+        unchanged = 0
+        last_count = -1
+        for _step in range(_SALES_NAV_MAX_SCROLL_STEPS):
+            batch = await self._page.evaluate(_sn.ROWS_JS)
+            for row in batch if isinstance(batch, list) else []:
+                if isinstance(row, dict) and row.get("key"):
+                    rows.setdefault(str(row["key"]), row)
+            step = await self._page.evaluate(
+                _sn.SCROLL_JS, {"fraction": _SALES_NAV_SCROLL_FRACTION}
+            )
+            await asyncio.sleep(_SALES_NAV_SCROLL_PAUSE_SECONDS)
+            count = len(rows)
+            at_end = bool(
+                isinstance(step, dict)
+                and (step.get("atBottom") or not step.get("moved"))
+            )
+            unchanged = unchanged + 1 if (count == last_count and at_end) else 0
+            last_count = count
+            if unchanged >= 2:
+                break
+        # one last read: the final scroll step may have rendered more rows
+        batch = await self._page.evaluate(_sn.ROWS_JS)
+        for row in batch if isinstance(batch, list) else []:
+            if isinstance(row, dict) and row.get("key"):
+                rows.setdefault(str(row["key"]), row)
+        return list(rows.values())
+
     async def search_companies(
         self,
         keywords: str,
@@ -2959,9 +3609,24 @@ class LinkedInExtractor:
                 timeout=10000,
             )
         except PlaywrightTimeoutError:
+            structure = await self._page.evaluate(
+                """() => {
+                    const main = document.querySelector('main');
+                    if (!main) return {main: false};
+                    return {
+                        main: true,
+                        list_items: main.querySelectorAll('li').length,
+                        aria_labels: main.querySelectorAll('label[aria-label]').length,
+                        role_buttons: main.querySelectorAll('[role="button"]').length,
+                        buttons: main.querySelectorAll('button').length,
+                        thread_links: main.querySelectorAll('a[href*="/messaging/thread/"]').length,
+                    };
+                }"""
+            )
             logger.debug(
-                "conversation labels did not appear within 10s (context=%s)",
+                "conversation labels did not appear within 10s (context=%s, structure=%s)",
                 context,
+                structure,
             )
             return []
 
@@ -2982,24 +3647,43 @@ class LinkedInExtractor:
                 for (let i = 0; i < cap; i++) {
                     const label = labels[i];
                     const ariaLabel = label.getAttribute('aria-label') || '';
-                    const clickTarget = label.closest('li')
-                        ?.querySelector('div[class*="listitem__link"]');
-                    if (!clickTarget) continue;
-                    const before = location.href;
-                    clickTarget.click();
-                    // Poll for the SPA URL to settle on the thread route. The
-                    // Ember click handler can take a moment to bind after the
-                    // label mounts, and a fixed sleep races the initial click.
-                    let after = before;
-                    for (let waits = 0; waits < 12; waits++) {
-                        await new Promise(r => setTimeout(r, 100));
-                        after = location.href;
-                        if (after !== before
-                            && /\\/messaging\\/thread\\//.test(after)) break;
-                    }
-                    const match = after.match(
+                    const row = label.closest('li');
+                    const directLink = row?.querySelector(
+                        'a[href*="/messaging/thread/"]'
+                    );
+                    const directMatch = directLink?.href.match(
                         /\\/messaging\\/thread\\/([^/?#]+)/
                     );
+                    if (directMatch) {
+                        results.push({ ariaLabel, threadId: directMatch[1] });
+                        continue;
+                    }
+                    const clickTargets = [
+                        row?.querySelector('div[class*="listitem__link"]'),
+                        row?.querySelector('button, [role="button"]'),
+                        label.parentElement,
+                        row,
+                    ].filter((target, index, targets) =>
+                        target && targets.indexOf(target) === index
+                    );
+                    if (!clickTargets.length) continue;
+                    const before = location.href;
+                    let after = before;
+                    let match = null;
+                    for (const clickTarget of clickTargets) {
+                        clickTarget.click();
+                        // The delegated click handler may live on different
+                        // descendants across LinkedIn messaging layouts.
+                        for (let waits = 0; waits < 12; waits++) {
+                            await new Promise(r => setTimeout(r, 100));
+                            after = location.href;
+                            match = after.match(
+                                /\\/messaging\\/thread\\/([^/?#]+)/
+                            );
+                            if (match) break;
+                        }
+                        if (match) break;
+                    }
                     if (match) {
                         results.push({ ariaLabel, threadId: match[1] });
                     }
@@ -3345,6 +4029,208 @@ class LinkedInExtractor:
             sent=True,
         )
 
+    async def reply_to_conversation(
+        self,
+        thread_id: str,
+        message: str,
+        *,
+        confirm_send: bool,
+    ) -> dict[str, Any]:
+        """Reply inside an existing messaging thread with explicit confirmation gating.
+
+        Replying in-thread works for InMail and recruiter threads whose sender
+        exposes no Message action on their profile (non-connections), so it is
+        the reliable path for answering recruiters. Navigation is by thread URL;
+        the composer and Send control are located by role, contenteditable, and
+        aria-label attributes only, never by layout class names.
+
+        Args:
+            thread_id: LinkedIn messaging thread ID.
+            message: Reply text to send.
+            confirm_send: Must be True to actually send (False does a dry run
+                that only verifies the reply box is available).
+        """
+        thread_id = (thread_id or "").strip()
+        if not re.fullmatch(r"[A-Za-z0-9_+=-]{1,128}", thread_id):
+            raise LinkedInScraperException("Invalid conversation thread ID.")
+        if not (message or "").strip():
+            raise LinkedInScraperException("Reply text is required.")
+
+        thread_url = f"https://www.linkedin.com/messaging/thread/{thread_id}/"
+        await self._navigate_to_page(thread_url)
+        await detect_rate_limit(self._page)
+        try:
+            await self._page.wait_for_selector("main")
+        except PlaywrightTimeoutError:
+            logger.debug("Thread page did not fully load for %s", thread_id)
+        await handle_modal_close(self._page)
+
+        if "/messaging/thread/" not in (self._page.url or ""):
+            return self._message_action_result(
+                self._page.url,
+                "thread_unavailable",
+                "LinkedIn did not open this conversation thread.",
+            )
+
+        compose_box = await self._resolve_message_compose_box()
+        if compose_box is None:
+            return self._message_action_result(
+                self._page.url,
+                "composer_unavailable",
+                "LinkedIn did not show a reply box for this conversation. It may be closed or need a reply from LinkedIn directly.",
+            )
+
+        if not confirm_send:
+            return self._message_action_result(
+                self._page.url,
+                "confirmation_required",
+                "Set confirm_send=true to send the reply.",
+                recipient_selected=True,
+            )
+
+        # Same patchright workaround as send_message: focus through evaluate()
+        # (no actionability wait) and type through the keyboard so React sees
+        # real input events. The focus script reports any pre-existing draft so
+        # it can be cleared first instead of being sent along with the reply.
+        focus = await self._page.evaluate(
+            """() => {
+                const selectors = [
+                    'main div[role="textbox"][contenteditable="true"]',
+                    'div[role="textbox"][contenteditable="true"][aria-label*="Write a message"]',
+                    'div[role="textbox"][contenteditable="true"]',
+                ];
+                for (const selector of selectors) {
+                    const el = document.querySelector(selector);
+                    if (!el) continue;
+                    el.focus();
+                    return { ok: true, existing: (el.innerText || '').trim().length };
+                }
+                return { ok: false, existing: 0 };
+            }"""
+        )
+        if not isinstance(focus, dict) or not focus.get("ok"):
+            return self._message_action_result(
+                self._page.url,
+                "compose_interact_failed",
+                "Could not focus the reply box.",
+                recipient_selected=True,
+            )
+        if focus.get("existing"):
+            await self._page.keyboard.press("ControlOrMeta+A")
+            await self._page.keyboard.press("Backspace")
+            await asyncio.sleep(0.2)
+
+        await asyncio.sleep(0.1)
+        await self._page.keyboard.type(message, delay=15)
+        await asyncio.sleep(1.0)  # allow React to enable the Send control
+
+        sent_via_js = await self._page.evaluate(
+            """() => {
+                const scope = document.querySelector('main') || document;
+                const btn = Array.from(scope.querySelectorAll(
+                    'button[type="submit"], button[aria-label*="Send"], button[aria-label*="send"],'
+                    + 'button[data-control-name="send"]'
+                )).find(b => !b.disabled && (b.offsetWidth || b.offsetHeight || b.getClientRects().length));
+                if (!btn) return false;
+                btn.click();
+                return true;
+            }"""
+        )
+        if not sent_via_js:
+            await self._page.keyboard.press("Enter")
+
+        if not await self._reply_delivered(message):
+            return self._message_action_result(
+                self._page.url,
+                "send_unavailable",
+                "LinkedIn did not confirm that the reply was sent. Check the conversation before retrying.",
+                recipient_selected=True,
+            )
+
+        return self._message_action_result(
+            self._page.url,
+            "sent",
+            "Reply sent.",
+            recipient_selected=True,
+            sent=True,
+        )
+
+    async def _reply_delivered(self, message: str) -> bool:
+        """Confirm a thread reply left the composer and appears in the thread.
+
+        Checking only that the text is on the page would also match text still
+        sitting unsent in the reply box, so the composer must be empty too.
+        """
+        try:
+            await self._page.wait_for_function(
+                """({ expected }) => {
+                    const normalize = value => (value || '').replace(/\\s+/g, ' ').trim();
+                    const target = normalize(expected);
+                    const composer = document.querySelector(
+                        'main div[role="textbox"][contenteditable="true"], div[role="textbox"][contenteditable="true"]'
+                    );
+                    const composerText = normalize(composer ? composer.innerText : '');
+                    if (composerText.includes(target)) return false;
+                    const root = document.querySelector('main') || document.body;
+                    return normalize(root ? root.innerText : '').includes(target);
+                }""",
+                arg={"expected": message[:300]},
+            )
+            return True
+        except PlaywrightTimeoutError:
+            return False
+
+    async def easy_apply(
+        self,
+        job_id: str,
+        *,
+        answers: Mapping[str, str] | None = None,
+        resume_path: str | None = None,
+        submit: bool = False,
+        profile: Mapping[str, str] | None = None,
+        callbacks: ProgressCallback | None = None,
+    ) -> dict[str, Any]:
+        """Fill (and optionally submit) a LinkedIn Easy Apply application.
+
+        Opens ``/jobs/view/{job_id}/``, finds the apply control inside the
+        job header, tells Easy Apply from an external apply by what the click
+        does (dialog vs. popup/navigation), then walks the ``role="dialog"``
+        form step by step: reads every question, fills it from ``answers``
+        (keyed by the label LinkedIn shows) and ``profile`` (canonical
+        contact fields), uploads ``resume_path`` on the resume step, unchecks
+        the follow-company box and advances with the footer's primary button.
+        It never guesses: a required question without an answer stops the run
+        with ``needs_review``; ``submit=False`` stops at the review step with
+        ``filled``; ``submit=True`` presses the final button and reports
+        ``submitted`` only after LinkedIn's confirmation.
+
+        Detection is structural wherever LinkedIn allows it; the English
+        strings it still depends on live in
+        :data:`linkedin_mcp_server.scraping.easy_apply.EASY_APPLY_LABELS`
+        with the limitation documented there.
+
+        Returns the shape from docs/auto-apply-spec.md section 4:
+        ``{status, questions, unanswered, external_url, evidence, steps, error}``.
+        Raises :class:`LinkedInScraperException` for invalid input (job id,
+        missing resume file) and lets authentication/rate-limit errors
+        propagate so the tool layer can recover the session.
+        """
+        try:
+            clean_job_id = _ea.validate_job_id(job_id)
+            clean_resume = _ea.validate_resume_path(resume_path)
+        except ValueError as exc:
+            raise LinkedInScraperException(str(exc)) from exc
+        run = _EasyApplyRun(
+            self,
+            clean_job_id,
+            answers={str(k): str(v) for k, v in (answers or {}).items()},
+            resume_path=clean_resume,
+            submit=bool(submit),
+            profile={str(k): str(v) for k, v in (profile or {}).items()},
+            callbacks=callbacks,
+        )
+        return await run.execute()
+
     async def _extract_root_content(
         self,
         selectors: list[str],
@@ -3453,3 +4339,673 @@ class LinkedInExtractor:
             {"selectors": selectors},
         )
         return result
+
+
+class _EasyApplyRun:
+    """State for one Easy Apply attempt (see ``LinkedInExtractor.easy_apply``).
+
+    Owns the step log, the questions seen so far and the browser-level
+    helpers; the decisions about *what* to fill and how to classify what the
+    page shows are delegated to the pure ``scraping.easy_apply`` module.
+    """
+
+    def __init__(
+        self,
+        extractor: LinkedInExtractor,
+        job_id: str,
+        *,
+        answers: dict[str, str],
+        resume_path: str | None,
+        submit: bool,
+        profile: dict[str, str],
+        callbacks: ProgressCallback | None,
+    ) -> None:
+        self._extractor = extractor
+        self._page = extractor._page
+        self.job_id = job_id
+        self.job_url = f"{_LINKEDIN_ORIGIN}/jobs/view/{job_id}/"
+        self.answers = answers
+        self.resume_path = resume_path
+        self.submit = submit
+        self.profile = profile
+        self._callbacks = callbacks
+        self.steps: list[str] = []
+        self._questions: dict[tuple[str, str], _ea.EasyApplyQuestion] = {}
+        self._clicked_primary = False
+        self._last_action: _ea.StepAction | None = None
+
+    # ------------------------------------------------------------------
+    # Bookkeeping
+    # ------------------------------------------------------------------
+
+    def _step(self, message: str) -> None:
+        self.steps.append(message)
+        logger.debug("easy_apply[%s]: %s", self.job_id, message)
+
+    async def _progress(self, message: str, percent: int) -> None:
+        if self._callbacks is None:
+            return
+        try:
+            await self._callbacks.on_progress(message, percent)
+        except Exception:
+            logger.debug("Progress callback failed", exc_info=True)
+
+    def _merge(self, questions: list[_ea.EasyApplyQuestion]) -> None:
+        for question in questions:
+            self._questions[(question.label, question.kind)] = question
+
+    @property
+    def _key_args(self) -> dict[str, Any]:
+        return {"keyAttr": _EASY_APPLY_KEY_ATTR}
+
+    # ------------------------------------------------------------------
+    # Entry
+    # ------------------------------------------------------------------
+
+    async def execute(self) -> dict[str, Any]:
+        try:
+            return await self._run()
+        except LinkedInScraperException:
+            raise
+        except Exception as exc:
+            logger.warning(
+                "Easy Apply for job %s failed: %s", self.job_id, exc, exc_info=True
+            )
+            self._step(f"Stopped: {type(exc).__name__}: {exc}")
+            return await self._finish(
+                "failed",
+                error=f"{type(exc).__name__}: {exc}",
+                close_dialog=True,
+            )
+
+    async def _run(self) -> dict[str, Any]:
+        await self._progress("Opening the job page", 5)
+        await self._extractor._navigate_to_page(self.job_url)
+        await detect_rate_limit(self._page)
+        try:
+            await self._page.wait_for_selector(
+                "main", timeout=_EASY_APPLY_DIALOG_TIMEOUT_MS
+            )
+        except PlaywrightTimeoutError:
+            logger.debug("Job page %s has no <main>", self.job_url)
+        await handle_modal_close(self._page)
+        self._step("Opened the job page")
+
+        if "/jobs/view/" not in urlparse(self._page.url or "").path:
+            return await self._finish(
+                "failed",
+                error=f"LinkedIn did not open the job page (now at {self._page.url}).",
+            )
+
+        header = await self._wait_for_header()
+        if header is None:
+            return await self._finish(
+                "failed",
+                error=(
+                    "Could not find the job header (no title on the page). "
+                    "The posting may be unavailable or the page did not load"
+                    f"{await self._page_brief()}."
+                ),
+            )
+        controls = list(header.get("controls") or [])
+        control = _ea.choose_apply_control(controls)
+        if control is None:
+            if _ea.header_shows_applied(str(header.get("text", ""))):
+                self._step("The job header shows the application as already sent")
+                return await self._finish("already_applied")
+            return await self._finish(
+                "failed",
+                error=(
+                    "No apply control was recognised in the job header "
+                    f"(controls seen: {_ea.describe_controls(controls)}). "
+                    + _ea.LOCALE_LIMITATION
+                ),
+            )
+        self._step(f"Found the apply control: {control.text or control.kind}")
+
+        await self._progress("Opening the application", 15)
+        observed = await self._click_apply_control(control)
+        outcome = observed.get("outcome")
+        if outcome in {"popup", "navigated"}:
+            external_url = str(observed.get("url") or control.href or "") or None
+            self._step(f"The apply control opened an external site: {external_url}")
+            return await self._finish(
+                "external", external_url=external_url, screenshot=False
+            )
+        if outcome != "dialog":
+            if control.kind == "external_anchor" and control.href:
+                self._step(f"The apply link points to an external site: {control.href}")
+                return await self._finish(
+                    "external", external_url=control.href, screenshot=False
+                )
+            return await self._finish(
+                "failed",
+                error=(
+                    "Clicking the apply control opened neither the Easy Apply "
+                    "dialog nor an external site."
+                ),
+            )
+        self._step("The Easy Apply dialog opened")
+        return await self._walk_dialog()
+
+    # ------------------------------------------------------------------
+    # Job header and apply control
+    # ------------------------------------------------------------------
+
+    async def _read_header(self) -> dict[str, Any] | None:
+        try:
+            header = await self._page.evaluate(_EASY_APPLY_HEADER_JS, self._key_args)
+        except Exception:
+            logger.debug("Job header probe failed", exc_info=True)
+            return None
+        return header if isinstance(header, dict) else None
+
+    async def _wait_for_header(self) -> dict[str, Any] | None:
+        """Read the job header, giving a page that is still drawing itself time to finish.
+
+        LinkedIn renders ``<main>`` first and fills the top card in afterwards, so a single read
+        straight after ``<main>`` appears can see no title or no buttons yet. Poll until the title
+        and at least one control are there (or the budget runs out) and return the last reading.
+        """
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + _EASY_APPLY_HEADER_WAIT_SECONDS
+        header = await self._read_header()
+        while not (header and header.get("controls")) and loop.time() < deadline:
+            await asyncio.sleep(_EASY_APPLY_HEADER_POLL_SECONDS)
+            header = await self._read_header() or header
+        return header
+
+    async def _page_brief(self) -> str:
+        """A short description of what the browser is showing, for an error the person has to act on."""
+        try:
+            title = str(await self._page.title() or "").strip()
+        except Exception:
+            return ""
+        return f" (the tab says: {title[:80]!r})" if title else ""
+
+    async def _header_applied(self) -> bool:
+        header = await self._read_header()
+        return header is not None and _ea.header_shows_applied(
+            str(header.get("text", ""))
+        )
+
+    async def _click_key(self, key: str) -> bool:
+        """Click a keyed element: real click first, JS click as fallback."""
+        selector = f'[{_EASY_APPLY_KEY_ATTR}="{key}"]'
+        try:
+            await self._page.locator(selector).first.click(timeout=5000)
+            return True
+        except Exception:
+            logger.debug(
+                "Locator click on %s failed; using JS click", key, exc_info=True
+            )
+        try:
+            clicked = await self._page.evaluate(
+                _EASY_APPLY_CLICK_KEY_JS, {**self._key_args, "key": key}
+            )
+        except Exception:
+            logger.debug("JS click on %s failed", key, exc_info=True)
+            return False
+        return bool(clicked)
+
+    async def _click_apply_control(self, control: _ea.ApplyControl) -> dict[str, Any]:
+        """Click the apply control and report what happened.
+
+        Outcomes: ``dialog`` (Easy Apply form opened), ``popup`` (a new tab
+        opened; its URL is captured and the tab closed), ``navigated`` (the
+        page left ``/jobs/view/``; the browser goes back), ``nothing``.
+        """
+        popups: list[Any] = []
+
+        def on_popup(popup: Any) -> None:
+            popups.append(popup)
+
+        start_url = self._page.url or ""
+        self._page.on("popup", on_popup)
+        try:
+            if not await self._click_key(control.key):
+                return {"outcome": "nothing"}
+            loop = asyncio.get_running_loop()
+            deadline = loop.time() + _EASY_APPLY_OBSERVE_SECONDS
+            while True:
+                if popups:
+                    break
+                current = self._page.url or ""
+                if current != start_url and "/jobs/view/" not in urlparse(current).path:
+                    await self._return_to_job_page()
+                    return {"outcome": "navigated", "url": current}
+                if await self._dialog_state() is not None:
+                    return {"outcome": "dialog"}
+                if loop.time() >= deadline:
+                    return {"outcome": "nothing"}
+                await asyncio.sleep(0.25)
+        finally:
+            self._page.remove_listener("popup", on_popup)
+        url = await self._settle_popup(popups[0], control.href)
+        return {"outcome": "popup", "url": url}
+
+    async def _settle_popup(self, popup: Any, fallback: str) -> str:
+        try:
+            await popup.wait_for_load_state(
+                "domcontentloaded", timeout=_EASY_APPLY_DIALOG_TIMEOUT_MS
+            )
+        except Exception:
+            logger.debug("Popup did not finish loading", exc_info=True)
+        url = ""
+        for _ in range(8):
+            try:
+                url = popup.url or ""
+            except Exception:
+                url = ""
+            if url and url != "about:blank":
+                break
+            await asyncio.sleep(0.25)
+        try:
+            await popup.close()
+        except Exception:
+            logger.debug("Could not close popup", exc_info=True)
+        return _ea.external_url_from_popup(url, fallback)
+
+    async def _return_to_job_page(self) -> None:
+        try:
+            await self._page.go_back(timeout=_EASY_APPLY_DIALOG_TIMEOUT_MS)
+        except Exception:
+            logger.debug("Could not navigate back to the job page", exc_info=True)
+
+    # ------------------------------------------------------------------
+    # Dialog walk
+    # ------------------------------------------------------------------
+
+    async def _dialog_state(self) -> dict[str, Any] | None:
+        try:
+            state = await self._page.evaluate(_EASY_APPLY_DIALOG_JS, self._key_args)
+        except Exception:
+            logger.debug("Dialog probe failed", exc_info=True)
+            return None
+        return state if isinstance(state, dict) else None
+
+    async def _wait_for_dialog_state(self, seconds: float) -> dict[str, Any] | None:
+        loop = asyncio.get_running_loop()
+        deadline = loop.time() + seconds
+        while True:
+            state = await self._dialog_state()
+            if state is not None or loop.time() >= deadline:
+                return state
+            await asyncio.sleep(0.25)
+
+    @staticmethod
+    def _primary_of(state: dict[str, Any]) -> tuple[str, str]:
+        primary = state.get("primary") or {}
+        return str(primary.get("text", "")), str(primary.get("aria_label", ""))
+
+    def _looks_submitted(self, state: dict[str, Any]) -> bool:
+        if not self._clicked_primary:
+            return False
+        if _ea.dialog_text_confirms_sent(str(state.get("text", ""))):
+            return True
+        # Structural fallback, only after an unrecognised (non-English) button:
+        # the form controls and the progress bar are gone.
+        return (
+            self._last_action == "unknown"
+            and not state.get("questions")
+            and int(state.get("control_count") or 0) == 0
+            and not state.get("has_progress")
+        )
+
+    async def _walk_dialog(self) -> dict[str, Any]:
+        previous_signature: tuple[Any, ...] | None = None
+        last_primary = ""
+        for step_no in range(1, _ea.MAX_STEPS + 1):
+            state = await self._wait_for_dialog_state(_EASY_APPLY_ADVANCE_WAIT_SECONDS)
+            if state is None:
+                if self._clicked_primary and await self._header_applied():
+                    self._step(
+                        "The dialog closed and the job header shows the application as sent"
+                    )
+                    return await self._finish("submitted", close_dialog=False)
+                return await self._finish(
+                    "failed",
+                    error="The Easy Apply dialog closed before the application was completed.",
+                )
+            if self._looks_submitted(state):
+                return await self._finish_submitted(str(state.get("text", "")))
+
+            questions = _ea.questions_from_dom(list(state.get("questions") or []))
+            primary_text, primary_aria = self._primary_of(state)
+            signature = _ea.step_signature(questions, primary_text)
+            if signature == previous_signature:
+                # The step did not change after the last press: either LinkedIn
+                # flagged an answer inline or the form is stuck.
+                flagged = [q for q in questions if q.error]
+                if flagged:
+                    _ea.finalize_statuses(questions, set(), {})
+                    self._merge(questions)
+                    self._step(
+                        "LinkedIn flagged: "
+                        + ", ".join(f"{q.label!r} ({q.error})" for q in flagged)
+                    )
+                    return await self._finish("needs_review", close_dialog=True)
+                return await self._finish(
+                    "failed",
+                    error=f"The Easy Apply form did not advance after pressing {last_primary!r}.",
+                    close_dialog=True,
+                )
+            previous_signature = signature
+
+            title = str(state.get("title") or "").strip() or f"step {step_no}"
+            await self._progress(f"Filling {title}", min(20 + step_no * 10, 80))
+            actions, unmatched = _ea.plan_fill(
+                questions, self.answers, self.profile, self.resume_path
+            )
+            notes = {q.label: q.message for q in questions if q.message}
+            await self._apply_actions(actions, {q.key: q for q in questions}, notes)
+
+            refreshed = await self._dialog_state()
+            if refreshed is not None:
+                questions = _ea.questions_from_dom(
+                    list(refreshed.get("questions") or [])
+                )
+                primary_text, primary_aria = self._primary_of(refreshed)
+                state = refreshed
+            _ea.finalize_statuses(questions, unmatched, notes)
+            self._merge(questions)
+
+            unanswered = _ea.unanswered_of(questions)
+            if unanswered:
+                self._step(
+                    "Stopped: required questions without an answer: "
+                    + ", ".join(repr(q.label) for q in unanswered)
+                )
+                return await self._finish("needs_review", close_dialog=True)
+
+            if not primary_text:
+                return await self._finish(
+                    "failed",
+                    error="The Easy Apply dialog has no footer button to continue with.",
+                    close_dialog=True,
+                )
+            action = _ea.classify_step_button(primary_text, primary_aria)
+            if not self.submit and action in {"submit", "unknown"}:
+                if action == "submit":
+                    self._step(
+                        "Stopped at the review step without submitting (submit is false)"
+                    )
+                else:
+                    self._step(
+                        f"Stopped before the unrecognised footer button {primary_text!r} "
+                        f"(submit is false). {_ea.LOCALE_LIMITATION}"
+                    )
+                return await self._finish("filled", close_dialog=True)
+            if action == "submit":
+                return await self._submit_application(primary_text, state)
+            if action == "unknown":
+                self._step(
+                    f"Footer button {primary_text!r} is not in the locale table; "
+                    "pressing it because submit is true"
+                )
+            last_primary = primary_text
+            self._last_action = action
+            await self._press_primary(primary_text)
+
+        return await self._finish(
+            "failed",
+            error=f"Gave up after {_ea.MAX_STEPS} dialog steps.",
+            close_dialog=True,
+        )
+
+    async def _press_primary(self, text: str) -> None:
+        if not await self._click_key("primary"):
+            raise LinkedInScraperException(
+                f"Could not press the dialog button {text!r}."
+            )
+        self._clicked_primary = True
+        self._step(f"Pressed {text!r}")
+        await asyncio.sleep(0.5)
+
+    async def _submit_application(
+        self, primary_text: str, state: dict[str, Any]
+    ) -> dict[str, Any]:
+        await self._progress("Submitting the application", 85)
+        previous_text = str(state.get("text", ""))
+        self._last_action = "submit"
+        await self._press_primary(primary_text)
+        value: Any = None
+        try:
+            handle = await self._page.wait_for_function(
+                _EASY_APPLY_POST_SUBMIT_JS,
+                arg={
+                    "sentLabels": list(_ea.application_sent_labels()),
+                    "previousText": previous_text,
+                },
+                timeout=_EASY_APPLY_SUBMIT_TIMEOUT_MS,
+            )
+            value = await handle.json_value()
+        except PlaywrightTimeoutError:
+            value = None
+        if not isinstance(value, dict):
+            return await self._finish(
+                "failed",
+                error=(
+                    "LinkedIn did not confirm the submission within the time limit. "
+                    "Check the job page before retrying."
+                ),
+                close_dialog=True,
+            )
+        if value.get("state") == "closed":
+            if await self._header_applied():
+                self._step(
+                    "The dialog closed and the job header shows the application as sent"
+                )
+                return await self._finish("submitted", close_dialog=False)
+            return await self._finish(
+                "failed",
+                error=(
+                    "The dialog closed after submit but LinkedIn showed no "
+                    "confirmation. Check the job page before retrying."
+                ),
+                close_dialog=False,
+            )
+        return await self._finish_submitted(str(value.get("text", "")))
+
+    async def _finish_submitted(self, confirmation_text: str) -> dict[str, Any]:
+        self._step("LinkedIn confirmed the application was sent")
+        await self._progress("Capturing the confirmation", 95)
+        return await self._finish(
+            "submitted", confirmation_text=confirmation_text, close_dialog=True
+        )
+
+    # ------------------------------------------------------------------
+    # Filling
+    # ------------------------------------------------------------------
+
+    async def _apply_actions(
+        self,
+        actions: list[_ea.FillAction],
+        by_key: dict[str, _ea.EasyApplyQuestion],
+        notes: dict[str, str],
+    ) -> None:
+        for action in actions:
+            question = by_key.get(action.key)
+            label = question.label if question else action.key
+            selector = f'[{_EASY_APPLY_KEY_ATTR}="{action.key}"]'
+            try:
+                if action.action == "fill":
+                    await self._fill_text(action.key, selector, action.value)
+                    picked = None
+                    if question is not None and question.combobox:
+                        picked = await self._pick_combobox_option(action.value)
+                    self._step(
+                        f"Filled {label!r}"
+                        + (f" and chose {picked!r}" if picked else "")
+                    )
+                elif action.action == "select":
+                    await self._page.locator(selector).first.select_option(
+                        index=action.index, timeout=5000
+                    )
+                    chosen = str(action.index)
+                    if question is not None and action.index in question.option_indices:
+                        chosen = question.options[
+                            question.option_indices.index(action.index)
+                        ]
+                    self._step(f"Selected {chosen!r} for {label!r}")
+                elif action.action in {"radio", "check"}:
+                    ok = await self._page.evaluate(
+                        _EASY_APPLY_SET_CHOICE_JS,
+                        {
+                            **self._key_args,
+                            "key": action.key,
+                            "option": action.option,
+                            "checked": True
+                            if action.action == "radio"
+                            else action.checked,
+                        },
+                    )
+                    if not ok:
+                        raise LinkedInScraperException("choice control not found")
+                    if action.action == "radio":
+                        self._step(f"Chose {action.option!r} for {label!r}")
+                    else:
+                        verb = "Checked" if action.checked else "Unchecked"
+                        target = (
+                            f"{action.option!r} for {label!r}"
+                            if action.option
+                            else repr(label)
+                        )
+                        self._step(f"{verb} {target}")
+                elif action.action == "file":
+                    await self._page.locator(selector).first.set_input_files(
+                        action.value, timeout=10000
+                    )
+                    name = Path(action.value).name
+                    self._step(f"Uploaded {name} for {label!r}")
+                    notes[label] = f"Uploaded {name}."
+            except Exception as exc:
+                logger.debug(
+                    "Easy Apply action %s on %r failed: %s",
+                    action.action,
+                    label,
+                    exc,
+                    exc_info=True,
+                )
+                notes[label] = f"Could not fill this field ({type(exc).__name__})."
+                self._step(f"Could not fill {label!r}")
+
+    async def _fill_text(self, key: str, selector: str, value: str) -> None:
+        try:
+            await self._page.locator(selector).first.fill(value, timeout=5000)
+            return
+        except Exception:
+            logger.debug("fill() failed for %s; setting the value via JS", key)
+        ok = await self._page.evaluate(
+            _EASY_APPLY_SET_VALUE_JS, {**self._key_args, "key": key, "value": value}
+        )
+        if not ok:
+            raise LinkedInScraperException("text control not found")
+
+    async def _pick_combobox_option(self, value: str) -> str | None:
+        try:
+            await self._page.wait_for_selector(
+                '[role="option"]', state="visible", timeout=2000
+            )
+        except PlaywrightTimeoutError:
+            return None
+        try:
+            picked = await self._page.evaluate(
+                _EASY_APPLY_PICK_OPTION_JS, {"value": value}
+            )
+        except Exception:
+            logger.debug("Typeahead option pick failed", exc_info=True)
+            return None
+        await asyncio.sleep(0.2)
+        return picked if isinstance(picked, str) and picked else None
+
+    # ------------------------------------------------------------------
+    # Evidence and cleanup
+    # ------------------------------------------------------------------
+
+    async def _capture_evidence(
+        self, confirmation_text: str, screenshot: bool
+    ) -> dict[str, Any]:
+        page_text = ""
+        try:
+            text = await self._page.evaluate(_EASY_APPLY_EVIDENCE_TEXT_JS)
+            page_text = text if isinstance(text, str) else ""
+        except Exception:
+            logger.debug("Could not read page text for evidence", exc_info=True)
+        screenshot_b64: str | None = None
+        if screenshot:
+            try:
+                png = await self._page.screenshot(type="png")
+                screenshot_b64 = base64.b64encode(png).decode("ascii")
+            except Exception:
+                logger.debug("Could not take a screenshot", exc_info=True)
+        return {
+            "page_text": page_text[:20000],
+            "confirmation_text": confirmation_text,
+            "screenshot_base64": screenshot_b64,
+            "url": self._page.url,
+        }
+
+    async def _close_dialogs(self) -> None:
+        """Close whatever dialog is open without touching form buttons.
+
+        Prefers the dialog's own dismiss control (icon-only labelled button),
+        then Escape. A follow-up prompt *without form controls* (LinkedIn's
+        "Save this application?") is answered with its primary button, which
+        keeps the draft; a dialog that still holds form controls is never
+        advanced from here.
+        """
+        for _ in range(4):
+            state = await self._dialog_state()
+            if state is None:
+                return
+            dismissed = False
+            try:
+                dismissed = bool(
+                    await self._page.evaluate(
+                        _EASY_APPLY_CLICK_KEY_JS, {**self._key_args, "key": "dismiss"}
+                    )
+                )
+            except Exception:
+                logger.debug("Dismiss click failed", exc_info=True)
+            if not dismissed:
+                try:
+                    await self._page.keyboard.press("Escape")
+                except Exception:
+                    logger.debug("Escape failed", exc_info=True)
+            await asyncio.sleep(0.4)
+            after = await self._dialog_state()
+            if after is None:
+                self._step("Closed the dialog")
+                return
+            if (
+                int(after.get("control_count") or 0) == 0
+                and after.get("text") != state.get("text")
+                and after.get("primary")
+            ):
+                primary_text, _ = self._primary_of(after)
+                await self._click_key("primary")
+                self._step(f"Answered the follow-up prompt with {primary_text!r}")
+                await asyncio.sleep(0.4)
+
+    async def _finish(
+        self,
+        status: _ea.Status,
+        *,
+        error: str = "",
+        external_url: str | None = None,
+        confirmation_text: str = "",
+        screenshot: bool = True,
+        close_dialog: bool = False,
+    ) -> dict[str, Any]:
+        evidence = await self._capture_evidence(confirmation_text, screenshot)
+        if close_dialog:
+            await self._close_dialogs()
+        return _ea.build_result(
+            status,
+            list(self._questions.values()),
+            evidence=evidence,
+            steps=self.steps,
+            error=error,
+            external_url=external_url,
+        )

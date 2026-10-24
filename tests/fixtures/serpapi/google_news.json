@@ -1,0 +1,95 @@
+{
+  "search_metadata": {
+    "id": "{{id}}",
+    "status": "Success",
+    "json_endpoint": "{{base}}/searches/{{id}}.json",
+    "created_at": "2026-10-22 12:00:00 UTC",
+    "processed_at": "2026-10-22 12:00:01 UTC",
+    "total_time_taken": 1.2,
+    "fixture": true,
+    "fixture_note": "Recorded-shape fixture for tests. Not live SerpApi data."
+  },
+  "news_results": [
+    {
+      "position": 1,
+      "title": "Coffee prices climb as harvests lag",
+      "link": "https://news.example.com/story-1",
+      "source": {
+        "name": "Reuters",
+        "icon": "https://news.example.com/icon.png",
+        "authors": [
+          "Staff"
+        ]
+      },
+      "date": "1 hour ago",
+      "snippet": "News result 1: a short description used only in test fixtures.",
+      "thumbnail": "https://news.example.com/thumb-1.jpg"
+    },
+    {
+      "position": 2,
+      "title": "New study links coffee to longevity",
+      "link": "https://news.example.com/story-2",
+      "source": {
+        "name": "BBC News",
+        "icon": "https://news.example.com/icon.png",
+        "authors": [
+          "Staff"
+        ]
+      },
+      "date": "3 hours ago",
+      "snippet": "News result 2: a short description used only in test fixtures.",
+      "thumbnail": "https://news.example.com/thumb-2.jpg"
+    },
+    {
+      "position": 3,
+      "title": "Cafe chains expand loyalty programs",
+      "link": "https://news.example.com/story-3",
+      "source": {
+        "name": "Bloomberg",
+        "icon": "https://news.example.com/icon.png",
+        "authors": [
+          "Staff"
+        ]
+      },
+      "date": "5 hours ago",
+      "snippet": "News result 3: a short description used only in test fixtures.",
+      "thumbnail": "https://news.example.com/thumb-3.jpg"
+    },
+    {
+      "position": 4,
+      "title": "Why cold brew keeps growing",
+      "link": "https://news.example.com/story-4",
+      "source": {
+        "name": "The Guardian",
+        "icon": "https://news.example.com/icon.png",
+        "authors": [
+          "Staff"
+        ]
+      },
+      "date": "1 day ago",
+      "snippet": "News result 4: a short description used only in test fixtures.",
+      "thumbnail": "https://news.example.com/thumb-4.jpg"
+    },
+    {
+      "position": 5,
+      "title": "Roasters adapt to tariffs",
+      "link": "https://news.example.com/story-5",
+      "source": {
+        "name": "AP News",
+        "icon": "https://news.example.com/icon.png",
+        "authors": [
+          "Staff"
+        ]
+      },
+      "date": "2 days ago",
+      "snippet": "News result 5: a short description used only in test fixtures.",
+      "thumbnail": "https://news.example.com/thumb-5.jpg"
+    }
+  ],
+  "menu_links": [
+    {
+      "title": "Top stories",
+      "topic_token": "fixture-topic"
+    }
+  ]
+}

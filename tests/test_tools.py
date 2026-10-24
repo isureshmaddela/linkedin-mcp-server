@@ -33,6 +33,7 @@ def _make_mock_extractor(scrape_result: dict) -> MagicMock:
     mock.get_conversation = AsyncMock(return_value=scrape_result)
     mock.search_conversations = AsyncMock(return_value=scrape_result)
     mock.send_message = AsyncMock(return_value=scrape_result)
+    mock.reply_to_conversation = AsyncMock(return_value=scrape_result)
     mock.get_my_profile = AsyncMock(return_value=scrape_result)
     mock.search_companies = AsyncMock(return_value=scrape_result)
     mock.get_company_employees = AsyncMock(return_value=scrape_result)
@@ -786,6 +787,64 @@ class TestMessagingTools:
             "testuser", "Hello!", confirm_send=True, profile_urn="ACoAAB1IelEB"
         )
 
+    async def test_reply_to_conversation_success(self, mock_context):
+        expected = {
+            "url": "https://www.linkedin.com/messaging/thread/2-abc/",
+            "status": "sent",
+            "message": "Reply sent.",
+            "recipient_selected": True,
+            "sent": True,
+        }
+        mock_extractor = _make_mock_extractor(expected)
+
+        from linkedin_mcp_server.tools.messaging import register_messaging_tools
+
+        mcp = FastMCP("test")
+        register_messaging_tools(mcp)
+
+        tool_fn = await get_tool_fn(mcp, "reply_to_conversation")
+        result = await tool_fn(
+            "2-abc",
+            "Thanks, Tuesday works.",
+            True,
+            mock_context,
+            extractor=mock_extractor,
+        )
+
+        assert result["status"] == "sent"
+        mock_extractor.reply_to_conversation.assert_awaited_once_with(
+            "2-abc", "Thanks, Tuesday works.", confirm_send=True
+        )
+
+    async def test_reply_to_conversation_is_marked_destructive(self):
+        from linkedin_mcp_server.tools.messaging import register_messaging_tools
+
+        mcp = FastMCP("test")
+        register_messaging_tools(mcp)
+        tool = await mcp.get_tool("reply_to_conversation")
+        assert tool is not None
+        assert tool.annotations is not None
+        assert tool.annotations.destructiveHint is True
+
+    async def test_reply_to_conversation_error(self, mock_context):
+        from fastmcp.exceptions import ToolError
+
+        from linkedin_mcp_server.exceptions import SessionExpiredError
+
+        mock_extractor = MagicMock()
+        mock_extractor.reply_to_conversation = AsyncMock(
+            side_effect=SessionExpiredError()
+        )
+
+        from linkedin_mcp_server.tools.messaging import register_messaging_tools
+
+        mcp = FastMCP("test")
+        register_messaging_tools(mcp)
+
+        tool_fn = await get_tool_fn(mcp, "reply_to_conversation")
+        with pytest.raises(ToolError, match="Session expired"):
+            await tool_fn("2-abc", "Hi", True, mock_context, extractor=mock_extractor)
+
     async def test_send_message_error(self, mock_context):
         from fastmcp.exceptions import ToolError
 
@@ -1133,10 +1192,12 @@ class TestToolTimeouts:
             "get_company_posts",
             "get_job_details",
             "search_jobs",
+            "search_sales_navigator",
             "get_inbox",
             "get_conversation",
             "search_conversations",
             "send_message",
+            "reply_to_conversation",
             "get_feed",
             "close_session",
         )
@@ -1164,10 +1225,12 @@ class TestToolTimeouts:
             "get_company_employees",
             "get_job_details",
             "search_jobs",
+            "search_sales_navigator",
             "get_inbox",
             "get_conversation",
             "search_conversations",
             "send_message",
+            "reply_to_conversation",
             "get_feed",
             "close_session",
         )

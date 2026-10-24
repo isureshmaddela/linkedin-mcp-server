@@ -43,3 +43,9 @@ class ScrapingError(LinkedInScraperException):
     """Raised when scraping fails for various reasons."""
 
     pass
+
+
+class SalesNavigatorAccessError(LinkedInScraperException):
+    """Raised when the signed-in account cannot open Sales Navigator people search."""
+
+    pass

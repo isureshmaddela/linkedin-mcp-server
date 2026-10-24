@@ -1,0 +1,82 @@
+[
+  {
+    "id": "585069bdee19ad271e9bc072",
+    "google_id": 200635,
+    "google_parent_id": 21176,
+    "name": "Austin, TX",
+    "canonical_name": "Austin, TX,Texas,United States",
+    "country_code": "US",
+    "target_type": "DMA Region",
+    "reach": 5560000,
+    "gps": [
+      -97.7430608,
+      30.267153
+    ]
+  },
+  {
+    "id": "585069b8ee19ad271e9ba949",
+    "google_id": 1026201,
+    "google_parent_id": 21176,
+    "name": "Austin",
+    "canonical_name": "Austin,Texas,United States",
+    "country_code": "US",
+    "target_type": "City",
+    "reach": 4870000,
+    "gps": [
+      -97.7430608,
+      30.267153
+    ]
+  },
+  {
+    "id": "585069bdee19ad271e9bc05e",
+    "google_id": 200611,
+    "google_parent_id": 2840,
+    "name": "Rochester, MN-Mason City, IA-Austin, MN",
+    "canonical_name": "Rochester, MN-Mason City, IA-Austin, MN,United States",
+    "country_code": "US",
+    "target_type": "DMA Region",
+    "reach": 555000
+  },
+  {
+    "id": "585069bcee19ad271e9bb8b1",
+    "google_id": 1023191,
+    "google_parent_id": 21167,
+    "name": "New York",
+    "canonical_name": "New York,New York,United States",
+    "country_code": "US",
+    "target_type": "City",
+    "reach": 18200000,
+    "gps": [
+      -74.0059728,
+      40.7127753
+    ]
+  },
+  {
+    "id": "585069bcee19ad271e9bb8b2",
+    "google_id": 1014221,
+    "google_parent_id": 21137,
+    "name": "San Francisco",
+    "canonical_name": "San Francisco,California,United States",
+    "country_code": "US",
+    "target_type": "City",
+    "reach": 8100000,
+    "gps": [
+      -122.4194155,
+      37.7749295
+    ]
+  },
+  {
+    "id": "585069bcee19ad271e9bb8b3",
+    "google_id": 1006886,
+    "google_parent_id": 2826,
+    "name": "London",
+    "canonical_name": "London,England,United Kingdom",
+    "country_code": "GB",
+    "target_type": "City",
+    "reach": 12900000,
+    "gps": [
+      -0.1277583,
+      51.5073509
+    ]
+  }
+]

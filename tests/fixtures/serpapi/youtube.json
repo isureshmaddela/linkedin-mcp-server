@@ -1,0 +1,104 @@
+{
+  "search_metadata": {
+    "id": "{{id}}",
+    "status": "Success",
+    "json_endpoint": "{{base}}/searches/{{id}}.json",
+    "created_at": "2026-10-22 12:00:00 UTC",
+    "processed_at": "2026-10-22 12:00:01 UTC",
+    "total_time_taken": 1.2,
+    "fixture": true,
+    "fixture_note": "Recorded-shape fixture for tests. Not live SerpApi data."
+  },
+  "video_results": [
+    {
+      "position_on_page": 1,
+      "title": "Python in 100 Seconds",
+      "link": "https://www.youtube.com/watch?v=fixture0",
+      "serpapi_link": "{{base}}/search.json?engine=youtube_video&v=fixture0",
+      "channel": {
+        "name": "Fireship",
+        "link": "https://www.youtube.com/@fixture0",
+        "verified": true,
+        "thumbnail": "https://example.com/channel-0.jpg"
+      },
+      "published_date": "1 years ago",
+      "views": 2900000,
+      "length": "2:25",
+      "description": "Video result 1: a short description used only in test fixtures.",
+      "extensions": [
+        "New"
+      ],
+      "thumbnail": {
+        "static": "https://example.com/video-0.jpg",
+        "rich": "https://example.com/video-0.webp"
+      }
+    },
+    {
+      "position_on_page": 2,
+      "title": "Learn Python - Full Course",
+      "link": "https://www.youtube.com/watch?v=fixture1",
+      "serpapi_link": "{{base}}/search.json?engine=youtube_video&v=fixture1",
+      "channel": {
+        "name": "freeCodeCamp.org",
+        "link": "https://www.youtube.com/@fixture1",
+        "verified": true,
+        "thumbnail": "https://example.com/channel-1.jpg"
+      },
+      "published_date": "2 years ago",
+      "views": 45000000,
+      "length": "4:26:51",
+      "description": "Video result 2: a short description used only in test fixtures.",
+      "extensions": [],
+      "thumbnail": {
+        "static": "https://example.com/video-1.jpg",
+        "rich": "https://example.com/video-1.webp"
+      }
+    },
+    {
+      "position_on_page": 3,
+      "title": "Python Tutorial for Beginners",
+      "link": "https://www.youtube.com/watch?v=fixture2",
+      "serpapi_link": "{{base}}/search.json?engine=youtube_video&v=fixture2",
+      "channel": {
+        "name": "Programming with Mosh",
+        "link": "https://www.youtube.com/@fixture2",
+        "verified": true,
+        "thumbnail": "https://example.com/channel-2.jpg"
+      },
+      "published_date": "3 years ago",
+      "views": 28000000,
+      "length": "6:14:07",
+      "description": "Video result 3: a short description used only in test fixtures.",
+      "extensions": [],
+      "thumbnail": {
+        "static": "https://example.com/video-2.jpg",
+        "rich": "https://example.com/video-2.webp"
+      }
+    },
+    {
+      "position_on_page": 4,
+      "title": "10 Python Tips",
+      "link": "https://www.youtube.com/watch?v=fixture3",
+      "serpapi_link": "{{base}}/search.json?engine=youtube_video&v=fixture3",
+      "channel": {
+        "name": "ArjanCodes",
+        "link": "https://www.youtube.com/@fixture3",
+        "verified": true,
+        "thumbnail": "https://example.com/channel-3.jpg"
+      },
+      "published_date": "4 years ago",
+      "views": 310000,
+      "length": "17:20",
+      "description": "Video result 4: a short description used only in test fixtures.",
+      "extensions": [],
+      "thumbnail": {
+        "static": "https://example.com/video-3.jpg",
+        "rich": "https://example.com/video-3.webp"
+      }
+    }
+  ],
+  "serpapi_pagination": {
+    "next_page_token": "fixture-youtube-token",
+    "next": "{{base}}/search.json?engine=youtube&search_query=python&sp=fixture-youtube-token"
+  }
+}

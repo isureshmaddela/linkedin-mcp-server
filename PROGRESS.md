@@ -1,0 +1,211 @@
+# Career Copilot Progress
+
+Last updated: 2026-10-23.
+
+## Completed
+
+### Platform
+- `aira/` domain package (16 modules) with the HTTP server in `auto_apply_assistant.py` reduced to routing and thin services.
+- Route table with `@route` decorator: correlation IDs (`X-Request-ID`), per-client rate limit, same-origin CSRF check, consistent error envelopes (400/401/403/404/429/502/500), request metrics, structured logging with redaction.
+- Versioned additive migrations (`aira/schema.py`, 8 versions, ledger table). Verified on a copy of the real local database: 11 jobs preserved, second run is a no-op.
+- SQLite connections now close on `with` exit (previously leaked handles and blocked file deletion on Windows); WAL and busy timeout enabled.
+- Security headers (CSP without inline script, frame/sniff/referrer/permissions policies), login lockout, health/readiness/metrics endpoints.
+
+### Product slices
+- **Jobs**: unified search across LinkedIn, Google Jobs (SerpApi), Greenhouse, Lever, Ashby, SmartRecruiters; import by posting URL; source catalog with planned providers and reasons; views All / LinkedIn / Google Jobs / Company Portals / Recommended / Saved; filters, sort, pagination, persisted filter state; save, notes, follow-ups, archive.
+- **Matching**: `explainable-match-v2` with ten evidence-only dimensions, weights, versioning, persisted explanation, inputs fingerprint for recalculation, five classifications including Not Recommended with a reason, sponsorship hard blockers only on explicit wording.
+- **Profile**: universal candidate profile with public/personal/sensitive classification; standard answers with explicit confirmation; 42-field ATS label mapping with confidence.
+- **Applications**: packet preparation from Greenhouse questions or standard questions, prefill, sensitive gating, review, approval checks (documents, resume version, required answers), daily limit, apply hand-off, confirmation evidence (encrypted), duplicate-submission prevention, pipeline board, review queue.
+- **Email intelligence**: paste or `.eml` import, nine categories, explicit extraction (date/time/time zone, meeting link, deadline, IDs, contacts), dedupe, user correction, confirmation gates, optional auto-apply above threshold for non-sensitive actions.
+- **Interviews**: CRUD, participants, prep and follow-up tasks, duplicate guard, ICS export with stable UID/SEQUENCE/CANCEL, Google/Outlook/Office 365 links.
+- **Recruiters**: CRM with interactions, follow-ups, related jobs and interviews, conservative dedupe; LinkedIn inbox and reply drafts kept.
+- **Documents**: Fernet-encrypted versioned store, content sniffing, size/type limits, scan hook, audit, retention, owner isolation.
+- **Analytics**: metric definitions, period/source/status filters, null-safe rates, pipeline, source conversion, companies, resume-version and cover-letter performance, timeline with table view, drill-down links.
+- **Settings**: profile, resume, standard answers, integrations and sources, automation policy and schedules, data and privacy (export, retention, account deletion, audit log, health).
+- **UI**: rebuilt as a responsive SPA (sidebar + mobile bottom nav), light/dark themes, keyboard shortcuts (`g` + letter, `/`, `?`, arrow keys in lists), focus-trapped drawers and modals, loading skeletons, empty/error/retry states, toasts, confirmation for destructive actions.
+
+### LinkedIn replies (2026-10-22)
+- New MCP tool `reply_to_conversation` replies inside a thread (works for recruiter InMail) and confirms delivery only when the reply box is empty and the text is in the thread.
+- Messages tab: Draft with AI, Send now with confirmation, per-conversation Manual send / Auto-reply switch, Save as recruiter, sent/held history, and an Automatic replies panel (daily count, inbox schedule, Check inbox now, pause, held replies with Review).
+- Auto-reply guardrails in `aira/messaging.py`: holds anything about pay, visa or work authorization, personal identifiers, offers, background checks, relocation, links, contact details, money, or placeholders; 6-hour cooldown per conversation; daily limit (default 20); pause switch; one send per conversation state; Aira works out who wrote last from sender labels and holds when it cannot tell.
+- The inbox check no longer trusts the local model alone: it skips when you wrote last and forces a draft when the recruiter wrote last with a question.
+- LinkedIn session recovery: a stopped session restarts from the saved sign-in (once per minute), Connect resumes a saved sign-in without a login window, Settings has Restart LinkedIn session and Sign in again, and a booting session is no longer mistaken for a stopped one.
+- Validation: 1041 tests pass; browser walkthrough with a stand-in LinkedIn server and the real local model passed 14 of 14 checks (manual send delivered once, sensitive auto-reply held, nothing extra sent).
+
+### Messages tab as the messenger (2026-10-22)
+- Aira keeps its own copy of the inbox (`aira/inbox_store.py`, migration 11: `inbox_threads`, `inbox_messages`, `inbox_sync_runs`). `GET /api/inbox` and `GET /api/conversations/{id}` answer from it and never wait on LinkedIn; `?refresh=1` or a never-saved thread reads LinkedIn live. Nothing is a 404 when LinkedIn is not connected.
+- Background sync (`POST /api/inbox/sync`, `GET /api/inbox/sync`): inbox list (20, as before), then the 10 newest threads one at a time, single flight, skips unchanged threads, stops after 3 failures in a row. The Messages tab starts it when the copy is older than 10 minutes; inbox checks save what they read, and replies sent from Aira appear at once and are reconciled on the next fetch.
+- UI: two-pane messenger (search, All / Needs reply / Recruiters / Auto-reply chips, avatars, previews, relative times, unread dots, grouped bubbles with day separators, sticky composer, mobile list/thread screens, dark mode). No link to linkedin.com remains in the Messages tab or the Recruiters drawer. Automatic replies panel is collapsible.
+- Review fixes (2026-10-22): the Messages tab's automatic sync reads only the inbox list and opens no thread (a sync the user asks for reads the newest 10, which LinkedIn marks read); syncs share the automation slot with inbox checks and are throttled; an unreadable list row keeps its earlier preview and reply flag and is never treated as unchanged; a thread the latest list confirmed is not scraped again when opened; a failed sync no longer reads as "just synced"; a reply sent twice with the same words and a fetch that began before a send no longer undo the new reply; saved copy can be cleared (`DELETE /api/inbox/cache`) and idle threads are pruned after 90 days; sends are refused if newer messages were saved meanwhile. UI: focus stays on the row and moves into the thread, roving tabindex, browser Back closes a thread, the composer is never under the mobile bottom navigation, taller messenger, one-line filter chips, no literal "null" in threads or the Recruiters drawer, the show-browser toggle lives in Settings > Integrations.
+- Validation: 114 messenger tests (64 store, 50 integration), 1370 pass overall; stand-in LinkedIn walkthrough in a headless browser passed 43 of 43 checks (cache-first open, sync progress, send once, offline copy, filters, keyboard, mobile, dark).
+
+### Aira API and Careers (2026-10-22)
+- **Aira API** (`#/airaapi`, `g` then `p`): a console for all 136 SerpApi engines (126 official plus 10 sub-endpoints): Overview, Playground, Engines, History with diff and export, Locations, Monitors and saved searches, Account, Aira API keys, Docs (with a coverage page of every SerpApi dashboard page), Status. Backend in `aira/airaapi/` (catalog, client, store, service, compat, routes; migration 12). A SerpApi-compatible, cached endpoint at `/v1/search.json` and friends is guarded by Aira API keys (`aira_` + 40 characters, hash only).
+- **Careers** (`#/careers`, `g` then `c`): Google Jobs search with Google's filters and `next_page_token` paging, duplicate-safe import into Jobs, six reports (company, salary, market, interview prep, travel, learn) with a cost plan before running, job alerts with a baseline run (migration 13). The Jobs-tab Google source shares history and cache with Careers.
+- **Key handling**: one SerpApi key, from `SERPAPI_API_KEY` or pasted in Aira API > Account (validated first, Fernet-encrypted, never returned, logged or stored in records). The top bar, Settings > Integrations, Jobs, the Dashboard widgets, `/api/sources` and `/api/status` all follow it.
+- **Integration (this entry)**: one `NAV` list drives sidebar groups, the phone bottom bar with More, chords and shortcuts help; Dashboard widgets (`views-widgets.js`); Settings card for the key; Jobs refreshes sources on every visit and the Google Jobs tab explains a missing key; dashboard notifications with in-app links now open them; CSP allows `https:` images; dark-theme contrast tokens (`--on-brand`, `--mark-ink`) fix white-on-mint text app-wide.
+- Not built, on purpose (listed on the Docs coverage page): outgoing webhooks and SerpApi team seats. XLSX export, `json_with_pixel_position` (X-Ray), per-monitor budget caps and search inside stored results were added on 2026-10-23 (next entry).
+- Validation: see the table below. Browser walk of every page (desktop light, mobile dark) against a scratch server and the stand-in SerpApi (`tests/serpapi_stub.py`): no console errors, no horizontal overflow, 21 of 21 interaction checks.
+
+### SerpApi dashboard parity (2026-10-23)
+- Closed the remaining buildable gaps between the SerpApi dashboard (https://serpapi.com/dashboard) and the Aira API console. Details in `docs/airaapi-spec.md` section 13; migration 15 `airaapi_parity`.
+- **Search inside results**: FTS5 index of the readable text of every stored result (LIKE fallback without FTS5). History has an "Inside results" switch and shows highlighted match excerpts (`in_results=1`). The newest 5,000 older results are backfilled.
+- **Export**: per-search Excel (`.xlsx`, standard-library writer in `aira/airaapi/xlsx.py`) and Markdown table, beside JSON, CSV, HTML and cURL.
+- **Monitors**: monthly budget per monitor. Scheduled runs wait for the next month once it is used up, Run now is refused, and raising the budget resumes the monitor. Optional pause on error, with a notification. Cards show a budget meter.
+- **X-Ray**: History detail > X-Ray, for Google Search and Google Ads. It reads `json_with_pixel_position` from SerpApi's Search Archive (no search used), keeps it with the search, and draws a page map with one colour per section. It can be shown over the stored HTML page, beside an element list with filter and keyboard navigation. The detail shows the JSON path, size, above-the-fold flag and `json_restrictor` path.
+- The Docs coverage page was updated to match (X-Ray, export, scheduler and history search are now built). A stale "expired id answers 404" line was corrected to 410.
+- Fixed: a literal "null" showed above the filter bar on every Jobs tab except Google Jobs (`views-jobs.js`, `replaceChildren` with a null child).
+- Still out of scope: outgoing webhooks (data-leak risk); team seats, billing, profile and 2FA (SerpApi account actions); live `json_with_pixel_position` from the Playground or `/v1`.
+- Validation:
+  - Full suite: 1584 passed, 5 skipped, 2 failed. The 2 failures are the Linux-only container tests that earlier rows deselect.
+  - The 31 new tests in `tests/test_airaapi_parity.py` pass, and the Aira API and Careers suites pass (318).
+  - ruff, ruff format, ty and the JS tests (32 and 9) pass.
+  - Browser walk against a scratch server and the stand-in SerpApi: 30 of 30 checks, desktop light and phone dark, with no console errors and no overflow.
+  - The scratch database at schema version 14 migrated to 15 on start.
+
+### Auto-apply in Jobs (2026-10-23)
+- **Jobs > Auto-apply** (`#/jobs/autopilot`). Search plans name the positions, where to search (LinkedIn, Google Jobs,
+  company boards), a minimum match, applications per run, a schedule and a mode: apply automatically, or fill and ask
+  first. On schedule or Run now, Aira searches, scores and applies to the best matches within the daily limit; each job
+  is tried once.
+- Contract and as-built details: `docs/auto-apply-spec.md` section 6. Code: `aira/autopilot.py`, migration 16, glue and
+  routes in `auto_apply_assistant.py`, `views-autopilot.js`.
+- Held jobs show their questions under *Needs you*. You answer once ("Remember" saves confirmed standard answers or
+  custom answers) and the run resumes. Review-mode runs wait for one click. Every submission stores a screenshot and the
+  confirmation page encrypted, is recorded as method `auto`, and moves the job to Applied with a follow-up task.
+- The readiness checklist covers profile, resume file, work-authorization answers, LinkedIn, SerpApi and Ollama.
+  "Your answers" confirms the answers almost every form asks for. The job drawer gets "Apply for me" and "Fill it,
+  I'll submit". The status line says live what the run is doing.
+- LinkedIn Easy Apply is opt-in per plan, with a warning: LinkedIn's User Agreement forbids automated applications.
+  When Easy Apply asks a question, Aira answers only exact profile matches and confirmed answers, then retries once.
+- Fixed: the form engine closed its own page on every run, because the popup guard also fired for the main page. It had
+  never worked and had no tests; `tests/test_apply_engine.py` now covers every stand-in ATS and outcome.
+- Also fixed:
+  - Two threads migrating a new account's database at once (a request and a scheduler tick) leaked a connection that
+    kept the database locked until restart. `_connect()` now migrates under a lock, only when behind, and closes the
+    connection if migrating fails.
+  - The router let a slower earlier page (the dashboard still loading) overwrite the page the user had just opened.
+    Each render now draws into its own stage.
+- Validation:
+  - Full suite: 1620 passed, 5 skipped. The only failures are the 2 Linux-only container tests and one pinned-version
+    assertion, since fixed.
+  - `tests/test_autopilot.py`: 23 tests, including real Chromium against the stand-in ATS.
+  - `tests/test_apply_engine.py`: 14 tests.
+  - ruff, ty, `node --check` and the JS tests pass.
+  - Browser walk with a stand-in board and ATS and the real local model: 22 of 22 checks. Covered: readiness, answers,
+    plan editor, live status, 1 applied and 2 held, answering both, remembered answer, screenshot evidence, the job
+    drawer, phone dark.
+  - Every-page walk: 26 of 26 pages clean.
+
+### Aira Jobs: finding jobs without SerpApi (2026-10-23)
+- Aira API had no data source of its own: every live search went to SerpApi. It now has its own engine **`aira_jobs`**,
+  which searches free public job-board APIs (Himalayas, The Muse, Remotive, Jobicy, Arbeitnow) itself, with no key and
+  no credits. Details are in `docs/airaapi-spec.md` section 14; code is in `aira/airaapi/jobboards.py` and
+  `catalog/aira_engines.json`.
+- Each board's terms are followed: per-board caching, credit and a link back on every result, apply links kept, and no
+  scripted visits to Himalayas pages.
+- It is used in Jobs (new **Aira Jobs** tab and source, the default without LinkedIn), Careers > Jobs ("Search with"
+  switch, the default without a key, imports keep the board as source), Auto-apply plans (on by default; board pages
+  followed to Greenhouse, Lever, Ashby or SmartRecruiters forms only) and `/v1`.
+- Validation:
+  - `tests/test_jobboards.py`: 15 tests, including HTTP journeys without a key and an Auto-apply run that submits a
+    Muse job through the stand-in Greenhouse form.
+  - Updated pinned engine and source counts (137 engines) and the keyless Careers tests.
+  - Browser walk on live boards with no key: 16 of 16 checks (Jobs tab, job drawer credit, Careers search and switch,
+    engine card, History at 0 credits, Auto-apply editor).
+
+## Current Work
+
+None in progress. All slices above are implemented and validated.
+
+## Decisions and Assumptions
+
+- Kept the existing Python/uv/stdlib HTTP/SQLite/Ollama stack; no framework migration was justified for a loopback app.
+- No connected source has an official candidate-side submission API, so submission stays user-performed and is recorded with evidence. Auto-submit is reported unavailable and cannot be enabled.
+- Gmail/Outlook and Google/Microsoft calendar APIs need OAuth credentials that do not exist here; email uses paste/.eml and calendars use ICS plus deep links.
+- Workday, iCIMS, Taleo, Oracle, SuccessFactors, BambooHR, UKG, and direct career sites are listed as planned because they lack an official public posting API.
+- Sensitive profile fields never go into model prompts and are never prefilled without a confirmed standard answer.
+- A manual draft save stamps the current resume version, because the user is reviewing against the resume that exists at that moment.
+- Daily application limit 0 means unlimited.
+
+## Commands Executed and Results
+
+| Command | Result |
+|---|---|
+| `uv run python -m pytest -q --deselect <2 Linux-only container tests>` | 979 passed, 5 skipped (POSIX permission tests), 2 deselected. |
+| Full suite after the Aira API, Careers and integration work (`uv run python -m pytest -q`, 2 Linux-only container tests deselected) | 1494 passed, 5 skipped, 2 deselected. |
+| `node tests/js/serp_kit.test.mjs`, `node tests/js/playground.test.mjs` | 32 and 9 passed, 0 failed. |
+| `uv run ruff check auto_apply_assistant.py aira/ tests/ linkedin_mcp_server/` | All checks passed. |
+| `uv run ty check auto_apply_assistant.py aira/ linkedin_mcp_server/` | All checks passed. |
+| `node --check` on every file in `auto_apply_assistant/` (one call per file; a single glob checks only the first) | All scripts parse. |
+| `uv build` | Wheel built; includes the `aira` package. |
+| End-to-end API walkthrough against a live server (scratch script) | 93 of 93 checks passed, including live imports from the GitLab Greenhouse board and a live search of the Ashby board. |
+| Headless Chromium walk of every page, desktop light and mobile dark | All pages render; only console error is the expected 401 session probe on the sign-in screen. |
+| Migration on a copy of the real `applications.sqlite3` | Upgraded 0 → 8, 11 jobs preserved, idempotent. |
+
+New test files: `tests/test_ats_adapters.py` (101), `tests/test_scoring.py` (74), `tests/test_field_mapping.py` (76), `tests/test_email_intel.py` (88), `tests/test_documents.py` (46), `tests/test_calendar_sync.py` (17), `tests/test_career_copilot.py` (11 HTTP integration journeys).
+
+## Known Blockers
+
+- No SerpApi key has ever been used here, so live Google Jobs, Careers and Aira API responses are verified only against the stand-in server's fixture-shaped data (real response shapes, 402/429 wording and archive behaviour are unseen).
+- No mailbox or calendar OAuth credentials.
+- Two Linux container-detection tests fail on Windows by design; five POSIX permission tests are skipped.
+- Sending a real LinkedIn reply was not exercised against live LinkedIn; the reply tool was verified with unit tests and a stand-in server. The first real send should be checked in the LinkedIn thread.
+
+## Exact Next Action
+
+Restart the running Aira server (`.\scripts\start_aira.ps1`) so it serves the new code; the database upgrades automatically on first request. Then connect LinkedIn from Settings → Integrations and paste a SerpApi key in Aira API → Account (or add `SERPAPI_API_KEY` to `.env`) to verify those two live sources; check the first Google Jobs search, one Careers report and one `/v1` call against the real service.
+
+### SerpApi-compatible API fixes (2026-10-23)
+- The compatible API now answers on SerpApi's own paths (`/search`, `/search.json`, `/search.html`, `/account.json`, `/locations.json`, `/searches/{id}.json|.html`) as well as `/v1/...`, so an SDK or script only needs its base URL pointed at Aira and an Aira API key.
+- Unknown parameters pass through (as SerpApi does; its SDKs add `source=python`); `allow_unknown=false` restores strict validation.
+- `json_endpoint`, `raw_html_file` and `serpapi_pagination` links in responses point at Aira, so `next_page()` and archive lookups stay on Aira.
+- `/locations.json` needs no key (like SerpApi); a presented key is still checked.
+- Verified with the official `serpapi` and `google-search-results` Python SDKs against a scratch server plus the stand-in SerpApi (search, next_page, account, locations, archive, html, async, 402/401 errors), and `/locations.json` live against real SerpApi. Live searches with a real SerpApi key remain unverified.
+- Tests: 1487 passed; the only failures are the 2 Linux-only container tests.
+
+### End-to-end test and fix pass (2026-10-23)
+Four independent testers, each in an isolated scratch Aira with the stand-in SerpApi, then fixes:
+- **All 136 engines**: API, SerpApi-compatible `/search.json` and Playground UI loops all pass; catalog lint clean; 32 engines checked against public SerpApi docs. Fixed: `google_jobs_listing` ratings renderer, `requires_any_of` on `ebay_seller`/`walmart_product_sellers`, double required markers on 4 engines, bogus `result_keys` on 5 engines, and YYYYMMDD dates on the engines that document them (`google_images`, `google_images_light`, `google_forums`, `google_ads_transparency_center`).
+- **Security**: 13 backend fixes (no lockout of valid keys by junk keys, cold-cache stampede runs once, history cap on every insert, concurrent hourly-limit overshoot, DNS-rebinding Host check now on every route, key no longer in DEBUG logs when percent-encoded, CSP sandbox on stored HTML, zlib inflate bound, keyless `/locations.json` cached and rate limited, CSV formula neutralising, nested-JSON guard (400), key-file ACL on Windows). Archive ids that were deleted or pruned answer `410 gone` for 31 days (migration 14).
+- **Careers**: every tab through API and browser; 5 fixes (alert naming, shared cache key with the Jobs tab, alert card copy, usage link, save-jobs copy); usage CSV export; "Save jobs to Aira" from History; honest coverage tables in Docs.
+- **Design walk** at 1440/1024/390 light and dark: 11 CSS fixes (overflow, bidi text, contrast, tap targets, numerals, checkbox colour, stat-tile grid) plus literal "null" text on Jobs/Applications, missing labels on Standard answers, dashboard widget stretch, History filters folded into a disclosure on phones, Markdown output option in the Playground.
+- **Live SerpApi** (key from `.env`, Free plan): 2 real searches (Google Jobs, Google); cache hit cost 0; archive by SerpApi id works; `json_endpoint` points at Aira. Official `serpapi` and `google-search-results` Python SDKs work unchanged with the base URL pointed at Aira.
+- Validation: 1540 passed (only the 2 Linux-only container tests fail on Windows), ruff and ty clean, every script parses, 41 JS unit tests pass.
+- Not verified: real responses for the other 134 engines (stand-in shapes only); the messenger against real LinkedIn.
+
+## Multi-tenant SaaS (started 2026-10-24)
+
+Spec: `C:\Users\Suresh\Downloads\Aira Career Copilot — Multi-Tenant SaaS Scope.md`. Build plan: a hosted shell `aira_cloud/` around the shared `aira/` domain code; the local single-user build is unchanged and its tests stay green.
+
+### Design decisions (as built)
+- **Control plane**: SQLite (`aira_cloud/db.py`, `schema.py`, migrations 1-2), `org_id` on every tenant table, portable SQL. PostgreSQL + row-level security is the production target; the workspace layout and SQL are kept portable for it but a PostgreSQL adapter is **not built**.
+- **Workspaces**: one SQLite per candidate under `tenants/<org_id>/<candidate_id>/workspace.sqlite3` (the existing per-account database, domain modules unchanged). Documents `tenants/<org>/<candidate>/<doc>.bin` or S3 `tenant/<org>/<candidate>/<doc>.bin`, encrypted with the org's data key (envelope: master key wraps per-org keys; `crypto.SecretManager`, rotation without downtime).
+- **Seams in shared code** (`aira/hosting.py`, all `None` locally): worker registry, documents provider, settings overlay, SerpApi key, secret key, model gateway, services wrapper (limits/policy), submission listener, background start/status/progress, key index. `aira.documents` got a blob-backend interface; `service.resolve_key` consults the hook.
+- **Gateway** (`aira_cloud/gateway.py`): pure `HttpRequest -> HttpResponse`; control-plane routes `aira_cloud/routes/*` (decorator `cloud_route`), and the local build's 171 routes run through a shim under `aira_cloud/policy.py` (default deny, every route listed). Hooks per route kind in `route_hooks.py`; sensitive-field redaction in `redaction.py`.
+- **Roles/permissions** `rbac.py` (matrix from the spec; coach scopes view<act<approve capped by plan; unknown/foreign candidate = 404). Seats: owner/admin/coach take "coach and admin" seats; billing contact and auditor do not.
+- **Entitlements** `plans.py`, `entitlements.py` (60 s cache, operator feature flags with global kill switch, atomic usage counters). Billing `billing.py` + `billing_providers.py` (stand-in with hosted-checkout pages and signed webhooks; Stripe adapter with real signature verification). Lifecycle `lifecycle.py` (dunning 14/60 days, export window, deletion keeping billing record + audit stub).
+- Queue/workers: `jobqueue.py` (tenant-fair lease, per-org concurrency cap), `worker.py`, `scheduler.py`, gate `gate.py` (re-checked at run start), `hooks.py`.
+- Tests: `tests/test_cloud_*.py`, helpers in `tests/cloud_support.py` (FakeClock, `build_org`, `Browser` that calls the gateway directly).
+
+### Status (updated 2026-10-24, late)
+- **Backend built and tested** (each file passes): `test_cloud_identity` 17, `test_cloud_rbac` 24, `test_cloud_billing` 18, `test_cloud_tenancy` 25, `test_cloud_isolation` 8 (every route with another tenant's ids: 100% accounted for), `test_cloud_gateway` 24, `test_cloud_worker` 16 (fairness for 50 candidates/5 orgs; real Chromium pipeline, review mode, held questions, caps), `test_cloud_integrations` 20 (S3 with independent SigV4 check, Stripe stub, shared SerpApi cache, Aira API metering and /v1, model gateway incl. no sensitive values sent), `test_cloud_hardening` 8 (key rotation incl. documents, legal hold, SIEM stream, HSTS, priority), `test_cloud_backup` 4 (restore drill: one tenant restored, others byte-identical), `test_cloud_agent` 9 (worker agents, signed forwarding, remote sign-in link), `test_cloud_sso` 38 (OIDC, SAML via signxml, SCIM; from the SSO fork), `test_cloud_legal` 45 (docs fork).
+- **UI built by forks** (browser-verified by them): sign-in/onboarding/consent/coach (`cloud-auth.js`, `cloud-coach.js`, `cloud-boot.js`, `cloud.css`), organization administration (`cloud-org.js`, `cloud-people.js`, `cloud-admin.css`). Billing and platform console (`cloud-billing.js`, `cloud-platform.js`) was still being built.
+- **Docs/deploy** by the docs fork: `docs/multitenant*.md`, `docs/hosted-api.md`, `docs/pricing.md`, `docs/legal/*`, `deploy/` (Dockerfile, compose, k8s, terraform skeleton: written, not run), `.github/workflows/cloud.yml`, `scripts/start_aira_cloud.ps1`.
+- Local build: full suite 1636 passed, 5 skipped, 2 failed (the two Linux-only container tests, as before) after the shared-code seams were added.
+- Shared-code changes (all behind `aira/hosting.py` hooks; local behaviour unchanged): documents blob backend, settings overlay, SerpApi key/secret key/model hooks, services wrapper (incl. `submit_allowed` so a person's click always submits), background start/status/progress, key index, max plans, search connection (shared cache), browser time cap. Local fix: `GET /api/jobs/<unknown>/preparation` is a 404.
+- Added since: overage toggle (`POST /api/org/billing/overage`, billing page button), org-branded sign-in (`/api/orgs/<slug>/branding`, only for orgs that chose branding), `test_cloud_dashboard`, `docs/multitenant-acceptance.md` (criterion-to-test matrix), gaps list in `docs/multitenant.md` brought up to date, `docs/hosted-api.md` regenerated, ruff and ty clean for `aira_cloud` and the CI scope.
+- Integrated browser walk (Chromium, demo server, all 8 sign-ins: owner, admin, coach, candidate, billing, auditor, Starter owner, trial owner; every nav page): no console errors or failed API calls except an auditor 403 on the SSO card, now replaced by a "visible to owners and admins" note.
+- Internal adversarial security review (2026-10-24): MFA re-enrolment bypass, SCIM owner/admin email takeover, unmasked sensitive values in exports, model-endpoint SSRF, `X-Forwarded-For` spoofing, CEF newline injection: all fixed with regression tests; table in `docs/multitenant-security.md`. Exports now also include autopilot plans/runs, custom answers and message tables. Overage route bug (`req.json()`) caught by `ty` and covered by a route-level test.
+- Final run (after the second security pass and the gap-closing work): SQLite `uv run python -m pytest -q -n 4 -p no:randomly`: 1995 passed, 21 skipped (PostgreSQL-only), 2 failed (the two Linux-only container tests, as before). PostgreSQL 16 in Docker (`AIRA_TEST_DATABASE_URL`): `tests/test_cloud_*.py` 375 passed. `ruff check`, `ruff format --check` and `ty check` clean.
+- Built since the first report: PostgreSQL control plane with row-level security (`AIRA_CLOUD_DB=postgres`, `migrate-to-postgres`), KMS master keys (AWS KMS, Vault transit) and `rewrap-keys`, pooled SerpApi and Aira API search metering with overage, custom limits and retention enforcement, remote sign-in broker (`python -m aira_cloud broker`, real-Chromium tests), Docker stack smoke test (31 checks), kind cluster smoke test (11 checks), Terraform validate/checkov/tflint, stripe-mock and Keycloak (OIDC + SAML) integration tests, second security pass (nine findings fixed, `docs/multitenant-security.md`), queue lease ownership and renewal, organization monitors scheduler.
+- Open: no external penetration test; no real Stripe account, Okta/Entra/Google tenant or live LinkedIn sign-in; Terraform never planned or applied; PostgreSQL poolers/replicas/failover untested; DNS rebinding after a URL is saved is not covered by the SSRF check. Environment note: C: was nearly full while forks ran (Docker engine crashed; unrelated `monosage-*` containers are stopped, not removed); test temp files for the final runs went to D:\aira-test-tmp (safe to delete).
+
+## Aira Leads (2026-10-24)
+
+A lead-generation application next to Careers (`#/leads`, `g` then `l`): `aira/leads/` (store, sources, scoring, enrichment, outreach, service), `aira/airaapi/leads_routes.py` (`/api/leads/*`), migration 18, `auto_apply_assistant/views-leads.js` + `leads.css`, `docs/leads.md`, `docs/api.md` section.
+- **Sources:** Google Maps (businesses with phone and website), Google web (`site:linkedin.com/in` people, `/company` companies), hiring signals (Google Jobs), Google News signals per lead, LinkedIn Sales Navigator (new read-only MCP tool `search_sales_navigator`, `linkedin_mcp_server/scraping/sales_navigator.py`, the person's own signed-in session), CSV import.
+- **Also:** ICP fit scoring with reasons, website enrichment (public pages only, SSRF-safe, robots.txt), outreach drafts that are never sent, lists/statuses/bulk actions, CSV and XLSX export, de-duplication (LinkedIn profile, Sales Navigator lead, Google place, domain outside Maps, name+company).
+- **Hosted build:** `leads` plan feature (Starter+), limits `leads_stored` and `lead_enrichments_per_month`, `leads.read/write` for the candidate and act/approve coaches only, Google sources metered like Google Jobs, Sales Navigator gated like LinkedIn and forwarded to the worker host, staff exports leave lead tables out, DPA section on prospect data.
+- **Tests:** `test_leads` (30), `test_leads_sales_nav` (4, real Chromium reader -> Leads), `test_sales_navigator` (reader), `test_leads_ui` (real-browser journey incl. Sales Navigator results, viewports and themes), `test_cloud_leads` (17). Full suite: 2105 passed, 21 skipped (PostgreSQL-only), 2 failed (the Linux-only container tests). ruff and ty clean. Also fixed a flaky xdist collection in `tests/test_documents.py` (zip timestamps in test ids).
+- **Not verified:** the real Sales Navigator DOM (only stand-in pages), a live SerpApi key (stub only). Restart the app and Settings > Integrations > LinkedIn restart before the first Sales Navigator run.

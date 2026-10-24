@@ -1,7 +1,7 @@
 """Helpers used by MCP tools after bootstrap gating."""
 
 import logging
-from typing import NoReturn
+from typing import Any, NoReturn
 
 from fastmcp import Context
 
@@ -27,6 +27,13 @@ from linkedin_mcp_server.exceptions import (
 from linkedin_mcp_server.scraping import LinkedInExtractor
 
 logger = logging.getLogger(__name__)
+
+
+def _browser_page_is_closed(browser: Any) -> bool:
+    try:
+        return browser.page.is_closed() is True
+    except Exception:
+        return True
 
 
 def _is_linux_browser_dependency_error(error: Exception) -> bool:
@@ -84,6 +91,15 @@ async def get_ready_extractor(
         await ensure_tool_ready_or_raise(tool_name, ctx)
         browser = await get_or_create_browser()
         await ensure_authenticated()
+        if _browser_page_is_closed(browser):
+            logger.warning("LinkedIn browser page closed unexpectedly; recreating it")
+            await close_browser()
+            browser = await get_or_create_browser()
+            await ensure_authenticated()
+            if _browser_page_is_closed(browser):
+                raise RuntimeError(
+                    "LinkedIn browser page closed during initialization."
+                )
         return LinkedInExtractor(browser.page)
     except AuthenticationError as e:
         await handle_auth_error(e, ctx)  # always raises

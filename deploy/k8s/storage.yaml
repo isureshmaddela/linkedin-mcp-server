@@ -1,0 +1,17 @@
+# The data root shared by web and worker pods: control.sqlite3 (WAL), tenants/ (one SQLite per candidate), secrets/.
+#
+# It must be ReadWriteMany, and the storage class must give SQLite reliable file locking (a managed NFS or a
+# cluster file system, not a best-effort network mount). SQLite allows one writer at a time, so this volume bounds
+# how far the control plane scales; see "Differences from the scope document and known gaps" in docs/multitenant.md.
+# Documents live in object storage (AIRA_CLOUD_STORAGE=s3), not here. Back this volume up with the master key kept elsewhere.
+apiVersion: v1
+kind: PersistentVolumeClaim
+metadata:
+  name: aira-data
+  namespace: aira
+spec:
+  accessModes: [ReadWriteMany]
+  storageClassName: replace-with-an-rwx-storage-class
+  resources:
+    requests:
+      storage: 100Gi

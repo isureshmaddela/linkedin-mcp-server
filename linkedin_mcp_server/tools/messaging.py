@@ -269,3 +269,60 @@ def register_messaging_tools(
                 raise_tool_error(relogin_exc, "send_message")
         except Exception as e:
             raise_tool_error(e, "send_message")  # NoReturn
+
+    @mcp.tool(
+        timeout=tool_timeout,
+        title="Reply To Conversation",
+        annotations={"destructiveHint": True, "openWorldHint": True},
+        tags={"messaging", "actions"},
+        exclude_args=["extractor"],
+    )
+    async def reply_to_conversation(
+        thread_id: str,
+        message: str,
+        confirm_send: bool,
+        ctx: Context,
+        extractor: Any | None = None,
+    ) -> dict[str, Any]:
+        """
+        Reply inside an existing LinkedIn messaging thread.
+
+        Works for InMail and recruiter threads where the sender's profile has no
+        Message button. This is a write operation when confirm_send is True.
+
+        Args:
+            thread_id: LinkedIn messaging thread ID (from get_inbox references)
+            message: The reply text to send
+            confirm_send: Must be True to send; False only checks the reply box
+            ctx: FastMCP context for progress reporting
+
+        Returns:
+            Dict with url, status, message, recipient_selected, and sent.
+        """
+        try:
+            extractor = extractor or await get_ready_extractor(
+                ctx, tool_name="reply_to_conversation"
+            )
+            logger.info(
+                "Replying to thread %s (confirm_send=%s)", thread_id, confirm_send
+            )
+
+            await ctx.report_progress(progress=0, total=100, message="Sending reply")
+
+            result = await extractor.reply_to_conversation(
+                thread_id,
+                message,
+                confirm_send=confirm_send,
+            )
+
+            await ctx.report_progress(progress=100, total=100, message="Complete")
+
+            return result
+
+        except AuthenticationError as e:
+            try:
+                await handle_auth_error(e, ctx)
+            except Exception as relogin_exc:
+                raise_tool_error(relogin_exc, "reply_to_conversation")
+        except Exception as e:
+            raise_tool_error(e, "reply_to_conversation")  # NoReturn

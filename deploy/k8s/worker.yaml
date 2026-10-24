@@ -1,0 +1,89 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: aira-worker
+  namespace: aira
+  labels: { app.kubernetes.io/name: aira-worker, app.kubernetes.io/part-of: aira-cloud }
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app.kubernetes.io/name: aira-worker }
+  template:
+    metadata:
+      labels: { app.kubernetes.io/name: aira-worker, app.kubernetes.io/part-of: aira-cloud }
+    spec:
+      # A stopped worker's running jobs return to the queue when their lease (15 minutes) expires, up to three attempts;
+      # a longer grace period lets in-flight applications finish on a scale-down or a rollout.
+      terminationGracePeriodSeconds: 300
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 10001
+        runAsGroup: 10001
+        fsGroup: 10001
+        seccompProfile: { type: RuntimeDefault }
+      containers:
+        - name: worker
+          image: registry.example.com/aira-cloud-worker:1.0.0   # build: docker build -f deploy/Dockerfile.cloud --target worker
+          args: ["worker", "--threads", "4"]
+          envFrom:
+            - configMapRef: { name: aira-config }
+            - secretRef: { name: aira-secrets }
+          # The worker serves no HTTP; `check` opens the control plane, which proves the pod can do its job.
+          livenessProbe:
+            exec: { command: ["python", "-m", "aira_cloud", "check"] }
+            initialDelaySeconds: 60
+            periodSeconds: 60
+            timeoutSeconds: 30
+            failureThreshold: 3
+          resources:
+            # about 400 to 600 MB per concurrent browser (docs/multitenant-operations.md, "Worker sizing")
+            requests: { cpu: "1", memory: 2560Mi }
+            limits: { memory: 4Gi }
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities: { drop: [ALL] }
+          volumeMounts:
+            - { name: data, mountPath: /data }
+            - { name: shm, mountPath: /dev/shm }
+      volumes:
+        - name: data
+          persistentVolumeClaim: { claimName: aira-data }
+        - name: shm
+          emptyDir: { medium: Memory, sizeLimit: 1Gi }
+---
+# Scales on CPU, which lags a burst of due plans. Scale on queue depth where you can: the queue's state is at
+# GET /api/platform/queue (depth, oldest_wait_seconds, workers) and /api/platform/health (workers.utilisation).
+# With KEDA, a metrics-api trigger on that endpoint (using an operator session or a dedicated read-only account)
+# scales on `queue.depth` or `queue.oldest_wait_seconds`; the sample below is commented because the endpoint needs
+# an authenticated operator cookie, which a plain scaler cannot send.
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: aira-worker
+  namespace: aira
+spec:
+  scaleTargetRef: { apiVersion: apps/v1, kind: Deployment, name: aira-worker }
+  minReplicas: 1
+  maxReplicas: 10
+  metrics:
+    - type: Resource
+      resource: { name: cpu, target: { type: Utilization, averageUtilization: 65 } }
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 600
+      policies:
+        - { type: Pods, value: 1, periodSeconds: 300 }
+# ---
+# apiVersion: keda.sh/v1alpha1
+# kind: ScaledObject
+# metadata: { name: aira-worker-queue, namespace: aira }
+# spec:
+#   scaleTargetRef: { name: aira-worker }
+#   minReplicaCount: 1
+#   maxReplicaCount: 10
+#   triggers:
+#     - type: metrics-api
+#       metadata:
+#         url: "http://aira-web.aira.svc/internal/queue-depth"   # an endpoint you add that exposes queue depth without a session
+#         valueLocation: "queue.depth"
+#         targetValue: "20"

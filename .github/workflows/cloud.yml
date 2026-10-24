@@ -1,0 +1,217 @@
+# .github/workflows/cloud.yml
+# The hosted (multi-tenant) build: lint, type check, its test suite, the interface scripts, and a dependency audit.
+# The existing ci.yml still runs the whole repository's suite (the local build must stay green); this workflow adds the
+# hosted-specific checks and a weekly dependency audit. The docker, kubernetes, terraform and integration jobs run what
+# was run by hand (deploy/smoke.py, deploy/k8s_smoke.py, terraform validate + checkov + tflint, stripe-mock, Keycloak);
+# the workflow itself has not run on GitHub yet.
+name: Cloud
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "aira_cloud/**"
+      - "aira/**"
+      - "auto_apply_assistant.py"
+      - "auto_apply_assistant/**"
+      - "tests/**"
+      - "docs/**"
+      - "deploy/**"
+      - "pyproject.toml"
+      - "uv.lock"
+      - ".github/workflows/cloud.yml"
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "17 5 * * 1"   # weekly dependency audit, Mondays
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  lint:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+
+      - run: uv sync --group dev --extra cloud
+
+      - name: Ruff
+        run: uv run ruff check aira_cloud tests/test_cloud_*.py tests/cloud_support.py
+
+      - name: Ruff format
+        run: uv run ruff format --check aira_cloud tests/test_cloud_*.py tests/cloud_support.py
+        continue-on-error: true   # formatting is advisory until the package is formatted once
+
+      - name: Type check
+        run: uv run ty check aira_cloud
+
+      - run: uv cache prune --ci
+
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+
+      - run: uv sync --group dev --extra cloud
+
+      - name: Interface scripts parse
+        run: |
+          for f in auto_apply_assistant/*.js; do node --check "$f"; done
+          for f in auto_apply_assistant/cloud-*.js; do node --check "$f"; done
+
+      - name: Hosted-build tests (isolation, roles, billing, SSO, legal)
+        run: uv run python -m pytest tests/test_cloud_*.py -n auto -v
+
+      - name: Deployment files parse
+        run: |
+          uv run --with pyyaml python - <<'PY'
+          import pathlib, yaml
+          for path in [*pathlib.Path("deploy/k8s").glob("*.yaml"), pathlib.Path("deploy/docker-compose.cloud.yml")]:
+              docs = [d for d in yaml.safe_load_all(path.read_text()) if d is not None]
+              assert docs, path
+              print("ok", path, len(docs), "document(s)")
+          PY
+
+      - run: uv cache prune --ci
+
+  postgres:
+    # The same hosted-build suite against a real PostgreSQL (row-level security, the application and platform roles),
+    # plus the PostgreSQL-only tests. Each test gets its own database copied from a migrated template.
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      AIRA_TEST_DATABASE_URL: postgresql://postgres:postgres@127.0.0.1:5432/postgres
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+
+      - run: uv sync --group dev --extra cloud
+
+      - name: Hosted-build tests on PostgreSQL
+        run: uv run python -m pytest tests/test_cloud_*.py -n 4 -v
+
+      - run: uv cache prune --ci
+
+  audit:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+
+      - name: Export the locked runtime dependencies
+        run: uv export --frozen --no-dev --extra cloud --no-hashes --no-emit-project -o /tmp/aira-requirements.txt
+
+      - name: Audit for known vulnerabilities
+        run: uvx pip-audit --requirement /tmp/aira-requirements.txt --no-deps --disable-pip --progress-spinner off
+
+  integration:
+    # The Stripe adapter against stripe/stripe-mock (validates every request against Stripe's OpenAPI spec) and OIDC and
+    # SAML against a real Keycloak driven by a real browser. Both skip themselves when Docker is missing.
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+
+      - run: uv sync --group dev --extra cloud
+
+      - run: uv run patchright install --with-deps chromium
+
+      - name: Stripe adapter against stripe-mock, Keycloak sign-in
+        run: uv run python -m pytest tests/test_cloud_stripe_mock.py tests/test_cloud_keycloak.py -v
+
+      - run: uv cache prune --ci
+
+  docker:
+    # Builds both images and runs the stack end to end: sign-up, MFA, documents in an S3-compatible store, a worker job,
+    # backup and restore, and a restart (deploy/smoke.py). Also checks the image hygiene the deployment relies on.
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Build and smoke-test the stack
+        run: python3 deploy/smoke.py
+
+      - name: Images run as a non-root user and carry no secrets
+        run: |
+          for image in aira-deploy-web aira-deploy-worker; do
+            test "$(docker image inspect "$image" --format '{{.Config.User}}')" = aira
+            if docker image inspect "$image" --format '{{range .Config.Env}}{{println .}}{{end}}' | grep -Ei 'secret|password|token|master_key'; then
+              echo "secret-like environment in $image"; exit 1
+            fi
+          done
+
+  kubernetes:
+    # Applies deploy/k8s (through the kind overlay) to a real cluster and checks readiness under the restricted Pod
+    # Security level, a rolling update, a pod kill, the worker and the tick CronJob (deploy/k8s_smoke.py).
+    runs-on: ubuntu-latest
+    timeout-minutes: 40
+    env:
+      KIND_VERSION: v0.33.0
+      KIND_SHA256: aee6151561422756b764a4ae28e7f44cda5af5a9eead3cc9985112b1de8d8e0d  # kind-linux-amd64 for the version above
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Install kind (checksum verified)
+        run: |
+          curl -sSLo kind "https://github.com/kubernetes-sigs/kind/releases/download/${KIND_VERSION}/kind-linux-amd64"
+          echo "${KIND_SHA256}  kind" | sha256sum --check
+          chmod +x kind && sudo mv kind /usr/local/bin/kind
+
+      - name: Build images and start a cluster
+        run: |
+          docker build -f deploy/Dockerfile.cloud --target web -t aira-deploy-web .
+          docker build -f deploy/Dockerfile.cloud --target worker -t aira-deploy-worker .
+          kind create cluster --name aira --wait 300s
+          kind load docker-image aira-deploy-web:latest aira-deploy-worker:latest --name aira
+
+      - name: Deploy and check
+        run: python3 deploy/k8s_smoke.py
+
+  terraform:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: terraform init, validate, fmt
+        run: |
+          docker run --rm -v "$PWD/deploy/terraform:/work" -w /work hashicorp/terraform:1.9 init -backend=false -input=false
+          docker run --rm -v "$PWD/deploy/terraform:/work" -w /work hashicorp/terraform:1.9 validate
+          docker run --rm -v "$PWD/deploy/terraform:/work" -w /work hashicorp/terraform:1.9 fmt -check -diff
+
+      - name: checkov
+        run: docker run --rm -v "$PWD/deploy/terraform:/tf" bridgecrew/checkov:latest -d /tf --framework terraform --compact --quiet
+
+      - name: tflint
+        run: docker run --rm -v "$PWD/deploy/terraform:/data" -w /data --entrypoint /bin/sh ghcr.io/terraform-linters/tflint:latest -c "tflint --init && tflint"
+

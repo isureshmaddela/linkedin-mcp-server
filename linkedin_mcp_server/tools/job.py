@@ -1,7 +1,8 @@
 """
-LinkedIn job scraping tools with search and detail extraction.
+LinkedIn job tools: search, detail extraction and Easy Apply.
 
-Uses innerText extraction for resilient job data capture.
+Uses innerText extraction for resilient job data capture; the Easy Apply
+tool drives the application dialog structurally (see scraping/easy_apply.py).
 """
 
 import logging
@@ -10,6 +11,7 @@ from typing import Annotated, Any
 from fastmcp import Context, FastMCP
 from pydantic import Field
 
+from linkedin_mcp_server.callbacks import MCPContextProgressCallback
 from linkedin_mcp_server.config.schema import DEFAULT_TOOL_TIMEOUT_SECONDS
 from linkedin_mcp_server.core.exceptions import AuthenticationError
 from linkedin_mcp_server.dependencies import get_ready_extractor, handle_auth_error
@@ -149,3 +151,87 @@ def register_job_tools(
                 raise_tool_error(relogin_exc, "search_jobs")
         except Exception as e:
             raise_tool_error(e, "search_jobs")  # NoReturn
+
+    @mcp.tool(
+        timeout=tool_timeout,
+        title="Apply To Job",
+        annotations={"destructiveHint": True, "openWorldHint": True},
+        tags={"jobs", "actions"},
+        exclude_args=["extractor"],
+    )
+    async def apply_to_job(
+        job_id: str,
+        ctx: Context,
+        answers: dict[str, str] | None = None,
+        resume_path: str | None = None,
+        submit: bool = False,
+        profile: dict[str, str] | None = None,
+        extractor: Any | None = None,
+    ) -> dict[str, Any]:
+        """
+        Fill, and optionally submit, a LinkedIn Easy Apply application.
+
+        Opens the job, finds the apply control in the job header and walks the
+        Easy Apply dialog step by step. Nothing is ever guessed: a required
+        question without an answer stops the run and returns the questions
+        (status "needs_review"); jobs that apply on an external site are not
+        filled and come back as "external" with the site URL. This is a write
+        operation when submit is True.
+
+        Args:
+            job_id: LinkedIn job ID (e.g., "4252026496")
+            ctx: FastMCP context for progress reporting
+            answers: Answers keyed by the question label exactly as LinkedIn
+                shows it (selects/radios by option text, checkboxes by yes/no)
+            resume_path: Path to a .pdf/.docx file on the server's disk to
+                upload on the resume step (optional)
+            submit: False fills every step and stops at the review step
+                ("filled", with a screenshot); True presses Submit application
+                and waits for LinkedIn's confirmation ("submitted")
+            profile: Canonical contact fields for the contact step
+                (first_name, last_name, email, phone, phone_country, city,
+                linkedin_url); only fills what LinkedIn left empty
+
+        Returns:
+            Dict with status ("submitted" | "filled" | "needs_review" |
+            "external" | "already_applied" | "failed"), questions and
+            unanswered (label, kind, required, options, value, status,
+            message), external_url, evidence (page_text, confirmation_text,
+            screenshot_base64 PNG, url), steps and error.
+        """
+        try:
+            extractor = extractor or await get_ready_extractor(
+                ctx, tool_name="apply_to_job"
+            )
+            logger.info(
+                "Easy Apply for job %s (submit=%s, answers=%d, resume=%s)",
+                job_id,
+                submit,
+                len(answers or {}),
+                bool(resume_path),
+            )
+
+            await ctx.report_progress(
+                progress=0, total=100, message="Starting Easy Apply"
+            )
+
+            result = await extractor.easy_apply(
+                job_id,
+                answers=answers or {},
+                resume_path=resume_path,
+                submit=submit,
+                profile=profile or {},
+                callbacks=MCPContextProgressCallback(ctx),
+            )
+
+            await ctx.report_progress(progress=100, total=100, message="Complete")
+
+            return result
+
+        except AuthenticationError as e:
+            try:
+                await handle_auth_error(e, ctx)
+            except Exception as relogin_exc:
+                raise_tool_error(relogin_exc, "apply_to_job")
+        except Exception as e:
+            raise_tool_error(e, "apply_to_job")  # NoReturn
