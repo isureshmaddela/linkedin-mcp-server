@@ -1,6 +1,6 @@
 # Aira Leads
 
-Aira Leads finds, qualifies, enriches and tracks sales leads. It sits next to Careers under **Research** (`g` then `l`, `#/leads`), uses the same Aira API layer and SerpApi key, and keeps everything in your own database.
+Aira Leads finds, qualifies, enriches and tracks sales leads. It sits next to Careers under **Research** (`g` then `l`, `#/leads`), uses the same API layer and SerpApi key, and keeps everything in your own database.
 
 It finds, organizes and prepares. Email goes out only after a person approves each message, through the person's own mail server; calls are placed by the person; LinkedIn messages and posts are never sent by Aira.
 
@@ -8,7 +8,7 @@ It finds, organizes and prepares. Email goes out only after a person approves ea
 
 | Source | What you get | What it costs | Needs |
 | --- | --- | --- | --- |
-| **Google Maps** | Local businesses: name, address, phone, website, rating, reviews, category | 1 search per page of about 20 | A SerpApi key (Aira API > Account) |
+| **Google Maps** | Local businesses: name, address, phone, website, rating, reviews, category | 1 search per page of about 20 | A SerpApi key (API > Account) |
 | **People via Google** | People found through `site:linkedin.com/in` queries: name, title, company, place, profile address | 1 search per page of about 10 | A SerpApi key |
 | **Companies via Google** | Companies found through `site:linkedin.com/company` queries | 1 search per page | A SerpApi key |
 | **Hiring signals** | Companies hiring for a role you sell into, each with the postings as a buying signal | 1 search per page of about 10 jobs | A SerpApi key |
@@ -16,7 +16,7 @@ It finds, organizes and prepares. Email goes out only after a person approves ea
 | **People asking for a service** | Public posts (Reddit, Quora, LinkedIn posts, anywhere Google indexes) where someone asks for a web designer, marketer, writer or ads help | 1 search per page of about 10 posts | A SerpApi key |
 | **CSV import** | Your own list, columns mapped by name (Name, Title, Company, Website, Email, Phone, LinkedIn, Location, Industry, Notes, Tags) | Free | A header row |
 
-Repeated Google searches inside the cache window cost nothing and say so. Every Google search is also recorded in Aira API > History.
+Repeated Google searches inside the cache window cost nothing and say so. Every Google search is also recorded in API > History.
 
 ### Sales Navigator
 
@@ -43,7 +43,7 @@ Settings holds your ICP: target titles, keywords, industries, locations, words a
 
 ## News signals
 
-"Find recent news" looks up headlines about the lead's company (Aira API `google_news`, 1 search, free when cached) and keeps up to three as buying signals on the lead, each linked to its story and showing the outlet and date. They are headlines only: Aira does not read the articles or judge them. A funding, hiring or expansion headline that matches your ICP raises the lead's score; the reason is listed.
+"Find recent news" looks up headlines about the lead's company (API `google_news`, 1 search, free when cached) and keeps up to three as buying signals on the lead, each linked to its story and showing the outlet and date. They are headlines only: Aira does not read the articles or judge them. A funding, hiring or expansion headline that matches your ICP raises the lead's score; the reason is listed.
 
 ## Drafts for LinkedIn and other channels
 

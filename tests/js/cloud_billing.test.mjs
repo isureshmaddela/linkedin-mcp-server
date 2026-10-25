@@ -89,7 +89,7 @@ test("the comparison rows reproduce the spec's plan table", () => {
   assert.equal(row("Applications per organization per month"), "1,500");
   assert.equal(row("Document storage and retention"), "2 GB, 1 year");
   assert.equal(row("Coach scopes"), "view, act");
-  assert.equal(row("Aira API (console and /v1)"), "1,000 searches, no /v1");
+  assert.equal(row("API (console and /v1)"), "1,000 searches, no /v1");
   assert.equal(row("Automatic submission"), "Yes");
   assert.equal(row("Sign-in"), "Password, MFA");
   assert.equal(row("Support"), "Email");
@@ -98,7 +98,7 @@ test("the comparison rows reproduce the spec's plan table", () => {
   const trial = { plan_id: "trial", limits: { ...starter.limits, retention_days: 30, storage_bytes: 100 * 1024 ** 2, coach_max_scope: "view", support: "community", api_searches_per_month: 0 }, features: ["sources.aira_jobs", "api.console_read"] };
   assert.equal(L.LIMIT_ROWS.find(([n]) => n === "Document storage and retention")[1](trial), "100 MB, 30 days after the trial ends");
   assert.equal(L.LIMIT_ROWS.find(([n]) => n === "Automatic submission")[1](trial), "Review mode only");
-  assert.equal(L.LIMIT_ROWS.find(([n]) => n === "Aira API (console and /v1)")[1](trial), "Read-only history");
+  assert.equal(L.LIMIT_ROWS.find(([n]) => n === "API (console and /v1)")[1](trial), "Read-only history");
   const enterprise = { plan_id: "enterprise", limits: starter.limits, features: ["sources.linkedin", "auth.sso", "auth.scim", "api.v1", "ai.cover_letters"] };
   assert.equal(L.LIMIT_ROWS.find(([n]) => n === "Candidate seats")[1](enterprise), "Custom");
   assert.match(L.LIMIT_ROWS.find(([n]) => n === "Sign-in")[1](enterprise), /SSO.*SCIM/);

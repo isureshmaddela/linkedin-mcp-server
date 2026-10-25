@@ -39,16 +39,16 @@ Last updated: 2026-10-23.
 - Review fixes (2026-10-22): the Messages tab's automatic sync reads only the inbox list and opens no thread (a sync the user asks for reads the newest 10, which LinkedIn marks read); syncs share the automation slot with inbox checks and are throttled; an unreadable list row keeps its earlier preview and reply flag and is never treated as unchanged; a thread the latest list confirmed is not scraped again when opened; a failed sync no longer reads as "just synced"; a reply sent twice with the same words and a fetch that began before a send no longer undo the new reply; saved copy can be cleared (`DELETE /api/inbox/cache`) and idle threads are pruned after 90 days; sends are refused if newer messages were saved meanwhile. UI: focus stays on the row and moves into the thread, roving tabindex, browser Back closes a thread, the composer is never under the mobile bottom navigation, taller messenger, one-line filter chips, no literal "null" in threads or the Recruiters drawer, the show-browser toggle lives in Settings > Integrations.
 - Validation: 114 messenger tests (64 store, 50 integration), 1370 pass overall; stand-in LinkedIn walkthrough in a headless browser passed 43 of 43 checks (cache-first open, sync progress, send once, offline copy, filters, keyboard, mobile, dark).
 
-### Aira API and Careers (2026-10-22)
-- **Aira API** (`#/airaapi`, `g` then `p`): a console for all 136 SerpApi engines (126 official plus 10 sub-endpoints): Overview, Playground, Engines, History with diff and export, Locations, Monitors and saved searches, Account, Aira API keys, Docs (with a coverage page of every SerpApi dashboard page), Status. Backend in `aira/airaapi/` (catalog, client, store, service, compat, routes; migration 12). A SerpApi-compatible, cached endpoint at `/v1/search.json` and friends is guarded by Aira API keys (`aira_` + 40 characters, hash only).
+### API and Careers (2026-10-22)
+- **API** (`#/airaapi`, `g` then `p`): a console for all 136 SerpApi engines (126 official plus 10 sub-endpoints): Overview, Playground, Engines, History with diff and export, Locations, Monitors and saved searches, Account, API keys, Docs (with a coverage page of every SerpApi dashboard page), Status. Backend in `aira/airaapi/` (catalog, client, store, service, compat, routes; migration 12). A SerpApi-compatible, cached endpoint at `/v1/search.json` and friends is guarded by API keys (`aira_` + 40 characters, hash only).
 - **Careers** (`#/careers`, `g` then `c`): Google Jobs search with Google's filters and `next_page_token` paging, duplicate-safe import into Jobs, six reports (company, salary, market, interview prep, travel, learn) with a cost plan before running, job alerts with a baseline run (migration 13). The Jobs-tab Google source shares history and cache with Careers.
-- **Key handling**: one SerpApi key, from `SERPAPI_API_KEY` or pasted in Aira API > Account (validated first, Fernet-encrypted, never returned, logged or stored in records). The top bar, Settings > Integrations, Jobs, the Dashboard widgets, `/api/sources` and `/api/status` all follow it.
+- **Key handling**: one SerpApi key, from `SERPAPI_API_KEY` or pasted in API > Account (validated first, Fernet-encrypted, never returned, logged or stored in records). The top bar, Settings > Integrations, Jobs, the Dashboard widgets, `/api/sources` and `/api/status` all follow it.
 - **Integration (this entry)**: one `NAV` list drives sidebar groups, the phone bottom bar with More, chords and shortcuts help; Dashboard widgets (`views-widgets.js`); Settings card for the key; Jobs refreshes sources on every visit and the Google Jobs tab explains a missing key; dashboard notifications with in-app links now open them; CSP allows `https:` images; dark-theme contrast tokens (`--on-brand`, `--mark-ink`) fix white-on-mint text app-wide.
 - Not built, on purpose (listed on the Docs coverage page): outgoing webhooks and SerpApi team seats. XLSX export, `json_with_pixel_position` (X-Ray), per-monitor budget caps and search inside stored results were added on 2026-10-23 (next entry).
 - Validation: see the table below. Browser walk of every page (desktop light, mobile dark) against a scratch server and the stand-in SerpApi (`tests/serpapi_stub.py`): no console errors, no horizontal overflow, 21 of 21 interaction checks.
 
 ### SerpApi dashboard parity (2026-10-23)
-- Closed the remaining buildable gaps between the SerpApi dashboard (https://serpapi.com/dashboard) and the Aira API console. Details in `docs/airaapi-spec.md` section 13; migration 15 `airaapi_parity`.
+- Closed the remaining buildable gaps between the SerpApi dashboard (https://serpapi.com/dashboard) and the API console. Details in `docs/airaapi-spec.md` section 13; migration 15 `airaapi_parity`.
 - **Search inside results**: FTS5 index of the readable text of every stored result (LIKE fallback without FTS5). History has an "Inside results" switch and shows highlighted match excerpts (`in_results=1`). The newest 5,000 older results are backfilled.
 - **Export**: per-search Excel (`.xlsx`, standard-library writer in `aira/airaapi/xlsx.py`) and Markdown table, beside JSON, CSV, HTML and cURL.
 - **Monitors**: monthly budget per monitor. Scheduled runs wait for the next month once it is used up, Run now is refused, and raising the budget resumes the monitor. Optional pause on error, with a notification. Cards show a budget meter.
@@ -58,7 +58,7 @@ Last updated: 2026-10-23.
 - Still out of scope: outgoing webhooks (data-leak risk); team seats, billing, profile and 2FA (SerpApi account actions); live `json_with_pixel_position` from the Playground or `/v1`.
 - Validation:
   - Full suite: 1584 passed, 5 skipped, 2 failed. The 2 failures are the Linux-only container tests that earlier rows deselect.
-  - The 31 new tests in `tests/test_airaapi_parity.py` pass, and the Aira API and Careers suites pass (318).
+  - The 31 new tests in `tests/test_airaapi_parity.py` pass, and the API and Careers suites pass (318).
   - ruff, ruff format, ty and the JS tests (32 and 9) pass.
   - Browser walk against a scratch server and the stand-in SerpApi: 30 of 30 checks, desktop light and phone dark, with no console errors and no overflow.
   - The scratch database at schema version 14 migrated to 15 on start.
@@ -98,7 +98,7 @@ Last updated: 2026-10-23.
   - Every-page walk: 26 of 26 pages clean.
 
 ### Aira Jobs: finding jobs without SerpApi (2026-10-23)
-- Aira API had no data source of its own: every live search went to SerpApi. It now has its own engine **`aira_jobs`**,
+- API had no data source of its own: every live search went to SerpApi. It now has its own engine **`aira_jobs`**,
   which searches free public job-board APIs (Himalayas, The Muse, Remotive, Jobicy, Arbeitnow) itself, with no key and
   no credits. Details are in `docs/airaapi-spec.md` section 14; code is in `aira/airaapi/jobboards.py` and
   `catalog/aira_engines.json`.
@@ -133,7 +133,7 @@ None in progress. All slices above are implemented and validated.
 | Command | Result |
 |---|---|
 | `uv run python -m pytest -q --deselect <2 Linux-only container tests>` | 979 passed, 5 skipped (POSIX permission tests), 2 deselected. |
-| Full suite after the Aira API, Careers and integration work (`uv run python -m pytest -q`, 2 Linux-only container tests deselected) | 1494 passed, 5 skipped, 2 deselected. |
+| Full suite after the API, Careers and integration work (`uv run python -m pytest -q`, 2 Linux-only container tests deselected) | 1494 passed, 5 skipped, 2 deselected. |
 | `node tests/js/serp_kit.test.mjs`, `node tests/js/playground.test.mjs` | 32 and 9 passed, 0 failed. |
 | `uv run ruff check auto_apply_assistant.py aira/ tests/ linkedin_mcp_server/` | All checks passed. |
 | `uv run ty check auto_apply_assistant.py aira/ linkedin_mcp_server/` | All checks passed. |
@@ -147,17 +147,17 @@ New test files: `tests/test_ats_adapters.py` (101), `tests/test_scoring.py` (74)
 
 ## Known Blockers
 
-- No SerpApi key has ever been used here, so live Google Jobs, Careers and Aira API responses are verified only against the stand-in server's fixture-shaped data (real response shapes, 402/429 wording and archive behaviour are unseen).
+- No SerpApi key has ever been used here, so live Google Jobs, Careers and API responses are verified only against the stand-in server's fixture-shaped data (real response shapes, 402/429 wording and archive behaviour are unseen).
 - No mailbox or calendar OAuth credentials.
 - Two Linux container-detection tests fail on Windows by design; five POSIX permission tests are skipped.
 - Sending a real LinkedIn reply was not exercised against live LinkedIn; the reply tool was verified with unit tests and a stand-in server. The first real send should be checked in the LinkedIn thread.
 
 ## Exact Next Action
 
-Restart the running Aira server (`.\scripts\start_aira.ps1`) so it serves the new code; the database upgrades automatically on first request. Then connect LinkedIn from Settings → Integrations and paste a SerpApi key in Aira API → Account (or add `SERPAPI_API_KEY` to `.env`) to verify those two live sources; check the first Google Jobs search, one Careers report and one `/v1` call against the real service.
+Restart the running Aira server (`.\scripts\start_aira.ps1`) so it serves the new code; the database upgrades automatically on first request. Then connect LinkedIn from Settings → Integrations and paste a SerpApi key in API → Account (or add `SERPAPI_API_KEY` to `.env`) to verify those two live sources; check the first Google Jobs search, one Careers report and one `/v1` call against the real service.
 
 ### SerpApi-compatible API fixes (2026-10-23)
-- The compatible API now answers on SerpApi's own paths (`/search`, `/search.json`, `/search.html`, `/account.json`, `/locations.json`, `/searches/{id}.json|.html`) as well as `/v1/...`, so an SDK or script only needs its base URL pointed at Aira and an Aira API key.
+- The compatible API now answers on SerpApi's own paths (`/search`, `/search.json`, `/search.html`, `/account.json`, `/locations.json`, `/searches/{id}.json|.html`) as well as `/v1/...`, so an SDK or script only needs its base URL pointed at Aira and an API key.
 - Unknown parameters pass through (as SerpApi does; its SDKs add `source=python`); `allow_unknown=false` restores strict validation.
 - `json_endpoint`, `raw_html_file` and `serpapi_pagination` links in responses point at Aira, so `next_page()` and archive lookups stay on Aira.
 - `/locations.json` needs no key (like SerpApi); a presented key is still checked.
@@ -189,7 +189,7 @@ Spec: `C:\Users\Suresh\Downloads\Aira Career Copilot — Multi-Tenant SaaS Scope
 - Tests: `tests/test_cloud_*.py`, helpers in `tests/cloud_support.py` (FakeClock, `build_org`, `Browser` that calls the gateway directly).
 
 ### Status (updated 2026-10-24, late)
-- **Backend built and tested** (each file passes): `test_cloud_identity` 17, `test_cloud_rbac` 24, `test_cloud_billing` 18, `test_cloud_tenancy` 25, `test_cloud_isolation` 8 (every route with another tenant's ids: 100% accounted for), `test_cloud_gateway` 24, `test_cloud_worker` 16 (fairness for 50 candidates/5 orgs; real Chromium pipeline, review mode, held questions, caps), `test_cloud_integrations` 20 (S3 with independent SigV4 check, Stripe stub, shared SerpApi cache, Aira API metering and /v1, model gateway incl. no sensitive values sent), `test_cloud_hardening` 8 (key rotation incl. documents, legal hold, SIEM stream, HSTS, priority), `test_cloud_backup` 4 (restore drill: one tenant restored, others byte-identical), `test_cloud_agent` 9 (worker agents, signed forwarding, remote sign-in link), `test_cloud_sso` 38 (OIDC, SAML via signxml, SCIM; from the SSO fork), `test_cloud_legal` 45 (docs fork).
+- **Backend built and tested** (each file passes): `test_cloud_identity` 17, `test_cloud_rbac` 24, `test_cloud_billing` 18, `test_cloud_tenancy` 25, `test_cloud_isolation` 8 (every route with another tenant's ids: 100% accounted for), `test_cloud_gateway` 24, `test_cloud_worker` 16 (fairness for 50 candidates/5 orgs; real Chromium pipeline, review mode, held questions, caps), `test_cloud_integrations` 20 (S3 with independent SigV4 check, Stripe stub, shared SerpApi cache, API metering and /v1, model gateway incl. no sensitive values sent), `test_cloud_hardening` 8 (key rotation incl. documents, legal hold, SIEM stream, HSTS, priority), `test_cloud_backup` 4 (restore drill: one tenant restored, others byte-identical), `test_cloud_agent` 9 (worker agents, signed forwarding, remote sign-in link), `test_cloud_sso` 38 (OIDC, SAML via signxml, SCIM; from the SSO fork), `test_cloud_legal` 45 (docs fork).
 - **UI built by forks** (browser-verified by them): sign-in/onboarding/consent/coach (`cloud-auth.js`, `cloud-coach.js`, `cloud-boot.js`, `cloud.css`), organization administration (`cloud-org.js`, `cloud-people.js`, `cloud-admin.css`). Billing and platform console (`cloud-billing.js`, `cloud-platform.js`) was still being built.
 - **Docs/deploy** by the docs fork: `docs/multitenant*.md`, `docs/hosted-api.md`, `docs/pricing.md`, `docs/legal/*`, `deploy/` (Dockerfile, compose, k8s, terraform skeleton: written, not run), `.github/workflows/cloud.yml`, `scripts/start_aira_cloud.ps1`.
 - Local build: full suite 1636 passed, 5 skipped, 2 failed (the two Linux-only container tests, as before) after the shared-code seams were added.
@@ -198,7 +198,7 @@ Spec: `C:\Users\Suresh\Downloads\Aira Career Copilot — Multi-Tenant SaaS Scope
 - Integrated browser walk (Chromium, demo server, all 8 sign-ins: owner, admin, coach, candidate, billing, auditor, Starter owner, trial owner; every nav page): no console errors or failed API calls except an auditor 403 on the SSO card, now replaced by a "visible to owners and admins" note.
 - Internal adversarial security review (2026-10-24): MFA re-enrolment bypass, SCIM owner/admin email takeover, unmasked sensitive values in exports, model-endpoint SSRF, `X-Forwarded-For` spoofing, CEF newline injection: all fixed with regression tests; table in `docs/multitenant-security.md`. Exports now also include autopilot plans/runs, custom answers and message tables. Overage route bug (`req.json()`) caught by `ty` and covered by a route-level test.
 - Final run (after the second security pass and the gap-closing work): SQLite `uv run python -m pytest -q -n 4 -p no:randomly`: 1995 passed, 21 skipped (PostgreSQL-only), 2 failed (the two Linux-only container tests, as before). PostgreSQL 16 in Docker (`AIRA_TEST_DATABASE_URL`): `tests/test_cloud_*.py` 375 passed. `ruff check`, `ruff format --check` and `ty check` clean.
-- Built since the first report: PostgreSQL control plane with row-level security (`AIRA_CLOUD_DB=postgres`, `migrate-to-postgres`), KMS master keys (AWS KMS, Vault transit) and `rewrap-keys`, pooled SerpApi and Aira API search metering with overage, custom limits and retention enforcement, remote sign-in broker (`python -m aira_cloud broker`, real-Chromium tests), Docker stack smoke test (31 checks), kind cluster smoke test (11 checks), Terraform validate/checkov/tflint, stripe-mock and Keycloak (OIDC + SAML) integration tests, second security pass (nine findings fixed, `docs/multitenant-security.md`), queue lease ownership and renewal, organization monitors scheduler.
+- Built since the first report: PostgreSQL control plane with row-level security (`AIRA_CLOUD_DB=postgres`, `migrate-to-postgres`), KMS master keys (AWS KMS, Vault transit) and `rewrap-keys`, pooled SerpApi and API search metering with overage, custom limits and retention enforcement, remote sign-in broker (`python -m aira_cloud broker`, real-Chromium tests), Docker stack smoke test (31 checks), kind cluster smoke test (11 checks), Terraform validate/checkov/tflint, stripe-mock and Keycloak (OIDC + SAML) integration tests, second security pass (nine findings fixed, `docs/multitenant-security.md`), queue lease ownership and renewal, organization monitors scheduler.
 - Open: no external penetration test; no real Stripe account, Okta/Entra/Google tenant or live LinkedIn sign-in; Terraform never planned or applied; PostgreSQL poolers/replicas/failover untested; DNS rebinding after a URL is saved is not covered by the SSRF check. Environment note: C: was nearly full while forks ran (Docker engine crashed; unrelated `monosage-*` containers are stopped, not removed); test temp files for the final runs went to D:\aira-test-tmp (safe to delete).
 
 ## Aira Leads (2026-10-24)
@@ -218,3 +218,11 @@ Finding people and businesses that need web, marketing, content or ad work, and 
 - **Hosted:** `leads_outreach` feature (Team and Enterprise), candidate-only `leads.outreach` permission, monthly and daily caps, kill switch, public SMTP hosts only, password encrypted under the org key, staff exports leave lead tables out.
 - **Checked with real services:** two live SerpApi calls (Maps and the LinkedIn X-ray; the people parser was rewritten after seeing real headlines) and the real local Ollama qwen3.5:4b (found and fixed the "calling from <the lead's company>" slip).
 - Full suite: 2170 passed, 21 skipped (PostgreSQL-only), 2 failed (the Linux-only container tests). ruff and ty clean. Not run against a real SMTP provider or a real Reddit search.
+
+## One account, many apps (2026-10-25)
+Design in `docs/apps.md`; catalog `aira/apps.py` (Careers = Dashboard, Jobs, Applications, Interviews, Recruiters, Documents, Analytics, Research; Leads; API; Settings/Security = account). "Aira API" renamed to "API" everywhere (312 replacements).
+- **Navigation (both builds):** app switcher (nine-dot grid) in the top bar and in the phone More sheet, app-scoped sidebar with the app's name, account menu (email, organization, Manage your account, Theme, Shortcuts, Sign out), `g` + app key chords; hosted roles grouped into Account (organization pages), Coaching, Admin console. `tests/test_app_switcher_ui.py` (9 real-browser tests).
+- **Per-app subscriptions (hosted):** migration v4 `org_apps`, `APP_PRICING` (Leads $4/seat on Starter and Team, API $3/seat on Team, both included in Enterprise, trial has all), `Entitlements.has_app`, `402 app_required` gating on app routes, billing add-on lines (stand-in and Stripe items), proration, cancel at period end, downgrade drops unavailable add-ons, operator grants; routes `/api/apps`, `/api/org/apps/*`, `/api/platform/tenants/<id>/apps`; Apps page `#/org/apps` (`cloud-apps.js`). `tests/test_cloud_apps.py` 17 (SQLite, PostgreSQL, stripe-mock).
+- **Account link 8780 → 8765:** `GET /api/launch/local` issues a 60 s single-use token (hashed, migration v5 `launch_tokens`), `POST /api/internal/launch/validate` (signed, purpose `launch`), local `POST /api/auth/launch` creates a password-less linked account; env `AIRA_CLOUD_LOCAL_APP_URL` + `AIRA_CLOUD_LAUNCH_SECRET` (account) and `AIRA_ACCOUNT_URL` + `AIRA_ACCOUNT_SECRET` (local). `tests/test_cloud_launch.py`, `tests/test_account_link.py` (incl. a two-process real-browser run).
+- Integration fixes: hosted `/api/apps` says `installation: "hosted"` (the hosted switcher shows Local workspace and More apps, not "Manage your account"); `tests/conftest.py` blanks `AIRA_ACCOUNT_*` so a linked `.env` cannot leak into tests. This checkout's `.env` / `.env.cloud` (ignored) link 8765 to 8780 with a shared secret; `start_aira_cloud.ps1` loads `.env.cloud`.
+- Not built: `#/switch-org` page (the link never shows; switching stays sign-out + organization picker); platform tenant detail does not list apps (the platform apps route does).

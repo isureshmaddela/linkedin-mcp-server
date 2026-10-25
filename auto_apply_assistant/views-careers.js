@@ -2,7 +2,7 @@
  *
  * One view (#/careers) with a tab per workspace (?tab=): jobs (default), company, salary, market, interview, travel,
  * learn and alerts. Everything runs through /api/careers/* (aira/airaapi/careers*.py), which spends the connected
- * SerpApi key through the Aira API service, so every search is recorded in Aira API > History and shares its cache.
+ * SerpApi key through the API service, so every search is recorded in API > History and shares its cache.
  *
  * - Jobs: the Google Jobs search (query, location, radius, remote, posted within, employment type), dynamic filter
  *   chips from the response, "Load more" through next_page_token, job cards, a detail drawer, Save to Aira (import),
@@ -133,8 +133,8 @@
       h("span", { class: "cr-setup-mark", "aria-hidden": "true" }, ico("key")),
       h("div", { class: "cr-setup-body" },
         h("h2", { id: "crSetupTitle", text: "Connect your SerpApi key to search" }),
-        h("p", { class: "muted", text: error || "Careers reads job listings, company news, pay and trends through the SerpApi key you connect in Aira API. Nothing is invented without it: until a key is connected you can see what each workspace will do and what it costs, but nothing runs." }),
-        h("div", { class: "btn-row" }, btn("Connect key", { icon: "key", kind: "", href: accountLink() }), btn("About the Aira API", { kind: "ghost", href: "#/airaapi?tab=overview" }))));
+        h("p", { class: "muted", text: error || "Careers reads job listings, company news, pay and trends through the SerpApi key you connect in API. Nothing is invented without it: until a key is connected you can see what each workspace will do and what it costs, but nothing runs." }),
+        h("div", { class: "btn-row" }, btn("Connect key", { icon: "key", kind: "", href: accountLink() }), btn("About the API", { kind: "ghost", href: "#/airaapi?tab=overview" }))));
   }
 
   /** An error as a card with the next step for the cases Careers can explain. */
@@ -143,10 +143,10 @@
     if (code === "not_configured") return setupPanel({ compact: true, error: error.message });
     const box = ui.error(error, retry);
     const hints = {
-      invalid_api_key: ["SerpApi rejected the stored key. ", h("a", { href: accountLink(), text: "Replace it in Aira API, Account" }), "."],
+      invalid_api_key: ["SerpApi rejected the stored key. ", h("a", { href: accountLink(), text: "Replace it in API, Account" }), "."],
       out_of_searches: ["The SerpApi account has no searches left. Cached results still work. ", h("a", { href: accountLink(), text: "Check the plan" }), "."],
       rate_limited: ["SerpApi is throttling this account. Wait a few minutes before the next live search."],
-      local_rate_limit: ["Aira's own hourly limit stopped this search. You can raise it in ", h("a", { href: accountLink(), text: "Aira API, Account" }), "."],
+      local_rate_limit: ["Aira's own hourly limit stopped this search. You can raise it in ", h("a", { href: accountLink(), text: "API, Account" }), "."],
       busy: ["Aira is already running several searches. Try again in a moment."],
     };
     const anchor = box.querySelector(".btn-row");
@@ -724,7 +724,7 @@
       readInputs();
       if (!st.form.q.trim()) return;
       const name = h("input", { type: "text", maxlength: 120, required: true, value: [st.form.q.trim(), st.form.location.trim() ? `in ${st.form.location.trim()}` : ""].filter(Boolean).join(" ") });
-      Aira.modal({ title: "Save this search", body: h("div", {}, h("p", { class: "muted", text: "Saved searches live in Aira API as well, so you can run, monitor or compare them there. Saving costs nothing." }), ui.field("Name", name)), actions: [{ label: "Cancel", kind: "ghost" }, { label: "Save search", kind: "primary", onClick: async () => {
+      Aira.modal({ title: "Save this search", body: h("div", {}, h("p", { class: "muted", text: "Saved searches live in API as well, so you can run, monitor or compare them there. Saving costs nothing." }), ui.field("Name", name)), actions: [{ label: "Cancel", kind: "ghost" }, { label: "Save search", kind: "primary", onClick: async () => {
         if (!name.value.trim()) { toast("Give the search a name.", "error"); return false; }
         try {
           const aira = st.form.provider === "aira";
@@ -741,7 +741,7 @@
     async function removeSaved() {
       const item = st.saved.find((entry) => entry.id === st.loadedSaved);
       if (!item) return;
-      if (!(await Aira.confirm({ title: "Delete this saved search?", message: `"${item.name}" is removed from Careers and from Aira API. Alerts and past results are not affected.`, confirmLabel: "Delete", danger: true }))) return;
+      if (!(await Aira.confirm({ title: "Delete this saved search?", message: `"${item.name}" is removed from Careers and from API. Alerts and past results are not affected.`, confirmLabel: "Delete", danger: true }))) return;
       try {
         await api(`/api/airaapi/saved/${item.id}`, { method: "DELETE" });
         st.saved = st.saved.filter((entry) => entry.id !== item.id);
@@ -905,7 +905,7 @@
           st.token ? h("span", { class: "muted", text: "more available" }) : null),
         h("div", { class: "cr-results-meta" },
           serp().creditChip({ status: "ok", cache_hit: Boolean(meta.cache_hit), credits: meta.spent ?? 1 }),
-          meta.params ? btn("Playground", { icon: "play", kind: "ghost", sm: true, href: playgroundLink(meta.provider === "aira" ? "aira_jobs" : "google_jobs", meta.params), title: "Open this exact request in the Aira API Playground" }) : null,
+          meta.params ? btn("Playground", { icon: "play", kind: "ghost", sm: true, href: playgroundLink(meta.provider === "aira" ? "aira_jobs" : "google_jobs", meta.params), title: "Open this exact request in the API Playground" }) : null,
           meta.record_id ? btn("Stored result", { icon: "history", kind: "ghost", sm: true, title: meta.provider === "aira" ? "Open the stored Aira Jobs response" : "Open the stored SerpApi response", onClick: () => Aira.airaapi && Aira.airaapi.openRecord(meta.record_id) }) : null));
       bulkNode = h("div", { class: "cr-bulk", role: "region", "aria-label": "Selected jobs", hidden: true });
       listNode = h("div", { class: "cr-jobs", "data-roving": "1" });
@@ -1307,7 +1307,7 @@
     // ---- result ---------------------------------------------------------------------------------------------------------
     function renderReport() {
       if (!st.report) {
-        fill(resultNode, h("div", { class: "cr-empty" }, ui.empty(`Your ${cfg.noun} will appear here`, "Fill in the form, check what will run and what it costs, then run it. Every section is a recorded search you can reopen in the Aira API Playground.")));
+        fill(resultNode, h("div", { class: "cr-empty" }, ui.empty(`Your ${cfg.noun} will appear here`, "Fill in the form, check what will run and what it costs, then run it. Every section is a recorded search you can reopen in the API Playground.")));
         return;
       }
       fill(resultNode, reportView(st.report, { cfg, tab, ctx, rerun: rerunSection, onDelete: null }));
@@ -1365,7 +1365,7 @@
       } catch (error) { fill(resultNode, problem(error, () => openStored(item))); }
     }
     async function removeStored(item) {
-      if (!(await Aira.confirm({ title: "Delete this report?", message: "The stored report is removed. The searches behind it stay in Aira API history.", confirmLabel: "Delete", danger: true }))) return;
+      if (!(await Aira.confirm({ title: "Delete this report?", message: "The stored report is removed. The searches behind it stay in API history.", confirmLabel: "Delete", danger: true }))) return;
       try {
         await api(`${BASE}/reports/${item.id}`, { method: "DELETE" });
         st.stored = (st.stored || []).filter((entry) => entry.id !== item.id);
@@ -1519,7 +1519,7 @@
       state === "empty" ? h("p", { class: "muted", text: section.why || "Nothing matched this search. Try different wording." }) : null,
       h("footer", { class: "cr-sec-actions" },
         retryButton,
-        btn("Open in Playground", { icon: "play", kind: "ghost", sm: true, href: playgroundLink(section.engine, section.params), title: "Open this exact request in the Aira API Playground" }),
+        btn("Open in Playground", { icon: "play", kind: "ghost", sm: true, href: playgroundLink(section.engine, section.params), title: "Open this exact request in the API Playground" }),
         section.record_id ? btn("Stored result", { icon: "history", kind: "ghost", sm: true, title: "Open the full stored SerpApi response", onClick: () => Aira.airaapi && Aira.airaapi.openRecord(section.record_id) }) : null));
   }
 
@@ -1764,7 +1764,7 @@
     renderNav(fresh);
     const usage30 = overview.usage_30d || {};
     const searchesUsed = ((usage30.jobs || {}).searches || 0) + ((usage30.reports || {}).searches || 0);
-    if (overview.configured && searchesUsed) fill(usage, h("a", { class: "btn ghost sm", href: "#/airaapi?tab=history", title: "Careers searches in the last 30 days (they are tagged careers and intel in Aira API history)" }, `${searchCount(searchesUsed)} in 30 days`));
+    if (overview.configured && searchesUsed) fill(usage, h("a", { class: "btn ghost sm", href: "#/airaapi?tab=history", title: "Careers searches in the last 30 days (they are tagged careers and intel in API history)" }, `${searchCount(searchesUsed)} in 30 days`));
 
     const ctx = { route, overview, tab, configured: Boolean(overview.configured) };
     try {

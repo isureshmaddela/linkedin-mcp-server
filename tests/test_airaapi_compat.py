@@ -1,4 +1,4 @@
-"""Compat helpers: Aira API keys, query splitting, generated samples and route loading."""
+"""Compat helpers: API keys, query splitting, generated samples and route loading."""
 
 from __future__ import annotations
 

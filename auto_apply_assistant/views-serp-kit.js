@@ -1,6 +1,6 @@
-/* Aira API kit — shared SerpApi console components (Aira.serp)
+/* API kit — shared SerpApi console components (Aira.serp)
  *
- * Everything the Aira API console, the Playground and Careers share: the catalog-driven parameter form, option
+ * Everything the API console, the Playground and Careers share: the catalog-driven parameter form, option
  * form, JSON tree, code snippets, result renderers (visual, table, raw, html, metadata) and small chips.
  *
  * The file has two halves. The first half is pure logic (snippet generation, validation, flattening, chart
@@ -1713,14 +1713,14 @@
     const origin = root.location && root.location.origin ? `${root.location.origin}/v1` : "http://127.0.0.1:8765/v1";
     const tabs = h("div", { class: "sk-langs", role: "tablist", "aria-label": "Language", dataset: { roving: "select" } });
     const panel = h("div", { class: "sk-snippet", role: "tabpanel" });
-    const targetSeg = segmented([["aira", "Aira API"], ["serpapi", "SerpApi direct"]], target === "serpapi" ? "serpapi" : "aira", (next) => { target = next; Aira.remember("serp.target", next); paint(); }, { label: "Endpoint" });
+    const targetSeg = segmented([["aira", "API"], ["serpapi", "SerpApi direct"]], target === "serpapi" ? "serpapi" : "aira", (next) => { target = next; Aira.remember("serp.target", next); paint(); }, { label: "Endpoint" });
     const hint = h("p", { class: "sk-hint" });
     const paint = () => {
       const direct = target === "serpapi";
       const code = buildSnippets(engineId(currentEngine), currentParams, { baseUrl: direct ? "https://serpapi.com" : (baseUrl || origin), apiKey: direct ? "YOUR_SERPAPI_API_KEY" : "YOUR_AIRA_API_KEY" });
       for (const button of tabs.children) { const on = button.dataset.lang === lang; button.setAttribute("aria-selected", String(on)); button.tabIndex = on ? 0 : -1; }
       panel.replaceChildren(codeBlock(lang, code[lang]));
-      hint.textContent = direct ? "Calls SerpApi directly and uses your own SerpApi key. Aira is not involved, so nothing is cached or recorded." : "Create an Aira API key on the Keys tab. Calls through Aira are cached, recorded in History and counted in Usage.";
+      hint.textContent = direct ? "Calls SerpApi directly and uses your own SerpApi key. Aira is not involved, so nothing is cached or recorded." : "Create an API key on the Keys tab. Calls through Aira are cached, recorded in History and counted in Usage.";
     };
     for (const code of LANGUAGES) {
       tabs.append(h("button", { type: "button", role: "tab", class: "sk-lang-tab", dataset: { lang: code }, text: LANGUAGE_LABELS[code], onclick: () => { lang = code; Aira.remember("serp.lang", code); paint(); } }));

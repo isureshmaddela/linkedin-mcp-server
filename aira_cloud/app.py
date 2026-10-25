@@ -13,6 +13,7 @@ from typing import Any
 from aira.hosting import HOOKS
 from aira_cloud import hooks
 from aira_cloud.agent import AgentClient, Verifier
+from aira_cloud.launch import LaunchTokens
 from aira_cloud.audit import AuditLog, PlatformAudit
 from aira_cloud.backup import BackupService
 from aira_cloud.billing import Billing
@@ -93,6 +94,7 @@ class CloudApp:
         self.queue = JobQueue(self)
         self.agents = AgentClient(self)
         self.linkedin = LinkedInSessions(self)
+        self.launch = LaunchTokens(self)
         self.signed_requests = Verifier(self)
         self.tenancy = Tenancy(self)
         self.authz = Authorizer(

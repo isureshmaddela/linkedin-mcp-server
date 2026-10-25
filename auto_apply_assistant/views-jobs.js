@@ -16,7 +16,7 @@
   const STAGES = ["discovered", "saved", "ready_to_apply", "applying", "needs_review", "applied", "assessment", "recruiter_screen", "technical_interview", "manager_interview", "panel_interview", "final_interview", "offer", "accepted", "rejected", "withdrawn", "failed"];
   const CLASSES = ["Recommended", "Strong Match", "Good Match", "Stretch", "Not Recommended"];
 
-  // The source catalog is read again on every visit to Jobs: a SerpApi key connected in Aira API, or a LinkedIn session
+  // The source catalog is read again on every visit to Jobs: a SerpApi key connected in API, or a LinkedIn session
   // that just came up, must show here without a reload.
   let sourcesLoad = null;
   function sources() {
@@ -64,7 +64,7 @@
       const structured = ["linkedin", "google_jobs", "aira_jobs", "lever", "ashby", "smartrecruiters"].includes(chosen.source);
       workType.disabled = !structured;
       jobType.disabled = !structured;
-      if (chosen.source === "google_jobs" && !chosen.connected) hint.replaceChildren(`${chosen.label}: `, h("a", { href: KEY_PAGE, text: "connect a SerpApi key in Aira API > Account" }), " (or set SERPAPI_API_KEY in .env), or search ", h("a", { href: "#/jobs/aira", text: "Aira Jobs" }), " for free.");
+      if (chosen.source === "google_jobs" && !chosen.connected) hint.replaceChildren(`${chosen.label}: `, h("a", { href: KEY_PAGE, text: "connect a SerpApi key in API > Account" }), " (or set SERPAPI_API_KEY in .env), or search ", h("a", { href: "#/jobs/aira", text: "Aira Jobs" }), " for free.");
       else if (chosen.source === "aira_jobs") hint.textContent = "Aira Jobs searches free job boards (Himalayas, The Muse, Remotive, Jobicy, Arbeitnow) itself: no key, no credits. Each result links back to its board.";
       else hint.textContent = chosen.connected ? chosen.connection_hint || "" : `${chosen.label}: ${chosen.connection_hint}`;
       submit.disabled = !chosen.connected && chosen.source !== "linkedin";
@@ -159,7 +159,7 @@
       return;
     }
     const showSearch = !["recommended", "saved"].includes(tab.id);
-    main.replaceChildren(...[head, subnav, showSearch ? searchPanel(tab, (data) => { if (data.imported) { load().then(() => openJob(data.imported.job_id, { loadDetails: data.needs_details })); } else { load(); if (data.jobs[0]) openJob(data.jobs[0].job_id, { loadDetails: !data.jobs[0].description }); } }) : h("p", { class: "note", text: tab.id === "recommended" ? "Jobs classified Recommended or Strong Match by the explainable scorer, ranked by score. Load a description and your profile to score more jobs." : "Jobs you starred, plus anything in the Saved status." }), tab.id === "google" ? h("p", { class: "muted", style: { margin: "-6px 0 14px", fontSize: "12.5px" } }, "Want Google's own filters, job alerts and company research? ", h("a", { href: "#/careers?tab=jobs", text: "Open Careers" }), ".") : tab.id === "aira" ? h("p", { class: "muted", style: { margin: "-6px 0 14px", fontSize: "12.5px" } }, "Aira's own job search, built into Aira API: no SerpApi key and no credits. Every search is kept in ", h("a", { href: "#/airaapi?tab=history&engine=aira_jobs", text: "Aira API history" }), ".") : null, filterBar, listBox].filter(Boolean));
+    main.replaceChildren(...[head, subnav, showSearch ? searchPanel(tab, (data) => { if (data.imported) { load().then(() => openJob(data.imported.job_id, { loadDetails: data.needs_details })); } else { load(); if (data.jobs[0]) openJob(data.jobs[0].job_id, { loadDetails: !data.jobs[0].description }); } }) : h("p", { class: "note", text: tab.id === "recommended" ? "Jobs classified Recommended or Strong Match by the explainable scorer, ranked by score. Load a description and your profile to score more jobs." : "Jobs you starred, plus anything in the Saved status." }), tab.id === "google" ? h("p", { class: "muted", style: { margin: "-6px 0 14px", fontSize: "12.5px" } }, "Want Google's own filters, job alerts and company research? ", h("a", { href: "#/careers?tab=jobs", text: "Open Careers" }), ".") : tab.id === "aira" ? h("p", { class: "muted", style: { margin: "-6px 0 14px", fontSize: "12.5px" } }, "Aira's own job search, built into API: no SerpApi key and no credits. Every search is kept in ", h("a", { href: "#/airaapi?tab=history&engine=aira_jobs", text: "API history" }), ".") : null, filterBar, listBox].filter(Boolean));
 
     async function load() {
       listBox.replaceChildren(ui.skeleton(6));
@@ -175,7 +175,7 @@
       const list = h("div", { class: "list", "data-roving": "1", role: "list" });
       const selectedId = route.path[3];
       if (googleMissing) {
-        list.append(ui.empty("Google Jobs needs a SerpApi key", "Connect a key once and Google Jobs searches here, in Careers and in your own scripts all use it. It is stored encrypted on this computer. No key? Aira Jobs searches free job boards without one.", h("div", { class: "btn-row", style: { justifyContent: "center" } }, h("a", { class: "btn", href: "#/jobs/aira", text: "Search Aira Jobs (free)" }), h("a", { class: "btn secondary", href: KEY_PAGE, text: "Connect a key in Aira API" }))));
+        list.append(ui.empty("Google Jobs needs a SerpApi key", "Connect a key once and Google Jobs searches here, in Careers and in your own scripts all use it. It is stored encrypted on this computer. No key? Aira Jobs searches free job boards without one.", h("div", { class: "btn-row", style: { justifyContent: "center" } }, h("a", { class: "btn", href: "#/jobs/aira", text: "Search Aira Jobs (free)" }), h("a", { class: "btn secondary", href: KEY_PAGE, text: "Connect a key in API" }))));
       } else if (!data.jobs.length) {
         const message = tab.id === "recommended" ? "Score jobs to see recommendations here." : tab.id === "saved" ? "Star a job in any list to keep it here." : "Search above, or import a posting by URL to start your pipeline.";
         list.append(ui.empty("No jobs yet", message));

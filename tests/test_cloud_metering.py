@@ -1,4 +1,4 @@
-"""Pooled SerpApi searches and Aira API search overage: counted, limited and billed."""
+"""Pooled SerpApi searches and API search overage: counted, limited and billed."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ def serpapi(monkeypatch):
 
 def team_with_pool(cloud, name="Pool Org", slug="pool.test", *, overrides=None):
     cloud.config.pooled_serpapi_key = DEFAULT_KEY
-    org = build_org(cloud, name, plan="team", seats=25, slug_email=slug)
+    org = build_org(cloud, name, plan="team", seats=25, slug_email=slug, apps="all")
     cloud.tenancy.update_policy(
         org.owner,
         {
@@ -136,7 +136,9 @@ def test_a_failed_pooled_search_gives_its_search_back(cloud, serpapi):
 
 
 def test_console_search_overage_is_billed_for_api_searches(cloud, serpapi):
-    org = build_org(cloud, "Api Overage", plan="team", seats=25, slug_email="api.test")
+    org = build_org(
+        cloud, "Api Overage", plan="team", seats=25, slug_email="api.test", apps=["api"]
+    )
     override(cloud, org, {"api_searches_per_month": 1})
     cloud.billing.set_overage(org.owner, True)
     owner = sign_in(cloud, org.owner)
@@ -159,7 +161,7 @@ def test_console_search_overage_is_billed_for_api_searches(cloud, serpapi):
         else invoice["lines"]
     )
     assert any(
-        "Aira API searches" in line["description"] and line["amount_cents"] == 2 * 2
+        "API searches" in line["description"] and line["amount_cents"] == 2 * 2
         for line in lines
     ), lines
 

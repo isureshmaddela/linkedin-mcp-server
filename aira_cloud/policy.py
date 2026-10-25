@@ -8,8 +8,8 @@ any domain code runs.
 Scopes:
   ``public``     no sign-in (static files, health)
   ``candidate``  one candidate's workspace; ``permission`` is checked against that candidate
-  ``org_api``    the organization's Aira API workspace (owners and admins)
-  ``apikey``     the SerpApi-compatible API, authenticated by an organization Aira API key
+  ``org_api``    the organization's API workspace (owners and admins)
+  ``apikey``     the SerpApi-compatible API, authenticated by an organization API key
   ``operator``   the platform console's own session
   ``deny``       not available in the hosted product
 """
@@ -52,6 +52,17 @@ PUBLIC = Rule("public")
 DENY = Rule("deny")
 OPERATOR = Rule("operator", "platform.health.read")
 
+# Routes under an app's path prefix that every organization may call whatever apps it has: the
+# organization's own SerpApi key is an integration Careers needs, not part of the API app.
+APP_FREE_ROUTES = frozenset(
+    {
+        "airaapi__routes__set_key",
+        "airaapi__routes__remove_key",
+        "airaapi__routes__account",
+        "airaapi__routes__status",
+    }
+)
+
 
 def _org(permission: str, **kw: Any) -> Rule:
     return Rule("org_api", permission, write=permission.endswith(".manage"), **kw)  # type: ignore[arg-type]
@@ -64,10 +75,13 @@ POLICY: dict[str, Rule] = {
     "api_health": PUBLIC,
     "api_ready": PUBLIC,
     "api_metrics": OPERATOR,
+    "api_apps": DENY,  # the control plane answers /api/apps with the organization's subscriptions
     # -- sign-in is the control plane's (these local routes are replaced) -----------------
     "api_auth_me": DENY,
     "api_auth_register": DENY,
     "api_auth_login": DENY,
+    "api_auth_launch": DENY,  # the hosted build is the account; a launch opens a local installation, not this one
+    "api_auth_account_link": DENY,
     "api_auth_logout": DENY,
     "api_account_delete": DENY,
     "api_account_export": read("export.own", kind="account_export", audit=True),
@@ -222,7 +236,7 @@ POLICY: dict[str, Rule] = {
     "api_schedule_delete": write(
         "linkedin.manage", linkedin=True, feature="sources.linkedin"
     ),
-    # -- the organization's Aira API console (owner and admin) --------------------------------------------------------
+    # -- the organization's API console (owner and admin) --------------------------------------------------------
     "airaapi__routes__overview": _org("integrations.read", feature="api.console_read"),
     "airaapi__routes__account": _org("integrations.read", feature="api.console_read"),
     "airaapi__routes__status": _org("integrations.read", feature="api.console_read"),
@@ -302,7 +316,7 @@ POLICY: dict[str, Rule] = {
     "airaapi__routes__keys_revoke": _org(
         "integrations.manage", feature="api.v1", kind="v1_key_revoke", audit=True
     ),
-    # -- the SerpApi-compatible API: an organization Aira API key, not a session -------------------------------------
+    # -- the SerpApi-compatible API: an organization API key, not a session -------------------------------------
     "airaapi__routes__v1_search": Rule("apikey", feature="api.v1", kind="v1_search"),
     "airaapi__routes__v1_account": Rule("apikey", feature="api.v1"),
     "airaapi__routes__v1_locations": Rule("apikey", feature="api.v1"),

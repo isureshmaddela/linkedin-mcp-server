@@ -1,4 +1,4 @@
-"""Aira Jobs: Aira API's own job search over free public job boards (no SerpApi).
+"""Aira Jobs: API's own job search over free public job boards (no SerpApi).
 
 Board responses are recorded-shape payloads served by a fake getter, so nothing
 here touches the network.
@@ -326,7 +326,7 @@ def test_posting_from_item_keeps_the_board_as_source():
     )
 
 
-# -- the engine inside Aira API ----------------------------------------------------------
+# -- the engine inside API ----------------------------------------------------------
 
 
 def test_engine_runs_without_a_key_at_no_cost_and_outside_the_hourly_cap(

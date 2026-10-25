@@ -611,9 +611,42 @@ ALTER TABLE worker_heartbeats ADD COLUMN agent_url TEXT NOT NULL DEFAULT '';
 ALTER TABLE queue_jobs ADD COLUMN host TEXT NOT NULL DEFAULT '';
 """
 
+_V5 = """
+CREATE TABLE launch_tokens (
+    token_hash TEXT PRIMARY KEY,
+    org_id TEXT NOT NULL,
+    member_id TEXT NOT NULL,
+    app TEXT NOT NULL DEFAULT 'local',
+    return_url TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    used_at INTEGER
+);
+CREATE INDEX launch_tokens_member ON launch_tokens (org_id, member_id);
+"""
+
+# Apps an organization has turned on beyond its plan: bought per seat (active, cancelled at period end)
+# or granted by an operator without charge. ``org_id`` first so the tenant policy covers it.
+_V4 = """
+CREATE TABLE org_apps (
+    org_id TEXT NOT NULL,
+    app_id TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'active',
+    seats_at_start INTEGER NOT NULL DEFAULT 0,
+    activated_at INTEGER NOT NULL,
+    cancelled_at INTEGER,
+    cancel_at_period_end INTEGER NOT NULL DEFAULT 0,
+    granted_by TEXT NOT NULL DEFAULT '',
+    note TEXT NOT NULL DEFAULT '',
+    PRIMARY KEY (org_id, app_id)
+);
+"""
+
 # (version, name, SQL script)
 MIGRATIONS: list[tuple[int, str, str]] = [
     (1, "initial", _V1),
     (2, "departures_and_exports", _V2),
     (3, "worker_agents", _V3),
+    (4, "org_apps", _V4),
+    (5, "launch_tokens", _V5),
 ]

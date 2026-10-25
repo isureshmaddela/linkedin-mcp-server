@@ -858,7 +858,7 @@ def test_alert_update_delete_and_orphan_handling(db, client, gateway):
     assert changed["min_score"] == 60 and changed["notify"] is False
     with pytest.raises(ValueError, match="Send name"):
         careers.update_alert(db, alert["id"], {})
-    # The monitor was deleted from the Aira API console: the alert lists as off and can be revived.
+    # The monitor was deleted from the API console: the alert lists as off and can be revived.
     db.execute("DELETE FROM airaapi_monitors")
     db.commit()
     listed = careers.list_alerts(db)[0]

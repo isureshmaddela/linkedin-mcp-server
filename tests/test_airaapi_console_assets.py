@@ -1,4 +1,4 @@
-"""Static checks for the Aira API console front end (views-airaapi.js and its CSS block).
+"""Static checks for the API console front end (views-airaapi.js and its CSS block).
 
 The console is plain browser JavaScript with no build step, so these tests guard the
 wiring that is easy to break: script order in index.html, the tabs the spec lists, that
@@ -96,8 +96,8 @@ def test_no_secret_is_kept_in_the_dom_or_storage() -> None:
 
 
 def test_console_css_block_is_closed() -> None:
-    assert "/* ==== Aira API console" in CSS
-    assert CSS.count("/* ==== end Aira API console ==== */") == 1
+    assert "/* ==== API console" in CSS
+    assert CSS.count("/* ==== end API console ==== */") == 1
 
 
 @pytest.mark.skipif(shutil.which("node") is None, reason="node is not installed")

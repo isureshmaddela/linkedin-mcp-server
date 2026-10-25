@@ -91,7 +91,7 @@
     ["Automatic submission", (p) => (p.features.includes("automation.submit") ? "Yes" : "Review mode only")],
     ["Search plans per candidate", (p) => (p.plan_id === "enterprise" ? "Custom" : num(p.limits.search_plans_per_candidate))],
     ["AI cover letters per month", (p) => (p.plan_id === "enterprise" ? "Custom, or your own model endpoint" : p.features.includes("ai.cover_letters") ? num(p.limits.cover_letters_per_month) : "—")],
-    ["Aira API (console and /v1)", (p) => (p.features.includes("api.v1") ? (p.plan_id === "enterprise" ? "Custom" : `${num(p.limits.api_searches_per_month)} searches, /v1 with ${p.limits.api_v1_keys} keys`) : p.features.includes("api.searches") ? `${num(p.limits.api_searches_per_month)} searches, no /v1` : "Read-only history")],
+    ["API (console and /v1)", (p) => (p.features.includes("api.v1") ? (p.plan_id === "enterprise" ? "Custom" : `${num(p.limits.api_searches_per_month)} searches, /v1 with ${p.limits.api_v1_keys} keys`) : p.features.includes("api.searches") ? `${num(p.limits.api_searches_per_month)} searches, no /v1` : "Read-only history")],
     ["Monitors and alerts per candidate", (p) => (p.plan_id === "enterprise" ? "Custom" : num(p.limits.monitors_per_candidate))],
     ["Document storage and retention", (p) => (p.plan_id === "enterprise" ? "Custom, legal hold" : `${bytes(p.limits.storage_bytes)}, ${p.plan_id === "trial" ? `${p.limits.retention_days} days after the trial ends` : retention(p.limits.retention_days)}`)],
     ["Audit log", (p) => (p.plan_id === "enterprise" ? "7 years, export to SIEM" : retention(p.limits.audit_days))],
@@ -359,7 +359,7 @@
         meter("Coach and admin seats", u.seats.staff.used, u.seats.staff.limit, { link: "#/org/members" }),
         meter("Applications this month", u.applications.used, u.applications.limit, { link: u.applications.link, note: u.applications.overage ? `${num(u.applications.overage)} over the limit (metered overage)` : "" }),
         meter("Searches", u.searches.used, null),
-        meter("Aira API searches", u.api_searches.used, u.api_searches.limit),
+        meter("API searches", u.api_searches.used, u.api_searches.limit),
         meter("AI cover letters", u.cover_letters.used, u.cover_letters.limit),
         meter("Document storage", u.storage.used_bytes, u.storage.limit_bytes, { unit: "bytes" }))));
     const cost = u.cost_per_application || {};

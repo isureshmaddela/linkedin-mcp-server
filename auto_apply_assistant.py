@@ -31,7 +31,7 @@ from http.cookies import SimpleCookie
 from pathlib import Path
 from types import TracebackType
 from typing import Any, Literal
-from urllib.error import URLError
+from urllib.error import HTTPError, URLError
 from urllib.parse import parse_qs, unquote, urlsplit
 from urllib.request import Request, urlopen
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -50,6 +50,7 @@ from linkedin_mcp_server.job_sources import (
 from linkedin_mcp_server.matching import score_keyword_evidence
 
 from aira import __version__ as AIRA_VERSION
+from aira import apps as aira_apps
 from aira.hosting import HOOKS as HOSTING
 from aira.analytics import summary as analytics_summary
 from aira.analytics import timeline as analytics_timeline
@@ -362,6 +363,16 @@ def _auth_connect() -> sqlite3.Connection:
             FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE
         )"""
     )
+    # An account that signs in through the Aira account (hosted) has no password here.
+    present = {row[1] for row in connection.execute("PRAGMA table_info(users)")}
+    for column, definition in (
+        ("account_linked_at", "INTEGER"),
+        ("account_org_id", "TEXT NOT NULL DEFAULT ''"),
+        ("account_org_name", "TEXT NOT NULL DEFAULT ''"),
+        ("account_url", "TEXT NOT NULL DEFAULT ''"),
+    ):
+        if column not in present:
+            connection.execute(f"ALTER TABLE users ADD COLUMN {column} {definition}")
     connection.commit()
     return connection
 
@@ -393,29 +404,30 @@ def _create_account(email: str, password: str) -> tuple[dict[str, Any], str]:
         ).fetchone()
         if existing:
             raise ValueError("An account with this email already exists.")
-        account_count = connection.execute("SELECT COUNT(*) FROM users").fetchone()[0]
-        user_id = uuid.uuid4().hex
-        if account_count == 0:
-            data_path = DB_PATH
-        else:
-            USER_DB_ROOT.mkdir(parents=True, exist_ok=True)
-            data_path = USER_DB_ROOT / f"{user_id}.sqlite3"
+        user = _insert_user(connection, email, _password_hash(password))
+    return user, _issue_session(user["user_id"])
+
+
+def _insert_user(
+    connection: sqlite3.Connection, email: str, password_hash: str
+) -> dict[str, Any]:
+    """A new account row; the first account keeps the original database path, later ones get their own file."""
+    account_count = connection.execute("SELECT COUNT(*) FROM users").fetchone()[0]
+    user_id = uuid.uuid4().hex
+    if account_count == 0:
+        data_path = DB_PATH
+    else:
+        USER_DB_ROOT.mkdir(parents=True, exist_ok=True)
+        data_path = USER_DB_ROOT / f"{user_id}.sqlite3"
+    connection.execute(
+        "INSERT INTO users (user_id, email, password_hash, data_path, created_at) VALUES (?, ?, ?, ?, ?)",
+        (user_id, email, password_hash, str(data_path), int(time.time())),
+    )
+    return dict(
         connection.execute(
-            "INSERT INTO users (user_id, email, password_hash, data_path, created_at) VALUES (?, ?, ?, ?, ?)",
-            (
-                user_id,
-                email,
-                _password_hash(password),
-                str(data_path),
-                int(time.time()),
-            ),
-        )
-        user = dict(
-            connection.execute(
-                "SELECT * FROM users WHERE user_id = ?", (user_id,)
-            ).fetchone()
-        )
-    return user, _issue_session(user_id)
+            "SELECT * FROM users WHERE user_id = ?", (user_id,)
+        ).fetchone()
+    )
 
 
 def _issue_session(user_id: str) -> str:
@@ -434,9 +446,179 @@ def _authenticate(email: str, password: str) -> tuple[dict[str, Any], str]:
         row = connection.execute(
             "SELECT * FROM users WHERE email = ?", (email.strip().lower(),)
         ).fetchone()
+    if row is not None and _account_linked(dict(row)):
+        raise AccountLinkedSignIn(ACCOUNT_LINK_MESSAGE)
     if row is None or not _password_matches(password, row["password_hash"]):
         raise ValueError("Email or password is incorrect.")
     user = dict(row)
+    return user, _issue_session(user["user_id"])
+
+
+# --- the Aira account (the hosted build) as the sign-in for this installation -------------------
+
+ACCOUNT_LINK_MESSAGE = 'This account signs in with your Aira account. Use "Sign in with your Aira account".'
+ACCOUNT_LINK_PURPOSE = "launch"
+ACCOUNT_SECRET_MIN_CHARS = 32
+
+
+class AccountLinkedSignIn(PermissionError):
+    """A password sign-in for an account that only the Aira account can open."""
+
+
+def _account_url() -> str:
+    return os.getenv("AIRA_ACCOUNT_URL", "").strip().rstrip("/")
+
+
+def _account_secret() -> str:
+    return os.getenv("AIRA_ACCOUNT_SECRET", "").strip()
+
+
+def _account_link_available() -> bool:
+    return bool(_account_url()) and len(_account_secret()) >= ACCOUNT_SECRET_MIN_CHARS
+
+
+def _account_linked(user: dict[str, Any] | None) -> bool:
+    return bool(user) and not str(user.get("password_hash") or "")
+
+
+def _account_summary(user: dict[str, Any] | None) -> dict[str, Any]:
+    linked = _account_linked(user)
+    return {
+        "linked": linked,
+        "url": (str((user or {}).get("account_url") or "") if linked else "")
+        or _account_url(),
+        "org_name": str((user or {}).get("account_org_name") or "") if linked else "",
+        "available": _account_link_available(),
+    }
+
+
+def _check_account_url(url: str) -> None:
+    """The account must be an http(s) address; off the loopback it must be a public host (or allowed explicitly)."""
+    parts = urlsplit(url)
+    host = (parts.hostname or "").lower()
+    if (
+        parts.scheme not in {"http", "https"}
+        or not host
+        or parts.username
+        or parts.password
+    ):
+        raise RuntimeError("AIRA_ACCOUNT_URL must be an http(s) address.")
+    if host in {"127.0.0.1", "localhost", "::1"}:
+        return
+    try:
+        import ipaddress
+
+        if ipaddress.ip_address(host).is_loopback:
+            return
+    except ValueError:
+        pass
+    from aira.leads import enrich
+
+    try:
+        enrich._check_addresses(
+            host,
+            parts.port or (443 if parts.scheme == "https" else 80),
+            allow_local=os.getenv("AIRA_ACCOUNT_ALLOW_LOCAL", "") == "1",
+        )
+    except enrich.FetchError as error:
+        raise RuntimeError(
+            f"AIRA_ACCOUNT_URL cannot be used: {error} Set AIRA_ACCOUNT_ALLOW_LOCAL=1 for a private address you trust."
+        ) from None
+
+
+def _account_signed_headers(body: bytes) -> dict[str, str]:
+    """The same HMAC the hosted account's internal routes check (purpose, timestamp, nonce and body)."""
+    timestamp, nonce = int(time.time()), secrets.token_hex(12)
+    message = f"{ACCOUNT_LINK_PURPOSE}.{timestamp}.{nonce}.".encode() + body
+    return {
+        "Content-Type": "application/json",
+        "X-Aira-Agent-Timestamp": str(timestamp),
+        "X-Aira-Agent-Nonce": nonce,
+        "X-Aira-Agent-Signature": hmac.new(
+            _account_secret().encode(), message, hashlib.sha256
+        ).hexdigest(),
+    }
+
+
+def _validate_launch_token(token: str) -> dict[str, Any]:
+    """Ask the account who this one-time launch token signs in."""
+    if not _account_link_available():
+        raise ValueError(
+            "Signing in with an Aira account is not set up on this installation (AIRA_ACCOUNT_URL and AIRA_ACCOUNT_SECRET)."
+        )
+    token = str(token or "").strip()
+    if not token or len(token) > 200 or not re.fullmatch(r"[A-Za-z0-9_\-]+", token):
+        raise ValueError(
+            "The launch link is not valid. Start again from your Aira account."
+        )
+    url = _account_url()
+    _check_account_url(url)
+    body = json.dumps({"token": token}).encode("utf-8")
+    request = Request(
+        f"{url}/api/internal/launch/validate",
+        data=body,
+        method="POST",
+        headers=_account_signed_headers(body),
+    )
+    try:
+        with urlopen(request, timeout=10) as response:  # noqa: S310 - the address is AIRA_ACCOUNT_URL, checked above
+            data = json.loads(response.read().decode("utf-8"))
+    except HTTPError as error:
+        try:
+            detail = json.loads(error.read().decode("utf-8"))
+        except ValueError:
+            detail = {}
+        message = str(detail.get("error") or "")
+        if error.code == 401:
+            raise RuntimeError(
+                "The Aira account refused this installation's signature: AIRA_ACCOUNT_SECRET does not match its AIRA_CLOUD_LAUNCH_SECRET."
+            ) from None
+        if error.code in {404, 410}:
+            raise ValueError(
+                message
+                or "The launch link is not valid or has expired. Start again from your Aira account."
+            ) from None
+        if error.code in {402, 403, 409}:
+            raise PermissionError(
+                message or "Your Aira account cannot open this installation right now."
+            ) from None
+        raise RuntimeError(
+            f"The Aira account answered HTTP {error.code}{': ' + message if message else ''}."
+        ) from None
+    except (URLError, TimeoutError, OSError, ValueError) as error:
+        raise RuntimeError(
+            f"The Aira account at {url} could not be reached ({type(error).__name__})."
+        ) from None
+    email = str(data.get("email") or "").strip().lower()
+    if len(email) > 254 or not EMAIL_RE.fullmatch(email):
+        raise RuntimeError("The Aira account did not name a valid email address.")
+    data["email"] = email
+    return data
+
+
+def _link_account(claims: dict[str, Any]) -> tuple[dict[str, Any], str]:
+    """Find or create the local account for the person the Aira account vouched for, and sign them in."""
+    email = claims["email"]
+    with _auth_connect() as connection:
+        row = connection.execute(
+            "SELECT * FROM users WHERE email = ?", (email,)
+        ).fetchone()
+        user = dict(row) if row else _insert_user(connection, email, "")
+        connection.execute(
+            "UPDATE users SET account_linked_at = ?, account_org_id = ?, account_org_name = ?, account_url = ? WHERE user_id = ?",
+            (
+                int(time.time()),
+                str(claims.get("org_id") or "")[:64],
+                str(claims.get("org_name") or "")[:120],
+                _account_url(),
+                user["user_id"],
+            ),
+        )
+        user = dict(
+            connection.execute(
+                "SELECT * FROM users WHERE user_id = ?", (user["user_id"],)
+            ).fetchone()
+        )
     return user, _issue_session(user["user_id"])
 
 
@@ -1758,10 +1940,10 @@ def _serpapi_key() -> str:
 def _shared_google_jobs_getter(
     api_key: str,
 ) -> Callable[[Mapping[str, str]], Mapping[str, Any]]:
-    """Run the Jobs tab's Google Jobs requests through Aira API history and cache.
+    """Run the Jobs tab's Google Jobs requests through API history and cache.
 
     The adapter builds its own request (with the key); the getter hands it to
-    the Aira API search service, so the search is recorded, counted against the
+    the API search service, so the search is recorded, counted against the
     SerpApi plan once and answered from the local cache when it repeats.
     """
     from aira.airaapi import routes as airaapi_routes
@@ -1798,7 +1980,7 @@ def _search_google_jobs(
     if not api_key:
         raise ValueError(
             "Google Jobs is not configured. Set SERPAPI_API_KEY in the server environment "
-            "or connect a key in Aira API > Account."
+            "or connect a key in API > Account."
         )
     filters: dict[str, Any] = {"w2_search": w2_search}
     if work_type:
@@ -1828,7 +2010,7 @@ def _search_aira_jobs(
     job_type: str = "",
     w2_search: bool = False,
 ) -> dict[str, Any]:
-    """Aira's own job search (free job boards, no SerpApi), through Aira API history and cache."""
+    """Aira's own job search (free job boards, no SerpApi), through API history and cache."""
     keywords = keywords.strip()
     if not keywords or len(keywords) > 200:
         raise ValueError("Enter search keywords (up to 200 characters).")
@@ -3846,7 +4028,7 @@ def _start_schedule_now(user: dict[str, Any], schedule_id: int) -> dict[str, Any
 
 
 def _run_airaapi_monitors_for(user: dict[str, Any]) -> None:
-    """Run one account's due Aira API monitors (a no-op without a SerpApi key)."""
+    """Run one account's due API monitors (a no-op without a SerpApi key)."""
     from aira.airaapi import routes as airaapi_routes
 
     _bind_user(user)
@@ -3872,7 +4054,7 @@ def _run_airaapi_monitors_for(user: dict[str, Any]) -> None:
                 limits=airaapi_service.load_limits(_setting),
             )
     except Exception:
-        logger.exception("Aira API monitors failed for account %s", user["user_id"])
+        logger.exception("API monitors failed for account %s", user["user_id"])
     finally:
         _unbind_user()
         _end_automation(f"airaapi:{user['user_id']}")
@@ -3897,7 +4079,7 @@ def _scheduler_loop() -> None:
         try:
             _run_due_airaapi_monitors()
         except Exception:
-            logger.exception("Aira API monitor tick failed")
+            logger.exception("API monitor tick failed")
         try:
             _run_due_autopilot()
         except Exception:
@@ -5175,7 +5357,7 @@ def _autopilot_unavailable(user: dict[str, Any]) -> Callable[[str], str]:
         if source == "linkedin" and _linkedin_status(user)["state"] != "connected":
             return "LinkedIn is not connected (Settings > Integrations)."
         if source == "google_jobs" and not _serpapi_key():
-            return "no SerpApi key (Aira API > Account)."
+            return "no SerpApi key (API > Account)."
         return ""
 
     return check
@@ -6625,7 +6807,7 @@ def _sources_status() -> list[dict[str, Any]]:
             item["connection_hint"] = (
                 "SerpApi key configured"
                 if google_ready
-                else "Connect a key in Aira API > Account or set SERPAPI_API_KEY in .env."
+                else "Connect a key in API > Account or set SERPAPI_API_KEY in .env."
             )
         else:
             item["connected"] = descriptor["status"] == "available"
@@ -6713,6 +6895,10 @@ def _export_account() -> dict[str, Any]:
 
 
 def _delete_account(user: dict[str, Any], password: str) -> None:
+    if _account_linked(user):
+        raise ValueError(
+            "This account signs in with your Aira account and has no password here. Remove the person from the organization in the Aira account instead."
+        )
     if not _password_matches(password, user["password_hash"]):
         raise ValueError("Enter your current Aira password to delete the account.")
     user_id = user["user_id"]
@@ -7175,10 +7361,71 @@ class RequestHandler(BaseHTTPRequestHandler):
                     "user_id": user["user_id"],
                     "linkedin_connected": bool(user.get("linkedin_port")),
                     "created_at": user.get("created_at"),
+                    "account": _account_summary(user),
                 },
             )
         else:
             self._send_json(401, {"error": "Sign in to continue."})
+
+    @route("GET", r"/api/auth/account-link", auth=False)
+    def api_auth_account_link(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        """Whether this installation can sign people in through an Aira account, and where that account is."""
+        available = _account_link_available()
+        self._send_json(
+            200,
+            {"available": available, "url": _account_url() if available else ""},
+        )
+
+    @route("POST", r"/api/auth/launch", auth=False)
+    def api_auth_launch(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        """Sign in with a one-time launch token issued by the Aira account."""
+        key = f"launch:{self._client_key()}"
+        allowed, retry_after = _login_limiter.check(key)
+        if not allowed:
+            self._send_json(
+                429,
+                {
+                    "error": f"Too many sign-in attempts. Try again in {retry_after // 60 + 1} minutes."
+                },
+            )
+            return
+        try:
+            claims = _validate_launch_token(str(payload.get("token", "")))
+        except (ValueError, PermissionError):
+            _login_limiter.hit(key)
+            raise
+        account, token = _link_account(claims)
+        _request_context.data_path = account["data_path"]
+        _request_context.user_id = account["user_id"]
+        _request_context.actor = account["email"]
+        _audit(
+            "account.launch",
+            "account",
+            account["user_id"],
+            {"org_id": claims.get("org_id", ""), "apps": claims.get("apps", [])},
+        )
+        _login_limiter.reset(key)
+        self._send_auth_json(
+            200,
+            {
+                "email": account["email"],
+                "account": _account_summary(account),
+                "apps": claims.get("apps", []),
+            },
+            token,
+        )
 
     @route("POST", r"/api/auth/register", auth=False)
     def api_auth_register(
@@ -7325,6 +7572,28 @@ class RequestHandler(BaseHTTPRequestHandler):
     ) -> None:
         assert user is not None
         self._send_json(200, _restart_linkedin_worker(user))
+
+    @route("GET", r"/api/apps")
+    def api_apps(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        """The apps this installation has (all of them, locally) and where the account lives."""
+        self._send_json(
+            200,
+            {
+                "apps": [
+                    {**app, "enabled": True, "reason": ""}
+                    for app in aira_apps.catalog()
+                ],
+                "account_url": _account_url(),
+                "account": _account_summary(user),
+                "installation": "local",
+            },
+        )
 
     @route("GET", r"/api/status")
     def api_status(
@@ -9051,7 +9320,7 @@ class RequestHandler(BaseHTTPRequestHandler):
 
 
 # ---------------------------------------------------------------------------
-# Aira API console and SerpApi-compatible /v1 (routes live in aira/airaapi/routes.py)
+# API console and SerpApi-compatible /v1 (routes live in aira/airaapi/routes.py)
 # ---------------------------------------------------------------------------
 
 _airaapi_key_cache: dict[str, bytes] = {}
@@ -9081,7 +9350,7 @@ def _airaapi_secret_store() -> airaapi_store.SecretStore:
 
 
 class _AiraKeyIndex:
-    """Maps Aira API key hashes to this account in the accounts database."""
+    """Maps API key hashes to this account in the accounts database."""
 
     def __init__(self, user_id: str) -> None:
         self.user_id = user_id
@@ -9128,7 +9397,7 @@ def _resolve_airaapi_key(
 def _authenticate_airaapi_key(
     handler: RequestHandler, query: dict[str, list[str]]
 ) -> tuple[dict[str, Any], dict[str, Any]]:
-    """Resolve the presented Aira API key to (account, key row) and bind the account.
+    """Resolve the presented API key to (account, key row) and bind the account.
 
     Only *rejected* keys count toward the per-client lockout, and a valid key
     is never refused because of it. Every local process (and every web page
@@ -9155,7 +9424,7 @@ def _authenticate_airaapi_key(
 def _airaapi_handler(
     entry: airaapi_http.AiraRoute,
 ) -> Callable[..., None]:
-    """Bind one framework-neutral Aira API route to a RequestHandler method."""
+    """Bind one framework-neutral API route to a RequestHandler method."""
 
     def handle(
         self: RequestHandler,

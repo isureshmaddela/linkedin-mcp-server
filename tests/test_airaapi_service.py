@@ -1,4 +1,4 @@
-"""Aira API service: caching, errors, usage, diff, export, retention, monitors, keys."""
+"""API service: caching, errors, usage, diff, export, retention, monitors, keys."""
 
 from __future__ import annotations
 

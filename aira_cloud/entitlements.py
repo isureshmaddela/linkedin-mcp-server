@@ -17,7 +17,9 @@ from typing import Any
 
 from aira_cloud.config import CloudConfig, Clock
 from aira_cloud.db import ControlDB, dumps, loads, many, one
+from aira import apps as app_catalog
 from aira_cloud.errors import (
+    AppRequired,
     NotFound,
     PlanRequired,
     SubscriptionInactive,
@@ -27,9 +29,11 @@ from aira_cloud.plans import (
     DEFAULT_PLANS,
     STATUS_RESTRICTIONS,
     Entitlements,
+    app_state,
     day_key,
     merge_limits,
     month_key,
+    plan_for_app,
     plan_for_feature,
     plan_for_limit,
     with_later_limits,
@@ -387,6 +391,12 @@ class EntitlementService:
             )
         if sub is None or org is None:
             raise NotFound("Organization not found.")
+        with self.db.read() as connection:
+            app_rows = many(
+                connection,
+                "SELECT app_id, status FROM org_apps WHERE org_id = ? AND status IN ('active', 'granted')",
+                (org_id,),
+            )
         plan = self.catalog.get(sub["plan_id"], sub["plan_version"])
         limits = merge_limits(
             with_later_limits(sub["plan_id"], plan["entitlements"]),
@@ -408,6 +418,16 @@ class EntitlementService:
             elif decision is False:
                 features.discard(flag)
         status = sub["status"]
+        apps = self._apps_for(sub["plan_id"], features, {r["app_id"] for r in app_rows})
+        for app_id in apps:  # an app that is on carries its feature: the feature checks below keep working
+            feature = app_catalog.BY_ID[app_id].feature
+            if feature:
+                features.add(feature)
+        for app in (
+            app_catalog.APPS
+        ):  # an app that is off takes its feature away, even from an old plan version
+            if app.feature and app.id not in apps:
+                features.discard(app.feature)
         entitlements = Entitlements(
             org_id=org_id,
             plan_id=sub["plan_id"],
@@ -415,6 +435,7 @@ class EntitlementService:
             status=status,
             limits=limits,
             features=frozenset(features),
+            apps=frozenset(apps),
             restrictions=STATUS_RESTRICTIONS.get(status, frozenset()),
             period_start=sub["period_start"],
             period_end=sub["period_end"],
@@ -431,10 +452,58 @@ class EntitlementService:
             )
         return entitlements
 
+    @staticmethod
+    def _apps_for(
+        plan_id: str, features: builtins.set[str], subscribed: builtins.set[str]
+    ) -> builtins.set[str]:
+        """The apps an organization may open: included by the plan, bought as add-ons, or granted by an operator."""
+        apps: builtins.set[str] = set()
+        for app in app_catalog.APPS:
+            state = app_state(plan_id, app.id)
+            if state == "included":
+                apps.add(app.id)
+            elif app.id in subscribed:
+                apps.add(
+                    app.id
+                )  # bought (active) or granted; an unavailable app can still be granted
+        return apps
+
     # -- checks ----------------------------------------------------------------
 
     def required_plan(self, feature: str) -> str | None:
         return plan_for_feature(self.catalog.current(), feature)
+
+    def require_app(
+        self, org_id: str, app_id: str, *, audience: str = "staff"
+    ) -> Entitlements:
+        """The organization must have the app that owns the route, or the call is ``402 app_required``."""
+        entitlements = self.resolve(org_id)
+        if app_id not in app_catalog.BY_ID or entitlements.has_app(app_id):
+            return entitlements
+        app = app_catalog.BY_ID[app_id]
+        state = app_state(entitlements.plan_id, app_id)
+        needed = plan_for_app(app_id)
+        if audience == "candidate":
+            message = f"{app.name} is not enabled for your organization."
+            hint = "Ask an owner or administrator to turn it on."
+        elif state == "addon":
+            message = f"{app.name} is not turned on for your organization."
+            hint = f"Turn it on under Apps (billed per candidate seat on your {entitlements.plan_id.title()} plan)."
+        elif needed:
+            message = f"{app.name} is not available on the {entitlements.plan_id.title()} plan."
+            hint = f"Upgrade to {needed.title()} and turn it on under Apps."
+        else:
+            message = f"{app.name} is not available on the {entitlements.plan_id.title()} plan."
+            hint = "Contact sales."
+        raise AppRequired(
+            message + " " + hint,
+            app=app_id,
+            name=app.name,
+            plan_hint=hint,
+            required_plan=needed if state == "unavailable" else None,
+            current_plan=entitlements.plan_id,
+            audience=audience,
+        )
 
     def require_feature(
         self, org_id: str, feature: str, *, audience: str = "staff", label: str = ""
@@ -789,7 +858,7 @@ class Enforcer:
         "applications": "applications",
         "searches": "searches",
         "cover_letters": "AI cover letters",
-        "api_searches": "Aira API searches",
+        "api_searches": "API searches",
         "pooled_searches": "pooled SerpApi searches",
         "lead_enrichments": "lead enrichments",
         "lead_emails": "outreach emails",

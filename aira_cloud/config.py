@@ -196,6 +196,11 @@ class CloudConfig:
         default_factory=lambda: _env("AIRA_CLOUD_REMOTE_LOGIN_URL")
     )
     remote_login_ttl: int = 600
+    # a local installation of the apps (the single-user build) that this account can open
+    local_app_url: str = field(default_factory=lambda: _env("AIRA_CLOUD_LOCAL_APP_URL"))
+    # shared with that installation as AIRA_ACCOUNT_SECRET: signs launch-token validation (32+ characters)
+    launch_secret: str = field(default_factory=lambda: _env("AIRA_CLOUD_LAUNCH_SECRET"))
+    launch_ttl: int = 60
     # the sign-in broker (`python -m aira_cloud broker`): streams the candidate's private browser to them
     broker_host: str = field(
         default_factory=lambda: _env("AIRA_CLOUD_BROKER_HOST", "127.0.0.1")

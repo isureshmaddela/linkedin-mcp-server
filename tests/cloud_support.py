@@ -150,12 +150,16 @@ def build_org(
     plan: str = "team",
     seats: int = 25,
     slug_email: str = "acme.test",
+    apps: str | list[str] | None = None,
 ) -> Org:
+    """``apps`` turns app add-ons on after checkout: a list of app ids, or ``"all"`` for every add-on the plan offers."""
     result = signup(app, name, f"owner@{slug_email}")
     org_id = result["org"]["org_id"]
     if plan != "trial":
         pay(app, org_id, plan, seats)
     owner = result["owner"]
+    if apps:
+        subscribe_apps(app, owner, apps)
     people = {
         "owner": owner,
         "admin": add_member(app, owner, f"admin@{slug_email}", "admin"),
@@ -166,6 +170,25 @@ def build_org(
         "auditor": add_member(app, owner, f"auditor@{slug_email}", "auditor"),
     }
     return Org(app, org_id, **people)
+
+
+def subscribe_apps(app: CloudApp, owner: Principal, apps: str | list[str]) -> list[str]:
+    """Turn on app add-ons for the owner's organization (``"all"`` = every add-on the plan sells); returns the ids."""
+    from aira.apps import APP_IDS
+    from aira_cloud.plans import app_state
+
+    plan_id = app.billing.subscription(owner.org_id)["plan_id"]
+    wanted = (
+        [a for a in APP_IDS if app_state(plan_id, a) == "addon"]
+        if apps == "all"
+        else list(apps)
+    )
+    turned_on = []
+    for app_id in wanted:
+        if app_state(plan_id, app_id) == "addon":
+            app.billing.subscribe_app(owner, app_id)
+            turned_on.append(app_id)
+    return turned_on
 
 
 def local_module():

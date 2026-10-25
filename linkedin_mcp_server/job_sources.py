@@ -564,7 +564,7 @@ class GoogleJobsAdapter:
     def use_json_getter(self, json_getter: GoogleJobsJsonGetter) -> None:
         """Send this adapter's requests through ``json_getter`` instead of SerpApi directly.
 
-        Aira uses this to route searches through its Aira API history and cache.
+        Aira uses this to route searches through its API history and cache.
         The getter receives the request parameters (including ``api_key``) and
         returns the decoded response body.
         """

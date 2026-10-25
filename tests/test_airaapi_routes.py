@@ -1,4 +1,4 @@
-"""HTTP journeys for the Aira API console and the /v1 endpoint.
+"""HTTP journeys for the API console and the /v1 endpoint.
 
 Each test starts the real request handler on a loopback port with scratch
 SQLite databases and points Aira at the stand-in SerpApi server
@@ -533,7 +533,7 @@ def test_environment_key_and_account_key_precedence(env, api, monkeypatch, caplo
 def test_other_features_use_the_connected_key(env, api, monkeypatch):
     sources = api.ok("GET", "/api/sources")["sources"]
     google = next(item for item in sources if item["source"] == "google_jobs")
-    assert google["connected"] is False and "Aira API" in google["connection_hint"]
+    assert google["connected"] is False and "API" in google["connection_hint"]
     connect_key(api)
     sources = api.ok("GET", "/api/sources")["sources"]
     google = next(item for item in sources if item["source"] == "google_jobs")
@@ -1128,7 +1128,7 @@ def test_scheduler_records_failures_without_raising(env, connected):
     assert listed["next_run_at"] > "2001-01-01"
 
 
-# -- Aira API keys and /v1 ------------------------------------------------------------
+# -- API keys and /v1 ------------------------------------------------------------
 
 
 def create_key(api: Api, name="script", hourly_limit=None) -> dict:

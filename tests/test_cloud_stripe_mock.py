@@ -188,3 +188,28 @@ def test_the_adapter_reads_the_shapes_stripe_actually_returns(stripe, mock_url):
         }
     )
     assert done and done["subscription_id"] == "sub_9" and done["seats"] == 25
+
+
+def test_app_add_on_items_validate_against_the_openapi_spec(stripe):
+    """An app add-on is a second subscription item: price_data with a product, a quantity and metadata.app_id."""
+    updated = stripe.update_subscription(
+        "sub_123",
+        plan_id="team",
+        plan_name="Team",
+        seats=25,
+        seat_cents=1100,
+        currency="usd",
+        prorate=True,
+        addons=[{"app_id": "leads", "name": "Leads", "seat_cents": 400, "seats": 25}],
+    )
+    assert updated["id"].startswith("sub_")
+    without = stripe.update_subscription(
+        "sub_123",
+        plan_id="team",
+        plan_name="Team",
+        seats=25,
+        seat_cents=1100,
+        currency="usd",
+        prorate=False,
+    )
+    assert without["id"].startswith("sub_")

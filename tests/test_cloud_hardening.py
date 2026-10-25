@@ -45,8 +45,8 @@ def test_rotation_re_encrypts_documents_and_api_secrets_before_old_keys_are_reti
     stub.start()
     monkeypatch.setenv("AIRA_SERPAPI_BASE_URL", stub.base_url)
     try:
-        org = build_org(cloud, plan="starter", seats=10)
-        owner = sign_in(cloud, org.owner, mfa=False)
+        org = build_org(cloud, plan="team", seats=10, apps=["api"])
+        owner = sign_in(cloud, org.owner)
         assert (
             owner.call("POST", "/api/airaapi/key", {"api_key": DEFAULT_KEY})[0] == 200
         )
@@ -63,7 +63,8 @@ def test_rotation_re_encrypts_documents_and_api_secrets_before_old_keys_are_reti
         assert (
             detail["documents"] == 1
             and detail["api_secrets"] == 1
-            and detail["secrets"] == 1
+            and detail["secrets"]
+            == 2  # "extra" and the owner's TOTP secret (Team requires MFA)
             and detail["keys_retired"] == 1
         )
         assert cloud.secrets.current_version(org.org_id) == first + 1

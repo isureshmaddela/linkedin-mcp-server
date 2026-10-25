@@ -133,7 +133,9 @@ def used(cloud, org, metric):
 
 @pytest.fixture
 def team(cloud, serpapi):
-    org = build_org(cloud, "Leads Team", plan="team", seats=25, slug_email="leads.test")
+    org = build_org(
+        cloud, "Leads Team", plan="team", seats=25, slug_email="leads.test", apps="all"
+    )
     configure(cloud, org, linkedin=True)
     return org
 
@@ -157,20 +159,21 @@ def test_every_leads_route_has_a_policy_entry():
             assert rule.write == (rule.permission == "leads.write"), name
 
 
-def test_leads_start_with_the_starter_plan_and_a_402_names_it(cloud):
+def test_leads_is_an_app_the_trial_includes_and_paid_plans_turn_on(cloud):
     candidate = sign_in(cloud, trial_candidate(cloud, "trial.test"))
-    status, body = candidate.call("GET", "/api/leads/overview")
-    assert (
-        status == 402
-        and body["code"] == "plan_required"
-        and body["required_plan"] == "starter"
+    assert candidate.call("GET", "/api/leads/overview")[0] == 200, (
+        "the trial includes every app"
     )
-    for plan_id in ("starter", "team", "enterprise"):
-        assert "leads" in plans.DEFAULT_PLANS[plan_id]["entitlements"]["features"]
-    assert "leads" not in plans.DEFAULT_PLANS["trial"]["entitlements"]["features"]
+    for plan_id in ("starter", "team"):
+        assert "leads" not in plans.DEFAULT_PLANS[plan_id]["entitlements"]["features"]
+        assert plans.app_state(plan_id, "leads") == "addon"
+    assert "leads" in plans.DEFAULT_PLANS["enterprise"]["entitlements"]["features"]
     starter = build_org(
         cloud, "Starter Org", plan="starter", seats=5, slug_email="starter.test"
     )
+    status, body = sign_in(cloud, starter.candidate).call("GET", "/api/leads/overview")
+    assert status == 402 and body["code"] == "app_required" and body["app"] == "leads"
+    cloud.billing.subscribe_app(starter.owner, "leads")
     assert (
         sign_in(cloud, starter.candidate).call("GET", "/api/leads/overview")[0] == 200
     )
@@ -188,7 +191,7 @@ def test_a_plan_version_published_before_leads_gets_the_feature_and_limits():
     }
     merged = plans.with_later_limits("starter", old)
     assert (
-        "leads" in merged["features"]
+        "leads" not in merged["features"]  # an add-on, turned on under Apps
         and merged["leads_stored"] == 2000
         and merged["lead_enrichments_per_month"] == 200
     )
@@ -196,7 +199,9 @@ def test_a_plan_version_published_before_leads_gets_the_feature_and_limits():
 
 
 def test_only_the_candidate_and_a_coach_with_act_scope_use_leads(cloud, serpapi):
-    org = build_org(cloud, "Role Org", plan="team", seats=25, slug_email="roles.test")
+    org = build_org(
+        cloud, "Role Org", plan="team", seats=25, slug_email="roles.test", apps="all"
+    )
     configure(cloud, org)
     candidate = sign_in(cloud, org.candidate)
     created = candidate.call(
@@ -239,8 +244,12 @@ def test_only_the_candidate_and_a_coach_with_act_scope_use_leads(cloud, serpapi)
 
 
 def test_another_organizations_lead_ids_are_not_found(cloud, serpapi):
-    a = build_org(cloud, "Org A", plan="team", seats=25, slug_email="a.test")
-    b = build_org(cloud, "Org B", plan="team", seats=25, slug_email="b.test")
+    a = build_org(
+        cloud, "Org A", plan="team", seats=25, slug_email="a.test", apps="all"
+    )
+    b = build_org(
+        cloud, "Org B", plan="team", seats=25, slug_email="b.test", apps="all"
+    )
     for org in (a, b):
         configure(cloud, org, key=False)
     ca, cb = sign_in(cloud, a.candidate), sign_in(cloud, b.candidate)
@@ -331,7 +340,12 @@ def test_google_lead_searches_are_metered_and_a_plan_without_the_source_is_refus
     )
     assert used(cloud, team, "searches") == 4, "a refused request is not counted"
     starter = build_org(
-        cloud, "Starter Org", plan="starter", seats=5, slug_email="st.test"
+        cloud,
+        "Starter Org",
+        plan="starter",
+        seats=5,
+        slug_email="st.test",
+        apps=["leads"],
     )
     cloud.tenancy.update_policy(starter.owner, {"allowed_sources": ALL_GOOGLE})
     sign_in(cloud, starter.owner).call(
@@ -400,7 +414,9 @@ def test_company_news_signals_are_gated_and_metered_like_other_google_searches(
 
 def test_a_lead_search_with_the_pooled_key_spends_the_pooled_allowance(cloud, serpapi):
     cloud.config.pooled_serpapi_key = DEFAULT_KEY
-    org = build_org(cloud, "Pool Org", plan="team", seats=25, slug_email="pool.test")
+    org = build_org(
+        cloud, "Pool Org", plan="team", seats=25, slug_email="pool.test", apps="all"
+    )
     cloud.tenancy.update_policy(
         org.owner, {"allowed_sources": ALL_GOOGLE, "use_pooled_serpapi": True}
     )

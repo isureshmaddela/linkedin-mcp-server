@@ -105,6 +105,7 @@ def me_payload(app: Any, principal: Principal) -> dict[str, Any]:
             "period_end": entitlements.period_end,
         },
         "features": sorted(entitlements.features),
+        "apps": app.billing.apps_for_member(principal.org_id, entitlements),
         "coach_scopes": entitlements.coach_scopes(),
         "permissions": permissions,
         "candidate_permissions": candidate_permissions,
@@ -406,6 +407,36 @@ def easy_apply_opt_in(req: Req):  # noqa: ANN201
             connection=connection,
         )
     return 200, {"easy_apply": enable}
+
+
+# --------------------------------------------------------------------------- opening a local installation
+
+
+@cloud_route("GET", r"/api/launch/local")
+def launch_local(req: Req):  # noqa: ANN201
+    """Send the signed-in candidate to the local installation with a one-time launch token (302; JSON when asked)."""
+    issued = req.app.launch.issue(req.principal, req.q("return"))
+    accept = req.request.headers.get("accept", "")
+    if "application/json" in accept and "text/html" not in accept:
+        return 200, {"redirect": issued["redirect"], "expires_in": issued["expires_in"]}
+    return Reply(
+        302,
+        b"",
+        content_type="text/plain; charset=utf-8",
+        headers=[("Location", issued["redirect"]), ("Cache-Control", "no-store")],
+    )
+
+
+@cloud_route("POST", r"/api/internal/launch/validate", auth="public", csrf=False)
+def launch_validate(req: Req):  # noqa: ANN201
+    """The local installation asks who a launch token signs in (signed with the launch secret; once)."""
+    try:
+        req.app.signed_requests.verify(
+            req.request.headers_object(), req.request.body, purpose="launch"
+        )
+    except PermissionError as error:
+        return 401, {"error": str(error), "code": "bad_signature"}
+    return 200, req.app.launch.validate(str(req.body().get("token", "")))
 
 
 __all__ = ["me_payload", "one", "OPERATOR_COOKIE"]

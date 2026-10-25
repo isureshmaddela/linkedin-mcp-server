@@ -68,7 +68,7 @@ class Hooks:
     automation_status: Callable[[str], dict[str, Any] | None] | None = None
     # (label) -> None; says what the running automation is doing now
     progress: Callable[[str], None] | None = None
-    # (user_id) -> object with add(key_hash) / remove(key_hash) that indexes Aira API keys for lookup
+    # (user_id) -> object with add(key_hash) / remove(key_hash) that indexes API keys for lookup
     key_index: Callable[[str], Any] | None = None
     # () -> how many search plans the bound account may keep (replaces the local default of 10)
     max_plans: Callable[[], int | None] | None = None

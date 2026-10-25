@@ -243,7 +243,7 @@
       h("div", { class: "btn-row" }, connect, easy)));
   }
 
-  // The Aira API usage widget is for the organization's administrators; everyone else keeps the Careers one.
+  // The API usage widget is for the organization's administrators; everyone else keeps the Careers one.
   const originalWidgets = Aira.dashboardWidgets;
   if (originalWidgets) Aira.dashboardWidgets = () => { const nodes = originalWidgets(); return cloud.can("integrations.read") ? nodes : nodes.slice(1); };
 

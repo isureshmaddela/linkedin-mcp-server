@@ -1,4 +1,4 @@
-"""Aira API: a local SerpApi console, SerpApi-compatible endpoint and Careers engine layer.
+"""API: a local SerpApi console, SerpApi-compatible endpoint and Careers engine layer.
 
 The package keeps the same split as the rest of ``aira``: pure domain modules
 (``catalog``, ``client``, ``store``, ``service``, ``compat``) that never import

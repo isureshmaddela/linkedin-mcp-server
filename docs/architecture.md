@@ -11,7 +11,7 @@ Aira is a local-first AI Career Copilot layered beside the existing LinkedIn MCP
 | API and scheduler | Python 3.12+, `http.server` (threaded), stdlib `sqlite3` | The repository already used this stack; no framework migration was justified. |
 | Domain modules | `aira/` package (pure functions, connection injection) | Testable in isolation; the server module only wires routes. |
 | LinkedIn | Existing FastMCP + Patchright server, one isolated worker per account | Preserves the upstream integration unchanged. |
-| SerpApi (Aira API and Careers) | `aira/airaapi/` (catalog of 136 engines, client, store, service, `/v1` compatibility layer, Careers) | One validated key, one recorded and cached call path for the console, Careers, the Jobs-tab Google source and scripts. `urllib` only. |
+| SerpApi (API and Careers) | `aira/airaapi/` (catalog of 136 engines, client, store, service, `/v1` compatibility layer, Careers) | One validated key, one recorded and cached call path for the console, Careers, the Jobs-tab Google source and scripts. `urllib` only. |
 | ATS and Google Jobs | `linkedin_mcp_server/job_sources.py` (contracts, LinkedIn, Greenhouse, Google/SerpApi) and `aira/ats.py` (Lever, Ashby, SmartRecruiters, catalog, portal detection) | Official public APIs only, injected transports for tests. |
 | UI | Static HTML/CSS/vanilla JS served by Aira (`auto_apply_assistant/`), hash router, no build step | Works offline, CSP `script-src 'self'`, no bundler to maintain. |
 | AI | Ollama (`/api/chat`, JSON mode) | Local inference; nothing leaves the machine. |
@@ -36,7 +36,7 @@ flowchart LR
     Server --> AiraApi[aira.airaapi
 service + store + client]
     AiraApi --> Serp2[SerpApi engines]
-    Scripts[Your scripts] -->|/v1 + Aira API key| Server
+    Scripts[Your scripts] -->|/v1 + API key| Server
     Sources -->|Jobs-tab Google source| AiraApi
     Server --> Ollama[Ollama]
     Server --> SQLite[(accounts.sqlite3 + per-user DB)]
@@ -72,7 +72,7 @@ service + store + client]
 | `airaapi` | See below: SerpApi catalog, client, store, service, `/v1` compatibility layer and Careers. |
 | `security` | Security headers, sliding-window rate limiter, same-origin and custom-header CSRF checks. |
 
-### Aira API and Careers (`aira/airaapi/`)
+### API and Careers (`aira/airaapi/`)
 
 The design contract is `docs/airaapi-spec.md`; this is the map.
 
@@ -144,6 +144,6 @@ Key properties:
 
 - Loopback only; no multi-tenant hosting, TLS, or reverse proxy contract.
 - No candidate-side official submission API exists for the connected sources; submission is user-performed and recorded.
-- SerpApi results are only as current and complete as SerpApi returns them; Aira never fabricates results, and without a key the console and Careers show a setup state. Outgoing webhooks and team seats are not built (see the coverage page in Aira API > Docs).
+- SerpApi results are only as current and complete as SerpApi returns them; Aira never fabricates results, and without a key the console and Careers show a setup state. Outgoing webhooks and team seats are not built (see the coverage page in API > Docs).
 - Gmail/Outlook OAuth and Google/Microsoft calendar APIs are not connected; email is imported by paste/.eml and calendars via ICS/links.
 - Workday, iCIMS, Taleo, Oracle, SuccessFactors, BambooHR, UKG, and direct career sites are catalogued as planned with reasons.

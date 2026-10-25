@@ -3,7 +3,7 @@
 Thin glue over :mod:`aira.airaapi.careers` (job search, import, alerts) and
 :mod:`aira.airaapi.careers_intel` (reports). Every handler runs as the signed-in
 user, opens that user's database and uses the account's SerpApi key through the
-same resolution as the Aira API console; the key is never part of a response.
+same resolution as the API console; the key is never part of a response.
 Loaded by :func:`aira.airaapi.http.load_route_modules`.
 """
 

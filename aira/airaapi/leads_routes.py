@@ -2,7 +2,7 @@
 
 Thin glue over :mod:`aira.leads` (storage, sources, scoring, enrichment, drafts). Every handler runs as the
 signed-in user and opens that user's database. Google searches use the account's SerpApi key through the same
-resolution as the Aira API console (so every search is in Aira API > History and shares its cache); the key is
+resolution as the API console (so every search is in API > History and shares its cache); the key is
 never part of a response. LinkedIn Sales Navigator is read through the person's own LinkedIn connection.
 Loaded by :func:`aira.airaapi.http.load_route_modules`.
 """

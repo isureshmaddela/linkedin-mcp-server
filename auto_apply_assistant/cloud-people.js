@@ -302,7 +302,7 @@
     const s = data.serpapi;
     const key = h("input", { type: "password", autocomplete: "off", placeholder: "Paste a SerpApi key", id: "serpKey", "aria-label": "SerpApi key", ...(s.available && manage ? {} : { disabled: true }) });
     const error = inlineError();
-    const status = s.configured ? h("div", { class: "adm-note" }, `A key ending in ${s.last4} is stored encrypted. It is used for Google Jobs, Careers and the Aira API console.`) : s.source === "pooled" ? h("div", { class: "adm-note", text: "No key of your own: searches use Aira's pooled allowance (metered)." }) : h("div", { class: "adm-note warn", text: "No key yet. Google Jobs and Careers need your organization's SerpApi key." });
+    const status = s.configured ? h("div", { class: "adm-note" }, `A key ending in ${s.last4} is stored encrypted. It is used for Google Jobs, Careers and the API console.`) : s.source === "pooled" ? h("div", { class: "adm-note", text: "No key of your own: searches use Aira's pooled allowance (metered)." }) : h("div", { class: "adm-note warn", text: "No key yet. Google Jobs and Careers need your organization's SerpApi key." });
     const body = h("div", { class: "panel-body adm-form" }, status,
       !s.available ? h("div", { class: "adm-note", text: `Google Jobs is included from the ${planWith("sources.google_jobs")} plan.` }) : null,
       manage && s.available ? h("div", { class: "adm-form" }, ui.field(s.configured ? "Replace the key" : "SerpApi key", key, "The key is checked with SerpApi before it is saved. Never put it in an environment file."), error,
@@ -313,9 +313,9 @@
 
   function apiCard(data, manage, planWith) {
     const a = data.api;
-    return A.panel("Aira API", h("div", { class: "panel-body adm-form" },
+    return A.panel("API", h("div", { class: "panel-body adm-form" },
       h("dl", { class: "adm-dl" }, h("dt", { text: "Console (history, read-only)" }), h("dd", { text: a.console ? "Included" : "Not included" }), h("dt", { text: "Live searches from the console" }), h("dd", { text: a.searches ? "Included" : `From the ${planWith("api.searches")} plan` }), h("dt", { text: "SerpApi-compatible /v1 and keys" }), h("dd", { text: a.v1 ? `${a.keys} of ${a.v1_limit ?? "unlimited"} keys in use` : `From the ${planWith("api.v1")} plan` })),
-      manage && a.console ? h("div", { class: "adm-btnrow" }, h("a", { class: "btn secondary", href: "#/airaapi", text: "Open the Aira API console" })) : null,
+      manage && a.console ? h("div", { class: "adm-btnrow" }, h("a", { class: "btn secondary", href: "#/airaapi", text: "Open the API console" })) : null,
       h("p", { class: "adm-sub", text: "API keys, per-key limits and the monthly search allowance are managed in the console. Keys belong to the organization, not to a person." })), { sub: a.v1 ? "Keys enabled" : "No /v1" });
   }
 

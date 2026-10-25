@@ -2,7 +2,10 @@
 # Usage: .\scripts\start_aira.ps1 [-Port 8765] [-OpenBrowser]
 param(
     [int]$Port = 8765,
-    [switch]$OpenBrowser
+    [switch]$OpenBrowser,
+    # The Aira account (hosted build) that can sign people in here, e.g. http://127.0.0.1:8780. The shared secret
+    # (AIRA_ACCOUNT_SECRET) belongs in .env, not on the command line.
+    [string]$AccountUrl = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -25,6 +28,7 @@ if ($null -eq $ollama) {
 }
 
 $env:AUTO_APPLY_PORT = "$Port"
+if ($AccountUrl) { $env:AIRA_ACCOUNT_URL = $AccountUrl }
 Write-Host "Starting Aira Career Copilot at http://127.0.0.1:$Port (Ctrl+C to stop)" -ForegroundColor Green
 if ($OpenBrowser) { Start-Process "http://127.0.0.1:$Port" }
 uv run python auto_apply_assistant.py

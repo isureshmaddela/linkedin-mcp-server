@@ -195,14 +195,19 @@
     $("authScreen").hidden = true;
     $("boot").hidden = true;
     $("app").hidden = false;
-    $("accountEmail").textContent = `${P.me.email} · ${P.me.role === "platform_admin" ? "platform admin" : "support"}`;
+    $("accountEmail").textContent = P.me.email;
+    $("accountMeta").textContent = P.me.role === "platform_admin" ? "platform admin" : "support";
     $("statusStrip").replaceChildren();
     const logout = $("logoutBtn");
     const fresh = logout.cloneNode(true);
     logout.replaceWith(fresh);
     fresh.addEventListener("click", signOut);
-    Aira.NAV.splice(0, Aira.NAV.length, ...P.items.map((item) => ({ id: item.id, label: item.label, icon: item.icon, group: "Platform", key: item.key, quick: !!item.quick })));
+    // The console is its own app in the switcher: every account, no workspace.
+    Aira.apps.pseudo.platform = { name: "Admin console", tagline: "Every account on this platform", icon: "settings", home: "ptenants" };
+    Aira.NAV.splice(0, Aira.NAV.length, ...P.items.map((item) => ({ id: item.id, label: item.label, icon: item.icon, group: "Platform", app: "platform", key: item.key, quick: !!item.quick })));
+    Aira.state.currentApp = "platform";
     Aira.renderNav();
+    if (Aira.renderAccount) Aira.renderAccount();
     renderSupportBar();
     if (!location.hash.startsWith("#/platform")) location.hash = "#/platform/tenants";
     else Aira.router.render();
@@ -380,7 +385,7 @@
   // ---------------------------------------------------------------------------
   const MB = 1024 * 1024;
   const FEATURES = ["sources.aira_jobs", "sources.company_boards", "sources.google_jobs", "sources.linkedin", "automation.submit", "ai.cover_letters", "api.console_read", "api.searches", "api.v1", "auth.mfa", "auth.sso", "auth.scim", "coach.act", "coach.approve", "branding", "overage", "pooled_serpapi", "byo_model", "siem_export", "legal_hold", "priority_sources", "custom_limits"];
-  const LIMIT_FIELDS = [["candidate_seats", "Candidate seats"], ["staff_seats", "Coach and admin seats"], ["apps_per_candidate_day", "Applications per candidate per day"], ["apps_per_org_month", "Applications per organization per month"], ["search_plans_per_candidate", "Search plans per candidate"], ["cover_letters_per_month", "AI cover letters per month"], ["api_searches_per_month", "Aira API searches per month"], ["api_v1_keys", "Aira API keys (/v1)"], ["api_v1_per_minute", "/v1 requests per minute"], ["monitors_per_candidate", "Monitors per candidate"], ["storage_mb", "Document storage (MB)"], ["retention_days", "Data retention (days)"], ["audit_days", "Audit log (days)"]];
+  const LIMIT_FIELDS = [["candidate_seats", "Candidate seats"], ["staff_seats", "Coach and admin seats"], ["apps_per_candidate_day", "Applications per candidate per day"], ["apps_per_org_month", "Applications per organization per month"], ["search_plans_per_candidate", "Search plans per candidate"], ["cover_letters_per_month", "AI cover letters per month"], ["api_searches_per_month", "API searches per month"], ["api_v1_keys", "API keys (/v1)"], ["api_v1_per_minute", "/v1 requests per minute"], ["monitors_per_candidate", "Monitors per candidate"], ["storage_mb", "Document storage (MB)"], ["retention_days", "Data retention (days)"], ["audit_days", "Audit log (days)"]];
   const PRICE_FIELDS = [["seat_dollars", "Price per seat per month (USD)"], ["min_seats", "Minimum seats"], ["application_cents", "Overage: per application (cents)"], ["search_cents", "Overage: per search (cents)"], ["cover_letter_cents", "Overage: per cover letter (cents)"], ["pooled_search_cents", "Overage: per pooled search (cents)"]];
 
   SCREENS.plans = async (stage) => {
@@ -488,7 +493,7 @@
     ["sources.linkedin", "LinkedIn search and inbox", "The riskiest source: switch it off for everyone without a deploy."],
     ["linkedin.easy_apply", "LinkedIn Easy Apply", "Automatic applications through LinkedIn."],
     ["automation.submit", "Automatic submission", "Review mode only when off."],
-    ["api.v1", "The Aira API (/v1)", "SerpApi-compatible API with organization keys."],
+    ["api.v1", "The API (/v1)", "SerpApi-compatible API with organization keys."],
     ["sources.google_jobs", "Google Jobs (SerpApi)", "Searches through an organization's key."],
   ];
 

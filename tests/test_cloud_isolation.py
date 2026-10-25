@@ -48,7 +48,7 @@ SAFE = {
 # Routes whose path identifiers are not tenant-owned objects, with the reason each needs no isolation sweep.
 EXEMPT_GROUPS = {
     r"[a-z][a-z0-9_]{1,60}": "standard-answer field names are a global vocabulary",
-    r"[a-z][a-z0-9_]{0,63}": "Aira API engine names are a global catalog",
+    r"[a-z][a-z0-9_]{0,63}": "API engine names are a global catalog",
     r"[A-Za-z0-9_+=-]{1,128}": "conversation ids are LinkedIn thread ids, looked up in the caller's own cached inbox",
     r"[A-Za-z0-9_.-]+": "static file names",
     r"[A-Za-z0-9_-]{20,80}": "bearer tokens: possession is the credential (invitations, downloads)",
@@ -59,6 +59,7 @@ EXEMPT_GROUPS = {
     r"[A-Za-z0-9_-]{1,80}": "SerpApi search ids resolved inside the caller's own workspace",
     r"[a-z0-9%]{1,720}": "custom-answer keys are labels the caller saved in their own workspace",
     r"[a-z-]{3,40}": "legal document names are a fixed, public list",
+    r"[a-z0-9_-]+": "app ids are a fixed catalog (careers, leads, api)",
 }
 # Routes with no tenant selector in the path; mutating ones are covered by body-identifier tests below.
 PUBLIC_OR_OWN_SESSION = {
@@ -75,8 +76,8 @@ class World:
 
     def __init__(self, app: Any) -> None:
         self.app = app
-        self.a = build_org(app, "Alpha Org", slug_email="alpha.test")
-        self.b = build_org(app, "Beta Secret Org", slug_email="beta.test")
+        self.a = build_org(app, "Alpha Org", slug_email="alpha.test", apps="all")
+        self.b = build_org(app, "Beta Secret Org", slug_email="beta.test", apps="all")
         for org in (self.a, self.b):
             for who in ("candidate", "other"):
                 seed_workspace(

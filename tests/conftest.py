@@ -20,6 +20,16 @@ def reset_singletons():
 
 
 @pytest.fixture(autouse=True)
+def isolate_account_link(monkeypatch):
+    """The local .env may link this checkout to an account; tests opt in to that themselves.
+
+    Empty rather than removed: the app calls load_dotenv on import, which never overrides a variable that is set.
+    """
+    for name in ("AIRA_ACCOUNT_URL", "AIRA_ACCOUNT_SECRET", "AIRA_ACCOUNT_ALLOW_LOCAL"):
+        monkeypatch.setenv(name, "")
+
+
+@pytest.fixture(autouse=True)
 def isolate_profile_dir(tmp_path, monkeypatch):
     """Redirect profile directory to tmp_path via config and DEFAULT_PROFILE_DIR."""
     fake_profile = tmp_path / "profile"

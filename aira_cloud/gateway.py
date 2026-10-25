@@ -31,6 +31,7 @@ from aira.security import (
     requires_custom_header,
     same_origin,
 )
+from aira.apps import app_of_path
 from aira_cloud import context, redaction
 from aira_cloud.db import clear_scope, set_scope
 from aira_cloud.errors import (
@@ -45,7 +46,13 @@ from aira_cloud.errors import (
 )
 from aira_cloud.gate import policy_source
 from aira_cloud.agent import request_spec
-from aira_cloud.policy import LINKEDIN_NOTICE, POLICY, Rule, remote_assignment
+from aira_cloud.policy import (
+    LINKEDIN_NOTICE,
+    POLICY,
+    Rule,
+    remote_assignment,
+    APP_FREE_ROUTES,
+)
 from aira_cloud.rbac import CANDIDATE, Principal
 from aira_cloud.webio import (
     CLOUD_ROUTES,
@@ -407,6 +414,13 @@ class Gateway:
                     )  # operator routes act on the operator's own rows: platform scope
                 self.rate_check(principal, org_id)
                 self.app.entitlements.require_state(org_id, write=route.writes)
+                if route.auth == "member":
+                    self._require_app_for(
+                        request.path,
+                        route.name,
+                        org_id,
+                        "candidate" if principal.role == CANDIDATE else "staff",
+                    )
         elif route.auth == "public" and route.method in MUTATING:
             allowed, retry = self.auth_limiter.check(f"auth:{request.client_ip}")
             if not allowed:
@@ -470,6 +484,7 @@ class Gateway:
             else {}
         )
         entitlements = self.app.entitlements.require_state(org_id, write=rule.write)
+        self._require_app_for(request.path, name, org_id, audience)
 
         candidate_id = ""
         if rule.scope == "candidate":
@@ -674,6 +689,15 @@ class Gateway:
         return HttpResponse(captured.status, list(captured.headers), captured.body)
 
     # ------------------------------------------------------------------ helpers the hooks use
+
+    def _require_app_for(
+        self, path: str, route_name: str, org_id: str, audience: str
+    ) -> None:
+        """A route an app owns is refused with ``402 app_required`` until the organization has that app."""
+        owner = app_of_path(path)
+        if owner is None or not owner.feature or route_name in APP_FREE_ROUTES:
+            return
+        self.app.entitlements.require_app(org_id, owner.id, audience=audience)
 
     def _target_candidate(self, request: HttpRequest, principal: Principal) -> str:
         explicit = request.headers.get("x-aira-candidate", "") or request.q("candidate")

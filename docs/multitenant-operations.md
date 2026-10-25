@@ -158,7 +158,7 @@ To prove the drill, keep a record of: backup time, time to restore, the audit ve
 ## 7. Key rotation
 
 - **Passwords and sessions**: users change passwords themselves; `POST /api/auth/password/change` and a reset end every other session. An administrator ends someone's sessions by changing their role or removing them.
-- **Organization data key**: `SecretManager.rotate(org_id)` adds a new key and re-encrypts that organization's control-plane secrets (SSO client secret, model endpoint, MFA secrets). New documents use the new key; old documents stay readable because retired keys are kept. Documents and the secrets stored in the organization's Aira API workspace are re-encrypted by a worker job (`python -m aira_cloud rotate-keys --org <id>` or the platform route); retired keys are kept until that finishes.
+- **Organization data key**: `SecretManager.rotate(org_id)` adds a new key and re-encrypts that organization's control-plane secrets (SSO client secret, model endpoint, MFA secrets). New documents use the new key; old documents stay readable because retired keys are kept. Documents and the secrets stored in the organization's API workspace are re-encrypted by a worker job (`python -m aira_cloud rotate-keys --org <id>` or the platform route); retired keys are kept until that finishes.
 - **Master key** (moving between the local file, AWS KMS and Vault, or to a new KMS key): `python -m aira_cloud rewrap-keys`. Data keys do not change, so documents and secrets are not touched. Procedure:
   1. Set the *new* provider in the normal variables (`AIRA_CLOUD_KMS`, `AIRA_CLOUD_KMS_KEY_ID`, ...) and the *old* one with the same names and an `_OLD` suffix: `AIRA_CLOUD_KMS_OLD` (default `local`), `AIRA_CLOUD_MASTER_KEY_OLD` (or leave it unset to read `<data root>/secrets/master.key`), `AIRA_CLOUD_KMS_KEY_ID_OLD`, `AIRA_CLOUD_KMS_ENDPOINT_OLD`, `AIRA_CLOUD_KMS_REGION_OLD`, `AIRA_CLOUD_KMS_ACCESS_KEY_OLD`, `AIRA_CLOUD_KMS_SECRET_KEY_OLD`, `AIRA_CLOUD_KMS_SESSION_TOKEN_OLD`, `AIRA_CLOUD_KMS_VAULT_ADDR_OLD`, `AIRA_CLOUD_KMS_VAULT_TOKEN_OLD`, `AIRA_CLOUD_KMS_VAULT_MOUNT_OLD`, `AIRA_CLOUD_KMS_VAULT_NAMESPACE_OLD`.
   2. `python -m aira_cloud rewrap-keys --verify-only` proves the old key opens every organization key and the new one wraps and unwraps it again, changing nothing.
@@ -232,6 +232,8 @@ Without `AIRA_CLOUD_SMTP_URL` nothing is sent: every message is stored in `mail_
 | `AIRA_CLOUD_AGENT_HOST` / `AIRA_CLOUD_AGENT_PORT` | Where a worker host's agent listens. |
 | `AIRA_CLOUD_AGENT_URL` | The address the gateway uses to reach that agent; published in the worker heartbeat. |
 | `AIRA_CLOUD_REMOTE_LOGIN_URL` | The sign-in broker's public address with a `{token}` placeholder, for example `https://login.example.com/s/{token}`. Empty means sign-in opens on the worker host itself. |
+| `AIRA_CLOUD_LOCAL_APP_URL` | A local installation of the apps (the single-user build) that candidates of this account may open with one click, for example `http://127.0.0.1:8765`. The app switcher shows it, and `GET /api/launch/local` sends a candidate there with a one-time token. Empty means no local installation. See [apps.md](apps.md). |
+| `AIRA_CLOUD_LAUNCH_SECRET` | The secret that installation uses (as its `AIRA_ACCOUNT_SECRET`) to validate launch tokens with `POST /api/internal/launch/validate`: 32+ random characters, never the agent or broker secret. Empty switches launching off (`409 not_configured`). Tokens live 60 seconds, are stored hashed and are single use; expired ones are swept by housekeeping. |
 
 ## The sign-in broker
 

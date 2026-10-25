@@ -1,4 +1,4 @@
-/* Aira — Aira API console: overview, engines, history, locations, monitors, account, keys, docs and status.
+/* Aira — API console: overview, engines, history, locations, monitors, account, keys, docs and status.
  *
  * The console is one view (#/airaapi) with a tab per page (?tab=). Every tab is a function in Aira.airaapi.tabs
  * taking (content, ctx) with ctx = {route, query, tab, content, setQuery(patch)}. The Playground tab hands its
@@ -362,16 +362,16 @@
     const tab = TAB_IDS.includes(route.query.tab) ? route.query.tab : "overview";
     Aira.closeDrawer(); // a drawer from the previous tab must not survive navigation
     const label = (TABS.find(([id]) => id === tab) || TABS[0])[1];
-    document.title = `${label} · Aira API · Aira`;
+    document.title = `${label} · API · Aira`;
     const crumbs = document.getElementById("crumbs");
-    if (crumbs) crumbs.replaceChildren(h("span", { text: "Aira API" }), h("span", { class: "muted", "aria-hidden": "true", text: "/" }), h("span", { text: label }));
+    if (crumbs) crumbs.replaceChildren(h("span", { text: "API" }), h("span", { class: "muted", "aria-hidden": "true", text: "/" }), h("span", { text: label }));
 
     const content = h("div", { class: "aa-content", id: "aaContent", role: "region", "aria-label": label, tabindex: "-1" });
-    const nav = h("nav", { class: "subnav aa-subnav", "aria-label": "Aira API sections" },
+    const nav = h("nav", { class: "subnav aa-subnav", "aria-label": "API sections" },
       ...TABS.map(([id, text]) => h("a", { href: link(id), "aria-current": id === tab ? "page" : "false", text })));
     main.replaceChildren(
       h("div", { class: "page-head aa-head" },
-        h("div", {}, h("h1", { text: "Aira API" }), h("p", { text: "Every SerpApi engine plus Aira's own free Aira Jobs engine behind one console: search, inspect, compare, monitor and call them from your own code through a local, cached, SerpApi-compatible endpoint." }))),
+        h("div", {}, h("h1", { text: "API" }), h("p", { text: "Every SerpApi engine plus Aira's own free Aira Jobs engine behind one console: search, inspect, compare, monitor and call them from your own code through a local, cached, SerpApi-compatible endpoint." }))),
       nav, content);
     const active = nav.querySelector('[aria-current="page"]');
     if (active && active.scrollIntoView) active.scrollIntoView({ inline: "center", block: "nearest" });
@@ -2019,19 +2019,19 @@
           h("li", { text: "The browser only ever learns whether a key is connected and its last four characters." }),
           h("li", { text: "Aira talks to SerpApi over HTTPS and refuses redirects, so the key cannot be forwarded elsewhere." }),
           h("li", { text: "Logs, errors, stored searches and exports have the key removed." }),
-          h("li", { text: "Other programs on this computer use Aira API keys instead (API keys tab). They never see the SerpApi key." }))) })),
+          h("li", { text: "Other programs on this computer use API keys instead (API keys tab). They never see the SerpApi key." }))) })),
         ...[plansTable(platform, data.account)].filter(Boolean));
     };
     await paint();
   };
 
   // ===========================================================================
-  // Aira API keys
+  // API keys
   // ===========================================================================
 
   function showNewKey(created, afterClose) {
     const secret = created.secret;
-    const field = h("input", { type: "text", readonly: true, class: "aa-secret sk-mono", value: secret, "aria-label": "Your new Aira API key", spellcheck: "false", autocomplete: "off" });
+    const field = h("input", { type: "text", readonly: true, class: "aa-secret sk-mono", value: secret, "aria-label": "Your new API key", spellcheck: "false", autocomplete: "off" });
     field.addEventListener("focus", () => field.select());
     const origin = `${location.origin}/v1`;
     const sample = `curl "${origin}/search.json?engine=google&q=coffee&api_key=${secret}"`;
@@ -2092,7 +2092,7 @@
         h("td", { class: "aa-acts" }, revoked ? null : revoke));
     });
     const table = keys.length
-      ? h("div", { class: "table-wrap aa-table-wrap" }, h("table", { class: "table aa-table aa-keys-table" }, h("caption", { class: "visually-hidden", text: "Aira API keys" }),
+      ? h("div", { class: "table-wrap aa-table-wrap" }, h("table", { class: "table aa-table aa-keys-table" }, h("caption", { class: "visually-hidden", text: "API keys" }),
         h("thead", {}, h("tr", {}, h("th", { scope: "col", text: "Key" }), h("th", { scope: "col", class: "hide-sm", text: "Status" }), h("th", { scope: "col", class: "hide-md", text: "Created" }), h("th", { scope: "col", class: "hide-sm", text: "Last used" }), h("th", { scope: "col", class: "hide-sm", text: "Usage" }), h("th", { scope: "col" }, h("span", { class: "visually-hidden", text: "Actions" })))),
         h("tbody", {}, ...rows)))
       : ui.empty("No API keys yet", "Create one to call Aira from scripts, spreadsheets or automations with the same requests you would send to SerpApi.");
@@ -2141,7 +2141,7 @@
     plan: { status: "partial", where: "Account", href: link("account"), how: "Plan, renewal date, usage meters and a plan comparison. Changing, cancelling or renewing a plan, Ludicrous Speed and refunds are billing actions at SerpApi, so buttons open serpapi.com." },
     "extra-credits": { status: "partial", where: "Account", href: link("account"), how: "The extra-credit balance is shown. Buying credits happens on serpapi.com." },
     "account-settings": { status: "partial", where: "Account", href: link("account"), how: "Email and account status are shown. Profile, password and 2FA are managed at SerpApi." },
-    team: { status: "na", where: "Not applicable", how: "SerpApi teams share one plan across people. Aira is a local app: each Aira account has its own database and SerpApi key, and Aira API keys separate your own scripts from each other." },
+    team: { status: "na", where: "Not applicable", how: "SerpApi teams share one plan across people. Aira is a local app: each Aira account has its own database and SerpApi key, and API keys separate your own scripts from each other." },
     usage: { status: "built", where: "Overview and Account", href: link("overview"), how: "Daily stacked chart (live, cached, errors), SerpApi's monthly and hourly meters, per-engine and per-source breakdowns." },
     status: { status: "built", where: "Status", href: link("status"), how: "Computed from your own run logs: success rate and latency per engine, SerpApi reachability, hourly cap and async queue. Incident subscriptions stay on SerpApi's status page." },
     webhooks: { status: "na", where: "In-app notifications", href: link("monitors"), how: "SerpApi has no webhooks and neither does Aira: async searches are polled and finish as a toast, and monitors raise in-app notifications. An outgoing webhook was left out on purpose, because a local app that posts to arbitrary URLs is a data-leak risk." },
@@ -2317,7 +2317,7 @@
         return wrap("Getting started", "Aira exposes a SerpApi-compatible API on this computer. Your scripts call Aira; Aira calls SerpApi with your key, caches the answer and keeps the history.",
           h("ol", { class: "aa-steps" },
             h("li", { class: "aa-step" }, h("span", { class: "aa-step-n", text: "1" }), h("div", {}, h("strong", { text: "Connect your SerpApi key" }), h("p", {}, "In ", h("a", { href: link("account"), text: "Account" }), ". Aira stores it encrypted and never shows it again."))),
-            h("li", { class: "aa-step" }, h("span", { class: "aa-step-n", text: "2" }), h("div", {}, h("strong", { text: "Create an Aira API key" }), h("p", {}, "On the ", h("a", { href: link("keys"), text: "API keys" }), " tab. It looks like aira_ followed by 40 characters and is shown once."))),
+            h("li", { class: "aa-step" }, h("span", { class: "aa-step-n", text: "2" }), h("div", {}, h("strong", { text: "Create an API key" }), h("p", {}, "On the ", h("a", { href: link("keys"), text: "API keys" }), " tab. It looks like aira_ followed by 40 characters and is shown once."))),
             h("li", { class: "aa-step" }, h("span", { class: "aa-step-n", text: "3" }), h("div", {}, h("strong", { text: "Call it like SerpApi" }), h("p", {}, "Use ", h("code", { text: docs.base_url }), " in place of https://serpapi.com. Parameters, responses and errors match.")))),
           section("Example", serp.snippetPanel("google", { q: "coffee" })),
           section("Why go through Aira?", h("ul", { class: "inline-list" }, h("li", { text: "Identical searches inside the cache window cost nothing and return instantly." }), h("li", { text: "Every call is stored with its parameters, cost and result, so you can search, compare and export them." }), h("li", { text: "Per-key hourly limits and a global cap protect your plan from runaway scripts." }), h("li", { text: "Saved searches and monitors turn any query into an alert." }))));
@@ -2361,13 +2361,13 @@
       case "sdks":
         return wrap("SDKs and libraries", "SerpApi publishes client libraries for many languages. Aira's snippets use plain HTTP, which works everywhere.",
           h("div", { class: "aa-sdk-grid" }, ...(p.sdks || []).map((s) => h("article", { class: "aa-sdk" }, h("h4", { text: s.language }), h("p", { class: "sk-dim", text: s.package }), s.repo ? externalLink(s.repo, "Repository") : null))),
-          h("p", { class: "sk-hint", text: "Each library targets serpapi.com. Aira answers on SerpApi's own paths, so the official libraries work once their base URL points at Aira and they use an Aira API key. Examples for the Python libraries:" }),
+          h("p", { class: "sk-hint", text: "Each library targets serpapi.com. Aira answers on SerpApi's own paths, so the official libraries work once their base URL points at Aira and they use an API key. Examples for the Python libraries:" }),
           ...Object.entries(docs.sdk || {}).map(([name, code]) => h("div", { class: "field" }, h("span", { class: "label", text: name }), serp.codeBlock("python", code, { label: name }))),
           h("p", {}, externalLink(SERPAPI_LINKS.integrations, "All integrations on serpapi.com")));
       case "migrate":
         return wrap("Migrate from SerpApi", "Moving an existing script to Aira takes two edits.",
           h("ol", { class: "aa-steps" }, ...docs.migrate.map((s, i) => h("li", { class: "aa-step" }, h("span", { class: "aa-step-n", text: String(i + 1) }), h("div", {}, h("p", { text: s }))))),
-          section("Before and after", simpleTable("Before and after", ["", "SerpApi", "Aira"], [["Base URL", h("code", { text: "https://serpapi.com/search.json" }), h("code", { text: `${docs.root_url || docs.base_url}/search.json` })], ["Key", "SerpApi private key", "Aira API key (aira_…)"], ["Everything else", "same", "same"]])));
+          section("Before and after", simpleTable("Before and after", ["", "SerpApi", "Aira"], [["Base URL", h("code", { text: "https://serpapi.com/search.json" }), h("code", { text: `${docs.root_url || docs.base_url}/search.json` })], ["Key", "SerpApi private key", "API key (aira_…)"], ["Everything else", "same", "same"]])));
       case "coverage": {
         const pages = p.dashboard_pages || [];
         const rows = pages.map((page) => {

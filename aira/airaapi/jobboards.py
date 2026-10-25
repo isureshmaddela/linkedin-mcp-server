@@ -1,4 +1,4 @@
-"""Aira Jobs: Aira API's own job search over free, public job-board APIs.
+"""Aira Jobs: API's own job search over free, public job-board APIs.
 
 No SerpApi key, no credits. Five boards publish open JSON APIs for exactly
 this kind of use, each with its own terms, which this module follows:
@@ -520,7 +520,7 @@ def http_json(url: str) -> Any:
 
 
 class _Fetcher:
-    """Board requests through the Aira API cache, one at a time per board."""
+    """Board requests through the API cache, one at a time per board."""
 
     def __init__(
         self, connection: sqlite3.Connection | None, getter: JsonGetter, now: datetime

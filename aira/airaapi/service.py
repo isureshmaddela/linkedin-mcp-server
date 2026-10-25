@@ -1,4 +1,4 @@
-"""Business logic for the Aira API console.
+"""Business logic for the API console.
 
 Pure functions over a user's SQLite connection plus a ``client`` argument that
 looks like :class:`aira.airaapi.client.SerpApiClient`, so tests inject a fake or
@@ -43,7 +43,7 @@ SOURCES = ("playground", "careers", "api", "monitor", "intel", "rerun", "leads")
 APP_KEY_SECRET = "serpapi_api_key"
 ENV_KEY_NAME = "SERPAPI_API_KEY"
 NOT_CONFIGURED_MESSAGE = (
-    "No SerpApi key is configured. Connect one in Aira API > Account, "
+    "No SerpApi key is configured. Connect one in API > Account, "
     "or set SERPAPI_API_KEY in the server environment."
 )
 MAX_CONCURRENT_SEARCHES = 4
@@ -857,7 +857,7 @@ def _check_local_limit(
         raise SerpApiError(
             "local_rate_limit",
             f"The local hourly limit of {limits.hourly_limit} live searches is reached. "
-            "Raise it in Aira API settings or wait for the hour to roll over.",
+            "Raise it in API settings or wait for the hour to roll over.",
         )
 
 

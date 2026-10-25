@@ -16,7 +16,7 @@ Applies to the hosted build only. The local single-user build keeps its own API,
 | --- | --- |
 | 400 | `invalid`: the request could not be used (the message says why) |
 | 401 | `unauthorized`; also `mfa_required` (give the second factor) |
-| 402 | `plan_required` (a feature or counted limit the plan does not allow, see below) or `subscription_inactive` (past due, read-only, cancelled, suspended, or over plan limits) |
+| 402 | `plan_required` (a feature or counted limit the plan does not allow, see below), `app_required` (the organization has not turned on the app that owns the route, see below) or `subscription_inactive` (past due, read-only, cancelled, suspended, or over plan limits) |
 | 403 | `forbidden` (permission), or a specific code: `email_unverified`, `mfa_enrollment_required`, `sso_required`, `bad_host`, `cross_origin`, `candidate_required`, `not_your_workspace`, `linkedin_off`, `source_blocked`, `sensitive_field`, `sensitive_answer`, `not_available`, `mfa_required_by_plan` |
 | 404 | `not_found`. It is also what an identifier of **another organization** returns, for every role, so identifiers cannot be probed |
 | 409 | `conflict` (for example `org_required` at sign-in, an email that is already a member, the last owner) |
@@ -34,6 +34,16 @@ Applies to the hosted build only. The local single-user build keeps its own API,
 ```
 
 A missing feature carries `feature` instead of `limit` (for example `sources.linkedin`). `required_plan` is the cheapest paid plan that includes it, or null when none does or the limit is organization policy. `audience` is `candidate` for a candidate: the message then states the organization's rule and `required_plan` is null, so a candidate never sees a sales prompt.
+
+### `402 app_required`
+
+```json
+{"error": "Leads is not turned on for your organization. Turn it on under Apps (billed per candidate seat on your Team plan).",
+ "code": "app_required", "app": "leads", "name": "Leads", "plan_hint": "Turn it on under Apps (billed per candidate seat on your Team plan).",
+ "required_plan": null, "current_plan": "team", "audience": "staff"}
+```
+
+Every route an app owns (`route_prefixes` in `aira/apps.py`: `/api/leads/*` for Leads, `/api/airaapi/*` and `/v1/*` for API) answers this until the organization has the app: included in its plan, bought under Apps (`POST /api/org/apps/<app>/subscribe`), or granted by an operator. `required_plan` names the cheapest plan that sells the app when the current one does not (the API app on Starter). Careers' routes and the organization's SerpApi key routes are never gated. A candidate's message states the organization's rule and carries no sales prompt.
 
 ### Read-only organizations
 
@@ -73,6 +83,8 @@ Routes marked *no gate* work while a person has not yet verified their email or 
 | DELETE | `/api/me/consent/{kind}` | member session | writes |  | Revoke one consent. Revoking `automation` stops automation for the candidate. **Who:** candidate. |
 | GET | `/api/me/onboarding` | member session |  |  | The candidate's onboarding checklist. **Who:** candidate. |
 | POST | `/api/me/easy-apply` | member session | writes | body: `acknowledge`, `enable` | Turn LinkedIn Easy Apply on (with `acknowledge: true`) or off for the candidate's own workspace. **Who:** candidate. |
+| GET | `/api/launch/local` | member session |  | query: `return` | Open the local installation (`AIRA_CLOUD_LOCAL_APP_URL`) as this candidate: a one-time launch token (60 s, single use, stored hashed, bound to the return address) and a `302` to `<return>#/launch?token=...`; `Accept: application/json` gets `{redirect, expires_in}`. `return` must be on the local installation's origin. `409 not_configured` without `AIRA_CLOUD_LOCAL_APP_URL` and `AIRA_CLOUD_LAUNCH_SECRET`; five per minute per member. **Who:** candidates only (staff, operators and acting coaches: 403); not while the organization is suspended, past due or read-only. |
+| POST | `/api/internal/launch/validate` | none | no CSRF check | body: `token` | The local installation asks who a launch token signs in: `{email, name, org_id, org_name, org_slug, member_id, role, app, apps[]}`, once (`410` afterwards or when expired, `404` unknown, `410` when the member was removed). Signed with `AIRA_CLOUD_LAUNCH_SECRET`, purpose `launch`, the agent signing scheme (timestamp, nonce, body); audited as `auth.launch_local`. **Who:** server to server (signature), no session. |
 
 ## The organization: dashboard, members, invitations, candidates, coaches, pause switches, audit, integrations, support access, data
 
@@ -147,6 +159,19 @@ Routes marked *no gate* work while a person has not yet verified their email or 
 | GET | `/billing/standin/portal/{customer}` | none |  |  | Stand-in billing portal with buttons that simulate payment failure and recovery. |
 | POST | `/billing/standin/portal/{customer}/fail` | none |  |  | Emit a signed `invoice.payment_failed` for the organization that owns the customer. |
 | POST | `/billing/standin/portal/{customer}/recover` | none |  |  | Emit a signed `invoice.paid` (payment recovered). |
+
+## Apps: the catalog, and the per-app subscriptions on top of the plan
+
+| Method | Path | Auth | Flags | Body and query | What it does, and who may call it |
+| --- | --- | --- | --- | --- | --- |
+| GET | `/api/apps` | member session |  |  | The app switcher: every app in the catalog with `enabled` and a `reason` when it is off, the account's address and the local installation (`AIRA_CLOUD_LOCAL_APP_URL`). **Who:** any member. |
+| GET | `/api/org/apps` | member session |  |  | The Apps page: each app with how the plan treats it (`included`, `addon`, `unavailable`), its status (`included`, `granted`, `active`, `cancelling`, `off`, `unavailable`), the price per candidate seat and what it costs this organization; `monthly_cents` and `addons_monthly_cents`. **Who:** owner and billing contact (`can_manage`); admin and auditor read. |
+| POST | `/api/org/apps/{value}/quote` | member session |  |  | What turning an app on costs: the monthly line and the prorated charge for the rest of this period. `402 plan_required` when the plan does not sell the app. **Who:** `billing.manage`. |
+| POST | `/api/org/apps/{value}/subscribe` | member session | writes |  | Turn an app on: billed per candidate seat with the plan, prorated now; `409 included|already_subscribed|granted|not_subscribed`. Audited as `billing.app_subscribed`. **Who:** `billing.manage`. |
+| POST | `/api/org/apps/{value}/unsubscribe` | member session | writes |  | Turn an app off at the period end; it keeps working until then. **Who:** `billing.manage`. |
+| POST | `/api/org/apps/{value}/keep` | member session | writes |  | Undo a cancellation that has not taken effect yet. **Who:** `billing.manage`. |
+| GET | `/api/platform/tenants/{id}/apps` | operator session |  |  | A tenant's apps as its Apps page shows them. **Who:** operator (`platform.tenants.read`). |
+| PUT | `/api/platform/tenants/{id}/apps/{value}` | operator session |  | body: `note`, `status` | Grant an app to a tenant at no charge (`status: granted`, with a `note`), also where the plan does not sell it, or take the grant back (`revoked`). Both audit logs record it. **Who:** `platform.billing.manage`. |
 
 ## Platform console (operator session)
 
@@ -525,9 +550,12 @@ Which workspace: a candidate's own, or `X-Aira-Candidate: <member id>` for staff
 
 | Method | Path | Handler | Extra rule |
 | --- | --- | --- | --- |
+| GET | `/api/apps` | `api_apps` |  |
 | GET | `/api/auth/me` | `api_auth_me` |  |
 | POST | `/api/auth/register` | `api_auth_register` |  |
 | POST | `/api/auth/login` | `api_auth_login` |  |
+| POST | `/api/auth/launch` | `api_auth_launch` |  |
+| GET | `/api/auth/account-link` | `api_auth_account_link` |  |
 | POST | `/api/auth/logout` | `api_auth_logout` |  |
 | POST | `/api/account/delete` | `api_account_delete` |  |
 

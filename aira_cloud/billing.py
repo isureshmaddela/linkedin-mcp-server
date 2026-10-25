@@ -13,6 +13,7 @@ import logging
 import sqlite3
 from typing import TYPE_CHECKING, Any
 
+from aira import apps as app_catalog
 from aira_cloud import crypto
 from aira_cloud.billing_providers import (
     BillingProvider,
@@ -26,10 +27,18 @@ from aira_cloud.errors import (
     Forbidden,
     NotFound,
     PlanRequired,
+    SubscriptionInactive,
     Unavailable,
     ValidationFailed,
 )
-from aira_cloud.plans import PLAN_ORDER, month_key, with_later_rates
+from aira_cloud.plans import (
+    PLAN_ORDER,
+    app_price,
+    app_state,
+    month_key,
+    plan_for_app,
+    with_later_rates,
+)
 from aira_cloud.rbac import BILLING, OWNER, Principal
 
 if TYPE_CHECKING:
@@ -293,8 +302,19 @@ class Billing:
         return out
 
     def quote(
-        self, org_id: str, plan_id: str, seats: int, *, enforce_usage: bool = True
+        self,
+        org_id: str,
+        plan_id: str,
+        seats: int,
+        *,
+        enforce_usage: bool = True,
+        apps: list[str] | None = None,
     ) -> dict[str, Any]:
+        """Monthly price for ``plan_id`` with ``seats``, with the organization's app add-ons carried along.
+
+        ``apps`` names the add-ons to price (default: the ones the organization has bought that the target
+        plan offers); an add-on the target plan does not offer is listed in ``dropped_apps``.
+        """
         if plan_id == "enterprise":
             raise ValidationFailed(
                 "Enterprise is arranged with our sales team; it is activated for you.",
@@ -346,24 +366,32 @@ class Billing:
                 f"{used} candidate seats are in use or invited. Remove people first, or choose at least {used} seats.",
                 used=used,
             )
-        monthly = seats * int(pricing["seat_cents_month"])
+        current_addons = self.active_addons(org_id)
+        wanted = (
+            current_addons
+            if apps is None
+            else [a for a in apps if a in app_catalog.BY_ID]
+        )
+        kept = [a for a in wanted if app_state(plan_id, a) == "addon"]
+        dropped = [a for a in wanted if app_state(plan_id, a) == "unavailable"]
+        addon_lines = self._addon_lines(plan_id, seats, kept)
+        base_monthly = seats * int(pricing["seat_cents_month"])
+        monthly = base_monthly + sum(line["amount_cents"] for line in addon_lines)
         quote: dict[str, Any] = {
             "plan_id": plan_id,
             "plan_name": plan["name"],
             "seats": seats,
             "seat_cents_month": pricing["seat_cents_month"],
+            "plan_monthly_cents": base_monthly,
+            "addons": addon_lines,
+            "dropped_apps": dropped,
             "monthly_cents": monthly,
             "currency": pricing.get("currency", "usd"),
             "overage": pricing.get("overage", {}),
         }
         subscription = self.subscription(org_id)
         if subscription["status"] == "active" and subscription["period_end"]:
-            old_plan = self.app.catalog.get(
-                subscription["plan_id"], subscription["plan_version"]
-            )
-            old_monthly = subscription["candidate_seats"] * int(
-                old_plan["pricing"].get("seat_cents_month", 0)
-            )
+            old_monthly = self._monthly_cents(subscription)
             period = max(
                 1,
                 subscription["period_end"]
@@ -491,11 +519,13 @@ class Billing:
                 "would_exceed": self.over_limits_for(
                     actor.org_id, plan_id, target_seats
                 ),
+                "dropped_apps": quote["dropped_apps"],
                 "quote": quote,
             }
         plan = self.app.catalog.get(plan_id)
+        kept = [line["app_id"] for line in quote["addons"]]
         if subscription["billing_subscription_id"]:
-            self.provider.update_subscription(
+            self._provider_for(subscription).update_subscription(
                 subscription["billing_subscription_id"],
                 plan_id=plan_id,
                 plan_name=plan["name"],
@@ -503,6 +533,7 @@ class Billing:
                 seat_cents=int(plan["pricing"]["seat_cents_month"]),
                 currency=plan["pricing"].get("currency", "usd"),
                 prorate=True,
+                addons=self._provider_addons(plan_id, target_seats, kept),
             )
         charge = int(quote.get("prorated_charge_cents", 0))
         with self.db.write() as connection:
@@ -510,6 +541,13 @@ class Billing:
                 """UPDATE subscriptions SET plan_id = ?, plan_version = ?, candidate_seats = ?, pending_plan_id = '', pending_seats = NULL,
                 pending_effective_at = NULL, updated_at = ? WHERE org_id = ?""",
                 (plan_id, plan["version"], target_seats, self.now, actor.org_id),
+            )
+            self._cancel_apps(
+                connection,
+                actor.org_id,
+                quote["dropped_apps"],
+                reason=f"not available on {plan['name']}",
+                actor=actor,
             )
             if charge:
                 connection.execute(
@@ -552,6 +590,7 @@ class Billing:
             "scheduled": False,
             "applied": True,
             "prorated_charge_cents": charge,
+            "dropped_apps": quote["dropped_apps"],
             "quote": quote,
         }
 
@@ -606,6 +645,10 @@ class Billing:
                 "UPDATE subscriptions SET cancel_at_period_end = 1, updated_at = ? WHERE org_id = ?",
                 (self.now, actor.org_id),
             )
+            connection.execute(
+                "UPDATE org_apps SET cancel_at_period_end = 1 WHERE org_id = ? AND status = 'active'",
+                (actor.org_id,),
+            )
             self.app.audit.record(
                 actor.org_id,
                 "billing.cancel",
@@ -627,6 +670,10 @@ class Billing:
                 connection.execute(
                     "UPDATE subscriptions SET cancel_at_period_end = 0, updated_at = ? WHERE org_id = ?",
                     (self.now, actor.org_id),
+                )
+                connection.execute(  # keeping the plan keeps its add-ons too
+                    "UPDATE org_apps SET cancel_at_period_end = 0 WHERE org_id = ? AND status = 'active'",
+                    (actor.org_id,),
                 )
                 self.app.audit.record(
                     actor.org_id,
@@ -701,7 +748,483 @@ class Billing:
             "entitlements": entitlements.as_dict(),
             "provider": subscription["billing_provider"],
             "overage_enabled": entitlements.overage_enabled,
+            "apps": self.apps_overview(org_id),
+            "monthly_cents": self._monthly_cents(subscription)
+            if subscription["status"] in {"active", "past_due", "read_only"}
+            else 0,
+            "addons_monthly_cents": sum(
+                line["amount_cents"]
+                for line in self._addon_lines(
+                    subscription["plan_id"],
+                    int(subscription["candidate_seats"]),
+                    self.active_addons(org_id, subscription["plan_id"]),
+                )
+            ),
         }
+
+    # -- apps: subscriptions per app, on top of the plan ------------------------------------
+
+    def _provider_for(self, subscription: dict[str, Any]) -> BillingProvider:
+        return self.providers.get(
+            subscription["billing_provider"] or self.provider.name, self.provider
+        )
+
+    def _app_rows(self, org_id: str) -> dict[str, dict[str, Any]]:
+        with self.db.read() as connection:
+            rows = many(
+                connection, "SELECT * FROM org_apps WHERE org_id = ?", (org_id,)
+            )
+        return {row["app_id"]: row for row in rows}
+
+    def active_addons(self, org_id: str, plan_id: str | None = None) -> list[str]:
+        """App add-ons the organization pays for: bought rows that are add-ons on the plan (grants cost nothing)."""
+        plan = plan_id or self.subscription(org_id)["plan_id"]
+        rows = self._app_rows(org_id)
+        return [
+            app.id
+            for app in app_catalog.APPS
+            if rows.get(app.id, {}).get("status") == "active"
+            and app_state(plan, app.id) == "addon"
+        ]
+
+    def _addon_lines(
+        self, plan_id: str, seats: int, apps: list[str]
+    ) -> list[dict[str, Any]]:
+        lines = []
+        for app_id in apps:
+            cents = app_price(plan_id, app_id) or 0
+            if cents <= 0:
+                continue
+            lines.append(
+                {
+                    "app_id": app_id,
+                    "name": app_catalog.BY_ID[app_id].name,
+                    "seat_cents_month": cents,
+                    "seats": int(seats),
+                    "amount_cents": cents * int(seats),
+                }
+            )
+        return lines
+
+    def _provider_addons(
+        self, plan_id: str, seats: int, apps: list[str]
+    ) -> list[dict[str, Any]]:
+        return [
+            {
+                "app_id": line["app_id"],
+                "name": line["name"],
+                "seat_cents": line["seat_cents_month"],
+                "seats": line["seats"],
+            }
+            for line in self._addon_lines(plan_id, seats, apps)
+        ]
+
+    def apps_overview(self, org_id: str) -> list[dict[str, Any]]:
+        """One card per app: how the plan treats it, what it costs here, and whether it is on."""
+        subscription = self.subscription(org_id)
+        plan_id = subscription["plan_id"]
+        seats = int(subscription["candidate_seats"])
+        rows = self._app_rows(org_id)
+        entitlements = self.app.entitlements.resolve(org_id)
+        cards = []
+        for app in app_catalog.APPS:
+            state = app_state(plan_id, app.id)
+            row = rows.get(app.id)
+            price = app_price(plan_id, app.id)
+            if row and row["status"] == "granted":
+                status = "granted"
+            elif state == "included":
+                status = "included"
+            elif row and row["status"] == "active":
+                status = "cancelling" if row["cancel_at_period_end"] else "active"
+            elif state == "unavailable":
+                status = "unavailable"
+            else:
+                status = "off"
+            monthly = (price or 0) * seats if status in {"active", "cancelling"} else 0
+            cards.append(
+                {
+                    "id": app.id,
+                    "name": app.name,
+                    "tagline": app.tagline,
+                    "description": app.description,
+                    "icon": app.icon,
+                    "home": app.home,
+                    "state": state,
+                    "status": status,
+                    "enabled": entitlements.has_app(app.id),
+                    "seat_cents_month": price,
+                    "seats": seats,
+                    "monthly_cents": monthly,
+                    "currency": "usd",
+                    "activated_at": row["activated_at"] if row else None,
+                    "cancel_at_period_end": bool(row and row["cancel_at_period_end"]),
+                    "effective_until": subscription["period_end"]
+                    if row and row["cancel_at_period_end"]
+                    else None,
+                    "required_plan": plan_for_app(app.id)
+                    if state == "unavailable"
+                    else None,
+                    "note": (row or {}).get("note", ""),
+                }
+            )
+        return cards
+
+    def apps_for_member(self, org_id: str, entitlements: Any) -> list[dict[str, Any]]:
+        """What the app switcher needs: each app, whether this organization may open it, and why not."""
+        out = []
+        for app in app_catalog.APPS:
+            enabled = entitlements.has_app(app.id)
+            state = app_state(entitlements.plan_id, app.id)
+            reason = ""
+            if not enabled:
+                reason = (
+                    "Not turned on for your organization."
+                    if state == "addon"
+                    else f"Not available on the {entitlements.plan_id.title()} plan."
+                )
+            out.append(
+                {"id": app.id, "name": app.name, "enabled": enabled, "reason": reason}
+            )
+        return out
+
+    def app_quote(self, org_id: str, app_id: str) -> dict[str, Any]:
+        """What turning an app on costs now: the monthly line and the prorated charge for the rest of this period."""
+        if app_id not in app_catalog.BY_ID:
+            raise NotFound("App not found.")
+        subscription = self.subscription(org_id)
+        plan_id = subscription["plan_id"]
+        state = app_state(plan_id, app_id)
+        app = app_catalog.BY_ID[app_id]
+        if state == "unavailable":
+            needed = plan_for_app(app_id)
+            raise PlanRequired(
+                f"{app.name} is not available on the {plan_id.title()} plan."
+                + (f" Upgrade to {needed.title()} to turn it on." if needed else ""),
+                feature=app.feature,
+                required_plan=needed,
+                current_plan=plan_id,
+                app=app_id,
+            )
+        seats = int(subscription["candidate_seats"])
+        price = app_price(plan_id, app_id) or 0
+        monthly = price * seats
+        fraction = 1.0
+        if subscription["period_end"]:
+            period = max(
+                1,
+                subscription["period_end"]
+                - (subscription["period_start"] or self.now - PERIOD_SECONDS),
+            )
+            fraction = max(
+                0.0, min(1.0, (subscription["period_end"] - self.now) / period)
+            )
+        return {
+            "app_id": app_id,
+            "name": app.name,
+            "plan_id": plan_id,
+            "state": state,
+            "seats": seats,
+            "seat_cents_month": price,
+            "monthly_cents": monthly,
+            "prorated_charge_cents": round(monthly * fraction),
+            "currency": "usd",
+            "period_end": subscription["period_end"],
+        }
+
+    def _require_active_for_apps(self, org_id: str) -> dict[str, Any]:
+        """App changes ride on an active paid subscription: dunning, read-only and cancelled refuse them."""
+        self.app.entitlements.require_state(org_id, write=True)
+        subscription = self.subscription(org_id)
+        if subscription["status"] in {"past_due", "read_only", "cancelled"}:
+            raise SubscriptionInactive(
+                f"The subscription is {subscription['status'].replace('_', ' ')}: apps cannot be changed until payment is restored.",
+                status=subscription["status"],
+            )
+        return subscription
+
+    def subscribe_app(self, actor: Principal, app_id: str) -> dict[str, Any]:
+        """Turn an app on for the organization: billed per candidate seat with the plan, prorated now."""
+        self.app.authz.require(actor, "billing.manage")
+        subscription = self._require_active_for_apps(actor.org_id)
+        quote = self.app_quote(actor.org_id, app_id)
+        app = app_catalog.BY_ID[app_id]
+        if quote["state"] == "included":
+            raise Conflict(f"{app.name} is included in your plan.", code="included")
+        if subscription["status"] != "active":
+            raise Conflict(
+                "Choose a plan through checkout first; the trial includes every app.",
+                code="not_subscribed",
+            )
+        rows = self._app_rows(actor.org_id)
+        row = rows.get(app_id)
+        if row and row["status"] == "granted":
+            raise Conflict(
+                f"{app.name} was granted to your organization.", code="granted"
+            )
+        if row and row["status"] == "active" and not row["cancel_at_period_end"]:
+            raise Conflict(f"{app.name} is already on.", code="already_subscribed")
+        if row and row["status"] == "active" and row["cancel_at_period_end"]:
+            return self.keep_app(actor, app_id)
+        seats = int(subscription["candidate_seats"])
+        apps = [*self.active_addons(actor.org_id), app_id]
+        if subscription["billing_subscription_id"]:
+            self._provider_for(subscription).update_subscription(
+                subscription["billing_subscription_id"],
+                plan_id=subscription["plan_id"],
+                plan_name=self.app.catalog.get(subscription["plan_id"])["name"],
+                seats=seats,
+                seat_cents=int(
+                    self.app.catalog.get(
+                        subscription["plan_id"], subscription["plan_version"]
+                    )["pricing"]["seat_cents_month"]
+                ),
+                currency=quote["currency"],
+                prorate=True,
+                addons=self._provider_addons(subscription["plan_id"], seats, apps),
+            )
+        charge = int(quote["prorated_charge_cents"])
+        with self.db.write() as connection:
+            connection.execute(
+                """INSERT INTO org_apps (org_id, app_id, status, seats_at_start, activated_at, cancelled_at, cancel_at_period_end, granted_by, note)
+                VALUES (?, ?, 'active', ?, ?, NULL, 0, '', '')
+                ON CONFLICT(org_id, app_id) DO UPDATE SET status = 'active', seats_at_start = excluded.seats_at_start,
+                activated_at = excluded.activated_at, cancelled_at = NULL, cancel_at_period_end = 0, granted_by = '', note = ''""",
+                (actor.org_id, app_id, seats, self.now),
+            )
+            if charge:
+                connection.execute(
+                    """INSERT INTO invoices (invoice_id, org_id, kind, amount_cents, currency, status, period_start, period_end, lines, created_at, paid_at)
+                    VALUES (?, ?, 'proration', ?, ?, 'paid', ?, ?, ?, ?, ?)""",
+                    (
+                        new_id(),
+                        actor.org_id,
+                        charge,
+                        quote["currency"],
+                        self.now,
+                        subscription["period_end"],
+                        dumps(
+                            [
+                                {
+                                    "description": f"{app.name} app ({seats} seats), prorated",
+                                    "amount_cents": charge,
+                                    "app_id": app_id,
+                                }
+                            ]
+                        ),
+                        self.now,
+                        self.now,
+                    ),
+                )
+            self.app.audit.record(
+                actor.org_id,
+                "billing.app_subscribed",
+                actor=actor,
+                target_type="app",
+                target_id=app_id,
+                detail={
+                    "seats": seats,
+                    "seat_cents_month": quote["seat_cents_month"],
+                    "prorated_cents": charge,
+                },
+                connection=connection,
+            )
+        self.app.entitlements.invalidate(actor.org_id)
+        return {
+            "app_id": app_id,
+            "status": "active",
+            "prorated_charge_cents": charge,
+            "quote": quote,
+        }
+
+    def unsubscribe_app(self, actor: Principal, app_id: str) -> dict[str, Any]:
+        """Turn an app off at the period end; it keeps working until then."""
+        self.app.authz.require(actor, "billing.manage")
+        subscription = self._require_active_for_apps(actor.org_id)
+        if app_id not in app_catalog.BY_ID:
+            raise NotFound("App not found.")
+        app = app_catalog.BY_ID[app_id]
+        row = self._app_rows(actor.org_id).get(app_id)
+        if app_state(subscription["plan_id"], app_id) == "included":
+            raise Conflict(
+                f"{app.name} is included in your plan and cannot be turned off.",
+                code="included",
+            )
+        if row is None or row["status"] != "active":
+            raise Conflict(f"{app.name} is not on.", code="not_subscribed")
+        with self.db.write() as connection:
+            connection.execute(
+                "UPDATE org_apps SET cancel_at_period_end = 1 WHERE org_id = ? AND app_id = ?",
+                (actor.org_id, app_id),
+            )
+            self.app.audit.record(
+                actor.org_id,
+                "billing.app_cancelled",
+                actor=actor,
+                target_type="app",
+                target_id=app_id,
+                detail={"effective_at": subscription["period_end"]},
+                connection=connection,
+            )
+        return {
+            "app_id": app_id,
+            "status": "cancelling",
+            "effective_at": subscription["period_end"],
+        }
+
+    def keep_app(self, actor: Principal, app_id: str) -> dict[str, Any]:
+        """Undo a cancellation that has not taken effect yet."""
+        self.app.authz.require(actor, "billing.manage")
+        self._require_active_for_apps(actor.org_id)
+        row = self._app_rows(actor.org_id).get(app_id)
+        if row is None or row["status"] != "active" or not row["cancel_at_period_end"]:
+            raise Conflict(
+                "That app is not scheduled to be turned off.", code="not_cancelling"
+            )
+        with self.db.write() as connection:
+            connection.execute(
+                "UPDATE org_apps SET cancel_at_period_end = 0 WHERE org_id = ? AND app_id = ?",
+                (actor.org_id, app_id),
+            )
+            self.app.audit.record(
+                actor.org_id,
+                "billing.app_kept",
+                actor=actor,
+                target_type="app",
+                target_id=app_id,
+                connection=connection,
+            )
+        self.app.entitlements.invalidate(actor.org_id)
+        return {"app_id": app_id, "status": "active"}
+
+    def _cancel_apps(
+        self,
+        connection: sqlite3.Connection,
+        org_id: str,
+        app_ids: list[str],
+        *,
+        reason: str,
+        actor: Principal | None = None,
+    ) -> None:
+        for app_id in app_ids:
+            changed = connection.execute(
+                "UPDATE org_apps SET status = 'cancelled', cancelled_at = ?, cancel_at_period_end = 0 WHERE org_id = ? AND app_id = ? AND status = 'active'",
+                (self.now, org_id, app_id),
+            ).rowcount
+            if changed:
+                self.app.audit.record(
+                    org_id,
+                    "billing.app_cancelled",
+                    actor=actor,
+                    actor_type="system" if actor is None else "",
+                    target_type="app",
+                    target_id=app_id,
+                    detail={"reason": reason, "effective_at": self.now},
+                    connection=connection,
+                )
+        if app_ids:
+            self.app.entitlements.invalidate(org_id)
+
+    def _apply_app_cancellations(self, sub: dict[str, Any]) -> None:
+        """At the period end, apps turned off during the period stop; the provider's subscription follows."""
+        org_id = sub["org_id"]
+        rows = self._app_rows(org_id)
+        due = [
+            app_id
+            for app_id, row in rows.items()
+            if row["status"] == "active" and row["cancel_at_period_end"]
+        ]
+        if not due:
+            return
+        with self.db.write() as connection:
+            self._cancel_apps(
+                connection, org_id, due, reason="turned off at period end"
+            )
+        if sub["billing_subscription_id"]:
+            plan = self.app.catalog.get(sub["plan_id"], sub["plan_version"])
+            try:
+                self._provider_for(sub).update_subscription(
+                    sub["billing_subscription_id"],
+                    plan_id=sub["plan_id"],
+                    plan_name=plan["name"],
+                    seats=int(sub["candidate_seats"]),
+                    seat_cents=int(plan["pricing"]["seat_cents_month"]),
+                    currency=plan["pricing"].get("currency", "usd"),
+                    prorate=False,
+                    addons=self._provider_addons(
+                        sub["plan_id"],
+                        int(sub["candidate_seats"]),
+                        self.active_addons(org_id, sub["plan_id"]),
+                    ),
+                )
+            except Exception:  # noqa: BLE001 - keep our state moving; reconcile reports the drift
+                logger.exception(
+                    "Could not drop the app add-on at the provider for %s", org_id
+                )
+
+    def tenant_apps(self, operator: Principal, org_id: str) -> dict[str, Any]:
+        self.app.authz.require(operator, "platform.tenants.read")
+        self.app.tenancy.org(org_id)
+        return {"org_id": org_id, "apps": self.apps_overview(org_id)}
+
+    def set_app_grant(
+        self,
+        operator: Principal,
+        org_id: str,
+        app_id: str,
+        status: str,
+        note: str = "",
+    ) -> dict[str, Any]:
+        """An operator grants an app to a tenant without charge (a contract), or takes a grant back."""
+        self.app.authz.require(operator, "platform.billing.manage")
+        self.app.tenancy.org(org_id)
+        if app_id not in app_catalog.BY_ID:
+            raise NotFound("App not found.")
+        if status not in {"granted", "revoked"}:
+            raise ValidationFailed("status must be granted or revoked.")
+        row = self._app_rows(org_id).get(app_id)
+        with self.db.write() as connection:
+            if status == "granted":
+                if row and row["status"] == "active":
+                    raise Conflict(
+                        "The organization pays for this app; turn it off first to grant it.",
+                        code="already_subscribed",
+                    )
+                connection.execute(
+                    """INSERT INTO org_apps (org_id, app_id, status, seats_at_start, activated_at, cancelled_at, cancel_at_period_end, granted_by, note)
+                    VALUES (?, ?, 'granted', 0, ?, NULL, 0, ?, ?)
+                    ON CONFLICT(org_id, app_id) DO UPDATE SET status = 'granted', activated_at = excluded.activated_at,
+                    cancelled_at = NULL, cancel_at_period_end = 0, granted_by = excluded.granted_by, note = excluded.note""",
+                    (org_id, app_id, self.now, operator.operator_id, note[:300]),
+                )
+            else:
+                if not row or row["status"] != "granted":
+                    raise Conflict(
+                        "That app is not granted to the organization.",
+                        code="not_granted",
+                    )
+                connection.execute(
+                    "UPDATE org_apps SET status = 'cancelled', cancelled_at = ?, note = ? WHERE org_id = ? AND app_id = ?",
+                    (self.now, note[:300], org_id, app_id),
+                )
+            self.app.platform_audit.record(
+                "billing.app_granted" if status == "granted" else "billing.app_revoked",
+                operator=operator,
+                org_id=org_id,
+                detail={"app": app_id, "note": note[:300]},
+                connection=connection,
+            )
+            self.app.audit.record(
+                org_id,
+                "billing.app_granted" if status == "granted" else "billing.app_revoked",
+                actor=operator,
+                target_type="app",
+                target_id=app_id,
+                detail={"note": note[:300]},
+                connection=connection,
+            )
+        self.app.entitlements.invalidate(org_id)
+        return {"org_id": org_id, "apps": self.apps_overview(org_id)}
 
     # -- limits after a plan change ---------------------------------------------------------
 
@@ -942,9 +1465,12 @@ class Billing:
                     ),
                 )
                 return
+            lines = (
+                neutral.get("lines") if isinstance(neutral.get("lines"), list) else []
+            )
             connection.execute(
-                """INSERT INTO invoices (invoice_id, org_id, provider_invoice_id, kind, amount_cents, currency, status, period_start, period_end, hosted_url, created_at, paid_at)
-                VALUES (?, ?, ?, 'subscription', ?, ?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO invoices (invoice_id, org_id, provider_invoice_id, kind, amount_cents, currency, status, period_start, period_end, hosted_url, lines, created_at, paid_at)
+                VALUES (?, ?, ?, 'subscription', ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     new_id(),
                     org_id,
@@ -955,6 +1481,7 @@ class Billing:
                     neutral.get("period_start"),
                     neutral.get("period_end"),
                     neutral.get("hosted_url", ""),
+                    dumps(lines),
                     self.now,
                     self.now if status == "paid" else None,
                 ),
@@ -1021,6 +1548,10 @@ class Billing:
             else self.app.config.cancelled_export_days
         )
         export_until = self.now + window * DAY
+        with self.db.write() as connection:
+            self._cancel_apps(
+                connection, org_id, self.active_addons(org_id), reason=reason
+            )
         self.transition(
             org_id,
             "cancelled",
@@ -1169,6 +1700,8 @@ class Billing:
             done["changed"].append(org_id)
             sub = self.subscription(org_id)
         self._bill_overage(sub)
+        self._apply_app_cancellations(sub)
+        sub = self.subscription(org_id)
         if sub["billing_provider"] == "standin" or not sub["billing_provider"]:
             payload, signature = self.standin.make_event(
                 "invoice.paid",
@@ -1179,25 +1712,55 @@ class Billing:
                     "currency": "usd",
                     "period_start": sub["period_end"],
                     "period_end": sub["period_end"] + PERIOD_SECONDS,
+                    "lines": self.invoice_lines(sub),
                 },
             )
             self.handle_webhook("standin", payload, signature)
             done["renewed"].append(org_id)
 
     def _monthly_cents(self, sub: dict[str, Any]) -> int:
+        """The plan's seats plus every app add-on the organization has bought, for one month."""
         plan = self.app.catalog.get(sub["plan_id"], sub["plan_version"])
-        return int(sub["candidate_seats"]) * int(
-            plan["pricing"].get("seat_cents_month", 0)
+        seats = int(sub["candidate_seats"])
+        base = seats * int(plan["pricing"].get("seat_cents_month", 0))
+        addons = self._addon_lines(
+            sub["plan_id"], seats, self.active_addons(sub["org_id"], sub["plan_id"])
         )
+        return base + sum(line["amount_cents"] for line in addons)
+
+    def invoice_lines(self, sub: dict[str, Any]) -> list[dict[str, Any]]:
+        """What a renewal invoice is made of: the plan line and one line per app add-on."""
+        plan = self.app.catalog.get(sub["plan_id"], sub["plan_version"])
+        seats = int(sub["candidate_seats"])
+        lines = [
+            {
+                "description": f"{plan['name']} ({seats} candidate seats)",
+                "amount_cents": seats * int(plan["pricing"].get("seat_cents_month", 0)),
+            }
+        ]
+        for line in self._addon_lines(
+            sub["plan_id"], seats, self.active_addons(sub["org_id"], sub["plan_id"])
+        ):
+            lines.append(
+                {
+                    "description": f"{line['name']} app ({seats} candidate seats)",
+                    "amount_cents": line["amount_cents"],
+                    "app_id": line["app_id"],
+                }
+            )
+        return lines
 
     def _apply_pending(self, sub: dict[str, Any]) -> None:
         org_id = sub["org_id"]
         plan_id = sub["pending_plan_id"]
         seats = int(sub["pending_seats"] or sub["candidate_seats"])
         plan = self.app.catalog.get(plan_id)
+        current = self.active_addons(org_id)
+        kept = [a for a in current if app_state(plan_id, a) == "addon"]
+        dropped = [a for a in current if app_state(plan_id, a) == "unavailable"]
         if sub["billing_subscription_id"]:
             try:
-                self.provider.update_subscription(
+                self._provider_for(sub).update_subscription(
                     sub["billing_subscription_id"],
                     plan_id=plan_id,
                     plan_name=plan["name"],
@@ -1205,6 +1768,7 @@ class Billing:
                     seat_cents=int(plan["pricing"]["seat_cents_month"]),
                     currency=plan["pricing"].get("currency", "usd"),
                     prorate=False,
+                    addons=self._provider_addons(plan_id, seats, kept),
                 )
             except Exception:  # noqa: BLE001 - keep our state moving; reconcile reports the drift
                 logger.exception(
@@ -1224,6 +1788,23 @@ class Billing:
                 "pending_effective_at": None,
             },
         )
+        if dropped:
+            with self.db.write() as connection:
+                self._cancel_apps(
+                    connection,
+                    org_id,
+                    dropped,
+                    reason=f"not available on {plan['name']}",
+                )
+            self.notice(
+                org_id,
+                "warning",
+                "Apps switched off",
+                "Not available on the new plan: "
+                + ", ".join(app_catalog.BY_ID[a].name for a in dropped)
+                + ".",
+                "#/org/apps",
+            )
         over = self.app.lifecycle.recompute_over_limits(org_id)
         if over:
             org = self.app.tenancy.org(org_id)
@@ -1260,7 +1841,7 @@ class Billing:
             "applications:overage": ("application_cents", "applications"),
             "searches:overage": ("search_cents", "searches"),
             "cover_letters:overage": ("cover_letter_cents", "AI cover letters"),
-            "api_searches:overage": ("api_search_cents", "Aira API searches"),
+            "api_searches:overage": ("api_search_cents", "API searches"),
             "pooled_searches:overage": (
                 "pooled_search_cents",
                 "pooled SerpApi searches",

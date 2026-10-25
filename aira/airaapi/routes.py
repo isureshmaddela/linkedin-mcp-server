@@ -1,4 +1,4 @@
-"""Route handlers for the Aira API console (``/api/airaapi/*``) and ``/v1/*``.
+"""Route handlers for the API console (``/api/airaapi/*``) and ``/v1/*``.
 
 Handlers are thin: they open the user's database, resolve the SerpApi key and
 hand everything else to :mod:`aira.airaapi.service` and
@@ -499,7 +499,7 @@ def monitors_run(request: Request) -> tuple[int, dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
-# Aira API keys and docs
+# API keys and docs
 # ---------------------------------------------------------------------------
 
 
@@ -566,7 +566,7 @@ def platform_reference(request: Request) -> tuple[int, dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
-# SerpApi-compatible /v1 (authenticated by an Aira API key)
+# SerpApi-compatible /v1 (authenticated by an API key)
 # ---------------------------------------------------------------------------
 
 
@@ -636,7 +636,7 @@ def _keyless_locations(client_id: str, text: str, limit: int) -> list[Any]:
         if len(hits) >= KEYLESS_LOCATIONS_PER_MINUTE:
             raise SerpApiError(
                 "rate_limited",
-                "Too many location lookups without an Aira API key. Wait a minute or send one.",
+                "Too many location lookups without an API key. Wait a minute or send one.",
                 429,
             )
         hits.append(now)

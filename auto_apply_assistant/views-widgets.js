@@ -1,4 +1,4 @@
-/* Aira — Dashboard widgets: Aira API usage and Careers shortcuts.
+/* Aira — Dashboard widgets: API usage and Careers shortcuts.
    The Dashboard view calls Aira.dashboardWidgets() and appends the nodes it returns. Both widgets fetch on their own
    after the Dashboard has drawn, so a slow or failing SerpApi never holds the rest of the page back. */
 "use strict";
@@ -42,10 +42,10 @@
   }
 
   // -------------------------------------------------------------------------
-  // Aira API
+  // API
   // -------------------------------------------------------------------------
   function fillApi(node, data) {
-    const title = "Aira API";
+    const title = "API";
     const open = h("a", { class: "btn ghost sm", href: apiLink("overview"), text: "Open console" });
     if (!data.configured) {
       node.replaceChildren(panelHead(title, open), h("div", { class: "dw-body" },
@@ -113,7 +113,7 @@
       panelHead("Careers", fresh ? h("a", { class: "badge stage applied", href: careersLink("alerts"), text: `${fmt.plural(fresh, "new job")} from alerts` }) : h("a", { class: "btn ghost sm", href: careersLink("jobs"), text: "Open Careers" })),
       h("div", { class: "dw-body" },
         form,
-        !data.configured ? h("p", { class: "note warn", role: "status" }, "Google Jobs and the research tabs need a SerpApi key. ", h("a", { href: apiLink("account"), text: "Connect one in Aira API" }), ".") : null),
+        !data.configured ? h("p", { class: "note warn", role: "status" }, "Google Jobs and the research tabs need a SerpApi key. ", h("a", { href: apiLink("account"), text: "Connect one in API" }), ".") : null),
       rows.length ? h("div", { class: "list" }, ...rows) : h("div", { class: "empty dw-empty" }, h("strong", { text: "No searches or alerts yet" }), h("div", { text: "Search for a role, then save the search or add an alert to hear about new postings." })),
       h("div", { class: "dw-body dw-foot" }, h("div", { class: "btn-row" },
         h("a", { class: "btn secondary sm", href: careersLink("company"), text: "Research a company" }),
@@ -124,10 +124,10 @@
   }
 
   Aira.dashboardWidgets = () => {
-    const apiNode = h("section", { class: "panel dw-panel", "aria-label": "Aira API usage", "aria-busy": "true" });
+    const apiNode = h("section", { class: "panel dw-panel", "aria-label": "API usage", "aria-busy": "true" });
     const careersNode = h("section", { class: "panel dw-panel", "aria-label": "Careers", "aria-busy": "true" });
     const loading = (node, title) => node.replaceChildren(panelHead(title), h("div", { class: "dw-body" }, ui.skeleton(3)));
-    const loadApi = () => { loading(apiNode, "Aira API"); return api("/api/airaapi/overview", { silent: true }).then((data) => fillApi(apiNode, data), (error) => failed(apiNode, "Aira API", error, loadApi)); };
+    const loadApi = () => { loading(apiNode, "API"); return api("/api/airaapi/overview", { silent: true }).then((data) => fillApi(apiNode, data), (error) => failed(apiNode, "API", error, loadApi)); };
     const loadCareers = () => { loading(careersNode, "Careers"); return api("/api/careers/overview", { silent: true }).then((data) => fillCareers(careersNode, data), (error) => failed(careersNode, "Careers", error, loadCareers)); };
     loadApi();
     loadCareers();

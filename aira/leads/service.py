@@ -225,7 +225,7 @@ def search(
 
         raise SerpApiError(
             "not_configured",
-            "Connect a SerpApi key in Aira API > Account to search Google for leads.",
+            "Connect a SerpApi key in API > Account to search Google for leads.",
         )
     record = airaservice.run_search(
         connection,
@@ -544,7 +544,7 @@ def news_signals(
 
         raise SerpApiError(
             "not_configured",
-            "Connect a SerpApi key in Aira API > Account to look up news.",
+            "Connect a SerpApi key in API > Account to look up news.",
         )
     record = airaservice.run_search(
         connection,
@@ -683,36 +683,28 @@ def overview(
                 "id": "google_maps",
                 "label": SOURCE_LABELS["google_maps"],
                 "available": serpapi_configured,
-                "needs": ""
-                if serpapi_configured
-                else "A SerpApi key (Aira API > Account).",
+                "needs": "" if serpapi_configured else "A SerpApi key (API > Account).",
                 "cost": "1 search per page of about 20 businesses",
             },
             {
                 "id": "google_web",
                 "label": SOURCE_LABELS["google_web"],
                 "available": serpapi_configured,
-                "needs": ""
-                if serpapi_configured
-                else "A SerpApi key (Aira API > Account).",
+                "needs": "" if serpapi_configured else "A SerpApi key (API > Account).",
                 "cost": "1 search per page of about 10 results",
             },
             {
                 "id": "google_intent",
                 "label": SOURCE_LABELS["google_intent"],
                 "available": serpapi_configured,
-                "needs": ""
-                if serpapi_configured
-                else "A SerpApi key (Aira API > Account).",
+                "needs": "" if serpapi_configured else "A SerpApi key (API > Account).",
                 "cost": "1 search per page of about 10 posts",
             },
             {
                 "id": "google_jobs",
                 "label": SOURCE_LABELS["google_jobs"],
                 "available": serpapi_configured,
-                "needs": ""
-                if serpapi_configured
-                else "A SerpApi key (Aira API > Account).",
+                "needs": "" if serpapi_configured else "A SerpApi key (API > Account).",
                 "cost": "1 search per page of about 10 jobs",
             },
             {

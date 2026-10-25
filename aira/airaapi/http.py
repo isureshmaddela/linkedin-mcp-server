@@ -1,4 +1,4 @@
-"""A tiny, framework-neutral request layer for the Aira API routes.
+"""A tiny, framework-neutral request layer for the API routes.
 
 Route handlers are plain functions ``handler(request) -> (status, body)`` or
 ``-> Raw`` (a download). They are registered with :func:`aira_route` and the
@@ -38,7 +38,7 @@ class Headers(Protocol):
 
 
 class KeyIndex(Protocol):
-    """Maps Aira API key hashes to the owning account (kept in the accounts database)."""
+    """Maps API key hashes to the owning account (kept in the accounts database)."""
 
     def add(self, key_hash: str) -> None: ...
 

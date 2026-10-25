@@ -676,7 +676,7 @@ class Lifecycle:
         """Rotate an organization's data key without downtime.
 
         A new key is added and the organization's secrets move to it at once; every stored document and the
-        organization's Aira API secrets (its SerpApi key) are then re-encrypted under it, and only after all of
+        organization's API secrets (its SerpApi key) are then re-encrypted under it, and only after all of
         that succeeds are the older keys dropped. Until then ``secrets.fernet`` still reads data under any key.
         """
         self.app.tenancy.org(org_id)
@@ -955,6 +955,9 @@ class Lifecycle:
             connection.execute(
                 "DELETE FROM remote_login_sessions WHERE expires_at < ? AND (state != 'active' OR used_at < ?)",
                 (self.now, self.now - 3600),  # a sign-in in progress outlives its link
+            )
+            connection.execute(
+                "DELETE FROM launch_tokens WHERE expires_at < ?", (self.now - 3600,)
             )
             expired = many(
                 connection,

@@ -478,7 +478,7 @@ def answers_write_pre(ctx: Ctx) -> None:
         )
 
 
-# --------------------------------------------------------------------------- the organization's Aira API
+# --------------------------------------------------------------------------- the organization's API
 
 
 def api_search_pre(ctx: Ctx) -> None:
@@ -531,7 +531,7 @@ def v1_key_create_inside(ctx: Ctx) -> None:
         ).fetchone()[0]
     if limit is not None and count >= limit:
         raise PlanRequired(
-            f"The plan allows {limit} Aira API keys.",
+            f"The plan allows {limit} API keys.",
             limit="api_v1_keys",
             used=count,
             limit_value=limit,

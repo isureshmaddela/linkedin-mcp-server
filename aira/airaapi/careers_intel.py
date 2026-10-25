@@ -9,7 +9,7 @@ the plan and its cost without calling SerpApi at all.
 
 Section items are a deliberately thin view of the engine response (title,
 subtitle, link, thumbnail and a few ``meta`` scalars) so a report stays small;
-the full response is one click away through ``record_id`` (Aira API history) or
+the full response is one click away through ``record_id`` (API history) or
 the section's ``params`` (open it in the Playground).
 
 Nothing here fabricates data: every item comes from a field of the stored

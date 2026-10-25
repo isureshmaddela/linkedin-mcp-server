@@ -9,6 +9,8 @@ the production provider (see ``docs/multitenant.md``).
 
 from __future__ import annotations
 
+from collections.abc import Mapping, Sequence
+
 import hashlib
 import hmac
 import json
@@ -55,6 +57,7 @@ class BillingProvider(Protocol):
         seat_cents: int,
         currency: str,
         prorate: bool,
+        addons: Sequence[Mapping[str, Any]] = (),
     ) -> dict[str, Any]: ...
 
     def cancel_subscription(
@@ -193,13 +196,30 @@ class StandInProvider:
         seat_cents: int,
         currency: str,
         prorate: bool,
+        addons: Sequence[Mapping[str, Any]] = (),
     ) -> dict[str, Any]:
-        return {
+        lines = [
+            {
+                "app_id": str(a["app_id"]),
+                "seats": int(a["seats"]),
+                "amount_cents": int(a["seats"]) * int(a["seat_cents"]),
+            }
+            for a in addons
+        ]
+        record = {
             "id": subscription_id,
             "plan_id": plan_id,
             "seats": seats,
-            "amount_cents": seats * seat_cents,
+            "amount_cents": seats * seat_cents + sum(a["amount_cents"] for a in lines),
+            "addons": lines,
+            "prorate": prorate,
         }
+        self._put(f"standin:subscription:{subscription_id}", record)
+        return record
+
+    def subscription_record(self, subscription_id: str) -> dict[str, Any] | None:
+        """What the stand-in last applied to a subscription (tests and the reconcile report read it)."""
+        return self._get(f"standin:subscription:{subscription_id}")
 
     def cancel_subscription(
         self, subscription_id: str, *, at_period_end: bool
@@ -311,6 +331,34 @@ class StripeProvider:
             "quantity": seats,
         }
 
+    def _addon_item(
+        self, addon: Mapping[str, Any], currency: str, product: str | None = None
+    ) -> dict[str, Any]:
+        """One subscription item per app add-on; ``metadata.app_id`` is how a later update finds it."""
+        price_data: dict[str, Any] = {
+            "currency": currency,
+            "unit_amount": int(addon["seat_cents"]),
+            "recurring": {"interval": "month"},
+        }
+        if product:
+            price_data["product"] = product
+        else:
+            price_data["product_data"] = {
+                "name": f"Aira {addon['name']} add-on (per candidate seat)"
+            }
+        return {
+            "price_data": price_data,
+            "quantity": int(addon["seats"]),
+            "metadata": {"app_id": str(addon["app_id"])},
+        }
+
+    def _product(self, name: str, metadata: Mapping[str, Any]) -> str:
+        return str(
+            self._call(
+                "POST", "/v1/products", {"name": name, "metadata": dict(metadata)}
+            )["id"]
+        )
+
     def create_checkout(
         self,
         *,
@@ -352,29 +400,52 @@ class StripeProvider:
         seat_cents: int,
         currency: str,
         prorate: bool,
+        addons: Sequence[Mapping[str, Any]] = (),
     ) -> dict[str, Any]:
         current = self._call("GET", f"/v1/subscriptions/{subscription_id}")
-        item = current["items"]["data"][0]["id"]
+        existing = list(current["items"]["data"])
+        # The plan item is the one without an app id; add-on items carry metadata.app_id.
+        by_app = {
+            str((i.get("metadata") or {}).get("app_id")): i["id"]
+            for i in existing
+            if (i.get("metadata") or {}).get("app_id")
+        }
+        plan_item = next(
+            (i["id"] for i in existing if not (i.get("metadata") or {}).get("app_id")),
+            existing[0]["id"],
+        )
         # price_data on an existing subscription item must name a product (product_data is only
         # accepted when creating a Checkout session), so make one for the new plan.
-        product = self._call(
-            "POST",
-            "/v1/products",
-            {
-                "name": f"Aira {plan_name} (per candidate seat)",
-                "metadata": {"plan_id": plan_id},
-            },
-        )["id"]
+        product = self._product(
+            f"Aira {plan_name} (per candidate seat)", {"plan_id": plan_id}
+        )
         price = self._price(plan_name, seats, seat_cents, currency)
         price["price_data"].pop("product_data", None)
         price["price_data"]["product"] = product
+        items: list[dict[str, Any]] = [{"id": plan_item, **price}]
+        wanted = {str(a["app_id"]): a for a in addons}
+        for app_id, addon in wanted.items():
+            addon_product = self._product(
+                f"Aira {addon['name']} add-on (per candidate seat)", {"app_id": app_id}
+            )
+            entry = self._addon_item(addon, currency, addon_product)
+            if app_id in by_app:
+                entry["id"] = by_app[app_id]
+            items.append(entry)
+        for app_id, item_id in by_app.items():
+            if app_id not in wanted:
+                items.append({"id": item_id, "deleted": "true"})
         return self._call(
             "POST",
             f"/v1/subscriptions/{subscription_id}",
             {
-                "items": [{"id": item, **price}],
+                "items": items,
                 "proration_behavior": "create_prorations" if prorate else "none",
-                "metadata": {"plan_id": plan_id, "seats": seats},
+                "metadata": {
+                    "plan_id": plan_id,
+                    "seats": seats,
+                    "apps": ",".join(sorted(wanted)),
+                },
             },
         )
 

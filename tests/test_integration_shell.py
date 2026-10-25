@@ -1,4 +1,4 @@
-"""How the Aira API and Careers sections join the rest of the app.
+"""How the API and Careers sections join the rest of the app.
 
 Static checks on the navigation, shortcuts, script order and the Dashboard, Settings and Jobs wiring (plain browser
 JavaScript has no build step, so these guard what is easy to break), plus HTTP journeys that the new Dashboard widgets,
@@ -45,23 +45,54 @@ def _nav() -> list[dict[str, str]]:
 
 def test_new_sections_are_in_the_navigation_with_icons_and_chords() -> None:
     nav = {item["id"]: item for item in _nav()}
-    assert nav["airaapi"]["label"] == "Aira API" and nav["airaapi"]["key"] == "p"
-    assert nav["careers"]["label"] == "Careers" and nav["careers"]["key"] == "c"
+    assert nav["airaapi"]["label"] == "API" and nav["airaapi"]["key"] == "p"
+    assert nav["airaapi"]["app"] == "api"
+    # The research workspace keeps its route id; inside the Careers app it is called Research.
+    assert nav["careers"]["label"] == "Research" and nav["careers"]["app"] == "careers"
+    assert nav["leads"]["app"] == "leads" and nav["settings"]["app"] == "account"
     assert len(nav) == 11
     keys = [item["key"] for item in nav.values()]
     assert len(set(keys)) == len(keys), "two sections share a g-chord"
     for item in nav.values():
         assert re.search(rf"\b{item['icon']}: '<svg", APP_JS), item["icon"]
-    # Phones keep four quick items; the rest sit behind More.
+    # Every section belongs to an app (or to the account, shown under every app).
+    assert {item["app"] for item in nav.values()} == {
+        "careers",
+        "leads",
+        "api",
+        "account",
+    }
+    # Phones keep four quick items for the Careers app; the rest sit behind More.
     quick = [
-        line for line in APP_JS.splitlines() if "id:" in line and "quick: true" in line
+        line
+        for line in APP_JS.splitlines()
+        if "id:" in line and "quick: true" in line and 'app: "careers"' in line
     ]
     assert len(quick) == 4
 
 
 def test_chords_and_help_are_driven_by_the_same_list() -> None:
     assert "NAV.find((item) => item.key === event.key)" in APP_JS
-    assert "NAV.map((item) => [`g then ${item.key}`, item.label])" in APP_JS
+    assert "APPS.find((item) => item.key === event.key" in APP_JS
+    assert "sections.map((item) => [`g then ${item.key}`, item.label])" in APP_JS
+
+
+def test_the_app_keys_do_not_collide_with_section_chords() -> None:
+    block = re.search(r"const APPS = \[(.*?)\n\];", APP_JS, re.S)
+    assert block is not None
+    app_keys = dict(re.findall(r'id: "(\w+)".*?key: "(\w)"', block.group(1)))
+    section_keys = {item["id"]: item["key"] for item in _nav()}
+    # An app's key may only coincide with its own home section (Leads, API), never with another section.
+    for app_id, key in app_keys.items():
+        owners = [
+            section
+            for section, section_key in section_keys.items()
+            if section_key == key
+        ]
+        assert owners in ([], [app_id], ["airaapi"] if app_id == "api" else [app_id]), (
+            app_id,
+            owners,
+        )
 
 
 def test_every_nav_section_has_a_registered_view() -> None:
@@ -178,5 +209,5 @@ def test_key_state_reaches_every_consumer_and_the_key_never_leaks(
 def test_sources_hint_points_to_the_key_page(env, api) -> None:
     sources = api.ok("GET", "/api/sources")["sources"]
     google = next(item for item in sources if item["source"] == "google_jobs")
-    assert "Aira API > Account" in google["connection_hint"]
-    assert "Aira API" in google["access_method"]
+    assert "API > Account" in google["connection_hint"]
+    assert "API" in google["access_method"]

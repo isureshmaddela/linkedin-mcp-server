@@ -462,9 +462,9 @@
   const nativeFetch = window.fetch.bind(window);
   window.fetch = async (input, init) => {
     const url = typeof input === "string" ? input : input && input.url;
-    // The Aira API console belongs to the organization's administrators; answer for everyone else without a request.
+    // The API console belongs to the organization's administrators; answer for everyone else without a request.
     if (url && url.startsWith("/api/airaapi/") && cloud.me && cloud.me.kind === "member" && !cloud.can("integrations.read")) {
-      return new Response(JSON.stringify({ error: "The Aira API console belongs to your organization's administrators.", code: "forbidden" }), { status: 403, headers: { "Content-Type": "application/json" } });
+      return new Response(JSON.stringify({ error: "The API console belongs to your organization's administrators.", code: "forbidden" }), { status: 403, headers: { "Content-Type": "application/json" } });
     }
     if (url === "/api/linkedin/connect" && init && init.method === "POST" && cloud.me && cloud.me.role === "candidate") {
       let body = {};

@@ -1,6 +1,6 @@
-# Aira API and Careers: design spec
+# API and Careers: design spec
 
-Status: build contract for the "Aira API" console (a SerpApi dashboard clone that is better where it can be),
+Status: build contract for the "API" console (a SerpApi dashboard clone that is better where it can be),
 the SerpApi-compatible local API, and the "Careers" workspace. Backend, frontend and tests are all built against
 this file. Where this file and the code disagree after the build, update this file.
 
@@ -11,14 +11,14 @@ Analytics and Settings:
 
 | Section | Route | What it is |
 |---|---|---|
-| **Aira API** | `#/airaapi` | A console equivalent to the SerpApi dashboard, covering every SerpApi engine: Overview (usage, plan, throughput), Playground, Engines catalog, Search history and archive, Locations, Account and API key, Status, Saved searches and monitors, Aira API keys, Docs. |
+| **API** | `#/airaapi` | A console equivalent to the SerpApi dashboard, covering every SerpApi engine: Overview (usage, plan, throughput), Playground, Engines catalog, Search history and archive, Locations, Account and API key, Status, Saved searches and monitors, API keys, Docs. |
 | **Careers** | `#/careers` | Career workspaces powered by those engines: Job search (Google Jobs with every filter), Company intelligence, Salary and market, Interview prep, Onsite travel, Learning. Results import straight into Aira Jobs, Recruiters, Interviews. |
 
-Aira also exposes a **SerpApi-compatible local endpoint** (`/v1/search.json` etc.) guarded by Aira API keys, so
+Aira also exposes a **SerpApi-compatible local endpoint** (`/v1/search.json` etc.) guarded by API keys, so
 scripts can call Aira instead of SerpApi and get caching, history and usage accounting for free.
 
 The SerpApi key is a secret. It comes from `SERPAPI_API_KEY` in the environment or is pasted once in
-Aira API > Account, validated against `account.json`, and stored Fernet-encrypted (key file next to
+API > Account, validated against `account.json`, and stored Fernet-encrypted (key file next to
 `documents.key`). It is never returned by any endpoint (only `configured`, `source`, `last4`), never logged, never
 stored in search records and never put in URLs the browser sees.
 
@@ -81,7 +81,7 @@ searches -> 402, rate limited -> 429, other -> 502. A bad Aira key is 401 with `
 Glue in `auto_apply_assistant.py` (a short block placed after the `RequestHandler` class, because it installs methods on it): for every entry in
 `AIRA_ROUTES` it appends `(method, compiled_pattern, name, auth_flag)` to `ROUTES` and installs a bound-method
 wrapper on `RequestHandler` that builds `Request`, calls the handler, and sends JSON or `Raw`. `auth="api_key"`
-routes use `auth=False` in `ROUTES` and the wrapper authenticates the Aira API key itself (binding the owning user
+routes use `auth=False` in `ROUTES` and the wrapper authenticates the API key itself (binding the owning user
 with `_bind_user`). Standard rate limit, CSRF and error envelope stay in `_dispatch`.
 
 ### 3.2 Tables (additive migration 12 `airaapi` in `aira/schema.py`; 9 to 11 belong to the messenger work)
@@ -205,7 +205,7 @@ A monitor re-runs its saved search on schedule (hook `service.run_due_monitors(.
 scheduler loop), computes the diff against the previous run and raises an in-app notification when the main result
 list changed. Costs are shown before enabling (searches per month estimate).
 
-### 4.6 Aira API keys and docs
+### 4.6 API keys and docs
 
 ```
 GET  /api/airaapi/keys    -> {keys: [{id,name,prefix,created_at,last_used_at,revoked_at,hourly_limit,used_this_hour}]}
@@ -217,7 +217,7 @@ GET  /api/airaapi/docs    -> {base_url, auth, endpoints: [...], parameters: [...
 ## 5. SerpApi-compatible local API (`auth="api_key"`)
 
 `GET /v1/search.json` (alias `/v1/search`) accepts exactly SerpApi's query parameters (`engine`, `q`, ..., `api_key`
-= Aira API key; `Authorization: Bearer aira_...` also accepted). It runs `service.run_search(source="api")` with the
+= API key; `Authorization: Bearer aira_...` also accepted). It runs `service.run_search(source="api")` with the
 owner's stored SerpApi key and returns the SerpApi JSON body with `search_metadata.aira = {id, cache_hit}` added.
 Also `/v1/account.json`, `/v1/locations.json`, `/v1/searches.json` (list), `/v1/searches/{id}.json`,
 `/v1/engines.json`. Errors use SerpApi's shape `{"error": "..."}` with the right HTTP status (401 bad key, 429
@@ -252,9 +252,9 @@ partial failure allowed. A report shows the credit cost before it runs (UI) and 
 
 New files in `auto_apply_assistant/` loaded from `index.html` after `views-settings.js`:
 `views-serp-kit.js` (shared components), `views-airaapi.js`, `views-playground.js`, `views-careers.js`.
-CSS goes into `app.css` in clearly delimited blocks (`/* ==== Aira API ==== */`, `/* ==== Careers ==== */`).
+CSS goes into `app.css` in clearly delimited blocks (`/* ==== API ==== */`, `/* ==== Careers ==== */`).
 Register views as the other modules do (`Aira.views.airaapi = ...`, `Aira.views.careers = ...`), add NAV entries and
-icons in `app.js`, shortcuts `g` then `p` (Aira API) and `g` then `c` (Careers), and the CSP stays free of inline script.
+icons in `app.js`, shortcuts `g` then `p` (API) and `g` then `c` (Careers), and the CSP stays free of inline script.
 
 ### 7.1 Shared kit: `Aira.serp` (in `views-serp-kit.js`)
 
@@ -300,7 +300,7 @@ Implemented behaviour and additions beyond the signatures above (the kit is the 
   gracefully); the `/static/` handler must serve `views-serp-kit.js` (it does for any `.js` in the static directory).
 * Tests: `node tests/js/serp_kit.test.mjs` (no dependencies; also run by `tests/test_serp_kit_js.py` when node is on PATH).
 
-### 7.2 Aira API console (`views-airaapi.js`, `views-playground.js`)
+### 7.2 API console (`views-airaapi.js`, `views-playground.js`)
 
 Sub-navigation (`ui.tabs`, URL `#/airaapi?tab=`): `overview` (default), `playground`, `engines`, `history`,
 `locations`, `monitors`, `account`, `keys`, `docs`, `status`.
@@ -319,7 +319,7 @@ Sub-navigation (`ui.tabs`, URL `#/airaapi?tab=`): `overview` (default), `playgro
 * **Locations**: search box against locations API with map-free table, copy canonical name, "Use in Playground".
 * **Monitors/Saved**: saved searches, monitor creation with cost estimate, last change summary.
 * **Account**: connect/replace/remove the SerpApi key, plan and usage meters, extra credits, link to SerpApi billing
-  (external, opens serpapi.com in a new tab: that is the product). **Keys**: create/revoke Aira API keys, usage.
+  (external, opens serpapi.com in a new tab: that is the product). **Keys**: create/revoke API keys, usage.
 * **Docs**: generated API reference of `/v1`, auth, params, errors, per-engine pages from the catalog with
   copyable snippets, plus a "migrate from SerpApi" guide (change base URL and key).
 * **Status**: local server, SerpApi reachability and latency, throttle, queue.
@@ -334,7 +334,7 @@ Playground as built (`views-playground.js`, `Aira.renderPlayground(content, rout
 * Compare uses `GET /api/airaapi/diff` between the open result and any earlier JSON run of the same engine (same parameters preferred).
 * Shortcuts: Ctrl/Cmd+Enter run, Ctrl/Cmd+K or `e` engine picker, Alt+1 to 5 left tabs; picker: arrows, Enter, Alt+F favorite, Esc.
 
-As built (`views-airaapi.js`, CSS block `/* ==== Aira API console`, classes prefixed `aa-`; the file is the reference
+As built (`views-airaapi.js`, CSS block `/* ==== API console`, classes prefixed `aa-`; the file is the reference
 when this list and a view disagree):
 
 * **Plug-in contract.** `Aira.airaapi = {TABS, tabs, link(tab, query), playgroundLink(engine, params, options),
@@ -373,7 +373,7 @@ dead buttons).
 * No scraping of serpapi.com and no use of the user's SerpApi login; only the documented API with the user's API key.
 * Never fabricate search results. Without a key the console shows setup state; tests use a stand-in SerpApi server
   (`AIRA_SERPAPI_BASE_URL`) with recorded-shape fixtures that live under `tests/fixtures/serpapi/` and are labeled as fixtures.
-* The Aira API key protects the local compat endpoint only; the server still binds to 127.0.0.1.
+* The API key protects the local compat endpoint only; the server still binds to 127.0.0.1.
 
 ## 9. As built: backend deviations and additions
 
@@ -383,7 +383,7 @@ The backend follows sections 2 to 5. Where it differs or adds, this is the contr
 server-wide); `DELETE /api/airaapi/key` removes only the account's key and answers `409 {code:"conflict"}` when only the
 environment key exists. `SecretStore` lives in `store.py` (`put/get/delete/exists`, ciphertext in `airaapi_secrets`); its
 Fernet key is `airaapi.key` beside the database or `AIRA_SECRET_KEY`. The existing Google Jobs source and `/api/sources`,
-`/api/status` use the same resolved key (`_serpapi_key()` in the glue). Aira API key failures use `code: "invalid_aira_key"`.
+`/api/status` use the same resolved key (`_serpapi_key()` in the glue). API key failures use `code: "invalid_aira_key"`.
 
 **Tables.** `airaapi_searches` gains `note` (empty-result message), `output` (`json|html|md`), `options_json`,
 `api_key_id` (the Aira key that made an `/v1` call; drives per-key hourly counting) and `result_truncated` (body larger
@@ -469,7 +469,7 @@ threads open their own connections to the same database file; a database that ca
 sections one at a time.
 
 **Alerts.** Minimum interval 60 minutes (one search per run), up to 10 alerts. Creating an alert creates the saved search
-and the monitor; deleting it removes both; deleting either from the Aira API console is handled (the alert disappears with its
+and the monitor; deleting it removes both; deleting either from the API console is handled (the alert disappears with its
 saved search, or lists as off and is recreated by `PATCH {"enabled": true}`). `service.run_monitor` gained a hook list
 (`register_monitor_hook`): a hook that returns a summary takes over the run, which replaces the generic "monitor changed"
 notification. `new_jobs` rows keep the Job as found; `already_in_aira` and `aira_job_key` are recomputed on read.
@@ -492,9 +492,9 @@ the monitor hook, concurrency cap, partial failure, estimates, every report kind
 
 ## 12. As built: integration
 
-* **Navigation.** `app.js` has one `NAV` list (`id, label, icon, group, key, quick`) that drives the sidebar (groups Workspace, Research, Account; the list scrolls on short screens), the phone bottom bar, the `g` then `<key>` chords and the shortcuts help. `Aira API` is `g p`, `Careers` is `g c`. The bottom bar keeps the four `quick` items; everything else is behind More, which opens the sidebar as a sheet, shows as the current place when the open section is not in the bar (`aria-current`), reports `aria-expanded`, shows a dot when a hidden section has a badge, and closes on Escape or after a link is chosen. `Aira.renderNav(counts)` merges counts, so the Careers widget can set the Careers badge (new alert jobs) without clearing the Dashboard's. Views set their own crumbs and `document.title` (`<tab> · Aira API · Aira`).
-* **Dashboard.** `views-widgets.js` adds `Aira.dashboardWidgets()`, two panels appended below the existing grid and filled after the page draws: Aira API (searches today and in 30 days, cache hit rate, searches left, 14-day bars, monitor count, setup card without a key) and Careers (role search that opens `#/careers?tab=jobs&q=`, alerts with new counts, saved searches, recent reports, report shortcuts). A failed widget shows its own error and retry. "Updates" rows that carry an in-app `link` (monitor changes, alerts, messages) now open it and mark that notification read.
-* **Key state.** One resolver (`service.resolve_key`) feeds `/api/sources`, `/api/status`, the Jobs-tab Google source, Careers, the console and `/v1`. The top bar has a `SerpApi ready/off` pill (links to Aira API > Account) that refreshes when a key is saved or removed. Settings > Integrations shows a "Google Jobs and Aira API" card from `GET /api/airaapi/overview` (connected with plan and searches left, no key, key rejected, key unusable) with Manage key, Open Aira API and Open Careers. The Jobs view reads `/api/sources` on every visit, links the not-connected hint to Aira API > Account, and the Google Jobs tab explains a missing key instead of showing an empty list.
+* **Navigation.** `app.js` has one `NAV` list (`id, label, icon, group, key, quick`) that drives the sidebar (groups Workspace, Research, Account; the list scrolls on short screens), the phone bottom bar, the `g` then `<key>` chords and the shortcuts help. `API` is `g p`, `Careers` is `g c`. The bottom bar keeps the four `quick` items; everything else is behind More, which opens the sidebar as a sheet, shows as the current place when the open section is not in the bar (`aria-current`), reports `aria-expanded`, shows a dot when a hidden section has a badge, and closes on Escape or after a link is chosen. `Aira.renderNav(counts)` merges counts, so the Careers widget can set the Careers badge (new alert jobs) without clearing the Dashboard's. Views set their own crumbs and `document.title` (`<tab> · API · Aira`).
+* **Dashboard.** `views-widgets.js` adds `Aira.dashboardWidgets()`, two panels appended below the existing grid and filled after the page draws: API (searches today and in 30 days, cache hit rate, searches left, 14-day bars, monitor count, setup card without a key) and Careers (role search that opens `#/careers?tab=jobs&q=`, alerts with new counts, saved searches, recent reports, report shortcuts). A failed widget shows its own error and retry. "Updates" rows that carry an in-app `link` (monitor changes, alerts, messages) now open it and mark that notification read.
+* **Key state.** One resolver (`service.resolve_key`) feeds `/api/sources`, `/api/status`, the Jobs-tab Google source, Careers, the console and `/v1`. The top bar has a `SerpApi ready/off` pill (links to API > Account) that refreshes when a key is saved or removed. Settings > Integrations shows a "Google Jobs and API" card from `GET /api/airaapi/overview` (connected with plan and searches left, no key, key rejected, key unusable) with Manage key, Open API and Open Careers. The Jobs view reads `/api/sources` on every visit, links the not-connected hint to API > Account, and the Google Jobs tab explains a missing key instead of showing an empty list.
 * **CSP.** `img-src 'self' data: blob: https:` (`aira/security.py`) so result thumbnails render; everything else is unchanged.
 * **Contrast.** The app tokens gained `--on-brand` and `--mark-ink` so text on the brand fills (buttons, hero, selected tabs, toasts, logo tile) is dark in the dark theme instead of white on mint; `.sk-count` uses `--ink-2`. A scripted audit of the landing state of every page at 1440 px in both themes (text on flat backgrounds; gradients, drawers and dialogs were not measured) found no text below WCAG AA.
 * **Tests.** `tests/test_integration_shell.py` (navigation, chords, script order, widget and Settings wiring, CSP, and the key-state journey over HTTP).
@@ -554,9 +554,9 @@ from the Playground or `/v1` is also not built, because X-Ray reads pixel positi
 
 Tests: `tests/test_airaapi_parity.py`.
 
-## 14. As built: Aira Jobs, Aira API's own engine (2026-10-23)
+## 14. As built: Aira Jobs, API's own engine (2026-10-23)
 
-Aira API was a console and cache over SerpApi: every live search needed a SerpApi key. It now has one engine of its
+API was a console and cache over SerpApi: every live search needed a SerpApi key. It now has one engine of its
 own, **`aira_jobs`**, which Aira answers itself from free public job-board APIs. It needs no key and costs no credits.
 
 **Catalog.** Engines carry a `provider`: `serpapi` (the 136 catalog engines) or `aira`. `aira_jobs` is defined in
@@ -595,7 +595,7 @@ carries `aira_source`, `attribution` ("Jobs from Himalayas (himalayas.app)") and
 
 **Where it is used:**
 - **Jobs**: a source `aira_jobs` (group `aira`, always connected) and an **Aira Jobs** tab. When LinkedIn is not
-  connected it is the default source. A search runs through Aira API (history label "Jobs tab: ..."), and postings are
+  connected it is the default source. A search runs through API (history label "Jobs tab: ..."), and postings are
   imported with source `aira_jobs` via `jobboards.posting_from_item`; the description ends with the board credit.
 - **Careers > Jobs**: a "Search with" switch, **Aira Jobs (free)** or **Google Jobs**. It defaults to Aira Jobs
   without a key, and the key panel appears only for Google. `careers.search_jobs(provider=...)`:
@@ -610,7 +610,7 @@ carries `aira_source`, `attribution` ("Jobs from Himalayas (himalayas.app)") and
   applying, `resolve_application_url` opens the board's job page (never Himalayas, which refuses scripted visits) and
   takes the employer's Greenhouse, Lever, Ashby or SmartRecruiters link. Otherwise the job ends as "Apply manually"
   with the board link.
-- **Aira API console**: the engine card shows "Aira, free, no key"; Playground, History ("Save jobs to Aira"),
+- **API console**: the engine card shows "Aira, free, no key"; Playground, History ("Save jobs to Aira"),
   monitors and `/v1` work with it.
 
 **Not covered**: Google Jobs coverage (Aira Jobs is a different and smaller set of listings, mostly remote and tech).

@@ -16,6 +16,7 @@ CLOUD_SCRIPTS = (
     '<script src="/static/cloud-org.js"></script>'
     '<script src="/static/cloud-people.js"></script>'
     '<script src="/static/cloud-billing.js"></script>'
+    '<script src="/static/cloud-apps.js"></script>'
     '<script src="/static/cloud-coach.js"></script>'
     '<script src="/static/cloud-platform.js"></script>'
     '<script src="/static/cloud-boot.js"></script>'

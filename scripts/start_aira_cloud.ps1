@@ -33,6 +33,14 @@ if ($needsInstall) {
     uv sync --group dev --extra cloud
 }
 
+# Optional local settings (for example the account-link secret), one KEY=VALUE per line; never echoed.
+$envFile = Join-Path $root ".env.cloud"
+if (Test-Path $envFile) {
+    foreach ($line in Get-Content $envFile) {
+        if ($line -match '^\s*([A-Z0-9_]+)\s*=\s*(.*)$') { [Environment]::SetEnvironmentVariable($Matches[1], $Matches[2].Trim(), "Process") }
+    }
+}
+
 if ([string]::IsNullOrWhiteSpace($DataDir)) { $DataDir = Join-Path $root ".aira-cloud" }
 $env:AIRA_CLOUD_DATA = $DataDir
 $env:AIRA_CLOUD_PORT = "$Port"

@@ -95,7 +95,7 @@ class Scheduler:
         return counts
 
     def _enqueue_org_monitors(self, now_iso: str, blocked_orgs: dict[str, bool]) -> int:
-        """The organization's own Aira API monitors live in its API workspace, not a candidate's."""
+        """The organization's own API monitors live in its API workspace, not a candidate's."""
         with self.app.db.read() as connection:
             orgs = many(
                 connection,

@@ -24,20 +24,19 @@
       <p id="authNotice" class="muted" role="status" aria-live="polite" style="min-height:20px;margin:10px 0 0"></p>
       <button id="authSubmit" class="btn" type="submit" style="width:100%;margin-top:8px">Sign in</button>
       <p class="switch"><span id="authSwitchText">New to Aira?</span> <button id="authSwitch" type="button">Create an account</button></p>
+      <div id="authExtras" class="auth-extras"></div>
     </form>
   </section>
 
   <div id="app" class="app" hidden>
     <aside id="sidebar" class="sidebar" aria-label="Primary">
-      <div class="brand"><span class="brand-mark">A</span><span>AIRA<small>Career Copilot</small></span></div>
+      <div class="brand"><span class="brand-mark">A</span><span>AIRA<small id="brandApp">Career Copilot</small></span></div>
       <nav class="nav" id="primaryNav" aria-label="Primary navigation"></nav>
       <div class="sidebar-foot">
-        <div class="account"><span id="accountEmail"></span></div>
-        <div class="btn-row">
-          <button id="themeToggle" class="btn ghost sm" type="button" aria-label="Toggle dark mode">Theme</button>
-          <button id="shortcutsBtn" class="btn ghost sm" type="button">Shortcuts</button>
-          <button id="logoutBtn" class="btn ghost sm" type="button">Sign out</button>
-        </div>
+        <button id="appSwitcherSideBtn" class="btn ghost sm app-switch-side" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="appSwitcher">
+          <svg viewBox="0 0 24 24"><circle cx="5" cy="5" r="1.6"/><circle cx="12" cy="5" r="1.6"/><circle cx="19" cy="5" r="1.6"/><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/><circle cx="5" cy="19" r="1.6"/><circle cx="12" cy="19" r="1.6"/><circle cx="19" cy="19" r="1.6"/></svg>
+          <span>Switch app</span>
+        </button>
       </div>
     </aside>
     <div class="main">
@@ -48,6 +47,30 @@
         <div class="crumbs" id="crumbs"><span>Dashboard</span></div>
         <div class="spacer"></div>
         <div class="status-strip" id="statusStrip" aria-live="polite"></div>
+        <div class="topbar-menu">
+          <button id="appSwitcherBtn" class="btn ghost icon app-switch" type="button" aria-label="Switch app" title="Aira apps" aria-haspopup="menu" aria-expanded="false" aria-controls="appSwitcher">
+            <svg viewBox="0 0 24 24"><circle cx="5" cy="5" r="1.6"/><circle cx="12" cy="5" r="1.6"/><circle cx="19" cy="5" r="1.6"/><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/><circle cx="5" cy="19" r="1.6"/><circle cx="12" cy="19" r="1.6"/><circle cx="19" cy="19" r="1.6"/></svg>
+          </button>
+          <div id="appSwitcher" class="popover app-switcher" role="menu" aria-label="Aira apps" hidden></div>
+        </div>
+        <div class="topbar-menu">
+          <button id="accountBtn" class="account-btn" type="button" aria-label="Account menu" aria-haspopup="menu" aria-expanded="false" aria-controls="accountMenu">
+            <span class="avatar" id="accountAvatar" aria-hidden="true">A</span>
+            <span class="account-name" id="accountBtnEmail"></span>
+          </button>
+          <div id="accountMenu" class="popover account-menu" role="menu" aria-label="Account" hidden>
+            <div class="account-head">
+              <span class="avatar lg" id="accountAvatarLarge" aria-hidden="true">A</span>
+              <div class="account-who"><strong id="accountEmail"></strong><span id="accountMeta" class="muted"></span></div>
+            </div>
+            <div id="accountLinks" class="menu-list"></div>
+            <div class="menu-list">
+              <button id="themeToggle" class="menu-item" type="button" role="menuitem" aria-label="Toggle dark mode">Theme</button>
+              <button id="shortcutsBtn" class="menu-item" type="button" role="menuitem">Shortcuts</button>
+              <button id="logoutBtn" class="menu-item" type="button" role="menuitem">Sign out</button>
+            </div>
+          </div>
+        </div>
       </header>
       <main id="main" class="content" tabindex="-1"></main>
     </div>
@@ -72,5 +95,6 @@
   <script src="/static/views-leads-outreach.js"></script>
   <script src="/static/views-widgets.js"></script>
   <!--aira:cloud-->
+  <script src="/static/account-link.js"></script>
 </body>
 </html>

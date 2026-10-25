@@ -988,9 +988,9 @@ SOURCE_CATALOG: tuple[SourceDescriptor, ...] = (
         label="Google Jobs",
         group="google",
         status="available",
-        access_method="SerpApi google_jobs engine (GET, needs a SerpApi key from Aira API or SERPAPI_API_KEY)",
+        access_method="SerpApi google_jobs engine (GET, needs a SerpApi key from API or SERPAPI_API_KEY)",
         identifier_label="",
-        identifier_help="No identifier is needed; connect a SerpApi key in Aira API > Account or set SERPAPI_API_KEY.",
+        identifier_help="No identifier is needed; connect a SerpApi key in API > Account or set SERPAPI_API_KEY.",
         capabilities=JobSourceCapabilities(
             search=True, import_jobs=True, normalize=True, resolve_application_link=True
         ),

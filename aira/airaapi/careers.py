@@ -1,6 +1,6 @@
 """Careers: Google Jobs search, duplicate-safe import and job alerts.
 
-This module turns the generic Aira API layer (:mod:`aira.airaapi.service`) into
+This module turns the generic API layer (:mod:`aira.airaapi.service`) into
 a job-search workspace. It owns three things:
 
 * **Job normalization.** A SerpApi ``google_jobs`` response becomes a list of
@@ -14,7 +14,7 @@ a job-search workspace. It owns three things:
   :class:`JobGateway`, so a job is never inserted twice and imports go through
   the application's normal scoring path. The gateway is installed by the HTTP
   server module; this module never imports it.
-* **Job alerts.** An alert is a saved ``google_jobs`` search plus an Aira API
+* **Job alerts.** An alert is a saved ``google_jobs`` search plus an API
   monitor. A monitor hook (see :func:`aira.airaapi.service.register_monitor_hook`)
   lists only jobs the alert has not seen before, raises an in-app notification
   and, if the user asked for it, imports new jobs whose match score reaches a
@@ -1295,7 +1295,7 @@ def shared_search(
     *,
     limits: service.Limits | None = None,
 ) -> dict[str, Any]:
-    """The Jobs-tab Google Jobs source, routed through Aira API history and cache.
+    """The Jobs-tab Google Jobs source, routed through API history and cache.
 
     ``GoogleJobsAdapter`` builds its own request parameters (including the API
     key); this runs the same search through :func:`service.run_search` so it is

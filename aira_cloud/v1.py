@@ -1,7 +1,7 @@
 """The SerpApi-compatible API (``/search.json``, ``/v1/...``) for hosted organizations.
 
 A request carries an organization's Aira key, not a session. The key resolves to its organization
-through the control-plane index, and the request then runs against that organization's Aira API
+through the control-plane index, and the request then runs against that organization's API
 workspace (history, cache, keys), shared by all of its candidates. The plan must include ``api.v1``,
 the plan's per-minute limit and the key's own hourly limit apply, and live searches are metered
 against the monthly allowance.
@@ -99,8 +99,9 @@ def run_v1(
                 ).to_response()
             try:
                 entitlements = app.entitlements.require_state(org_id, automation=False)
+                app.entitlements.require_app(org_id, "api")
                 app.entitlements.require_feature(
-                    org_id, "api.v1", label="The Aira API (/v1)"
+                    org_id, "api.v1", label="The API (/v1)"
                 )
             except CloudError as error:
                 return Reply(error.status, error.payload()).to_response()

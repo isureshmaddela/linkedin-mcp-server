@@ -304,7 +304,7 @@ class WorkspaceManager:
         principal: Principal | None = None,
         correlation_id: str = "",
     ) -> Iterator[dict[str, Any]]:
-        """Bind to the organization's Aira API workspace (history, monitors, keys shared across its candidates)."""
+        """Bind to the organization's API workspace (history, monitors, keys shared across its candidates)."""
         local = _local()
         path = self.org_api_path(org_id)
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -339,7 +339,7 @@ class WorkspaceManager:
                     del local._request_context.correlation_id
 
     def org_api_connection(self, org_id: str) -> sqlite3.Connection:
-        """A connection to the organization's shared Aira API workspace (search history and cache for all its candidates)."""
+        """A connection to the organization's shared API workspace (search history and cache for all its candidates)."""
         local = _local()
         path = self.org_api_path(org_id)
         path.parent.mkdir(parents=True, exist_ok=True)

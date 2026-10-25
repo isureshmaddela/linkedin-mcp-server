@@ -63,6 +63,12 @@ def broker_secret(app: CloudApp) -> str:
     return str(app.config.broker_secret or "")
 
 
+def launch_secret(app: CloudApp) -> str:
+    """The secret a local installation uses to validate launch tokens (never the agent or broker secret)."""
+    value = str(app.config.launch_secret or "")
+    return value if len(value) >= 32 else ""
+
+
 def sign(
     secret: str, timestamp: int, nonce: str, body: bytes, purpose: str = "agent"
 ) -> str:
@@ -86,6 +92,8 @@ class Verifier:
     def _secret(self, purpose: str) -> str:
         if purpose == "broker":
             return broker_secret(self.app)
+        if purpose == "launch":
+            return launch_secret(self.app)
         return agent_secret(self.app)
 
     def verify(

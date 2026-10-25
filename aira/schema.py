@@ -669,7 +669,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         12,
         "airaapi",
-        "Aira API console: stored searches, saved searches, monitors, usage rollups, encrypted secrets, Aira API keys, response cache.",
+        "API console: stored searches, saved searches, monitors, usage rollups, encrypted secrets, API keys, response cache.",
         _airaapi,
     ),
     Migration(
@@ -681,13 +681,13 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         14,
         "airaapi_gone",
-        "Tombstones for deleted or pruned Aira API searches, so archive lookups answer 410 like SerpApi.",
+        "Tombstones for deleted or pruned API searches, so archive lookups answer 410 like SerpApi.",
         _airaapi,
     ),
     Migration(
         15,
         "airaapi_parity",
-        "Full-text index of stored Aira API results (backfilled for the newest 5,000), X-Ray pixel-position copies, monitor monthly budgets and pause on error.",
+        "Full-text index of stored API results (backfilled for the newest 5,000), X-Ray pixel-position copies, monitor monthly budgets and pause on error.",
         _airaapi_parity,
     ),
     Migration(

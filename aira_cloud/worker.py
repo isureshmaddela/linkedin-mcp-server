@@ -180,7 +180,7 @@ def handle_monitors_due(app: CloudApp, job: dict[str, Any]) -> dict[str, Any]:
 
 
 def handle_org_monitors_due(app: CloudApp, job: dict[str, Any]) -> dict[str, Any]:
-    """Run the organization's own Aira API monitors (the console's, not a candidate's) with its SerpApi key."""
+    """Run the organization's own API monitors (the console's, not a candidate's) with its SerpApi key."""
     from aira.airaapi import compat as airaapi_compat
     from aira.airaapi import routes as airaapi_routes
     from aira.airaapi import service as airaapi_service

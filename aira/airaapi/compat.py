@@ -1,7 +1,7 @@
 """The SerpApi-compatible ``/v1`` API and generated documentation and code samples.
 
 ``/v1/search.json`` accepts SerpApi's query parameters, authenticates with an
-Aira API key (``api_key`` query parameter or ``Authorization: Bearer``), runs
+API key (``api_key`` query parameter or ``Authorization: Bearer``), runs
 the search through :func:`aira.airaapi.service.run_search` with the owner's
 SerpApi key and answers with the SerpApi JSON body plus
 ``search_metadata.aira = {id, cache_hit}``. Aira keys are random 45-character
@@ -28,8 +28,8 @@ from aira.airaapi.client import SerpApiError
 from aira.airaapi.http import Headers, Raw
 
 INVALID_KEY_MESSAGE = (
-    "Invalid API key. Pass an Aira API key as the api_key parameter "
-    "(create one in Aira API > Keys)."
+    "Invalid API key. Pass an API key as the api_key parameter "
+    "(create one in API > Keys)."
 )
 KEY_PREFIX = "aira_"
 KEY_BODY_LENGTH = 40
@@ -42,7 +42,7 @@ SERPAPI_KEY_PLACEHOLDER = "YOUR_SERPAPI_KEY"
 
 
 # ---------------------------------------------------------------------------
-# Aira API keys
+# API keys
 # ---------------------------------------------------------------------------
 
 
@@ -159,9 +159,7 @@ def authenticate_key(
     if row is None or not hmac.compare_digest(str(row["key_hash"]), digest):
         raise SerpApiError("invalid_aira_key", INVALID_KEY_MESSAGE, 401)
     if row["revoked_at"]:
-        raise SerpApiError(
-            "invalid_aira_key", "This Aira API key has been revoked.", 401
-        )
+        raise SerpApiError("invalid_aira_key", "This API key has been revoked.", 401)
     store.touch_api_key(connection, row["id"], store.to_iso(now))
     connection.commit()
     return row
@@ -179,7 +177,7 @@ def enforce_hourly_limit(
     if used >= limit:
         raise SerpApiError(
             "rate_limited",
-            f"This Aira API key has used its {limit} searches for the hour. Try again later.",
+            f"This API key has used its {limit} searches for the hour. Try again later.",
             429,
         )
 
@@ -210,7 +208,7 @@ def hourly_slot(
         if used + _key_inflight.get(key_id, 0) >= limit:
             raise SerpApiError(
                 "rate_limited",
-                f"This Aira API key has used its {limit} searches for the hour. Try again later.",
+                f"This API key has used its {limit} searches for the hour. Try again later.",
                 429,
             )
         _key_inflight[key_id] = _key_inflight.get(key_id, 0) + 1
@@ -647,9 +645,9 @@ _AIRA_ERRORS = (
     {
         "http_status": 401,
         "code": "invalid_aira_key",
-        "message": "Invalid API key. Pass an Aira API key as the api_key parameter ... / This Aira API key has been revoked.",
+        "message": "Invalid API key. Pass an API key as the api_key parameter ... / This API key has been revoked.",
         "meaning": "The key is missing, unknown or revoked.",
-        "advice": "Create a key under Aira API > Keys and send it as api_key or a Bearer token.",
+        "advice": "Create a key under API > Keys and send it as api_key or a Bearer token.",
     },
     {
         "http_status": 400,
@@ -661,7 +659,7 @@ _AIRA_ERRORS = (
     {
         "http_status": 429,
         "code": "rate_limited",
-        "message": "This Aira API key has used its N searches for the hour.",
+        "message": "This API key has used its N searches for the hour.",
         "meaning": "The per-key hourly limit was reached.",
         "advice": "Wait for the hour to roll over or raise the limit on the key.",
     },
@@ -670,14 +668,14 @@ _AIRA_ERRORS = (
         "code": "local_rate_limit",
         "message": "The local hourly limit of N live searches is reached.",
         "meaning": "Aira's own protection against spending the SerpApi quota was hit.",
-        "advice": "Raise the limit in Aira API settings.",
+        "advice": "Raise the limit in API settings.",
     },
     {
         "http_status": 409,
         "code": "not_configured",
         "message": "No SerpApi key is configured.",
         "meaning": "The account behind this Aira key has not connected a SerpApi key.",
-        "advice": "Connect one under Aira API > Account.",
+        "advice": "Connect one under API > Account.",
     },
     {
         "http_status": 402,
@@ -699,7 +697,7 @@ def docs_payload(base_url: str) -> dict[str, Any]:
         "base_url": f"{base_url}/v1",
         "root_url": base_url,
         "auth": {
-            "summary": "Send an Aira API key as the api_key query parameter or as 'Authorization: Bearer aira_...'.",
+            "summary": "Send an API key as the api_key query parameter or as 'Authorization: Bearer aira_...'.",
             "key_format": "aira_ followed by 40 URL-safe characters. Only a SHA-256 hash is stored; the secret is shown once.",
             "scope": "A key reaches only the account that created it and only the /v1 endpoints. It never exposes the SerpApi key.",
         },
@@ -726,7 +724,7 @@ def docs_payload(base_url: str) -> dict[str, Any]:
             "Replace https://serpapi.com with "
             + base_url
             + " in your code. SerpApi's own paths work (/search.json, /account.json, /locations.json, /searches/{id}.json) and so do the /v1 paths.",
-            "Replace your SerpApi key with an Aira API key from Aira API > Keys.",
+            "Replace your SerpApi key with an API key from API > Keys.",
             "Nothing else changes: parameters, JSON bodies, pagination links and error shapes match SerpApi, and the official SDKs work unchanged.",
             "Identical searches within the cache window now cost no SerpApi searches and appear in Aira's history.",
         ],

@@ -334,7 +334,7 @@ def make_shim(base: Any) -> Any:
             self._send_json(code, {"error": message or "Error"})
 
         def finish_capture(self) -> None:
-            """Handlers that stream with ``wfile`` (the Aira API's raw responses) are collected here."""
+            """Handlers that stream with ``wfile`` (the API's raw responses) are collected here."""
             data = self.wfile.getvalue()
             if data and not self._captured.body:
                 self._captured.body = data

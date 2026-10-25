@@ -35,7 +35,7 @@ def _iso(timestamp: int | None) -> str:
 
 
 class ControlKeyIndex:
-    """Indexes an organization's Aira API keys in the control plane so ``/v1`` can find their owner."""
+    """Indexes an organization's API keys in the control plane so ``/v1`` can find their owner."""
 
     def __init__(self, app: CloudApp, org_id: str) -> None:
         self.app = app
@@ -278,7 +278,7 @@ def install(app: CloudApp) -> None:
 
 
 def _org_serpapi_key(app: CloudApp, org_id: str) -> str | None:
-    """The organization's own SerpApi key from its Aira API workspace, decrypted with its data key."""
+    """The organization's own SerpApi key from its API workspace, decrypted with its data key."""
     from aira.airaapi import service as airaapi_service
     from aira.airaapi import store as airaapi_store
 

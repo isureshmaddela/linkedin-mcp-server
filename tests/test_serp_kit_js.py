@@ -1,4 +1,4 @@
-"""Run the dependency-free node tests for the Aira API UI kit when node is installed."""
+"""Run the dependency-free node tests for the API UI kit when node is installed."""
 
 from __future__ import annotations
 

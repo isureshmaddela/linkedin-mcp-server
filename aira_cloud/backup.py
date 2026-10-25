@@ -54,6 +54,7 @@ SKIP_TABLES = frozenset(
         "email_tokens",
         "sso_states",
         "remote_login_sessions",
+        "launch_tokens",
         "worker_heartbeats",
         "usage_daily",
         "org_notices",

@@ -119,6 +119,8 @@
     { id: "org-integrations", page: "integrations", label: "Integrations", icon: "airaapi", key: "k", roles: READERS },
     { id: "org-audit", page: "audit", label: "Audit log", icon: "documents", key: "t", roles: READERS },
     { id: "org-data", page: "data", label: "Data & closure", icon: "analytics", key: "x", roles: READERS },
+    // The apps the organization subscribes to (cloud-apps.js draws the page; a plain list stands in until it loads).
+    { id: "org-apps", page: "apps", label: "Apps", icon: "more", key: "z", roles: [...READERS, "billing"] },
   ];
   const ALIASES = { dashboard: "", support: "data" };
 
@@ -129,7 +131,7 @@
     const render = A.pages[page];
     A.setCurrent(page);
     if (!render) { stage.replaceChildren(ui.empty("Page not found", "Choose a page from the navigation.")); return; }
-    if (!READERS.includes(cloud.role())) { stage.replaceChildren(ui.empty("Not available", "Organization administration is for owners, administrators and auditors.")); return; }
+    if (!READERS.includes(cloud.role()) && !(page === "apps" && cloud.role() === "billing")) { stage.replaceChildren(ui.empty("Not available", "Organization administration is for owners, administrators and auditors.")); return; }
     if (["members", "coaches", "policy"].includes(page) && !STAFF.includes(cloud.role())) { stage.replaceChildren(ui.empty("Not available for your role", "Members, coach assignments and policy are managed by owners and administrators. Auditors have read-only access to the rest of the organization.")); return; }
     await render(stage, route);
   }
@@ -190,7 +192,7 @@
     tiles.append(A.usageTile("Coach and admin seats", usage.seats.staff.used, usage.seats.staff.limit, "#/org/members"));
     tiles.append(A.usageTile("Applications this month", usage.applications.used, usage.applications.limit, "#/org/candidates", usage.applications.overage ? `${A.n(usage.applications.overage)} billed as overage` : undefined));
     tiles.append(A.usageTile("Searches", usage.searches.used, null, "#/org/audit?action=candidate.jobs_search", "Candidate and automated searches"));
-    tiles.append(A.usageTile("Aira API searches", usage.api_searches.used, usage.api_searches.limit, A.can("integrations.manage") ? "#/airaapi" : "#/org/integrations"));
+    tiles.append(A.usageTile("API searches", usage.api_searches.used, usage.api_searches.limit, A.can("integrations.manage") ? "#/airaapi" : "#/org/integrations"));
     tiles.append(A.usageTile("AI cover letters", usage.cover_letters.used, usage.cover_letters.limit, "#/org/audit?action=candidate.job_generate"));
     tiles.append(A.usageTile("Document storage", usage.storage.used_bytes, usage.storage.limit_bytes, "#/org/data", undefined, A.size));
     const history = usage.history || [];
@@ -267,7 +269,7 @@
     if (ACTION_WORDS[event.action]) return ACTION_WORDS[event.action];
     if (event.action.startsWith("subscription.")) return `subscription ${event.action.slice(13).replace("_to_", " → ").replace(/_/g, " ")}`;
     if (event.action.startsWith("candidate.")) return event.action.slice(10).replace(/_/g, " ");
-    if (event.action.startsWith("integrations.")) return `Aira API: ${event.action.slice(13).replace(/_/g, " ")}`;
+    if (event.action.startsWith("integrations.")) return `API: ${event.action.slice(13).replace(/_/g, " ")}`;
     return event.action.replace(/[._]/g, " ");
   };
 
@@ -296,6 +298,24 @@
   // Candidates
   // --------------------------------------------------------------------------------------------
   const STAGES = ["onboarding", "searching", "applying", "interviewing", "offers", "placed"];
+
+  // --------------------------------------------------------------------------------------------
+  // Apps: what the organization can open. cloud-apps.js replaces this with the subscription page;
+  // until it loads, the list from /api/apps stands in.
+  // --------------------------------------------------------------------------------------------
+  if (!A.pages.apps) {
+    A.pages.apps = async (stage) => {
+      A.crumbs("Apps");
+      stage.replaceChildren(ui.skeleton(3));
+      let data;
+      try { data = await api("/api/apps", { silent: true }); } catch (error) { stage.replaceChildren(ui.error(error, () => Aira.router.render())); return; }
+      const rows = (data.apps || []).map((app) => h("div", { class: "adm-tile" },
+        h("span", { class: "label", text: app.name }),
+        h("span", { text: app.description || app.tagline || "" }),
+        h("span", { class: app.enabled === false ? "muted" : "", text: app.enabled === false ? (app.reason || "Not subscribed") : "On" })));
+      stage.replaceChildren(h("div", { class: "adm-page" }, A.head("Apps", "The apps your organization can open. Each one is a subscription billed with the plan."), rows.length ? h("div", { class: "adm-grid" }, ...rows) : A.empty("No apps are listed for this organization.")));
+    };
+  }
 
   A.pages.candidates = async (stage, route) => {
     if (route.path[2]) return candidateDetail(stage, route.path[2]);

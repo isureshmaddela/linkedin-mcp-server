@@ -1,4 +1,4 @@
-# Aira API Reference
+# API Reference
 
 Base URL: `http://127.0.0.1:8765` (loopback only). All responses are JSON unless noted. Errors use the envelope `{"error": "plain-language message"}`. Every response carries an `X-Request-ID` correlation header; send your own `X-Request-ID` (4–64 `[A-Za-z0-9-]`) to propagate one.
 
@@ -10,7 +10,7 @@ Base URL: `http://127.0.0.1:8765` (loopback only). All responses are JSON unless
 - **Pagination**: list endpoints accept `page`, `page_size` (≤200) and return `total`, `page`, `pages`.
 - **Idempotency**: job imports are idempotent by `(source, external_id)`; submissions by `idempotency_key` (default `job:<job_id>`); email imports by message fingerprint.
 - **Job keys**: LinkedIn jobs use the numeric ID; other sources use `source:external_id` (URL-encode the colon in browsers).
-- **Status codes**: `400` validation, `401` sign-in required, `402` SerpApi account out of searches, `403` forbidden/cross-origin, `404` not found, `409` conflict or SerpApi not configured, `422` SerpApi rejected the key, `429` rate limited, `502` upstream provider failure, `503` not ready. Errors from the Aira API routes also carry a machine-readable `code`.
+- **Status codes**: `400` validation, `401` sign-in required, `402` SerpApi account out of searches, `403` forbidden/cross-origin, `404` not found, `409` conflict or SerpApi not configured, `422` SerpApi rejected the key, `429` rate limited, `502` upstream provider failure, `503` not ready. Errors from the API routes also carry a machine-readable `code`.
 
 ## Health and observability
 
@@ -155,9 +155,9 @@ Settings keys: `daily_message_limit` (0–100, default 20) and `auto_reply_pause
 
 Messages cache (migration 11): `inbox_threads`, `inbox_messages`, and `inbox_sync_runs` hold Aira's copy of the inbox. A reply sent from Aira is appended to the saved thread at once (`source: aira`) and dropped when a later fetch lists one more own message with the same text than the fetch before it (an older identical message does not count). While it is pending the thread stays "you wrote last". Idle threads are pruned after 90 days and unlisted replies after 48 hours. Migration 11 holds its own copy of the table definitions. The scheduled inbox check also saves the list and the threads it reads, so the Messages tab stays current without extra LinkedIn visits. Both tables are part of `GET /api/account/export`.
 
-## Aira API console and SerpApi-compatible `/v1`
+## API console and SerpApi-compatible `/v1`
 
-Design contract: [airaapi-spec.md](airaapi-spec.md). The console wraps every SerpApi engine in `aira/airaapi/catalog/` (136 engines: 126 official plus 10 sub-endpoints). Searches, results, saved searches, monitors, usage and Aira API keys are stored per account (migration 12). The SerpApi key is a secret: it comes from `SERPAPI_API_KEY` or is pasted once and stored Fernet-encrypted (`airaapi.key` beside the database, or `AIRA_SECRET_KEY`); an account's own key wins over the environment. It is never returned, logged, stored in a record or put in a URL the browser sees; responses expose only `configured`, `source` (`env` or `app`) and `last4`. A key SerpApi rejects answers `422` (never `401`, which the browser app treats as an ended session).
+Design contract: [airaapi-spec.md](airaapi-spec.md). The console wraps every SerpApi engine in `aira/airaapi/catalog/` (136 engines: 126 official plus 10 sub-endpoints). Searches, results, saved searches, monitors, usage and API keys are stored per account (migration 12). The SerpApi key is a secret: it comes from `SERPAPI_API_KEY` or is pasted once and stored Fernet-encrypted (`airaapi.key` beside the database, or `AIRA_SECRET_KEY`); an account's own key wins over the environment. It is never returned, logged, stored in a record or put in a URL the browser sees; responses expose only `configured`, `source` (`env` or `app`) and `last4`. A key SerpApi rejects answers `422` (never `401`, which the browser app treats as an ended session).
 
 Session-authenticated routes (`/api/airaapi/*`):
 
@@ -178,13 +178,13 @@ Session-authenticated routes (`/api/airaapi/*`):
 | GET | `/api/airaapi/locations?q=&limit=` | | Google locations (free, no key needed, cached 24 h, 2 to 120 characters). |
 | GET / POST / PATCH / DELETE | `/api/airaapi/saved[/{id}]`, `POST /api/airaapi/saved/{id}/run` | `{name, engine, params, tags, pinned}` | Saved searches (up to 300). |
 | GET / POST / PATCH / DELETE | `/api/airaapi/monitors[/{id}]`, `POST /api/airaapi/monitors/{id}/run` | `{saved_id, interval_minutes (>=15), notify_on_change, enabled}` | A monitor re-runs a saved search live on schedule, diffs it against the previous run and raises an in-app notification when the main result list changed. Each monitor reports `estimated_monthly_searches`. Up to 25. Runs from the existing scheduler loop; accounts without a key are skipped. |
-| GET / POST / DELETE | `/api/airaapi/keys[/{id}]` | `{name, hourly_limit}` | Aira API keys (`aira_` plus 40 characters). The secret is returned once by POST; only a SHA-256 hash is stored. DELETE revokes. |
+| GET / POST / DELETE | `/api/airaapi/keys[/{id}]` | `{name, hourly_limit}` | API keys (`aira_` plus 40 characters). The secret is returned once by POST; only a SHA-256 hash is stored. DELETE revokes. |
 | GET | `/api/airaapi/docs` | | Generated `/v1` reference, errors and code samples. |
 | GET | `/api/airaapi/platform` | | Platform reference for the Docs and Account pages: plans, billing rules, SDKs, `search_metadata` fields, dashboard-page coverage. |
 
 Local limits are settings (`POST /api/settings`): `airaapi_cache_ttl_minutes` (0 to 10,080, default 60; 0 turns the cache off), `airaapi_hourly_limit` (live searches per hour, 0 = off), `airaapi_retention_days` (1 to 3,650, default 30), `airaapi_max_records` (50 to 100,000, default 2,000) and `airaapi_result_cap_mb` (1 to 50, default 5; larger bodies are returned but not stored). Pinned records and the baselines of saved searches and monitors are never pruned. At most four searches run at once per process.
 
-SerpApi-compatible endpoint, authenticated by an Aira API key as `api_key=aira_...` or `Authorization: Bearer aira_...` (no cookies, no CORS headers; GET only). It answers on SerpApi's own paths at the root and on the same paths under `/v1`, so an SDK only needs its base URL pointed at Aira (`serpapi.http.HTTPClient.BASE_DOMAIN = "http://127.0.0.1:8765"` for the `serpapi` package, `GoogleSearch.BACKEND = ...` for `google-search-results`):
+SerpApi-compatible endpoint, authenticated by an API key as `api_key=aira_...` or `Authorization: Bearer aira_...` (no cookies, no CORS headers; GET only). It answers on SerpApi's own paths at the root and on the same paths under `/v1`, so an SDK only needs its base URL pointed at Aira (`serpapi.http.HTTPClient.BASE_DOMAIN = "http://127.0.0.1:8765"` for the `serpapi` package, `GoogleSearch.BACKEND = ...` for `google-search-results`):
 
 | Path | Notes |
 |---|---|
@@ -198,7 +198,7 @@ Errors use SerpApi's `{"error": "..."}` plus `code`: `401 invalid_aira_key` (mis
 
 ## Leads (`/api/leads/*`)
 
-Aira Leads ([leads.md](leads.md)) builds lead generation on the Aira API layer and the person's own LinkedIn connection. Google searches are normal recorded Aira API searches (history source `leads`) that use the same SerpApi key, cache window and limits; without a key they answer `409 not_configured` (`dry_run` still works). Sales Navigator reads the person's own signed-in LinkedIn, read only. Migration 18 adds `lead_lists`, `leads`, `lead_keys`, `lead_searches`, `lead_runs` and `lead_settings`; migration 19 adds `lead_messages` (the outbox), `lead_suppressions` and `lead_calls`. Email is sent only after a person approves each message, through the person's own mail server; Aira never dials a call and never sends a LinkedIn message.
+Aira Leads ([leads.md](leads.md)) builds lead generation on the API layer and the person's own LinkedIn connection. Google searches are normal recorded API searches (history source `leads`) that use the same SerpApi key, cache window and limits; without a key they answer `409 not_configured` (`dry_run` still works). Sales Navigator reads the person's own signed-in LinkedIn, read only. Migration 18 adds `lead_lists`, `leads`, `lead_keys`, `lead_searches`, `lead_runs` and `lead_settings`; migration 19 adds `lead_messages` (the outbox), `lead_suppressions` and `lead_calls`. Email is sent only after a person approves each message, through the person's own mail server; Aira never dials a call and never sends a LinkedIn message.
 
 | Method | Path | Body or query | Result |
 | --- | --- | --- | --- |
@@ -246,7 +246,7 @@ Search sources and their forms:
 
 ## Careers (`/api/careers/*`)
 
-Design contract: [airaapi-spec.md](airaapi-spec.md) sections 6 and 10. Careers builds job search, reports and alerts on the Aira API layer: every engine call is a normal recorded search (history source `careers` for job searches, `intel` for report sections) that uses the same SerpApi key, cache window and local limits. Without a key the routes answer `409 not_configured` (cache hits and `dry_run` still work). Migration 13 adds `careers_alerts`, `careers_alert_jobs` and `careers_reports`.
+Design contract: [airaapi-spec.md](airaapi-spec.md) sections 6 and 10. Careers builds job search, reports and alerts on the API layer: every engine call is a normal recorded search (history source `careers` for job searches, `intel` for report sections) that uses the same SerpApi key, cache window and local limits. Without a key the routes answer `409 not_configured` (cache hits and `dry_run` still work). Migration 13 adds `careers_alerts`, `careers_alert_jobs` and `careers_reports`.
 
 | Method | Path | Body or query | Notes |
 |---|---|---|---|
@@ -255,7 +255,7 @@ Design contract: [airaapi-spec.md](airaapi-spec.md) sections 6 and 10. Careers b
 | POST | `/api/careers/jobs/import` | `{job}` (a Job from a search) | Rebuilds the posting from Google's fields, never trusts client flags, and saves it through the normal import and scoring path with source `google_jobs`. Returns `{job, created, duplicate_of, matched_by}`; a posting already known (same Google record, same posting URL under any apply link, or same content) is merged, never duplicated. `201` when created, `200` otherwise. |
 | POST | `/api/careers/company-intel` `/salary` `/trends` `/interview-prep` `/travel` `/learn` | see below | A report: 1 to 5 engine calls, at most 4 at once, partial failure tolerated. `{id, kind, title, generated_at, input, sections[{id, title, engine, params, status (ok\|empty\|error), summary, items[{title, subtitle, url, thumbnail, meta}], record_id, cache_hit, credits, error, code, stats}], credits, cache_hits, errors}`. `dry_run: true` returns `{plan[{id,title,engine,params,cache_hit,credits}], credits, max_credits, cache_hits, configured}` and calls nothing. `sections: [ids]` runs a subset. If nothing succeeds because of the key (not configured, rejected, out of searches) that error is returned instead of an empty report. |
 | GET / DELETE | `/api/careers/reports[?kind=&limit=]`, `/api/careers/reports/{id}` | | The last 100 reports are kept. |
-| GET / POST | `/api/careers/alerts` | `{q, location, ..., name, interval_minutes (>=60, default 720), auto_import, min_score (0-100, default 75), notify}` | A job alert is a saved Google Jobs search (tags `careers`, `alert`) plus an Aira API monitor. Up to 10. The response carries `estimated_monthly_searches`. |
+| GET / POST | `/api/careers/alerts` | `{q, location, ..., name, interval_minutes (>=60, default 720), auto_import, min_score (0-100, default 75), notify}` | A job alert is a saved Google Jobs search (tags `careers`, `alert`) plus an API monitor. Up to 10. The response carries `estimated_monthly_searches`. |
 | GET / PATCH / DELETE | `/api/careers/alerts/{id}` | `{name, interval_minutes, enabled, auto_import, min_score, notify}` | GET adds `new_jobs[]` (Jobs with `found_at`, `record_id`, `match`, `imported_job_id`); `?all=1` includes dismissed ones. DELETE removes the monitor and saved search too. |
 | POST | `/api/careers/alerts/{id}/run`, `/dismiss` | dismiss: `{job_keys[]}` or `{all: true}` | Run costs one search and never uses the cache. |
 

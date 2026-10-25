@@ -1,6 +1,6 @@
 """Lead sources: how each search is built, and how its answer becomes leads.
 
-Every ``build_*`` function validates the form and returns ``(params, applied, warnings)`` for the Aira API
+Every ``build_*`` function validates the form and returns ``(params, applied, warnings)`` for the API
 engine it runs on; every ``normalize_*`` function turns the engine's stored answer into lead dictionaries
 (see :func:`aira.leads.store.normalize_lead`). A field a source does not provide stays empty: nothing is
 guessed, and each lead keeps ``source`` and ``source_ref`` so you can see where it came from.

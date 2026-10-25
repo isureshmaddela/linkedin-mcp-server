@@ -1,4 +1,4 @@
-"""Object storage, the Stripe adapter, the organization's SerpApi key and Aira API, and the model gateway.
+"""Object storage, the Stripe adapter, the organization's SerpApi key and API, and the model gateway.
 
 Everything talks to loopback stand-ins (``tests/s3_stub.py``, ``tests/stripe_stub.py``, ``tests/serpapi_stub.py``
 and a model server below); nothing reaches the network and no real SerpApi quota is used.
@@ -330,7 +330,7 @@ def test_a_missing_provider_key_says_so(tmp_path):
     app.close()
 
 
-# ----------------------------------------------------------------------------- SerpApi key, shared search cache, the organization's Aira API
+# ----------------------------------------------------------------------------- SerpApi key, shared search cache, the organization's API
 
 
 @pytest.fixture
@@ -425,14 +425,14 @@ def test_a_tenants_candidates_searching_the_same_role_hit_one_search(cloud, serp
 def test_console_searches_are_metered_against_the_plan_and_cache_hits_are_free(
     cloud, serpapi
 ):
-    org = build_org(cloud, plan="starter", seats=10)
+    org = build_org(cloud, plan="team", seats=10, apps=["api"])
     with cloud.db.write() as connection:
         connection.execute(
             "UPDATE subscriptions SET overrides = ? WHERE org_id = ?",
             ('{"api_searches_per_month": 2}', org.org_id),
         )
     cloud.entitlements.invalidate(org.org_id)
-    owner = sign_in(cloud, org.owner, mfa=False)
+    owner = sign_in(cloud, org.owner)
     assert owner.call("POST", "/api/airaapi/key", {"api_key": DEFAULT_KEY})[0] == 200
     search = {"engine": "google", "params": {"q": "coffee"}}
     assert owner.call("POST", "/api/airaapi/search", search)[0] == 200
@@ -466,8 +466,9 @@ def test_v1_needs_the_plan_and_an_organization_key_and_stays_inside_the_organiza
     status, body = sign_in(cloud, starter.owner, mfa=False).call(
         "POST", "/api/airaapi/keys", {"name": "ci"}
     )
-    assert status == 402 and body["feature"] == "api.v1"
-    team = build_org(cloud, "Team Org", plan="team", slug_email="t.test")
+    assert status == 402 and body["code"] == "app_required" and body["app"] == "api"
+    assert body["required_plan"] == "team", "the API app is not sold on Starter"
+    team = build_org(cloud, "Team Org", plan="team", slug_email="t.test", apps=["api"])
     owner = sign_in(cloud, team.owner)
     assert owner.call("POST", "/api/airaapi/key", {"api_key": DEFAULT_KEY})[0] == 200
     status, created = owner.call("POST", "/api/airaapi/keys", {"name": "ci"})
@@ -488,7 +489,9 @@ def test_v1_needs_the_plan_and_an_organization_key_and_stays_inside_the_organiza
     )
     assert anonymous.call("GET", "/search.json?engine=google&q=x")[0] == 401
     # another organization's key cannot read this organization's stored search
-    other = build_org(cloud, "Other Team", plan="team", slug_email="o.test")
+    other = build_org(
+        cloud, "Other Team", plan="team", slug_email="o.test", apps=["api"]
+    )
     other_owner = sign_in(cloud, other.owner)
     other_owner.call("POST", "/api/airaapi/key", {"api_key": DEFAULT_KEY})
     other_secret = other_owner.call("POST", "/api/airaapi/keys", {"name": "ci"})[1][
@@ -514,14 +517,14 @@ def test_v1_needs_the_plan_and_an_organization_key_and_stays_inside_the_organiza
 
 
 def test_the_plans_v1_key_limit_and_per_minute_limit(cloud, serpapi):
-    team = build_org(cloud, "Team Org", plan="team", slug_email="t.test")
+    team = build_org(cloud, "Team Org", plan="team", slug_email="t.test", apps=["api"])
     owner = sign_in(cloud, team.owner)
     owner.call("POST", "/api/airaapi/key", {"api_key": DEFAULT_KEY})
     codes = [
         owner.call("POST", "/api/airaapi/keys", {"name": f"k{i}"})[0] for i in range(6)
     ]
     assert all(code in (200, 201) for code in codes[:5]) and codes[5] == 402, (
-        f"Team allows 5 Aira API keys: {codes}"
+        f"Team allows 5 API keys: {codes}"
     )
     assert len(owner.call("GET", "/api/airaapi/keys")[1]["keys"]) == 5
 
@@ -813,7 +816,7 @@ def test_enterprise_can_bring_its_own_model_endpoint(tmp_path, model, monkeypatc
 def test_the_organizations_own_aira_api_monitors_run_on_schedule(cloud, serpapi):
     from aira_cloud.worker import Worker
 
-    org = build_org(cloud, plan="team", seats=10)
+    org = build_org(cloud, plan="team", seats=10, apps=["api"])
     owner = sign_in(cloud, org.owner, mfa=True)
     assert owner.call("POST", "/api/airaapi/key", {"api_key": DEFAULT_KEY})[0] == 200
     status, saved = owner.call(
@@ -847,5 +850,5 @@ def test_the_organizations_own_aira_api_monitors_run_on_schedule(cloud, serpapi)
     Worker(cloud, threads=1, run_tick=False).run_once()
     assert serpapi.count("/search.json") == 1
     assert cloud.usage.used(org.org_id, "api_searches") == 1, (
-        "the run is metered as an Aira API search"
+        "the run is metered as an API search"
     )

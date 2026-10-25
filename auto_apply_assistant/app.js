@@ -303,22 +303,100 @@ Aira.ui = ui;
 // ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
+// One account, many apps (docs/apps.md). APPS mirrors aira/apps.py: the switcher lists them, `g` then the app's
+// key opens its home, and the sidebar shows only the current app's sections. GET /api/apps says which of them
+// this account may open (the hosted build sells each one as a subscription).
+const APPS = [
+  { id: "careers", name: "Careers", tagline: "Find, apply and track", icon: "careers", home: "dashboard", key: "c" },
+  { id: "leads", name: "Leads", tagline: "Find people who need what you sell", icon: "leads", home: "leads", key: "l" },
+  { id: "api", name: "API", tagline: "Search engines and keys", icon: "airaapi", home: "airaapi", key: "p" },
+];
 // One list drives the sidebar, the phone bottom bar, the `g` then <key> chords and the shortcuts help.
+// `app` says which app a section belongs to; items in the Account group show under every app.
 // `quick` items sit in the bottom bar; everything else is reached through More, which opens the sidebar.
 const NAV = [
-  { id: "dashboard", label: "Dashboard", icon: "dashboard", group: "Workspace", key: "d", quick: true },
-  { id: "jobs", label: "Jobs", icon: "jobs", group: "Workspace", key: "j", quick: true },
-  { id: "applications", label: "Applications", icon: "applications", group: "Workspace", key: "a", quick: true },
-  { id: "interviews", label: "Interviews", icon: "interviews", group: "Workspace", key: "i", quick: true },
-  { id: "recruiters", label: "Recruiters", icon: "recruiters", group: "Workspace", key: "r" },
-  { id: "documents", label: "Documents", icon: "documents", group: "Workspace", key: "o" },
-  { id: "analytics", label: "Analytics", icon: "analytics", group: "Workspace", key: "n" },
-  { id: "careers", label: "Careers", icon: "careers", group: "Research", key: "c" },
-  { id: "leads", label: "Leads", icon: "leads", group: "Research", key: "l" },
-  { id: "airaapi", label: "Aira API", icon: "airaapi", group: "Research", key: "p" },
-  { id: "settings", label: "Settings", icon: "settings", group: "Account", key: "s" },
+  { id: "dashboard", label: "Dashboard", icon: "dashboard", app: "careers", group: "Careers", key: "d", quick: true },
+  { id: "jobs", label: "Jobs", icon: "jobs", app: "careers", group: "Careers", key: "j", quick: true },
+  { id: "applications", label: "Applications", icon: "applications", app: "careers", group: "Careers", key: "a", quick: true },
+  { id: "interviews", label: "Interviews", icon: "interviews", app: "careers", group: "Careers", key: "i", quick: true },
+  { id: "recruiters", label: "Recruiters", icon: "recruiters", app: "careers", group: "Careers", key: "r" },
+  { id: "documents", label: "Documents", icon: "documents", app: "careers", group: "Careers", key: "o" },
+  { id: "analytics", label: "Analytics", icon: "analytics", app: "careers", group: "Careers", key: "n" },
+  { id: "careers", label: "Research", icon: "careers", app: "careers", group: "Careers", key: "f" },
+  { id: "leads", label: "Leads", icon: "leads", app: "leads", group: "Leads", key: "l", quick: true },
+  { id: "airaapi", label: "API", icon: "airaapi", app: "api", group: "API", key: "p", quick: true },
+  { id: "settings", label: "Settings", icon: "settings", app: "account", group: "Account", key: "s" },
 ];
 Aira.NAV = NAV; // the hosted build replaces the entries by role
+Aira.APPS = APPS;
+
+// ---------------------------------------------------------------------------
+// Apps: the switcher, the current app, the pseudo-apps a build adds (Account, Coaching, Admin console)
+// ---------------------------------------------------------------------------
+const apps = (Aira.apps = {
+  catalog: APPS,
+  // Apps a build adds for sections that are not products: the hosted Account (organization) pages, Coaching, the Admin console.
+  pseudo: {},
+  state: { enabled: {}, reasons: {}, accountUrl: "", localUrl: "", installation: "local", loaded: false, extra: [] },
+  decorate: null, // a build may adjust the list the switcher shows: (entries) => entries
+  async load() {
+    try {
+      const data = await api("/api/apps", { silent: true });
+      for (const item of data.apps || []) {
+        apps.state.enabled[item.id] = item.enabled !== false;
+        apps.state.reasons[item.id] = item.reason || "";
+      }
+      apps.state.accountUrl = String(data.account_url || "");
+      apps.state.localUrl = String(data.local_url || "");
+      apps.state.installation = data.installation || (Aira.cloud ? "hosted" : "local");
+      apps.state.loaded = true;
+    } catch { /* an older server or a role without the route: every app counts as available */ }
+    return apps.state;
+  },
+  // The app a section belongs to; the Account group shows under every app, so it keeps the app you were in.
+  appOf(section) {
+    const item = NAV.find((entry) => entry.id === section);
+    if (!item) return null;
+    if (item.group === "Account") return null;
+    return item.app || null;
+  },
+  current() {
+    const section = Router.current && Router.current.path[0];
+    const owner = section ? apps.appOf(section) : null;
+    if (owner) Aira.state.currentApp = owner;
+    const id = Aira.state.currentApp || (NAV.find((entry) => entry.group !== "Account") || {}).app || APPS[0].id;
+    return apps.describe(id);
+  },
+  describe(id) {
+    const product = APPS.find((entry) => entry.id === id);
+    if (product) return { ...product, enabled: apps.state.enabled[id] !== false, reason: apps.state.reasons[id] || "" };
+    const extra = apps.pseudo[id];
+    if (extra) return { id, enabled: true, reason: "", ...extra };
+    return { id, name: id, tagline: "", icon: "dashboard", home: id, enabled: true, reason: "" };
+  },
+  homeOf(id) {
+    const described = apps.describe(id);
+    if (NAV.some((entry) => entry.id === described.home && entry.app === id)) return described.home;
+    const first = NAV.find((entry) => entry.app === id && entry.group !== "Account");
+    return first ? first.id : described.home;
+  },
+  // What the switcher shows: every product app, plus the pseudo-apps that have sections in this build.
+  available() {
+    const present = new Set(NAV.filter((entry) => entry.group !== "Account").map((entry) => entry.app));
+    const entries = [];
+    for (const id of Object.keys(apps.pseudo)) if (present.has(id)) entries.push({ ...apps.describe(id), kind: "account" });
+    for (const product of APPS) {
+      const described = apps.describe(product.id);
+      entries.push({ ...described, kind: "product", present: present.has(product.id) });
+    }
+    const list = apps.decorate ? apps.decorate(entries) : entries;
+    return [...list, ...apps.state.extra];
+  },
+  open(id) {
+    const home = apps.homeOf(id);
+    if (home) Router.go([home]);
+  },
+});
 // Phones open the sidebar as a sheet (menu button or More); this keeps both triggers and the sheet in step.
 function setSidebarOpen(open) {
   $("sidebar").classList.toggle("open", open);
@@ -352,6 +430,10 @@ const Router = {
     Router.current = route;
     // A drawer belongs to the section it was opened from; Back, a link inside it, or a chord must not leave it over the next page.
     if (Aira.activeDrawer) Aira.activeDrawer.close(false);
+    // Moving into another app redraws the sidebar for that app; inside an app only the current mark moves.
+    const before = Aira.state.currentApp;
+    const app = apps.current();
+    if (app.id !== before || !document.querySelector(`#primaryNav a[data-section="${CSS.escape(section)}"]`)) renderNav();
     for (const link of document.querySelectorAll("#primaryNav a, #bottomNav a")) link.setAttribute("aria-current", link.dataset.section === section ? "page" : "false");
     // A section that is not in the bottom bar lives behind More, so More shows as the current place.
     const more = document.querySelector('#bottomNav a[data-section="more"]');
@@ -359,8 +441,10 @@ const Router = {
     setSidebarOpen(false);
     if (!view) { main.replaceChildren(ui.empty("Page not found", "Choose a section from the navigation.")); return; }
     const navItem = NAV.find((item) => item.id === section);
-    $("crumbs").replaceChildren(h("span", { text: navItem ? navItem.label : section }));
-    document.title = `${navItem ? navItem.label : "Aira"} · Aira`;
+    const label = navItem ? navItem.label : section;
+    const inProduct = APPS.some((entry) => entry.id === app.id) && navItem && navItem.group !== "Account";
+    $("crumbs").replaceChildren(...(inProduct ? [h("span", { class: "crumb-app", text: app.name }), h("span", { class: "crumb-sep", "aria-hidden": "true", text: "/" })] : []), h("span", { text: label }));
+    document.title = `${label} · ${inProduct ? `${app.name} · ` : ""}Aira`;
     // Each render draws into its own stage. A newer render swaps in a fresh stage, so a slower
     // earlier view (the dashboard still loading when a link is followed) writes into a detached
     // element instead of over the page the person moved to.
@@ -384,24 +468,143 @@ Aira.recall = (key, fallback) => { try { const raw = localStorage.getItem(`aira.
 // ---------------------------------------------------------------------------
 // Shell: navigation, status strip, theme, auth
 // ---------------------------------------------------------------------------
+// The sections of the current app (and the Account group, which shows under every app).
+function visibleNav() {
+  const app = apps.current();
+  return NAV.filter((item) => item.app === app.id || item.group === "Account");
+}
+Aira.visibleNav = visibleNav;
+
 function renderNav(counts = {}) {
   // Counts merge, so a widget can set one badge (Careers alerts) without wiping the others.
   Aira.state.navCounts = { ...(Aira.state.navCounts || {}), ...counts };
   const shown = Aira.state.navCounts;
   const current = Router.current && Router.current.path[0];
+  const app = apps.current();
+  const items = visibleNav();
+  $("brandApp").textContent = app.name || "Aira";
   const link = (item) => h("a", { href: `#/${item.id}`, dataset: { section: item.id }, "aria-current": current === item.id ? "page" : "false", "aria-keyshortcuts": `g ${item.key}`, onclick: () => { if (window.innerWidth <= 900) setSidebarOpen(false); } }, Aira.icon(item.icon), h("span", { text: item.label }), shown[item.id] ? h("span", { class: "count", text: shown[item.id] }) : null);
-  const groups = [...new Set(NAV.map((item) => item.group))];
-  $("primaryNav").replaceChildren(...groups.map((group) => {
-    const labelId = `navGroup${group}`;
-    return h("div", { class: "nav-group", role: "group", "aria-labelledby": labelId }, h("span", { class: "nav-label", id: labelId, text: group }), ...NAV.filter((item) => item.group === group).map(link));
+  // The app's own groups first, the Account group (shown under every app) last.
+  const groups = [...new Set(items.map((item) => item.group))].sort((a, b) => (a === "Account") - (b === "Account"));
+  const head = h("div", { class: "nav-apphead", id: "navAppHead" }, Aira.icon(app.icon || "dashboard"), h("div", {}, h("strong", { text: app.name || "Aira" }), app.tagline ? h("span", { class: "muted", text: app.tagline }) : null));
+  $("primaryNav").replaceChildren(head, ...groups.map((group) => {
+    const labelId = `navGroup${group.replace(/\W+/g, "")}`;
+    return h("div", { class: "nav-group", role: "group", "aria-labelledby": labelId }, h("span", { class: "nav-label", id: labelId, text: group }), ...items.filter((item) => item.group === group).map(link));
   }));
   const bottom = $("bottomNav");
-  const more = h("a", { href: "#", dataset: { section: "more" }, role: "button", "aria-controls": "sidebar", "aria-expanded": String($("sidebar").classList.contains("open")), "aria-current": current && NAV.some((item) => item.id === current && !item.quick) ? "page" : "false", onclick: (event) => { event.preventDefault(); setSidebarOpen(!$("sidebar").classList.contains("open")); } }, Aira.icon("more"), h("span", { text: "More" }));
-  const hidden = NAV.filter((item) => !item.quick).reduce((sum, item) => sum + (Number(shown[item.id]) || 0), 0);
+  const more = h("a", { href: "#", dataset: { section: "more" }, role: "button", "aria-controls": "sidebar", "aria-expanded": String($("sidebar").classList.contains("open")), "aria-current": current && items.some((item) => item.id === current && !item.quick) ? "page" : "false", onclick: (event) => { event.preventDefault(); setSidebarOpen(!$("sidebar").classList.contains("open")); } }, Aira.icon("more"), h("span", { text: "More" }));
+  const hidden = items.filter((item) => !item.quick).reduce((sum, item) => sum + (Number(shown[item.id]) || 0), 0);
   if (hidden) more.append(h("span", { class: "dot", role: "img", "aria-label": `${hidden} waiting in More` }));
-  bottom.replaceChildren(...NAV.filter((item) => item.quick).map((item) => h("a", { href: `#/${item.id}`, dataset: { section: item.id }, "aria-current": current === item.id ? "page" : "false" }, Aira.icon(item.icon), h("span", { text: item.label }))), more);
+  bottom.replaceChildren(...items.filter((item) => item.quick).slice(0, 4).map((item) => h("a", { href: `#/${item.id}`, dataset: { section: item.id }, "aria-current": current === item.id ? "page" : "false" }, Aira.icon(item.icon), h("span", { text: item.label }))), more);
 }
 Aira.renderNav = renderNav;
+
+// ---------------------------------------------------------------------------
+// Menus in the top bar: the app switcher and the account menu
+// ---------------------------------------------------------------------------
+const openMenus = new Set();
+function closeMenus(except = null) {
+  for (const menu of [...openMenus]) if (menu !== except) menu.close();
+}
+// A popover under a button: Enter/Space/click opens, Escape and an outside click close, arrows move through the items.
+function popover(buttons, panel, { render, onClose } = {}) {
+  const triggers = buttons.filter(Boolean);
+  const menu = {
+    isOpen: () => !panel.hidden,
+    open(from) {
+      closeMenus(menu);
+      if (render) render(panel);
+      panel.hidden = false;
+      for (const button of triggers) button.setAttribute("aria-expanded", "true");
+      // On phones the open menu must sit above the navigation sheet, which is above the top bar otherwise.
+      const bar = panel.closest(".topbar");
+      if (bar) bar.classList.add("menu-open");
+      openMenus.add(menu);
+      menu.from = from || triggers[0];
+      const first = panel.querySelector('[role="menuitem"]:not([aria-disabled="true"])');
+      if (first) first.focus();
+    },
+    close(focusBack = true) {
+      if (panel.hidden) return;
+      panel.hidden = true;
+      for (const button of triggers) button.setAttribute("aria-expanded", "false");
+      const bar = panel.closest(".topbar");
+      if (bar && ![...openMenus].some((other) => other !== menu && other.isOpen())) bar.classList.remove("menu-open");
+      openMenus.delete(menu);
+      if (onClose) onClose();
+      if (focusBack && menu.from && menu.from.isConnected && window.getComputedStyle(menu.from).display !== "none") menu.from.focus();
+    },
+    toggle(from) { if (panel.hidden) menu.open(from); else menu.close(); },
+  };
+  for (const button of triggers) button.addEventListener("click", (event) => { event.stopPropagation(); menu.toggle(button); });
+  panel.addEventListener("keydown", (event) => {
+    const items = [...panel.querySelectorAll('[role="menuitem"]:not([aria-disabled="true"])')];
+    const index = items.indexOf(document.activeElement);
+    if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); menu.close(); return; }
+    if (event.key === "Tab") { menu.close(false); return; }
+    if (!["ArrowDown", "ArrowUp", "ArrowRight", "ArrowLeft", "Home", "End"].includes(event.key) || !items.length) return;
+    event.preventDefault();
+    const step = ["ArrowDown", "ArrowRight"].includes(event.key) ? 1 : -1;
+    const next = event.key === "Home" ? 0 : event.key === "End" ? items.length - 1 : (index + step + items.length) % items.length;
+    items[next].focus();
+  });
+  panel.addEventListener("click", (event) => { if (event.target.closest("a[href], button[data-close]")) menu.close(false); });
+  return menu;
+}
+document.addEventListener("click", (event) => { if (!event.target.closest(".popover")) closeMenus(); });
+
+function appTile(entry) {
+  const disabled = entry.enabled === false;
+  const attrs = { class: `app-tile ${disabled ? "disabled" : ""} ${entry.kind === "account" ? "account" : ""}`, role: "menuitem", tabindex: "-1", dataset: { app: entry.id } };
+  if (disabled) { attrs["aria-disabled"] = "true"; attrs.title = entry.reason || "Not available"; }
+  const node = entry.href
+    ? h("a", { ...attrs, href: entry.href, ...(entry.external ? { target: "_blank", rel: "noopener noreferrer" } : {}) })
+    : h("button", { ...attrs, type: "button", onclick: (event) => { event.preventDefault(); if (disabled) return; closeMenus(); apps.open(entry.id); } });
+  node.append(h("span", { class: "app-tile-icon" }, Aira.icon(entry.icon || "dashboard")), h("span", { class: "app-tile-name", text: entry.name }), h("span", { class: "app-tile-tag", text: disabled && entry.reason ? entry.reason : entry.tagline || "" }));
+  return node;
+}
+function renderSwitcher(panel) {
+  const entries = apps.available();
+  const current = apps.current();
+  const tiles = entries.map((entry) => { const tile = appTile(entry); if (entry.id === current.id) tile.setAttribute("aria-current", "true"); return tile; });
+  const links = [];
+  const local = apps.state.installation === "local";
+  if (local && apps.state.accountUrl) links.push(h("a", { class: "menu-item", role: "menuitem", tabindex: "-1", href: `${apps.state.accountUrl}/#/org`, target: "_blank", rel: "noopener noreferrer" }, Aira.icon("settings"), h("span", { text: "Manage your account" })));
+  if (!local && apps.state.localUrl) links.push(h("a", { class: "menu-item", role: "menuitem", tabindex: "-1", href: apps.state.localUrl, target: "_blank", rel: "noopener noreferrer" }, Aira.icon("dashboard"), h("span", { text: "Local workspace" })));
+  const can = Aira.cloud && Aira.cloud.can;
+  if (!local && can && (can("billing.manage") || can("org.settings"))) links.push(h("a", { class: "menu-item", role: "menuitem", tabindex: "-1", href: "#/org/apps" }, Aira.icon("more"), h("span", { text: "More apps" })));
+  // replaceChildren turns a null child into the text "null": only real nodes go in.
+  panel.replaceChildren(
+    ...[h("div", { class: "popover-title", text: "Aira apps" }), h("div", { class: "app-grid" }, ...tiles), links.length ? h("div", { class: "menu-list" }, ...links) : null].filter(Boolean),
+  );
+}
+Aira.renderSwitcher = renderSwitcher;
+
+// The account menu: who is signed in, where the account is managed, theme, shortcuts, sign out.
+Aira.accountLinks = []; // a build adds entries: { label, href, icon?, external?, when?() }
+function renderAccount() {
+  const user = Aira.state.user || {};
+  const email = String(user.email || "");
+  const initial = (email[0] || "A").toUpperCase();
+  $("accountAvatar").textContent = initial;
+  $("accountAvatarLarge").textContent = initial;
+  $("accountBtnEmail").textContent = email;
+  if (!$("accountEmail").textContent) $("accountEmail").textContent = email;
+  const cloud = Aira.cloud || null;
+  const me = cloud && cloud.me;
+  const links = [];
+  if (me && me.kind === "member") {
+    if (cloud.isStaff && cloud.isStaff()) links.push({ label: "Manage your account", href: "#/org", icon: "settings" });
+    else links.push({ label: "Account settings", href: "#/settings", icon: "settings" });
+    if (Array.isArray(me.orgs) && me.orgs.length > 1) links.push({ label: "Switch organization", href: "#/switch-org", icon: "recruiters" });
+  } else if (!me && apps.state.installation === "local" && apps.state.accountUrl) {
+    links.push({ label: "Manage your account", href: `${apps.state.accountUrl}/#/org`, icon: "settings", external: true });
+  }
+  for (const extra of Aira.accountLinks) if (!extra.when || extra.when(user)) links.push(extra);
+  $("accountLinks").replaceChildren(...links.map((entry) => h("a", { class: "menu-item", role: "menuitem", tabindex: "-1", href: entry.href, ...(entry.external ? { target: "_blank", rel: "noopener noreferrer" } : {}) }, Aira.icon(entry.icon || "settings"), h("span", { text: entry.label }))));
+  $("accountLinks").hidden = !links.length;
+}
+Aira.renderAccount = renderAccount;
 
 async function refreshStatus() {
   const strip = $("statusStrip");
@@ -413,7 +616,7 @@ async function refreshStatus() {
     strip.replaceChildren(
       pill(linkedin.state === "connected", linkedin.state === "connected" ? "LinkedIn connected" : linkedin.state === "login" || linkedin.state === "starting" ? "LinkedIn connecting" : "LinkedIn off", linkedin.message, linkedin.state === "login" || linkedin.state === "starting"),
       pill(status.ollama, status.ollama ? "Ollama ready" : "Ollama offline", status.ollama ? "Local model available for reviews and drafts" : "Start Ollama to review fit and generate drafts"),
-      pill(status.google_jobs, status.google_jobs ? "SerpApi ready" : "SerpApi off", status.google_jobs ? "A SerpApi key is connected: Google Jobs, Careers and the Aira API console can search" : "Connect a SerpApi key in Aira API > Account to use Google Jobs, Careers and the Aira API console", false, "#/airaapi?tab=account"),
+      pill(status.google_jobs, status.google_jobs ? "SerpApi ready" : "SerpApi off", status.google_jobs ? "A SerpApi key is connected: Google Jobs, Careers and the API console can search" : "Connect a SerpApi key in API > Account to use Google Jobs, Careers and the API console", false, "#/airaapi?tab=account"),
     );
     if (linkedin.state === "login" || linkedin.state === "starting") setTimeout(refreshStatus, 3000);
   } catch { /* status is best-effort */ }
@@ -450,7 +653,11 @@ async function loadApp() {
   // The hosted build decides which sections this person has and whether there is a workspace to load.
   let workspace = true;
   if (Aira.cloud && Aira.cloud.boot) workspace = (await Aira.cloud.boot(Aira.state.user)) !== false;
+  Aira.state.currentApp = null;
   renderNav();
+  renderAccount();
+  // The hosted build hides the sections of apps the organization has not subscribed to once the list arrives.
+  apps.load().then(() => { if (Aira.cloud && Aira.cloud.buildNav) Aira.cloud.buildNav(); else renderNav(); renderAccount(); });
   if (workspace) await loadWorkspace();
   const landing = Aira.cloud && Aira.cloud.landing ? Aira.cloud.landing(workspace) : null;
   if (!location.hash || location.hash === "#/" || location.hash === "#") Router.go(landing || (Aira.state.profile && Aira.state.profile.resume_hash ? ["dashboard"] : ["settings", "resume"]), {}, { replace: true });
@@ -491,15 +698,19 @@ document.addEventListener("keydown", (event) => {
   if (event.key === "/") { const search = document.querySelector("#main input[type='search'], #main input[data-search]"); if (search) { event.preventDefault(); search.focus(); } return; }
   if (event.key === "?") { showShortcuts(); return; }
   if (chord === "g") {
+    // A section's chord first (inside any app), then an app's key, which opens that app's home.
     const target = NAV.find((item) => item.key === event.key);
-    if (target) { Router.go([target.id]); }
+    const app = !target && APPS.find((item) => item.key === event.key && apps.describe(item.id).enabled !== false);
+    if (target) { Router.go([target.id]); } else if (app) { apps.open(app.id); }
     chord = "";
     return;
   }
   if (event.key === "g") { chord = "g"; setTimeout(() => { chord = ""; }, 900); }
 });
 function showShortcuts() {
-  const rows = [...NAV.map((item) => [`g then ${item.key}`, item.label]), ["/", "Focus search"], ["↑ ↓", "Move through a list"], ["Esc", "Close panel"], ["?", "This help"]];
+  const sections = visibleNav();
+  const appRows = APPS.map((item) => [`g then ${item.key}`, `${item.name} app`]);
+  const rows = [...appRows, ...sections.map((item) => [`g then ${item.key}`, item.label]), ["/", "Focus search"], ["↑ ↓", "Move through a list"], ["Esc", "Close panel"], ["?", "This help"]];
   modal({ title: "Keyboard shortcuts", body: h("table", { class: "table" }, h("tbody", {}, ...rows.map(([key, label]) => h("tr", {}, h("td", {}, h("span", { class: "kbd", text: key })), h("td", { text: label }))))), actions: [{ label: "Close", kind: "" }] });
 }
 document.addEventListener("keydown", (event) => {
@@ -525,10 +736,13 @@ document.addEventListener("DOMContentLoaded", () => {
     const effectiveDark = current ? current === "dark" : prefersDark;
     applyTheme(effectiveDark ? "light" : "dark");
   });
-  $("shortcutsBtn").addEventListener("click", showShortcuts);
+  $("shortcutsBtn").addEventListener("click", () => { closeMenus(); showShortcuts(); });
   $("menuBtn").addEventListener("click", () => setSidebarOpen(!$("sidebar").classList.contains("open")));
-  document.addEventListener("click", (event) => { if (window.innerWidth <= 900 && $("sidebar").classList.contains("open") && !event.target.closest("#sidebar, #menuBtn, #bottomNav")) setSidebarOpen(false); });
+  document.addEventListener("click", (event) => { if (window.innerWidth <= 900 && $("sidebar").classList.contains("open") && !event.target.closest("#sidebar, #menuBtn, #bottomNav, .popover")) setSidebarOpen(false); });
   $("logoutBtn").addEventListener("click", async () => { try { await api("/api/auth/logout", { method: "POST", body: {} }); } finally { location.hash = ""; location.reload(); } });
+  // The app switcher opens from the top bar (desktop) or the More sheet (phones); the account menu from the avatar.
+  Aira.switcherMenu = popover([$("appSwitcherBtn"), $("appSwitcherSideBtn")], $("appSwitcher"), { render: renderSwitcher, onClose: () => { if (window.innerWidth <= 900) setSidebarOpen(false); } });
+  Aira.accountMenu = popover([$("accountBtn")], $("accountMenu"), { render: renderAccount });
   $("authSwitch").addEventListener("click", () => setAuthMode(Aira.state.authMode === "login" ? "register" : "login"));
   $("authForm").addEventListener("submit", async (event) => {
     event.preventDefault();

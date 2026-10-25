@@ -1,4 +1,4 @@
-"""Aira API persistence: searches, usage, saved items, keys, cache and secrets."""
+"""API persistence: searches, usage, saved items, keys, cache and secrets."""
 
 from __future__ import annotations
 

@@ -80,6 +80,13 @@ class SubscriptionInactive(CloudError):
     code = "subscription_inactive"
 
 
+class AppRequired(CloudError):
+    """The organization has not subscribed to the app that owns this route (HTTP 402)."""
+
+    status = 402
+    code = "app_required"
+
+
 class Unavailable(CloudError):
     status = 503
     code = "unavailable"

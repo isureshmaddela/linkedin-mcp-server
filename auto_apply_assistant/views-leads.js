@@ -407,8 +407,8 @@
       h("span", { class: "ld-setup-mark", "aria-hidden": "true" }, ico("key")),
       h("div", { class: "ld-setup-body" },
         h("h2", { id: "ldSetupTitle", text: "Connect SerpApi to search Google for leads" }),
-        h("p", { class: "muted", text: "Google Maps, people, companies and hiring signals use the SerpApi key you connect in Aira API. Sales Navigator and CSV import work without it. Until a key is connected you can still see what each search would cost." }),
-        h("div", { class: "btn-row" }, btn("Connect SerpApi in Aira API > Account", { icon: "key", kind: "", href: accountLink() }))));
+        h("p", { class: "muted", text: "Google Maps, people, companies and hiring signals use the SerpApi key you connect in API. Sales Navigator and CSV import work without it. Until a key is connected you can still see what each search would cost." }),
+        h("div", { class: "btn-row" }, btn("Connect SerpApi in API > Account", { icon: "key", kind: "", href: accountLink() }))));
   }
 
   function problem(error, retry) {
@@ -1203,7 +1203,7 @@
   async function renderHistory(content, ctx) {
     const runs = ctx.overview.runs || [];
     if (!runs.length) { fill(content, ui.empty("No searches yet", "Every search you run is listed here with what it found, added and cost.", btn("Find leads", { kind: "", href: link("find") }))); return; }
-    fill(content, h("section", { class: "panel ld-panel" }, h("div", { class: "panel-head" }, h("h2", { text: "Recent searches" }), h("small", { class: "muted", text: "Google searches also appear in Aira API > History, tagged leads." })),
+    fill(content, h("section", { class: "panel ld-panel" }, h("div", { class: "panel-head" }, h("h2", { text: "Recent searches" }), h("small", { class: "muted", text: "Google searches also appear in API > History, tagged leads." })),
       h("div", { class: "table-wrap ld-table-wrap" }, h("table", { class: "table ld-table", id: "ldHistory" },
         h("caption", { class: "visually-hidden", text: "Recent lead searches" }),
         h("thead", {}, h("tr", {}, ...["When", "Source", "Search", "Result", "Credits"].map((t) => h("th", { text: t })))),

@@ -155,14 +155,14 @@
     content.replaceChildren(cards, table);
   }
 
-  // The SerpApi key behind Google Jobs. Its state comes from the Aira API overview (the key may live in the app or in
-  // SERPAPI_API_KEY); the key itself is never shown. Managing it happens in Aira API > Account.
+  // The SerpApi key behind Google Jobs. Its state comes from the API overview (the key may live in the app or in
+  // SERPAPI_API_KEY); the key itself is never shown. Managing it happens in API > Account.
   function googleCard(serp, status) {
     const manage = (text) => h("a", { class: `btn${text === "Manage key" ? " secondary" : ""} sm`, href: "#/airaapi?tab=account", text });
     const configured = serp ? serp.configured : Boolean(status.google_jobs);
     let state = "No key";
     let badge = "stage needs_review";
-    let detail = "No SerpApi key is connected. Paste one in Aira API > Account (it is checked with SerpApi, then stored encrypted on this computer) or set SERPAPI_API_KEY in .env.";
+    let detail = "No SerpApi key is connected. Paste one in API > Account (it is checked with SerpApi, then stored encrypted on this computer) or set SERPAPI_API_KEY in .env.";
     if (configured && serp) {
       const account = serp.account;
       const origin = serp.key && serp.key.source === "env" ? "set by SERPAPI_API_KEY in the environment" : "stored encrypted in Aira";
@@ -181,9 +181,9 @@
       detail = serp.key_error;
     }
     return h("div", { class: "card" },
-      h("div", { class: "btn-row", style: { justifyContent: "space-between" } }, h("h3", { text: "Google Jobs and Aira API" }), h("span", { class: `badge ${badge}`, text: state })),
+      h("div", { class: "btn-row", style: { justifyContent: "space-between" } }, h("h3", { text: "Google Jobs and API" }), h("span", { class: `badge ${badge}`, text: state })),
       h("p", { class: "muted", text: detail }),
-      h("div", { class: "btn-row" }, manage(configured ? "Manage key" : "Connect key"), h("a", { class: "btn ghost sm", href: "#/airaapi", text: "Open Aira API" }), h("a", { class: "btn ghost sm", href: "#/careers", text: "Open Careers" })));
+      h("div", { class: "btn-row" }, manage(configured ? "Manage key" : "Connect key"), h("a", { class: "btn ghost sm", href: "#/airaapi", text: "Open API" }), h("a", { class: "btn ghost sm", href: "#/careers", text: "Open Careers" })));
   }
 
   // -------------------------------------------------------------------------

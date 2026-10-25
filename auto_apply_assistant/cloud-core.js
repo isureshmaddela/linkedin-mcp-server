@@ -37,6 +37,11 @@
   // ---------------------------------------------------------------------------
   const WORKSPACE_IDS = ["dashboard", "jobs", "applications", "interviews", "recruiters", "documents", "analytics", "careers", "leads", "settings"];
   const LOCAL_NAV = Aira.NAV.map((item) => ({ ...item }));
+  // The app a registered section belongs to when its definition does not say: the candidate's own sections are
+  // Careers, organization administration is the Account app, coaching is its own app-like group.
+  const APP_OF_GROUP = { Workspace: "careers", Account: "account", Organization: "account", Coaching: "coaching", Platform: "platform" };
+  Aira.apps.pseudo.account = { name: "Account", tagline: "Organization and sign-in", icon: "settings", home: "org" };
+  Aira.apps.pseudo.coaching = { name: "Coaching", tagline: "Your candidates and their held questions", icon: "recruiters", home: "coach" };
 
   cloud.register = (definition) => {
     cloud.items = cloud.items.filter((item) => item.id !== definition.id);
@@ -45,9 +50,10 @@
   };
 
   function workspaceNav() {
-    const hide = new Set(["airaapi"]); // the Aira API console belongs to the organization, not to a candidate
+    const hide = new Set(["airaapi"]); // the API console belongs to the organization, not to a candidate
     if (!cloud.has("sources.google_jobs")) hide.add("careers");
-    return LOCAL_NAV.filter((item) => !hide.has(item.id));
+    const appOff = (id) => Aira.apps.state.loaded && Aira.apps.state.enabled[id] === false;
+    return LOCAL_NAV.filter((item) => !hide.has(item.id) && !appOff(item.app));
   }
 
   function itemsFor(role) {
@@ -59,11 +65,28 @@
     const acting = !!Aira.state.actingFor;
     let nav = [];
     if (role === "candidate" || acting) nav = workspaceNav().map((item) => (item.id === "dashboard" && role !== "candidate" ? { ...item, label: "Candidate home" } : item));
-    const own = itemsFor(role).map((item) => ({ id: item.id, label: item.label, icon: item.icon || "dashboard", group: item.group || "Organization", key: item.key, quick: !!item.quick }));
+    const own = itemsFor(role).map((item) => ({ id: item.id, label: item.label, icon: item.icon || "dashboard", group: item.group || "Organization", app: item.app || APP_OF_GROUP[item.group || "Organization"] || "account", key: item.key, quick: !!item.quick }));
     // Staff sections come first for people who administer; a candidate's own sections stay first for them.
-    nav = role === "candidate" ? [...nav, ...own] : [...own, ...nav.map((item) => ({ ...item, group: acting ? "Candidate workspace" : item.group }))];
+    nav = role === "candidate" ? [...nav, ...own] : [...own, ...nav.map((item) => ({ ...item, group: acting && item.group !== "Account" ? "Candidate workspace" : item.group }))];
     Aira.NAV.splice(0, Aira.NAV.length, ...nav);
+    Aira.state.currentApp = null;
+    Aira.apps.pseudo.account.tagline = cloud.me && cloud.me.org ? cloud.me.org.name : "Organization and sign-in";
     Aira.renderNav();
+    if (Aira.renderAccount) Aira.renderAccount();
+  };
+
+  // The switcher: a candidate opens the apps the organization subscribes to; staff open them for a candidate.
+  Aira.apps.decorate = (entries) => {
+    const role = cloud.role();
+    const acting = !!Aira.state.actingFor;
+    return entries.map((entry) => {
+      if (entry.kind !== "product") return entry;
+      if (role === "operator") return { ...entry, enabled: false, reason: "Operators have no workspace" };
+      if (entry.enabled === false) return entry;
+      if (role !== "candidate" && !acting) return { ...entry, enabled: false, reason: "Open a candidate's workspace first" };
+      if (!entry.present) return { ...entry, enabled: false, reason: entry.reason || "Not available for your role" };
+      return entry;
+    });
   };
 
   // ---------------------------------------------------------------------------
@@ -73,7 +96,8 @@
     cloud.me = user;
     if (user.org && user.org.slug) Aira.remember("lastOrg", user.org.slug); // the next sign-in page shows this organization's branding
     cloud.restoreActing();
-    $("accountEmail").textContent = `${user.email} · ${user.role}${user.org ? " · " + user.org.name : ""}`;
+    $("accountEmail").textContent = user.email;
+    $("accountMeta").textContent = `${user.role || ""}${user.org ? " · " + user.org.name : ""}`;
     cloud.buildNav();
     cloud.refreshBanners();
     if (!cloud.bannerTimer) cloud.bannerTimer = setInterval(cloud.refreshBanners, 60000);

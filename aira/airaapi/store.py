@@ -1,4 +1,4 @@
-"""SQLite persistence for the Aira API console.
+"""SQLite persistence for the API console.
 
 Every function takes the connection to the signed-in user's database (or, for
 the key index, to the accounts database) so the module stays testable without
@@ -72,7 +72,7 @@ class SecretError(ValueError):
 
 
 def ensure_schema(connection: sqlite3.Connection) -> None:
-    """Create the Aira API tables. Additive and idempotent."""
+    """Create the API tables. Additive and idempotent."""
     connection.execute(
         """CREATE TABLE IF NOT EXISTS airaapi_searches (
             id TEXT PRIMARY KEY, serpapi_id TEXT NOT NULL DEFAULT '',
@@ -1058,7 +1058,7 @@ def delete_monitor(connection: sqlite3.Connection, monitor_id: str) -> bool:
 
 
 # ---------------------------------------------------------------------------
-# Aira API keys
+# API keys
 # ---------------------------------------------------------------------------
 
 

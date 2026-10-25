@@ -12,6 +12,7 @@ import copy
 from dataclasses import dataclass, field
 from typing import Any
 
+from aira import apps as app_catalog
 from aira_cloud.rbac import SCOPE_LEVELS
 
 MB = 1024 * 1024
@@ -90,7 +91,6 @@ _STARTER: dict[str, Any] = {
         "api.searches",
         "auth.mfa",
         "coach.act",
-        "leads",
     ],
 }
 _TEAM: dict[str, Any] = {
@@ -131,7 +131,6 @@ _TEAM: dict[str, Any] = {
         "branding",
         "overage",
         "pooled_serpapi",
-        "leads",
         "leads_outreach",
     ],
 }
@@ -158,6 +157,8 @@ _ENTERPRISE: dict[str, Any] = {
     "support": "named_contact_sla",
     "features": _TEAM["features"]
     + [
+        "leads",
+        "api.console",
         "auth.scim",
         "byo_model",
         "siem_export",
@@ -232,6 +233,44 @@ DEFAULT_PLANS: dict[str, dict[str, Any]] = {
         "public": True,
     },
 }
+
+# Apps sold per candidate seat per month, in cents: 0 = included in the plan, None = not available on it.
+# An app that is not listed (Careers) is part of every plan; the trial has every app.
+APP_PRICING: dict[str, dict[str, int | None]] = {
+    "leads": {"starter": 400, "team": 400, "enterprise": 0},
+    "api": {"starter": None, "team": 300, "enterprise": 0},
+}
+APP_STATES = ("included", "addon", "unavailable")
+
+
+def app_state(plan_id: str, app_id: str) -> str:
+    """How ``plan_id`` relates to an app: ``included``, ``addon`` (bought per seat) or ``unavailable``."""
+    if app_id not in app_catalog.BY_ID:
+        return "unavailable"
+    if plan_id == "trial" or app_id not in APP_PRICING:
+        return "included"
+    price = APP_PRICING[app_id].get(plan_id)
+    if price is None:
+        return "unavailable"
+    return "included" if price == 0 else "addon"
+
+
+def app_price(plan_id: str, app_id: str) -> int | None:
+    """Cents per candidate seat per month for an add-on (0 when included, None when not available)."""
+    if app_state(plan_id, app_id) == "unavailable":
+        return None
+    if app_state(plan_id, app_id) == "included":
+        return 0
+    return int(APP_PRICING[app_id][plan_id] or 0)
+
+
+def plan_for_app(app_id: str) -> str | None:
+    """The cheapest paid plan on which the app can be had (bought or included)."""
+    for plan_id in PLAN_ORDER[1:]:
+        if app_state(plan_id, app_id) != "unavailable":
+            return plan_id
+    return None
+
 
 # Sources → the feature that unlocks them.
 SOURCE_FEATURES = {
@@ -331,12 +370,18 @@ class Entitlements:
     over_limits: tuple[str, ...] = ()
     overage_enabled: bool = False
     pricing: dict[str, Any] = field(default_factory=dict)
+    apps: frozenset[str] = (
+        frozenset()
+    )  # the apps the organization may open (plan, add-ons, grants)
 
     def limit(self, name: str) -> Any:
         return self.limits.get(name)
 
     def has(self, feature: str) -> bool:
         return feature in self.features
+
+    def has_app(self, app_id: str) -> bool:
+        return app_id in self.apps
 
     @property
     def automation_allowed(self) -> bool:
@@ -376,6 +421,7 @@ class Entitlements:
             "automation_allowed": self.automation_allowed,
             "sources": self.sources(),
             "coach_scopes": self.coach_scopes(),
+            "apps": sorted(self.apps),
         }
 
 

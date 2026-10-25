@@ -1,4 +1,4 @@
-/* Aira API Playground — the flagship search console (spec 7.2)
+/* API Playground — the flagship search console (spec 7.2)
  *
  * Aira.renderPlayground(content, route) mounts the Playground into `content`. views-airaapi.js calls it for
  * #/airaapi?tab=playground, so the sub-navigation and page heading belong to that file; this one owns everything
@@ -784,7 +784,7 @@
       ]);
       const shareMenu = menuButton(btn("Share", { icon: "share" }), () => [
         { label: "Copy link to this request", icon: "link", onClick: () => serp().copyText(shareUrl(), "Link copied") },
-        { label: "Copy cURL (Aira API)", icon: "code", onClick: () => serp().copyText(serp().codeSnippets(record.engine, record.params).curl, "cURL copied") },
+        { label: "Copy cURL (API)", icon: "code", onClick: () => serp().copyText(serp().codeSnippets(record.engine, record.params).curl, "cURL copied") },
         { label: "Copy cURL (SerpApi direct)", icon: "code", onClick: () => serp().copyText(serp().codeSnippets(record.engine, record.params, { baseUrl: "https://serpapi.com", apiKey: "YOUR_SERPAPI_API_KEY" }).curl, "cURL copied") },
         { label: "Copy result JSON", icon: "copy", disabled: !record.result, onClick: () => serp().copyText(JSON.stringify(record.result, null, 2), "JSON copied") },
       ]);
@@ -1390,7 +1390,7 @@
       if (!alive()) return;
       build();
       document.addEventListener("keydown", onKeydown);
-      // leaving the page (a different Aira API tab or section) disposes the mount once the router has replaced the content
+      // leaving the page (a different API tab or section) disposes the mount once the router has replaced the content
       const onHash = () => setTimeout(() => { if (active === api && !content.isConnected) dispose(); }, 0);
       window.addEventListener("hashchange", onHash);
       cleanups.push(() => { document.removeEventListener("keydown", onKeydown); window.removeEventListener("hashchange", onHash); });

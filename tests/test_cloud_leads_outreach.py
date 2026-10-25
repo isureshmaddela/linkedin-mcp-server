@@ -187,7 +187,12 @@ def test_the_plans_carry_the_outreach_feature_and_limits_and_old_versions_get_th
 
 def test_a_starter_plan_is_told_to_upgrade_to_team_for_every_send_step(cloud):
     org = build_org(
-        cloud, "Starter Two", plan="starter", seats=5, slug_email="startertwo.test"
+        cloud,
+        "Starter Two",
+        plan="starter",
+        seats=5,
+        slug_email="startertwo.test",
+        apps=["leads"],
     )
     candidate = sign_in(cloud, org.candidate)
     for method, path, body in (
@@ -212,15 +217,22 @@ def test_a_starter_plan_is_told_to_upgrade_to_team_for_every_send_step(cloud):
     assert status == 201 and drafts["created"] == 1
 
 
-def test_a_trial_organization_has_no_leads_at_all(cloud):
+def test_a_trial_organization_has_leads_but_cannot_send(cloud):
     from cloud_support import add_member, signup
 
     owner = signup(cloud, "Trial Out", "owner@trialout.test")["owner"]
     candidate = sign_in(
         cloud, add_member(cloud, owner, "cand@trialout.test", "candidate")
     )
-    status, body = candidate.call("GET", "/api/leads/outbox")
-    assert status == 402 and body["required_plan"] == "starter"
+    assert candidate.call("GET", "/api/leads/outbox")[0] == 200, (
+        "the trial has every app"
+    )
+    status, body = candidate.call(
+        "POST", "/api/leads/outreach/settings", {"from_name": "x"}
+    )
+    assert status == 402 and body["required_plan"] == "team", (
+        "sending stays a Team capability"
+    )
 
 
 def test_a_coach_drafts_and_edits_but_only_the_candidate_approves_and_sends(
@@ -702,7 +714,12 @@ def test_another_organizations_messages_and_leads_are_not_found(
 ):
     candidate, lead_ids, message_ids = prepare(cloud, team, smtp, count=1)
     other = build_org(
-        cloud, "Other Out", plan="team", seats=25, slug_email="otherout.test"
+        cloud,
+        "Other Out",
+        plan="team",
+        seats=25,
+        slug_email="otherout.test",
+        apps="all",
     )
     configure(cloud, other, key=False)
     stranger = sign_in(cloud, other.candidate)
@@ -846,7 +863,12 @@ def test_a_search_for_requests_is_a_google_search_gated_and_metered_like_the_oth
 
 def test_the_pooled_allowance_settles_by_credits_for_a_request_search(cloud, serpapi):
     org = build_org(
-        cloud, "Pooled Intent", plan="team", seats=25, slug_email="pooledintent.test"
+        cloud,
+        "Pooled Intent",
+        plan="team",
+        seats=25,
+        slug_email="pooledintent.test",
+        apps="all",
     )
     configure(cloud, org, key=False)
     cloud.tenancy.update_policy(org.owner, {"use_pooled_serpapi": True})

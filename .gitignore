@@ -218,3 +218,4 @@ scripts/snapshot_dumps/
 .aira-shots/
 .aira-run*.txt
 .aira-test*/
+.env.cloud

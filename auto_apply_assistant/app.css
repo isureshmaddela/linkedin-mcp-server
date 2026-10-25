@@ -165,8 +165,58 @@ small, .muted { color: var(--muted); }
 .nav a[aria-current="page"] { background: var(--brand-soft); color: var(--brand-ink); }
 .nav a .count { margin-left: auto; min-width: 20px; padding: 1px 6px; border-radius: 999px; background: var(--surface-3); color: var(--ink-2); font-size: 11px; text-align: center; }
 .nav a[aria-current="page"] .count { background: var(--brand); color: var(--on-brand); }
-.sidebar-foot { margin-top: 8px; padding-top: 14px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
-.sidebar-foot .account { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; overflow-wrap: anywhere; color: var(--ink-2); }
+.sidebar-foot { margin-top: 8px; padding-top: 10px; border-top: 1px solid var(--line); font-size: 12px; color: var(--muted); }
+.sidebar-foot:empty, .sidebar-foot:not(:has(.app-switch-side)) { display: none; }
+.sidebar-foot .app-switch-side { display: none; width: 100%; justify-content: flex-start; gap: 10px; font-weight: 700; color: var(--ink-2); }
+.app-switch-side svg { width: 18px; height: 18px; fill: currentColor; stroke: none; }
+.nav-apphead { display: flex; align-items: center; gap: 10px; padding: 8px 10px 12px; }
+.nav-apphead > span { display: contents; }
+.nav-apphead svg { width: 22px; height: 22px; flex: none; stroke: var(--brand-ink); fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.nav-apphead div { display: grid; gap: 1px; min-width: 0; }
+.nav-apphead strong { font-size: 15px; letter-spacing: 0.01em; }
+.nav-apphead .muted { font-size: 11.5px; line-height: 1.3; }
+.nav-apphead + .nav-group { padding-top: 8px; border-top: 1px solid var(--line); }
+
+/* Top-bar menus: the app switcher and the account menu --------------------- */
+.topbar-menu { position: relative; display: flex; align-items: center; }
+.topbar.menu-open { z-index: 50; }
+.app-switch svg { width: 20px; height: 20px; fill: currentColor; stroke: none; }
+.app-switch[aria-expanded="true"], .account-btn[aria-expanded="true"] { background: var(--surface-2); }
+.account-btn { display: inline-flex; align-items: center; gap: 8px; max-width: 260px; min-height: 38px; padding: 3px 10px 3px 3px; border: 1px solid transparent; border-radius: 999px; background: transparent; color: var(--ink-2); font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.account-btn:hover { background: var(--surface-2); border-color: var(--line); }
+.account-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.avatar { display: grid; place-items: center; width: 30px; height: 30px; flex: none; border-radius: 50%; background: var(--brand-deep); color: var(--mark-ink); font: 700 14px var(--font-display); }
+.avatar.lg { width: 42px; height: 42px; font-size: 19px; }
+.popover { position: absolute; top: calc(100% + 6px); right: 0; z-index: 70; min-width: 280px; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); box-shadow: var(--shadow-lg); }
+.popover[hidden] { display: none; }
+.popover-title { padding: 2px 8px 8px; color: var(--muted); font-size: 10.5px; font-weight: 800; letter-spacing: 0.09em; text-transform: uppercase; }
+.app-switcher { width: 340px; }
+.app-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+.app-tile { display: grid; justify-items: center; gap: 4px; padding: 12px 6px 10px; border: 1px solid transparent; border-radius: var(--radius); background: transparent; color: var(--ink); font: inherit; text-align: center; text-decoration: none; cursor: pointer; }
+.app-tile:hover, .app-tile:focus-visible { background: var(--surface-2); border-color: var(--line); outline: none; }
+.app-tile[aria-current="true"] { background: var(--brand-soft); border-color: transparent; }
+.app-tile.disabled { color: var(--muted); cursor: not-allowed; }
+.app-tile-icon { display: grid; place-items: center; width: 44px; height: 44px; border-radius: 12px; background: var(--surface-2); color: var(--brand-ink); }
+.app-tile.disabled .app-tile-icon { color: var(--muted); }
+.app-tile[aria-current="true"] .app-tile-icon { background: var(--surface); }
+.app-tile-icon svg { width: 22px; height: 22px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.app-tile-name { font-size: 13px; font-weight: 700; }
+.app-tile-tag { font-size: 10.5px; line-height: 1.3; color: var(--muted); overflow-wrap: anywhere; }
+.menu-list { display: grid; gap: 2px; padding-top: 8px; margin-top: 8px; border-top: 1px solid var(--line); }
+.app-switcher .menu-list, .account-menu .menu-list:first-child { margin-top: 0; }
+.menu-item { display: flex; align-items: center; gap: 10px; width: 100%; padding: 8px 10px; border: 0; border-radius: 8px; background: transparent; color: var(--ink-2); font: inherit; font-size: 13.5px; font-weight: 600; text-align: left; text-decoration: none; cursor: pointer; }
+.menu-item:hover, .menu-item:focus-visible { background: var(--surface-2); color: var(--ink); outline: none; }
+.menu-item svg { width: 16px; height: 16px; flex: none; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.account-menu { width: 300px; }
+.account-head { display: flex; align-items: center; gap: 12px; padding: 6px 8px 10px; }
+.account-who { display: grid; gap: 2px; min-width: 0; font-size: 13px; }
+.account-who strong { overflow-wrap: anywhere; }
+.account-who .muted { font-size: 12px; }
+#accountLinks[hidden] { display: none; }
+.crumb-app { color: var(--muted); font-weight: 600; }
+.crumb-sep { color: var(--line-strong); }
+.auth-extras { display: grid; gap: 8px; }
+.auth-extras:empty { display: none; }
 .main { min-width: 0; display: flex; flex-direction: column; }
 .topbar { position: sticky; top: 0; z-index: 20; display: flex; align-items: center; gap: 12px; height: var(--topbar); padding: 0 24px; border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--surface) 88%, transparent); backdrop-filter: blur(10px); }
 .topbar .crumbs { font-weight: 700; font-size: 15px; display: flex; align-items: center; gap: 8px; min-width: 0; }
@@ -425,7 +475,12 @@ button.row:hover, a.row:hover, .row.selectable:hover { background: var(--surface
   .sidebar { position: fixed; left: 0; top: 0; z-index: 45; width: min(300px, 84vw); transform: translateX(-105%); transition: transform 0.18s; box-shadow: var(--shadow-lg); }
   .sidebar.open { transform: none; }
   .menu-btn { display: inline-flex; }
-  .topbar { padding: 0 14px; }
+  .topbar { padding: 0 14px; gap: 8px; }
+  /* Phones: the switcher lives in the More sheet; the avatar alone stands for the account menu. */
+  .topbar .app-switch { display: none; }
+  .sidebar-foot .app-switch-side { display: inline-flex; }
+  .account-btn { padding: 3px; }
+  .account-name { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   /* Dots only on phones: the words stay for screen readers and the dot is a 28px target. */
   .status-strip .status-pill span { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .status-strip .status-pill { position: relative; min-width: 28px; min-height: 28px; justify-content: center; padding: 4px; }
@@ -444,6 +499,7 @@ button.row:hover, a.row:hover, .row.selectable:hover { background: var(--surface
   .hero { padding: 18px; }
 }
 @media (max-width: 600px) {
+  .popover { position: fixed; left: 10px; right: 10px; top: calc(var(--topbar) + 6px); width: auto; min-width: 0; max-height: calc(100vh - var(--topbar) - 90px); overflow: auto; }
   .grid.cols-2, .grid.cols-3, .grid.cols-4 { grid-template-columns: 1fr; }
   .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   h1 { font-size: 26px; }
@@ -582,8 +638,8 @@ button.row:hover, a.row:hover, .row.selectable:hover { background: var(--surface
 
 
 
-/* ==== Aira API kit ====================================================================================================
-   Shared components for the Aira API console, the Playground and Careers (views-serp-kit.js, Aira.serp).
+/* ==== API kit ====================================================================================================
+   Shared components for the API console, the Playground and Careers (views-serp-kit.js, Aira.serp).
    Every class is prefixed sk-. Colours come from the app tokens; chart series use the validated categorical palette
    (blue, orange, aqua, yellow, magenta) with dark-mode steps, and are never the only carrier of meaning. */
 :root {
@@ -1074,10 +1130,10 @@ a.sk-item-title:hover { text-decoration: underline; }
   .sk-seg { max-width: 100%; }
   .sk-frame { height: 60vh; }
 }
-/* ==== end Aira API kit ==== */
+/* ==== end API kit ==== */
 
-/* ==== Aira API Playground =============================================================================================
-   views-playground.js. Classes are prefixed pg-; shared atoms come from the Aira API kit (sk-). */
+/* ==== API Playground =============================================================================================
+   views-playground.js. Classes are prefixed pg-; shared atoms come from the API kit (sk-). */
 :root { --pg-on-brand: #ffffff; }
 @media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) { --pg-on-brand: #07251a; } }
 :root[data-theme="dark"] { --pg-on-brand: #07251a; }
@@ -1286,10 +1342,10 @@ body.pg-sheet-open { overflow: hidden; }
   .pg-run-key { display: none; }
   .pg-toolbar .btn { flex: 1 1 auto; }
 }
-/* ==== end Aira API Playground ==== */
+/* ==== end API Playground ==== */
 
-/* ==== Aira API console ================================================================================================
-   Pages of the Aira API console (views-airaapi.js). Every class is prefixed aa-. Colours come from the app tokens and the
+/* ==== API console ================================================================================================
+   Pages of the API console (views-airaapi.js). Every class is prefixed aa-. Colours come from the app tokens and the
    kit's chart palette; state is never carried by colour alone (labels, icons and text sit next to every colour). */
 :root {
   --aa-hero-a: #0c4932; --aa-hero-b: #176b4a; --aa-hero-ink: #ffffff; --aa-hero-soft: rgba(255, 255, 255, 0.8);
@@ -1728,7 +1784,7 @@ body.pg-sheet-open { overflow: hidden; }
   .aa-engine-actions .btn { flex: 1 1 auto; }
   .aa-pager { flex-direction: column; align-items: stretch; }
 }
-/* ==== end Aira API console ==== */
+/* ==== end API console ==== */
 
 /* ==== Careers =========================================================================================================
    The Careers workspace (views-careers.js): Google Jobs search, career intelligence reports and job alerts. Every class is
@@ -2019,7 +2075,7 @@ a.cr-item-title:hover { color: var(--brand); text-decoration: underline; text-un
 /* ==== end Careers ==== */
 
 /* ==== Dashboard widgets ============================================================
-   Aira API usage and Careers shortcuts on the Dashboard (views-widgets.js). Classes are prefixed dw-. */
+   API usage and Careers shortcuts on the Dashboard (views-widgets.js). Classes are prefixed dw-. */
 .dw-body { padding: 4px 16px 16px; display: grid; gap: 12px; }
 .dw-body > p { margin: 0; }
 .dw-foot { padding-top: 12px; border-top: 1px solid var(--line); }
@@ -2044,7 +2100,7 @@ a.dw-stat:hover { border-color: var(--brand); }
 /* Markdown page mode of the result viewer (output=md) */
 .sk-mdpage { padding: 14px 16px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); max-height: 70vh; overflow: auto; }
 
-/* ==== Aira API: search inside results, monitor budgets, X-Ray ======================= */
+/* ==== API: search inside results, monitor budgets, X-Ray ======================= */
 .aa-search-row { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; }
 .aa-search-row > .sk-filter-row { flex: 1 1 260px; min-width: 0; }
 .aa-search-row .sk-switch { flex: none; }
