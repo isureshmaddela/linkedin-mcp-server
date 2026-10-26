@@ -36,6 +36,7 @@ class Scheduler:
             "schedules.due": 0,
             "monitors.due": 0,
             "monitors.org": 0,
+            "suite.tick": 0,
             "skipped": 0,
         }
         with self.app.db.read() as connection:
@@ -92,7 +93,39 @@ class Scheduler:
                     ),
                 )
         counts["monitors.org"] = self._enqueue_org_monitors(now_iso, blocked_orgs)
+        counts["suite.tick"] = self._enqueue_suite_ticks(now)
         return counts
+
+    def _enqueue_suite_ticks(self, now: int) -> int:
+        """Every five minutes, each organization that has an industry or life app: their periodic checks and due
+        mail (aira.suite.background), as one job per organization per window."""
+        from aira import apps as app_catalog
+        from aira.suite import background
+
+        suite_apps = {
+            app.id for app in (*app_catalog.INDUSTRY_APPS, *app_catalog.LIFE_APPS)
+        }
+        window = now // background.INTERVAL_SECONDS
+        with self.app.db.read() as connection:
+            orgs = many(
+                connection,
+                "SELECT org_id FROM organizations WHERE deleted_at IS NULL AND status = 'active'",
+            )
+        queued = 0
+        for org in orgs:
+            org_id = org["org_id"]
+            if not self.app.workspaces.org_api_path(org_id).exists():
+                continue
+            if not suite_apps & set(self.app.entitlements.resolve(org_id).apps):
+                continue
+            if self.app.queue.enqueue(
+                org_id,
+                "suite.tick",
+                dedupe_key=f"suite.tick:{org_id}:{window}",
+                priority=7,
+            ):
+                queued += 1
+        return queued
 
     def _enqueue_org_monitors(self, now_iso: str, blocked_orgs: dict[str, bool]) -> int:
         """The organization's own API monitors live in its API workspace, not a candidate's."""

@@ -20,10 +20,13 @@ from aira_cloud.plans import ALL_SOURCES, SOURCE_FEATURES
 from aira_cloud.rbac import (
     ADMIN,
     CANDIDATE,
+    CANDIDATE_ONLY,
+    CANDIDATE_PERMISSION_LEVEL,
     COACH,
     COACH_SCOPES,
     ORG_ROLES,
     OWNER,
+    PERSONAL_ROLES,
     SCOPE_LEVELS,
     STAFF_ROLES,
     Principal,
@@ -409,8 +412,15 @@ class Tenancy:
                 """SELECT invite_id, email, role FROM invites WHERE org_id = ? AND accepted_at IS NULL AND revoked_at IS NULL AND expires_at > ?""",
                 (org_id, self.now),
             )
+            personal = one(
+                connection,
+                """SELECT COUNT(*) AS n FROM workspaces w JOIN members m ON m.member_id = w.candidate_id
+                WHERE w.org_id = ? AND m.role != 'candidate' AND m.removed_at IS NULL AND m.status = 'active'""",
+                (org_id,),
+            )
         by_role = {r["role"]: int(r["n"]) for r in members}
-        candidates = by_role.get(CANDIDATE, 0)
+        # A personal workspace (an owner or admin using the apps themselves) takes a candidate seat.
+        candidates = by_role.get(CANDIDATE, 0) + int(personal["n"] if personal else 0)
         staff = sum(n for role, n in by_role.items() if role in SEAT_STAFF_ROLES)
         for invite in invites:
             if invite["invite_id"] == exclude_invite or (
@@ -484,6 +494,13 @@ class Tenancy:
             raise Conflict(
                 "The organization needs at least one owner. Make someone else an owner first."
             )
+        if role not in PERSONAL_ROLES and self.has_personal_workspace(
+            actor.org_id, member_id
+        ):
+            raise Conflict(
+                "This person has their own workspace, which only owners and admins can keep. They end it first "
+                "(account menu, End my workspace), or remove them from the organization."
+            )
         with self.db.write() as connection:
             connection.execute(
                 "UPDATE members SET role = ? WHERE member_id = ? AND org_id = ?",
@@ -506,6 +523,119 @@ class Tenancy:
             )
         self.app.lifecycle.recompute_over_limits(actor.org_id)
         return self.public_member(self.member(actor.org_id, member_id))
+
+    # ------------------------------------------------------------------ personal workspaces
+
+    def has_personal_workspace(self, org_id: str, member_id: str) -> bool:
+        with self.db.read() as connection:
+            row = one(
+                connection,
+                """SELECT 1 AS x FROM workspaces w JOIN members m ON m.member_id = w.candidate_id
+                WHERE w.org_id = ? AND w.candidate_id = ? AND m.role != 'candidate'""",
+                (org_id, member_id),
+            )
+        return row is not None
+
+    def personal_workspace(self, principal: Principal) -> dict[str, Any]:
+        """Whether this owner or admin may keep a workspace of their own, and its state."""
+        available = principal.staff_role in PERSONAL_ROLES and not principal.is_operator
+        state: dict[str, Any] = {"available": available, "exists": False}
+        if available and self.has_personal_workspace(
+            principal.org_id, principal.member_id
+        ):
+            workspace = self.app.workspaces.row(principal.org_id, principal.member_id)
+            state.update(
+                {
+                    "exists": True,
+                    "stage": workspace["stage"],
+                    "status": workspace["status"],
+                    "paused": bool(workspace["paused_at"]),
+                    "linkedin_opted_in": bool(workspace["linkedin_opt_in_at"]),
+                    # Inside it the person holds a candidate's permissions over their own data.
+                    "candidate_permissions": sorted(
+                        set(CANDIDATE_PERMISSION_LEVEL) | CANDIDATE_ONLY
+                    ),
+                }
+            )
+        return state
+
+    def start_personal_workspace(self, principal: Principal) -> dict[str, Any]:
+        """An owner or admin starts using the apps themselves: a workspace of their own, one candidate seat.
+
+        Starting it is the person's agreement to automation on their own behalf and to how sensitive answers are
+        handled (the consents a candidate gives at onboarding); no coach can be given access to it.
+        """
+        if principal.is_operator or principal.staff_role not in PERSONAL_ROLES:
+            raise Forbidden(
+                "Only owners and admins can keep a workspace of their own.",
+                code="personal_not_allowed",
+            )
+        org_id, member_id = principal.org_id, principal.member_id
+        if self.has_personal_workspace(org_id, member_id):
+            return self.personal_workspace(principal)
+        self.app.entitlements.require_state(org_id, write=True)
+        self.require_seat(org_id, CANDIDATE)
+        with self.db.write() as connection:
+            self.app.workspaces.create(org_id, member_id, connection=connection)
+            for kind in ("automation", "sensitive_policy"):
+                connection.execute(
+                    "INSERT INTO consents (org_id, candidate_id, kind, version, granted_at, detail) VALUES (?, ?, ?, ?, ?, ?)",
+                    (
+                        org_id,
+                        member_id,
+                        kind,
+                        CONSENT_VERSION,
+                        self.now,
+                        dumps({"personal": True}),
+                    ),
+                )
+            self.app.audit.record(
+                org_id,
+                "workspace.personal_start",
+                actor=principal,
+                candidate_id=member_id,
+                target_type="member",
+                target_id=member_id,
+                connection=connection,
+            )
+        self.app.lifecycle.recompute_over_limits(org_id)
+        return self.personal_workspace(principal)
+
+    def end_personal_workspace(self, principal: Principal) -> dict[str, Any]:
+        """The owner or admin ends their own workspace: its data is deleted and the seat is free again."""
+        org_id, member_id = principal.org_id, principal.member_id
+        if not self.has_personal_workspace(org_id, member_id):
+            raise NotFound("You do not have a workspace of your own.")
+        self.app.entitlements.require_state(org_id, write=True)
+        outcome = self._close_personal_workspace(org_id, member_id)
+        self.app.audit.record(
+            org_id,
+            "workspace.personal_end",
+            actor=principal,
+            candidate_id=member_id,
+            target_type="member",
+            target_id=member_id,
+            detail={"outcome": outcome},
+        )
+        self.app.lifecycle.recompute_over_limits(org_id)
+        return {**self.personal_workspace(principal), "outcome": outcome}
+
+    def _close_personal_workspace(self, org_id: str, member_id: str) -> str:
+        self.app.workspaces.stop_automation(org_id, member_id)
+        if self.app.lifecycle.on_legal_hold(org_id):
+            with self.db.write() as connection:
+                connection.execute(
+                    "UPDATE workspaces SET status = 'archived' WHERE org_id = ? AND candidate_id = ?",
+                    (org_id, member_id),
+                )
+            return "archived"  # nothing is deleted while a legal hold is in place
+        self.app.workspaces.delete(org_id, member_id)
+        with self.db.write() as connection:
+            connection.execute(
+                "DELETE FROM consents WHERE org_id = ? AND candidate_id = ?",
+                (org_id, member_id),
+            )
+        return "deleted"
 
     def _owner_count(self, org_id: str) -> int:
         with self.db.read() as connection:
@@ -539,6 +669,10 @@ class Tenancy:
         result: dict[str, Any] = {"member_id": member_id, "role": target["role"]}
         if target["role"] == CANDIDATE:
             result.update(self._offboard_candidate(actor, target))
+        elif self.has_personal_workspace(actor.org_id, member_id):
+            result["personal_workspace"] = self._close_personal_workspace(
+                actor.org_id, member_id
+            )
         with self.db.write() as connection:
             connection.execute(
                 "UPDATE members SET status = 'removed', removed_at = ?, password_hash = '' WHERE member_id = ? AND org_id = ?",
@@ -578,6 +712,12 @@ class Tenancy:
                 connection=connection,
             )
         self.app.secrets.delete(actor.org_id, f"mfa:{member_id}")
+        from aira_cloud.hooks import erase_social, erase_videos
+
+        erase_social(
+            actor.org_id, (member_id,)
+        )  # their Social profile, posts and messages
+        erase_videos(actor.org_id, (member_id,))  # their channel, videos and files
         self.app.lifecycle.recompute_over_limits(actor.org_id)
         return result
 
@@ -937,6 +1077,8 @@ class Tenancy:
             for r in rows
         }
         required = list(REQUIRED_CONSENTS)
+        if self.app.authz.is_personal(org_id, candidate_id):
+            required.remove("coach_access")  # no coach can open a personal workspace
         return {
             "version": CONSENT_VERSION,
             "granted": granted,

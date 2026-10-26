@@ -47,6 +47,7 @@ RETAINED_TABLES = frozenset(
         "plan_versions",
         "plan_migrations",
         "feature_flags",
+        "platform_apps",
         "announcements",
         "operators",
         "blocked_sources",
@@ -64,6 +65,51 @@ def _holds_unmasked_data(row: dict[str, Any]) -> bool:
         or created_by.startswith("dsr:")
         or (row.get("candidate_id") and created_by == row.get("candidate_id"))
     )
+
+
+def _with_social(archive_bytes: bytes, member_id: str) -> bytes:
+    """Add the person's own Social data (social.json) to their archive; Social lives outside the workspace."""
+    from contextlib import closing
+
+    from aira.suite.social import db as social_db
+    from aira.suite.social import service as social
+
+    try:
+        with closing(social_db.connect()) as sc:
+            ids = social.accounts_for(sc, person_keys=[f"m:{member_id}"])
+            if not ids:
+                return archive_bytes
+            data = social.export_account(sc, ids[0])
+    except Exception:  # noqa: BLE001 - the rest of the export still goes out
+        logger.exception("Could not add Social data to an export")
+        return archive_bytes
+    buffer = io.BytesIO(archive_bytes)
+    with zipfile.ZipFile(buffer, "a", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("social.json", json.dumps(data, indent=2, default=str))
+    return buffer.getvalue()
+
+
+def _with_videos(archive_bytes: bytes, member_id: str) -> bytes:
+    """Add the person's own Videos data (videos.json: channel, videos, comments, playlists, earnings and payouts);
+    Videos lives outside the workspace, and the video files stay on the server."""
+    from contextlib import closing
+
+    from aira.suite.videos import db as videos_db
+    from aira.suite.videos import service as videos
+
+    try:
+        with closing(videos_db.connect()) as sc:
+            ids = videos.channels_for(sc, person_keys=[f"m:{member_id}"])
+            if not ids:
+                return archive_bytes
+            data = videos.export_channel(sc, ids[0])
+    except Exception:  # noqa: BLE001 - the rest of the export still goes out
+        logger.exception("Could not add Videos data to an export")
+        return archive_bytes
+    buffer = io.BytesIO(archive_bytes)
+    with zipfile.ZipFile(buffer, "a", zipfile.ZIP_DEFLATED) as archive:
+        archive.writestr("videos.json", json.dumps(data, indent=2, default=str))
+    return buffer.getvalue()
 
 
 class Lifecycle:
@@ -178,8 +224,14 @@ class Lifecycle:
         export_id = new_id()
         token = crypto.new_token()
         if candidate_id:
-            data = self.app.workspaces.export_zip(
-                org_id, candidate_id, principal, full=full
+            data = _with_videos(
+                _with_social(
+                    self.app.workspaces.export_zip(
+                        org_id, candidate_id, principal, full=full
+                    ),
+                    candidate_id,
+                ),
+                candidate_id,
             )
         else:
             data = self._organization_archive(org_id, principal)
@@ -615,6 +667,10 @@ class Lifecycle:
                     "Could not delete workspace %s", workspace["candidate_id"]
                 )
         self.app.workspaces.delete_org_tree(org_id)
+        from aira_cloud.hooks import erase_social, erase_videos
+
+        erase_social(org_id)  # Social lives outside the organization's database
+        erase_videos(org_id)  # so do Videos and the organization's ads
         count, last_hash = self.app.audit.delete_org(org_id)
         self.app.secrets.delete_org(org_id)
         name_hash = crypto.hash_token(org["name"].lower())

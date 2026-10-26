@@ -129,6 +129,12 @@ from aira.email_intel import (
 from aira import inbox_store
 from aira.airaapi import careers as airaapi_careers
 from aira.leads import service as leads_service
+from aira import suite as aira_suite
+from aira.suite import public as suite_public
+from aira.suite.social import db as social_db
+from aira.suite.videos import db as videos_db
+from aira.suite.videos import media as videos_media
+from aira.suite.videos import service as videos_service
 from aira.airaapi import compat as airaapi_compat
 from aira.airaapi import http as airaapi_http
 from aira.airaapi import jobboards as airaapi_jobboards
@@ -4084,6 +4090,42 @@ def _scheduler_loop() -> None:
             _run_due_autopilot()
         except Exception:
             logger.exception("Auto-apply tick failed")
+        try:
+            _run_suite_background()
+        except Exception:
+            logger.exception("Suite background tick failed")
+
+
+_suite_background_last = 0.0
+
+
+def _run_suite_background() -> None:
+    """Every few minutes, for each account that uses the industry or life apps: their periodic checks (a missed
+    dose tells the caregiver) and messages that are due (a booking reminder), sent through the account's own mail
+    server (aira.suite.background)."""
+    global _suite_background_last
+    from aira.suite import background as suite_background
+
+    now = time.monotonic()
+    if now - _suite_background_last < suite_background.INTERVAL_SECONDS:
+        return
+    _suite_background_last = now
+    with _auth_connect() as connection:
+        users = [
+            dict(row) for row in connection.execute("SELECT * FROM users").fetchall()
+        ]
+    for user in users:
+        if not Path(str(user.get("data_path") or "")).exists():
+            continue
+        _bind_user(user)
+        _request_context.actor = "system:suite"
+        try:
+            with _connect() as connection:
+                suite_background.run(connection, _airaapi_secret_store())
+        except Exception:
+            logger.exception("Suite background failed for %s", user.get("user_id"))
+        finally:
+            _unbind_user()
 
 
 # ---------------------------------------------------------------------------
@@ -7230,11 +7272,11 @@ class RequestHandler(BaseHTTPRequestHandler):
             # Every answer is a JSON envelope; the stdlib send_error would reply with an HTML page.
             self._reject(404, "Not found.")
         except ValueError as error:
-            self._send_json(400, {"error": str(error)})
+            self._send_json(400, _error_body(error, str(error)))
         except LookupError as error:
-            self._send_json(404, {"error": str(error) or "Not found."})
+            self._send_json(404, _error_body(error, str(error) or "Not found."))
         except PermissionError as error:
-            self._send_json(403, {"error": str(error) or "Not allowed."})
+            self._send_json(403, _error_body(error, str(error) or "Not allowed."))
         except RuntimeError as error:
             logger.warning(
                 "Upstream failure: %s",
@@ -7291,6 +7333,53 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_error(500, "Dashboard assets are missing.")
             return
         self._send_bytes(200, body, "text/html; charset=utf-8")
+
+    @route("GET", r"/p/([A-Za-z0-9_-]{40,64})", auth=False)
+    def ui_public(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        """A page a business shared with its customers (aira.suite.public); its script reads the token."""
+        try:
+            body = (STATIC_DIR / "public.html").read_bytes()
+        except OSError:
+            self.send_error(500, "Public page assets are missing.")
+            return
+        self._send_bytes(200, body, "text/html; charset=utf-8")
+
+    @route("GET", r"/videos/copyright", auth=False)
+    def ui_copyright(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        """The public copyright notice form for Videos (anyone, no account; aira/suite/videos)."""
+        try:
+            body = (STATIC_DIR / "copyright.html").read_bytes()
+        except OSError:
+            self.send_error(500, "Copyright page assets are missing.")
+            return
+        self._send_bytes(200, body, "text/html; charset=utf-8")
+
+    @route("GET", r"/static/i18n/([a-z]{2})\.json", auth=False)
+    def ui_i18n(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        """A language's translations for the screens (i18n.js; English is the source and has no file)."""
+        target = STATIC_DIR / "i18n" / f"{match.group(1)}.json"
+        if not target.is_file():
+            self._send_json(404, {"error": "No translation for that language."})
+            return
+        self._send_bytes(200, target.read_bytes(), "application/json; charset=utf-8")
 
     @route("GET", r"/static/([A-Za-z0-9_.-]+)", auth=False)
     def ui_static(
@@ -9364,6 +9453,85 @@ class _AiraKeyIndex:
             airaapi_store.unindex_key(connection, key_hash)
 
 
+def _error_body(error: BaseException, message: str) -> dict[str, Any]:
+    """The JSON error envelope; an exception that carries a machine-readable ``code`` passes it on."""
+    body: dict[str, Any] = {"error": message}
+    code = getattr(error, "code", None)
+    if isinstance(code, str) and code:
+        body["code"] = code
+    return body
+
+
+class _PublicLinkIndex:
+    """Maps public link token hashes (aira.suite.public) to the account that made them, in the accounts database."""
+
+    @staticmethod
+    def _ensure(connection: sqlite3.Connection) -> None:
+        connection.execute(
+            """CREATE TABLE IF NOT EXISTS suite_public_index (
+                token_hash TEXT PRIMARY KEY,
+                user_id TEXT NOT NULL,
+                app TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            )"""
+        )
+
+    def add(self, token_hash: str, app: str) -> None:
+        user_id = getattr(_request_context, "user_id", None)
+        if not user_id:
+            raise RuntimeError("A public link can only be made by a signed-in account.")
+        with _auth_connect() as connection:
+            self._ensure(connection)
+            connection.execute(
+                "INSERT OR REPLACE INTO suite_public_index (token_hash, user_id, app, created_at) VALUES (?, ?, ?, ?)",
+                (token_hash, user_id, app, datetime.now(timezone.utc).isoformat()),
+            )
+
+    def remove(self, token_hash: str) -> None:
+        with _auth_connect() as connection:
+            self._ensure(connection)
+            connection.execute(
+                "DELETE FROM suite_public_index WHERE token_hash = ?", (token_hash,)
+            )
+
+    def lookup(self, token: str) -> dict[str, Any] | None:
+        with _auth_connect() as connection:
+            self._ensure(connection)
+            row = connection.execute(
+                """SELECT u.* FROM suite_public_index i JOIN users u ON u.user_id = i.user_id
+                WHERE i.token_hash = ?""",
+                (suite_public.hash_token(token),),
+            ).fetchone()
+        return dict(row) if row else None
+
+
+_public_link_index = _PublicLinkIndex()
+# Customers on a public page: generous for reading, tight for actions (a booking, an order, a sign-up).
+_public_view_limiter = RateLimiter(limit=300, window_seconds=60)
+_public_action_limiter = RateLimiter(limit=60, window_seconds=60)
+
+
+def _bind_public_link(handler: RequestHandler, token: str) -> dict[str, Any]:
+    """Bind the account that owns a public link; LookupError (404) when there is none."""
+    limiter = (
+        _public_view_limiter if handler.command == "GET" else _public_action_limiter
+    )
+    key = f"public:{handler._client_key()}"
+    allowed, retry_after = limiter.check(key)
+    if not allowed:
+        raise PermissionError(
+            f"Too many requests from this address. Try again in {retry_after} seconds."
+        )
+    limiter.hit(key)
+    user = _public_link_index.lookup(token)
+    if user is None:
+        raise LookupError("This link is no longer available.")
+    _bind_user(user)
+    _request_context.bound_by_request = True
+    _request_context.actor = "public:visitor"
+    return user
+
+
 def _resolve_airaapi_key(
     plaintext: str | None,
 ) -> tuple[dict[str, Any], dict[str, Any]]:
@@ -9444,6 +9612,8 @@ def _airaapi_handler(
             return
         try:
             key_row = None
+            if entry.auth == "public_link":
+                user = _bind_public_link(self, match.group(1))
             if entry.auth == "api_key" or (
                 entry.auth == "api_key_optional"
                 and airaapi_compat.extract_key(self.headers, query)
@@ -9610,6 +9780,22 @@ class _LeadsGateway:
 
 
 leads_service.set_gateway(_LeadsGateway())
+aira_suite.set_gateway(_LeadsGateway())  # the industry apps share the writing model
+suite_public.set_default_index(
+    _public_link_index
+)  # the hosted build installs its own (organization) index
+social_db.set_default_path(
+    lambda: DB_PATH.parent / "social.sqlite3"
+)  # one Social network for every account on this computer
+videos_db.set_default_path(
+    lambda: DB_PATH.parent / "videos.sqlite3"
+)  # one Videos catalog (and its ads) for every account on this computer
+videos_media.set_default_root(
+    lambda: DB_PATH.parent / "media"
+)  # video files; AIRA_MEDIA_DIR puts them on a drive with more space
+videos_service.set_computer_owner(
+    lambda user: str(user.get("data_path") or "") == str(DB_PATH)
+)  # the first account on this computer looks after Videos and Ads for everyone on it
 
 
 def _interview_event(interview: dict[str, Any]) -> Any:

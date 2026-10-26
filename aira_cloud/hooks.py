@@ -81,6 +81,60 @@ def principal_from(payload: Mapping[str, Any] | None) -> Principal | None:
 
 
 def install(app: CloudApp) -> None:
+    from aira.suite import public as suite_public
+
+    suite_public.set_index(app.public_index)  # public links resolve to the organization
+    from aira.suite.social import db as social_db
+
+    social_db.set_path(
+        lambda: app.config.data_root / "social.sqlite3"
+    )  # one Social network across organizations
+    from aira.suite.videos import db as videos_db
+    from aira.suite.videos import media as videos_media
+
+    videos_db.set_path(
+        lambda: app.config.data_root / "videos.sqlite3"
+    )  # one Videos catalog (and its ads) across organizations
+    videos_media.set_root(
+        lambda: app.config.data_root / "media"
+    )  # video files on disk (AIRA_MEDIA_DIR wins); object storage holds whole encrypted blobs only
+    videos_media.show_paths = False  # members never see the server's folders
+    videos_media.set_quota(lambda sc, home, size: media_quota(app, sc, home, size))
+    from aira_cloud.webhooks import install_listener
+
+    install_listener(app)  # the apps' activity becomes webhook events
+    from aira import suite as aira_suite
+
+    aira_suite.set_public_origin(
+        lambda: app.config.base_url
+    )  # links in customers' emails
+
+    def _actor() -> dict | None:
+        bound = context.current()
+        principal = bound.principal if bound else None
+        if principal is None or principal.is_operator or not principal.member_id:
+            return None  # a public page or the system: no person
+        return {
+            "member_id": principal.member_id,
+            "name": principal.name,
+            "email": principal.email,
+            "role": principal.staff_role,
+        }
+
+    def _has_app(app_id: str) -> bool:
+        bound = context.current()
+        return bool(
+            bound
+            and bound.org_id
+            and app.entitlements.resolve(bound.org_id).has_app(app_id)
+        )
+
+    aira_suite.set_actor_resolver(
+        _actor
+    )  # the life apps' person is the signed-in member
+    aira_suite.set_app_filter(
+        _has_app
+    )  # Today and pulse ask only the apps the organization has
     ctx_org = lambda: context.require().org_id  # noqa: E731
 
     HOOKS.worker_registry = ControlWorkerRegistry(app)
@@ -310,3 +364,74 @@ __all__ = [
     "CANDIDATE",
     "one",
 ]
+
+
+def media_quota(app: CloudApp, sc: Any, home: str, size: int) -> None:
+    """Videos and ad files count against the organization's storage limit (``storage_bytes``), with its documents."""
+    from aira.suite.videos import media as videos_media
+    from aira_cloud.errors import PlanRequired
+
+    if not home or home.startswith("local:"):
+        return
+    entitlements = app.entitlements.resolve(home)
+    limit = entitlements.limit("storage_bytes")
+    if limit is None:
+        return
+    used = app.storage.usage_bytes(home) + videos_media.usage_bytes(sc, home)
+    if used + size > limit:
+        raise PlanRequired(
+            f"Your organization's storage ({videos_media.human(limit)}) has {videos_media.human(max(0, limit - used))} left, "
+            f"and this file is {videos_media.human(size)}. Delete videos you no longer need, or ask an owner about a larger plan.",
+            limit="storage_bytes",
+            used=used,
+            limit_value=limit,
+            required_plan=None,
+            current_plan=entitlements.plan_id,
+            audience="candidate",
+        )
+
+
+def erase_videos(org_id: str, member_ids: tuple[str, ...] = ()) -> int:
+    """Remove people from Videos (one catalog outside every organization's database), and the organization's ads when
+    the whole organization goes. Never stops a deletion."""
+    from contextlib import closing
+
+    from aira.suite.ads import service as ads
+    from aira.suite.videos import db as videos_db
+    from aira.suite.videos import service as videos
+
+    try:
+        with closing(videos_db.connect()) as sc:
+            ids = videos.channels_for(
+                sc,
+                home="" if member_ids else org_id,
+                person_keys=[f"m:{m}" for m in member_ids],
+            )
+            count = videos.erase_channels(sc, ids)
+            if not member_ids:
+                ads.erase_advertiser(sc, org_id)
+            return count
+    except Exception:  # noqa: BLE001 - deletion presses on
+        logger.exception("Could not remove Videos data for organization %s", org_id)
+        return 0
+
+
+def erase_social(org_id: str, member_ids: tuple[str, ...] = ()) -> int:
+    """Remove people from Social (one network outside every organization's database): the whole
+    organization when no member is named, else those members. Never stops a deletion."""
+    from contextlib import closing
+
+    from aira.suite.social import db as social_db
+    from aira.suite.social import service as social
+
+    try:
+        with closing(social_db.connect()) as sc:
+            ids = social.accounts_for(
+                sc,
+                home="" if member_ids else org_id,
+                person_keys=[f"m:{m}" for m in member_ids],
+            )
+            return social.erase_accounts(sc, ids)
+    except Exception:  # noqa: BLE001 - deletion presses on
+        logger.exception("Could not remove Social data for organization %s", org_id)
+        return 0

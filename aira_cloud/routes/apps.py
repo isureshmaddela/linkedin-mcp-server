@@ -23,6 +23,7 @@ def apps_catalog(req: Req):  # noqa: ANN201
                 **entry,
                 "enabled": bool(member.get("enabled")),
                 "reason": member.get("reason", ""),
+                "switched_off": bool(member.get("switched_off")),
             }
         )
     return 200, {
@@ -103,4 +104,24 @@ def tenant_app_grant(req: Req):  # noqa: ANN201
         req.group(2),
         status,
         str(body.get("note", "")).strip(),
+    )
+
+
+@cloud_route(
+    "POST", r"/api/platform/tenants/([0-9a-f]{32})/subscription", auth="operator"
+)
+def platform_subscription_set(req: Req):  # noqa: ANN201
+    """The superadmin sets a tenant's plan, seats, paid months and apps (bought outside the product)."""
+    body = req.body()
+    apps = body.get("apps") or {}
+    if not isinstance(apps, dict):
+        apps = {}
+    return 200, req.app.billing.operator_set_subscription(
+        req.principal,
+        req.group(),
+        plan_id=str(body.get("plan_id") or ""),
+        seats=body.get("seats") or 0,
+        months=body.get("months") or 1,
+        apps={str(k): bool(v) for k, v in apps.items()},
+        note=str(body.get("note") or ""),
     )

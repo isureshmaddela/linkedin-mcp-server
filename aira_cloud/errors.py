@@ -87,6 +87,13 @@ class AppRequired(CloudError):
     code = "app_required"
 
 
+class AppDisabled(CloudError):
+    """The app is switched off for every organization by an operator (HTTP 403); its data is kept."""
+
+    status = 403
+    code = "app_disabled"
+
+
 class Unavailable(CloudError):
     status = 503
     code = "unavailable"

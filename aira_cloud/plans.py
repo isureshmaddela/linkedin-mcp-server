@@ -237,37 +237,67 @@ DEFAULT_PLANS: dict[str, dict[str, Any]] = {
 # Apps sold per candidate seat per month, in cents: 0 = included in the plan, None = not available on it.
 # An app that is not listed (Careers) is part of every plan; the trial has every app.
 APP_PRICING: dict[str, dict[str, int | None]] = {
-    "leads": {"starter": 400, "team": 400, "enterprise": 0},
     "api": {"starter": None, "team": 300, "enterprise": 0},
+    # Business apps (aira/apps.py INDUSTRY_APPS: Sales, Marketing with Leads, Service, Commerce, Courses & Events),
+    # bought per seat, all in Enterprise.
+    **{
+        app.id: {"starter": 500, "team": 400, "enterprise": 0}
+        for app in app_catalog.INDUSTRY_APPS
+    },
+    # Life apps (everyday use by every member): cheaper per seat, all in Enterprise and the trial.
+    **{
+        app.id: {"starter": 200, "team": 150, "enterprise": 0}
+        for app in app_catalog.LIFE_APPS
+    },
 }
 APP_STATES = ("included", "addon", "unavailable")
+APP_PLANS = ("starter", "team", "enterprise")
+# An operator's price changes over APP_PRICING (aira_cloud.entitlements.AppSettings): app -> plan -> cents or None.
+PriceOverrides = dict[str, dict[str, int | None]]
 
 
-def app_state(plan_id: str, app_id: str) -> str:
-    """How ``plan_id`` relates to an app: ``included``, ``addon`` (bought per seat) or ``unavailable``."""
+def app_prices(
+    app_id: str, overrides: PriceOverrides | None = None
+) -> dict[str, int | None]:
+    """Per-plan seat prices for a sold app: the defaults above with an operator's changes on top."""
+    prices = dict(APP_PRICING.get(app_id, {}))
+    prices.update((overrides or {}).get(app_id, {}))
+    return prices
+
+
+def app_state(
+    plan_id: str, app_id: str, overrides: PriceOverrides | None = None
+) -> str:
+    """How ``plan_id`` relates to an app: ``included``, ``addon`` (bought per seat) or ``unavailable``.
+    An old app id (``"shop"``) answers for the app it became (Commerce)."""
+    app_id = app_catalog.current_id(app_id)
     if app_id not in app_catalog.BY_ID:
         return "unavailable"
     if plan_id == "trial" or app_id not in APP_PRICING:
         return "included"
-    price = APP_PRICING[app_id].get(plan_id)
+    price = app_prices(app_id, overrides).get(plan_id)
     if price is None:
         return "unavailable"
     return "included" if price == 0 else "addon"
 
 
-def app_price(plan_id: str, app_id: str) -> int | None:
+def app_price(
+    plan_id: str, app_id: str, overrides: PriceOverrides | None = None
+) -> int | None:
     """Cents per candidate seat per month for an add-on (0 when included, None when not available)."""
-    if app_state(plan_id, app_id) == "unavailable":
+    app_id = app_catalog.current_id(app_id)
+    state = app_state(plan_id, app_id, overrides)
+    if state == "unavailable":
         return None
-    if app_state(plan_id, app_id) == "included":
+    if state == "included":
         return 0
-    return int(APP_PRICING[app_id][plan_id] or 0)
+    return int(app_prices(app_id, overrides)[plan_id] or 0)
 
 
-def plan_for_app(app_id: str) -> str | None:
+def plan_for_app(app_id: str, overrides: PriceOverrides | None = None) -> str | None:
     """The cheapest paid plan on which the app can be had (bought or included)."""
     for plan_id in PLAN_ORDER[1:]:
-        if app_state(plan_id, app_id) != "unavailable":
+        if app_state(plan_id, app_id, overrides) != "unavailable":
             return plan_id
     return None
 
@@ -381,7 +411,8 @@ class Entitlements:
         return feature in self.features
 
     def has_app(self, app_id: str) -> bool:
-        return app_id in self.apps
+        """``app_id`` may be an app, an old app id or a section/package (``"bookings"`` -> Commerce)."""
+        return app_catalog.current_id(app_id) in self.apps
 
     @property
     def automation_allowed(self) -> bool:

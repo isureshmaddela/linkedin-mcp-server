@@ -24,6 +24,7 @@ GLOBAL_TABLES = frozenset(
         "plans",
         "plan_versions",
         "feature_flags",
+        "platform_apps",
         "announcements",
         "blocked_sources",
         "worker_heartbeats",

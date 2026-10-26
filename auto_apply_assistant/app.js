@@ -46,6 +46,27 @@ const ICONS = {
   leads: '<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="18" cy="7" r="2.5"/><path d="m16.5 12.5 1.5 1.5 3-3.5"/></svg>',
   careers: '<svg viewBox="0 0 24 24"><rect x="3" y="7" width="18" height="13" rx="2"/><path d="M9 7V5a2 2 0 0 1 2-2h2a2 2 0 0 1 2 2v2M3 13h18M11 13h2"/></svg>',
   airaapi: '<svg viewBox="0 0 24 24"><path d="M8 4C6 4 5 5 5 7v2c0 1.5-1 2.5-2 3 1 .5 2 1.5 2 3v2c0 2 1 3 3 3M16 4c2 0 3 1 3 3v2c0 1.5 1 2.5 2 3-1 .5-2 1.5-2 3v2c0 2-1 3-3 3"/><circle cx="12" cy="12" r="1.2"/></svg>',
+  studio: '<svg viewBox="0 0 24 24"><path d="M4 20h16M6 16l9-9 3 3-9 9H6z"/><path d="m13 9 3 3"/></svg>',
+  bookings: '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/><path d="m9 15 2 2 4-4"/></svg>',
+  shop: '<svg viewBox="0 0 24 24"><path d="M5 8h14l-1.2 11.1a1 1 0 0 1-1 .9H7.2a1 1 0 0 1-1-.9z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/></svg>',
+  academy: '<svg viewBox="0 0 24 24"><path d="m2 9 10-5 10 5-10 5z"/><path d="M6 11v5c0 1.7 2.7 3 6 3s6-1.3 6-3v-5M22 9v6"/></svg>',
+  events: '<svg viewBox="0 0 24 24"><path d="M4 8a2 2 0 0 0 2-2h12a2 2 0 0 0 2 2v2a2 2 0 0 0 0 4v2a2 2 0 0 0-2 2H6a2 2 0 0 0-2-2v-2a2 2 0 0 0 0-4z"/><path d="M14 6v12" stroke-dasharray="2 2"/></svg>',
+  marketing: '<svg viewBox="0 0 24 24"><path d="M3 11v2a1 1 0 0 0 1 1h3l6 4V6L7 10H4a1 1 0 0 0-1 1z"/><path d="M17 9a4 4 0 0 1 0 6M19.5 6.5a8 8 0 0 1 0 11"/></svg>',
+  hub: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="3"/><circle cx="5" cy="5" r="2"/><circle cx="19" cy="5" r="2"/><circle cx="5" cy="19" r="2"/><circle cx="19" cy="19" r="2"/><path d="m6.5 6.5 3.4 3.4M17.5 6.5l-3.4 3.4M6.5 17.5l3.4-3.4M17.5 17.5l-3.4-3.4"/></svg>',
+  family: '<svg viewBox="0 0 24 24"><circle cx="8" cy="7" r="3"/><circle cx="17" cy="9" r="2.5"/><path d="M2.5 20c0-3.3 2.5-6 5.5-6s5.5 2.7 5.5 6M13 20c0-2.5 1.8-4.5 4-4.5s4 2 4 4.5"/></svg>',
+  care: '<svg viewBox="0 0 24 24"><path d="M12 20s-7-4.4-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.6-7 10-7 10z"/><path d="M9 11h6M12 8v6"/></svg>',
+  learn: '<svg viewBox="0 0 24 24"><path d="M4 5a2 2 0 0 1 2-2h12v16H6a2 2 0 0 0-2 2z"/><path d="M4 21V5M8 7h6M8 11h4"/></svg>',
+  play: '<svg viewBox="0 0 24 24"><rect x="2" y="7" width="20" height="11" rx="5"/><path d="M7 10.5v4M5 12.5h4"/><circle cx="16" cy="11" r="1"/><circle cx="18" cy="14" r="1"/></svg>',
+  planner: '<svg viewBox="0 0 24 24"><rect x="4" y="4" width="16" height="17" rx="2"/><path d="M9 2v4M15 2v4M8 11l2 2 4-4M8 17h8"/></svg>',
+  service: '<svg viewBox="0 0 24 24"><path d="M4 13a8 8 0 0 1 16 0"/><rect x="2.5" y="13" width="4" height="6" rx="1.5"/><rect x="17.5" y="13" width="4" height="6" rx="1.5"/><path d="M20 19c0 1.7-2 2.5-5 2.5"/></svg>',
+  social: '<svg viewBox="0 0 24 24"><path d="M21 12a8 8 0 0 1-11.6 7.1L4 20l1.1-4.6A8 8 0 1 1 21 12z"/><circle cx="9" cy="12" r="1"/><circle cx="12.5" cy="12" r="1"/><circle cx="16" cy="12" r="1"/></svg>',
+  commerce: '<svg viewBox="0 0 24 24"><path d="M5 8h14l-1.2 11.1a1 1 0 0 1-1 .9H7.2a1 1 0 0 1-1-.9z"/><path d="M9 8V6a3 3 0 0 1 6 0v2"/><path d="m9.5 14 2 2 3.5-4"/></svg>',
+  experiences: '<svg viewBox="0 0 24 24"><path d="m2 8 8-4 8 4-8 4z"/><path d="M5 10v4c0 1.4 2.2 2.5 5 2.5s5-1.1 5-2.5v-4"/><path d="M15 15h5a2 2 0 0 0 2-2v-1a2 2 0 0 1 0-4V7"/></svg>',
+  news: '<svg viewBox="0 0 24 24"><path d="M4 5h13v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M17 9h3v10a2 2 0 0 1-2 2"/><path d="M7 9h7M7 13h7M7 17h4"/></svg>',
+  videos: '<svg viewBox="0 0 24 24"><rect x="2.5" y="5" width="19" height="14" rx="3"/><path d="m10 9 5 3-5 3z"/></svg>',
+  ads: '<svg viewBox="0 0 24 24"><path d="M3 10v4a1 1 0 0 0 1 1h2l5 4V5L6 9H4a1 1 0 0 0-1 1z"/><path d="M15 9.5a3.5 3.5 0 0 1 0 5"/><circle cx="19" cy="7" r="2.2"/><path d="M19 6.2v1.6M18.2 7h1.6"/></svg>',
+  today: '<svg viewBox="0 0 24 24"><path d="M3 11 12 4l9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-5h4v5"/></svg>',
+  speaker: '<svg viewBox="0 0 24 24"><path d="M4 10v4h4l5 4V6L8 10z"/><path d="M16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/></svg>',
 };
 Aira.icon = (name) => h("span", { html: ICONS[name] || "", "aria-hidden": "true", style: { display: "contents" } });
 
@@ -73,7 +94,8 @@ async function api(path, { method = "GET", body, raw = false, silent = false } =
     const response = await fetch(path, {
       method,
       // A coach, administrator or auditor opens one candidate's workspace by naming them here (the hosted build).
-      headers: { "Content-Type": "application/json", "X-Requested-With": "aira", Accept: raw ? "*/*" : "application/json", ...(Aira.state.actingFor ? { "X-Aira-Candidate": Aira.state.actingFor.id } : {}) },
+      // The life apps name the person using a shared device (life.js keeps it; the hosted build ignores it).
+      headers: { "Content-Type": "application/json", "X-Requested-With": "aira", Accept: raw ? "*/*" : "application/json", ...(Aira.state.actingFor ? { "X-Aira-Candidate": Aira.state.actingFor.id } : {}), ...(Aira.state.lifeProfile ? { "X-Aira-Profile": Aira.state.lifeProfile } : {}) },
       body: body === undefined ? undefined : JSON.stringify(body),
       credentials: "same-origin",
     });
@@ -87,6 +109,7 @@ async function api(path, { method = "GET", body, raw = false, silent = false } =
     }
     const data = await response.json().catch(() => ({}));
     if (!response.ok && Aira.cloud && Aira.cloud.onApiError) Aira.cloud.onApiError(response.status, data, path);
+    if (!response.ok && Aira.onApiError) Aira.onApiError(response.status, data, path);
     if (response.status === 401 && !path.startsWith("/api/auth/") && !path.startsWith("/api/platform/auth/") && !path.startsWith("/api/invites/") && !path.startsWith("/api/cloud/")) {
       Aira.showAuth();
       throw new ApiError("Your session ended. Sign in again.", 401, requestId);
@@ -276,6 +299,9 @@ async function withBusy(button, fn) {
 }
 Aira.withBusy = withBusy;
 
+// A server answer that an app is not on here (the organization has not turned it on, or it is switched off for
+// everyone): views show the app's closed page instead of an error.
+const APP_CLOSED_CODES = new Set(["app_required", "app_disabled"]);
 const ui = {
   stage: (stage) => h("span", { class: `badge stage ${stage || "discovered"}`, text: fmt.stage(stage) }),
   source: (source) => h("span", { class: "badge source", text: (source || "").replaceAll("_", " ") }),
@@ -285,7 +311,7 @@ const ui = {
     return h("span", { class: "score", style: { "--pct": Math.round(value) }, title: `Match score ${Math.round(value)}%` }, h("span", { text: Math.round(value) }));
   },
   empty: (title, text, action) => h("div", { class: "empty" }, h("strong", { text: title }), text ? h("div", { text }) : null, action || null),
-  error: (error, retry) => h("div", { class: "error-box", role: "alert" }, h("strong", { text: "Something went wrong" }), h("div", { text: error && error.message ? error.message : String(error) }), error && error.requestId ? h("div", { class: "muted", text: `Request ID ${error.requestId}` }) : null, retry ? h("div", { class: "btn-row" }, h("button", { type: "button", class: "btn secondary sm", text: "Try again", onclick: retry })) : null),
+  error: (error, retry) => (error && APP_CLOSED_CODES.has(error.code) && Aira.apps ? Aira.apps.lockedFromError(error) : h("div", { class: "error-box", role: "alert" }, h("strong", { text: "Something went wrong" }), h("div", { text: error && error.message ? error.message : String(error) }), error && error.requestId ? h("div", { class: "muted", text: `Request ID ${error.requestId}` }) : null, retry ? h("div", { class: "btn-row" }, h("button", { type: "button", class: "btn secondary sm", text: "Try again", onclick: retry })) : null)),
   skeleton: (rows = 4) => h("div", { class: "skeleton-list", "aria-busy": "true", "aria-label": "Loading" }, ...Array.from({ length: rows }, () => h("div", { class: "skeleton" }))),
   field: (label, input, hint) => { const id = input.id || (input.id = `f${Math.random().toString(36).slice(2, 8)}`); return h("div", { class: "field" }, h("label", { for: id, text: label }), input, hint ? h("span", { class: "hint", text: hint }) : null); },
   select: (options, value, attrs = {}) => { const select = h("select", attrs); for (const option of options) { const [val, label] = Array.isArray(option) ? option : [option, option]; select.append(h("option", { value: val, text: label, selected: val === value })); } return select; },
@@ -308,8 +334,23 @@ Aira.ui = ui;
 // this account may open (the hosted build sells each one as a subscription).
 const APPS = [
   { id: "careers", name: "Careers", tagline: "Find, apply and track", icon: "careers", home: "dashboard", key: "c" },
-  { id: "leads", name: "Leads", tagline: "Find people who need what you sell", icon: "leads", home: "leads", key: "l" },
-  { id: "api", name: "API", tagline: "Search engines and keys", icon: "airaapi", home: "airaapi", key: "p" },
+  { id: "api", name: "Developers", tagline: "APIs, keys and connected apps", icon: "airaapi", home: "airaapi", key: "p", scope: "org" },
+  // Business apps (aira/suite), like the clouds of a CRM suite: data shared by the organization; one app can hold
+  // several sections (Commerce is Shop and Bookings). `g` then a digit opens one.
+  { id: "studio", name: "Sales", tagline: "Clients, deals, proposals and invoices", icon: "studio", home: "studio", key: "1", category: "industry", scope: "org" },
+  { id: "marketing", name: "Marketing", tagline: "Leads, content, campaigns and forms", icon: "marketing", home: "marketing", key: "2", category: "industry", scope: "org" },
+  { id: "service", name: "Service", tagline: "Help your customers fast", icon: "service", home: "service", key: "3", category: "industry", scope: "org" },
+  { id: "commerce", name: "Commerce", tagline: "Sell products and appointments", icon: "commerce", home: "shop", key: "4", category: "industry", scope: "org" },
+  { id: "experiences", name: "Courses & Events", tagline: "Teach, sell tickets and check in", icon: "experiences", home: "academy", key: "5", category: "industry", scope: "org" },
+  { id: "ads", name: "Ads", tagline: "Advertise on videos, pay creators", icon: "ads", home: "ads", category: "industry", scope: "org" },
+  // Everyday apps (aira/suite/life.py): every person, each with their own profile. Social holds Family too.
+  { id: "social", name: "Social", tagline: "Friends, family, chats and photos", icon: "social", home: "social", key: "6", category: "life", scope: "org" },
+  { id: "care", name: "Health", tagline: "Medicines, check-ups and wellbeing", icon: "care", home: "care", key: "7", category: "life", scope: "org" },
+  { id: "learn", name: "Learn", tagline: "Practise a little every day", icon: "learn", home: "learn", key: "8", category: "life", scope: "org" },
+  { id: "play", name: "Play", tagline: "Games, quizzes and things to watch", icon: "play", home: "play", key: "9", category: "life", scope: "org" },
+  { id: "planner", name: "Planner", tagline: "Chores, shopping and bills", icon: "planner", home: "planner", category: "life", scope: "org" },
+  { id: "news", name: "News", tagline: "Today's headlines in your language", icon: "news", home: "news", category: "life", scope: "org" },
+  { id: "videos", name: "Videos", tagline: "Watch, upload and earn", icon: "videos", home: "videos", category: "life", scope: "org" },
 ];
 // One list drives the sidebar, the phone bottom bar, the `g` then <key> chords and the shortcuts help.
 // `app` says which app a section belongs to; items in the Account group show under every app.
@@ -323,11 +364,37 @@ const NAV = [
   { id: "documents", label: "Documents", icon: "documents", app: "careers", group: "Careers", key: "o" },
   { id: "analytics", label: "Analytics", icon: "analytics", app: "careers", group: "Careers", key: "n" },
   { id: "careers", label: "Research", icon: "careers", app: "careers", group: "Careers", key: "f" },
-  { id: "leads", label: "Leads", icon: "leads", app: "leads", group: "Leads", key: "l", quick: true },
-  { id: "airaapi", label: "API", icon: "airaapi", app: "api", group: "API", key: "p", quick: true },
+  { id: "airaapi", label: "API", icon: "airaapi", app: "api", group: "Developers", key: "p", quick: true },
+  // Third-party access: OAuth apps, access tokens and webhooks (views-developers.js).
+  { id: "developers", label: "Connected apps", icon: "settings", app: "api", group: "Developers" },
+  { id: "studio", label: "Sales", icon: "studio", app: "studio", group: "Sales", quick: true },
+  { id: "marketing", label: "Marketing", icon: "marketing", app: "marketing", group: "Marketing", quick: true },
+  { id: "leads", label: "Leads", icon: "leads", app: "marketing", group: "Marketing", key: "l", quick: true },
+  { id: "service", label: "Service", icon: "service", app: "service", group: "Service", quick: true },
+  { id: "shop", label: "Shop", icon: "shop", app: "commerce", group: "Commerce", quick: true },
+  { id: "bookings", label: "Bookings", icon: "bookings", app: "commerce", group: "Commerce", quick: true },
+  { id: "academy", label: "Courses", icon: "academy", app: "experiences", group: "Courses & Events", quick: true },
+  { id: "events", label: "Events", icon: "events", app: "experiences", group: "Courses & Events", quick: true },
+  { id: "ads", label: "Ads", icon: "ads", app: "ads", group: "Ads", quick: true },
+  { id: "social", label: "Social", icon: "social", app: "social", group: "Social", quick: true },
+  { id: "family", label: "Family", icon: "family", app: "social", group: "Social", quick: true },
+  { id: "care", label: "Health", icon: "care", app: "care", group: "Health", quick: true },
+  { id: "learn", label: "Learn", icon: "learn", app: "learn", group: "Learn", quick: true },
+  { id: "play", label: "Play", icon: "play", app: "play", group: "Play", quick: true },
+  { id: "planner", label: "Planner", icon: "planner", app: "planner", group: "Planner", quick: true },
+  { id: "news", label: "News", icon: "news", app: "news", group: "News", quick: true },
+  { id: "videos", label: "Videos", icon: "videos", app: "videos", group: "Videos", quick: true },
+  // Today is each person's day across the life apps: medicines due, chores, events, messages, birthdays.
+  { id: "today", label: "Today", icon: "today", app: "account", group: "Account" },
+  { id: "display", label: "Display and reading", icon: "speaker", app: "account", group: "Account" },
+  // The Business hub adds up every industry app (revenue, customers' activity, setup, the shared email outbox).
+  { id: "hub", label: "Business hub", icon: "hub", app: "account", group: "Account", key: "0" },
   { id: "settings", label: "Settings", icon: "settings", app: "account", group: "Account", key: "s" },
 ];
 Aira.NAV = NAV; // the hosted build replaces the entries by role
+// Every product section and its app, kept before a build narrows NAV to what one person has, so a link to a section
+// of an app that is not on here (#/academy, #/social) still knows which app it belongs to.
+const SECTIONS = NAV.filter((item) => APPS.some((entry) => entry.id === item.app)).map((item) => ({ ...item }));
 Aira.APPS = APPS;
 
 // ---------------------------------------------------------------------------
@@ -337,7 +404,7 @@ const apps = (Aira.apps = {
   catalog: APPS,
   // Apps a build adds for sections that are not products: the hosted Account (organization) pages, Coaching, the Admin console.
   pseudo: {},
-  state: { enabled: {}, reasons: {}, accountUrl: "", localUrl: "", installation: "local", loaded: false, extra: [] },
+  state: { enabled: {}, reasons: {}, switchedOff: {}, accountUrl: "", localUrl: "", installation: "local", loaded: false, extra: [] },
   decorate: null, // a build may adjust the list the switcher shows: (entries) => entries
   async load() {
     try {
@@ -345,6 +412,7 @@ const apps = (Aira.apps = {
       for (const item of data.apps || []) {
         apps.state.enabled[item.id] = item.enabled !== false;
         apps.state.reasons[item.id] = item.reason || "";
+        apps.state.switchedOff[item.id] = !!item.switched_off;
       }
       apps.state.accountUrl = String(data.account_url || "");
       apps.state.localUrl = String(data.local_url || "");
@@ -396,6 +464,40 @@ const apps = (Aira.apps = {
     const home = apps.homeOf(id);
     if (home) Router.go([home]);
   },
+  sectionApp: (section) => (SECTIONS.find((item) => item.id === section) || {}).app || null,
+  // Why a section cannot open here, or null: its app is not on for the organization (``off``), switched off for
+  // everyone (``disabled``), or, by a build's rule, not part of this person's role (``role``).
+  roleBlock: null,
+  blocked(section) {
+    const id = apps.sectionApp(section);
+    if (!id) return null;
+    if (apps.state.loaded && apps.state.enabled[id] === false) return { app: id, kind: apps.state.switchedOff[id] ? "disabled" : "off", reason: apps.state.reasons[id] || "" };
+    return apps.roleBlock ? apps.roleBlock(section, id) : null;
+  },
+  // What this person can do about a closed app: a build returns { text, action: { label, href } } or null.
+  remedy: null,
+  locked({ app: id, kind, reason }) {
+    const app = apps.describe(id);
+    const title = kind === "role" ? `${app.name} is not part of your role` : kind === "disabled" ? `${app.name} is switched off for now` : `${app.name} is not turned on`;
+    const fallback = kind === "role" ? "Your role does not include this app." : kind === "disabled" ? "Nobody can open it until it is switched back on. Your data is kept." : "Your organization has not turned this app on yet.";
+    const remedy = apps.remedy ? apps.remedy(id, kind) : null;
+    const home = (Aira.startPage && Aira.startPage(false)) || "";
+    return h("section", { class: "card app-locked", "data-app": id, "data-kind": kind, role: "status" },
+      h("div", { class: "app-locked-icon" }, Aira.icon(app.icon || "dashboard")),
+      h("h1", { text: title }),
+      app.tagline ? h("p", { class: "muted", text: app.tagline }) : null,
+      h("p", { text: reason || fallback }),
+      remedy && remedy.text ? h("p", { class: "muted", text: remedy.text }) : null,
+      h("div", { class: "btn-row" },
+        remedy && remedy.action ? h("a", { class: "btn", href: remedy.action.href, text: remedy.action.label }) : null,
+        h("a", { class: `btn ${remedy && remedy.action ? "secondary" : ""}`, href: `#/${home}`, text: "Go to Home" })));
+  },
+  lockedFromError(error) {
+    const data = error.data || {};
+    const section = Router.current && Router.current.path[0];
+    const id = data.app || apps.sectionApp(section) || "";
+    return apps.locked({ app: id, kind: error.code === "app_disabled" ? "disabled" : "off", reason: error.message });
+  },
 });
 // Phones open the sidebar as a sheet (menu button or More); this keeps both triggers and the sheet in step.
 function setSidebarOpen(open) {
@@ -423,7 +525,7 @@ const Router = {
   current: null,
   async render() {
     const route = Router.parse();
-    if (!route.path.length) { Router.go(["dashboard"], {}, { replace: true }); return; }
+    if (!route.path.length) { Router.go([(Aira.startPage && Aira.startPage(false)) || "dashboard"], {}, { replace: true }); return; }
     const section = route.path[0];
     const view = Aira.views[section];
     const main = $("main");
@@ -440,6 +542,22 @@ const Router = {
     if (more && NAV.some((item) => item.id === section && !item.quick)) more.setAttribute("aria-current", "page");
     setSidebarOpen(false);
     if (!view) { main.replaceChildren(ui.empty("Page not found", "Choose a section from the navigation.")); return; }
+    // A build may hold a page back for this person (the Business hub for a candidate, a candidate's workspace page for
+    // staff who have not opened one): it returns what to show instead, or null.
+    const gate = Aira.sectionGate ? Aira.sectionGate(section) : null;
+    if (gate) {
+      $("crumbs").replaceChildren(h("span", { text: (NAV.find((item) => item.id === section) || SECTIONS.find((item) => item.id === section) || {}).label || "Not available" }));
+      main.replaceChildren(h("div", { class: "view-stage" }, gate));
+      return;
+    }
+    const blocked = apps.blocked(section);
+    if (blocked) {
+      const closed = apps.describe(blocked.app);
+      $("crumbs").replaceChildren(h("span", { class: "crumb-app", text: closed.name }));
+      document.title = `${closed.name} · Aira`;
+      main.replaceChildren(h("div", { class: "view-stage" }, apps.locked(blocked)));
+      return;
+    }
     const navItem = NAV.find((item) => item.id === section);
     const label = navItem ? navItem.label : section;
     const inProduct = APPS.some((entry) => entry.id === app.id) && navItem && navItem.group !== "Account";
@@ -495,7 +613,9 @@ function renderNav(counts = {}) {
   const more = h("a", { href: "#", dataset: { section: "more" }, role: "button", "aria-controls": "sidebar", "aria-expanded": String($("sidebar").classList.contains("open")), "aria-current": current && items.some((item) => item.id === current && !item.quick) ? "page" : "false", onclick: (event) => { event.preventDefault(); setSidebarOpen(!$("sidebar").classList.contains("open")); } }, Aira.icon("more"), h("span", { text: "More" }));
   const hidden = items.filter((item) => !item.quick).reduce((sum, item) => sum + (Number(shown[item.id]) || 0), 0);
   if (hidden) more.append(h("span", { class: "dot", role: "img", "aria-label": `${hidden} waiting in More` }));
-  bottom.replaceChildren(...items.filter((item) => item.quick).slice(0, 4).map((item) => h("a", { href: `#/${item.id}`, dataset: { section: item.id }, "aria-current": current === item.id ? "page" : "false" }, Aira.icon(item.icon), h("span", { text: item.label }))), more);
+  // A build may choose the phone bar's items (life.js: Home and the everyday apps on Today and in those apps).
+  const quickItems = (Aira.quickItems && Aira.quickItems(items, current)) || items.filter((item) => item.quick).slice(0, 4);
+  bottom.replaceChildren(...quickItems.map((item) => h("a", { href: `#/${item.id}`, dataset: { section: item.id }, "aria-current": current === item.id ? "page" : "false" }, Aira.icon(item.icon), h("span", { text: item.label }))), more);
 }
 Aira.renderNav = renderNav;
 
@@ -564,9 +684,13 @@ function appTile(entry) {
   return node;
 }
 function renderSwitcher(panel) {
-  const entries = apps.available();
+  // Only the apps this account can open: an app it has no access to is not shown (an admin finds it under More apps).
+  const entries = apps.available().filter((entry) => entry.enabled !== false || entry.kind !== "product");
   const current = apps.current();
-  const tiles = entries.map((entry) => { const tile = appTile(entry); if (entry.id === current.id) tile.setAttribute("aria-current", "true"); return tile; });
+  const tile = (entry) => { const node = appTile(entry); if (entry.id === current.id) node.setAttribute("aria-current", "true"); return node; };
+  const core = entries.filter((entry) => entry.category !== "industry" && entry.category !== "life");
+  const everyday = entries.filter((entry) => entry.category === "life");
+  const industry = entries.filter((entry) => entry.category === "industry");
   const links = [];
   const local = apps.state.installation === "local";
   if (local && apps.state.accountUrl) links.push(h("a", { class: "menu-item", role: "menuitem", tabindex: "-1", href: `${apps.state.accountUrl}/#/org`, target: "_blank", rel: "noopener noreferrer" }, Aira.icon("settings"), h("span", { text: "Manage your account" })));
@@ -575,7 +699,16 @@ function renderSwitcher(panel) {
   if (!local && can && (can("billing.manage") || can("org.settings"))) links.push(h("a", { class: "menu-item", role: "menuitem", tabindex: "-1", href: "#/org/apps" }, Aira.icon("more"), h("span", { text: "More apps" })));
   // replaceChildren turns a null child into the text "null": only real nodes go in.
   panel.replaceChildren(
-    ...[h("div", { class: "popover-title", text: "Aira apps" }), h("div", { class: "app-grid" }, ...tiles), links.length ? h("div", { class: "menu-list" }, ...links) : null].filter(Boolean),
+    ...[
+      h("div", { class: "popover-title", text: "Aira apps" }),
+      core.length ? h("div", { class: "app-grid" }, ...core.map(tile)) : null,
+      everyday.length ? h("div", { class: "popover-subtitle", text: "Everyday" }) : null,
+      everyday.length ? h("div", { class: "app-grid" }, ...everyday.map(tile)) : null,
+      industry.length ? h("div", { class: "popover-subtitle", text: "Business apps" }) : null,
+      industry.length ? h("div", { class: "app-grid" }, ...industry.map(tile)) : null,
+      !entries.length ? h("p", { class: "muted", text: "No apps are turned on for your account yet." }) : null,
+      links.length ? h("div", { class: "menu-list" }, ...links) : null,
+    ].filter(Boolean),
   );
 }
 Aira.renderSwitcher = renderSwitcher;
@@ -642,6 +775,8 @@ function setAuthMode(mode) {
 Aira.showAuth = () => { $("boot").hidden = true; $("app").hidden = true; $("authScreen").hidden = false; $("authEmail").focus(); };
 
 async function loadApp() {
+  // The person's language first, so the first screen is already in it (i18n.js).
+  if (Aira.i18n) { try { await Aira.i18n.ready; } catch { /* English */ } }
   try {
     const user = await api("/api/auth/me", { silent: true });
     Aira.state.user = user;
@@ -657,9 +792,21 @@ async function loadApp() {
   renderNav();
   renderAccount();
   // The hosted build hides the sections of apps the organization has not subscribed to once the list arrives.
-  apps.load().then(() => { if (Aira.cloud && Aira.cloud.buildNav) Aira.cloud.buildNav(); else renderNav(); renderAccount(); });
+  apps.load().then(() => {
+    // Until the list arrives every app counts as on; redraw the sidebar only when it turns some off, so a click on a
+    // section link at that moment is not lost on a link that is being replaced.
+    if (Object.values(apps.state.enabled).some((on) => on === false)) {
+      if (Aira.cloud && Aira.cloud.buildNav) Aira.cloud.buildNav(); else renderNav();
+    }
+    renderAccount();
+    const section = Router.current && Router.current.path[0];
+    if (section && apps.blocked(section)) Router.render(); // a link to an app that is not on here
+  });
   if (workspace) await loadWorkspace();
-  const landing = Aira.cloud && Aira.cloud.landing ? Aira.cloud.landing(workspace) : null;
+  // life.js: who is using a shared device, their display preferences, live reminders.
+  if (Aira.afterSignIn) { try { await Aira.afterSignIn(Aira.state.user); } catch (error) { console.warn("afterSignIn", error); } }
+  const preferred = Aira.startPage ? Aira.startPage(true) : null; // the person's own start page (Today in easy mode)
+  const landing = (Aira.cloud && Aira.cloud.landing ? Aira.cloud.landing(workspace) : null) || (preferred ? [preferred] : null);
   if (!location.hash || location.hash === "#/" || location.hash === "#") Router.go(landing || (Aira.state.profile && Aira.state.profile.resume_hash ? ["dashboard"] : ["settings", "resume"]), {}, { replace: true });
   else Router.render();
   if (!Aira.state.statusTimer) Aira.state.statusTimer = setInterval(() => { if (Aira.state.workspaceLoaded) refreshStatus(); }, 60000);

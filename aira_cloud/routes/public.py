@@ -62,6 +62,21 @@ def ui_static(req: Req):  # noqa: ANN201
     )
 
 
+@cloud_route("GET", r"/static/i18n/([a-z]{2})\.json", auth="public")
+def ui_i18n(req: Req):  # noqa: ANN201
+    """A language's translations for the screens (auto_apply_assistant/i18n.js)."""
+    local = _local()
+    target = local.STATIC_DIR / "i18n" / f"{req.group()}.json"
+    if not target.is_file():
+        return Reply(404, {"error": "Not found.", "code": "not_found"})
+    return Reply(
+        200,
+        target.read_bytes(),
+        content_type="application/json; charset=utf-8",
+        headers=[("Cache-Control", "no-cache")],
+    )
+
+
 @cloud_route("GET", r"/api/health", auth="public")
 def health(req: Req):  # noqa: ANN201
     return 200, {

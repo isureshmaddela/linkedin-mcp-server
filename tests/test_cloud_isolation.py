@@ -8,6 +8,7 @@ category with the reason it needs no identifier or is covered by its own test.
 
 from __future__ import annotations
 
+import os
 import re
 from typing import Any
 
@@ -60,6 +61,9 @@ EXEMPT_GROUPS = {
     r"[a-z0-9%]{1,720}": "custom-answer keys are labels the caller saved in their own workspace",
     r"[a-z-]{3,40}": "legal document names are a fixed, public list",
     r"[a-z0-9_-]+": "app ids are a fixed catalog (careers, leads, api)",
+    r"[a-z_]{2,40}": "public page action names are a fixed vocabulary per page kind",
+    r"[a-z]{2}": "language codes of the screens' translations are a fixed public list",
+    r"[A-Za-z0-9_-]{40,64}": "public link tokens: possession is the credential (aira.suite.public), and each resolves to its own organization",
 }
 # Routes with no tenant selector in the path; mutating ones are covered by body-identifier tests below.
 PUBLIC_OR_OWN_SESSION = {
@@ -189,6 +193,30 @@ class World:
                 "auditor",
             )
         ]
+        # Developer objects (OAuth app, access token, webhook): their ids are tokens, not hex.
+        made = app.oauth.create_client(
+            b.owner,
+            {
+                "name": "Beta partner",
+                "redirect_uris": ["https://partner.beta.test/cb"],
+                "scopes": ["hub:read"],
+            },
+        )
+        pat = app.oauth.create_personal_token(
+            b.owner, {"name": "Beta script", "scopes": ["hub:read"]}
+        )
+        previous = os.environ.get("AIRA_WEBHOOKS_ALLOW_LOCAL")
+        os.environ["AIRA_WEBHOOKS_ALLOW_LOCAL"] = "1"
+        try:
+            hook = app.webhooks.create(
+                b.owner, {"url": "http://127.0.0.1:9/beta-hook", "events": ["*"]}
+            )
+        finally:
+            if previous is None:
+                os.environ.pop("AIRA_WEBHOOKS_ALLOW_LOCAL", None)
+            else:
+                os.environ["AIRA_WEBHOOKS_ALLOW_LOCAL"] = previous
+        ids["developer"] = [made["client_id"], pat["id"], hook["endpoint_id"]]
         ids["candidate"] = b.candidate.member_id
         ids["coach"] = b.coach.member_id
         ids["slug"] = app.tenancy.org(b.org_id)["slug"]
@@ -279,6 +307,8 @@ def candidates_for(group: str, ids: dict[str, Any]) -> list[str] | None:
         group == r"[a-z0-9-]{1,60}"
     ):  # an organization slug (public: it names the sign-in page); tenant B has no SSO configured
         return [ids.get("slug", "beta-secret-org")]
+    if group == r"[A-Za-z0-9_-]{8,80}":  # OAuth apps, access tokens and webhooks
+        return list(ids["developer"])
     if group == r"[0-9a-f]{16}":
         return [ids["hex32"][0][:16], "f" * 16]
     if group.startswith("[A-Za-z0-9][A-Za-z0-9_.:-]"):
@@ -670,7 +700,13 @@ def test_every_route_is_accounted_for_in_the_sweep():
     for _kind, _method, pattern, _name in table:
         for group in groups_of(pattern):
             candidates_for(
-                group, {"hex32": ["0" * 32], "job": "j", "schedule": 1}
+                group,
+                {
+                    "hex32": ["0" * 32],
+                    "job": "j",
+                    "schedule": 1,
+                    "developer": ["d" * 8],
+                },
             )  # raises when a group has no rule
     assert [n for k, m, p, n in table if k == "local" and n not in POLICY] == []
     reads_ids = re.compile(

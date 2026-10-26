@@ -11,7 +11,6 @@ from typing import Any
 
 import pytest
 from cloud_support import (
-    add_member,
     build_org,
     local_module,
     seed_workspace,
@@ -22,8 +21,6 @@ from serpapi_stub import DEFAULT_KEY, SerpApiStub
 
 from aira.leads import service as leads_service
 from aira_cloud import plans
-from aira_cloud.agent import AgentServer
-from aira_cloud.gateway import Gateway
 from aira_cloud.policy import POLICY
 
 SALES_NAV_URL = (
@@ -91,10 +88,14 @@ def bridge():
     leads_service.set_gateway(previous)
 
 
-def trial_candidate(cloud, domain):
-    """A candidate in a trial organization (a trial has two staff seats, so no full cast)."""
-    owner = signup(cloud, "Trial Org", f"owner@{domain}")["owner"]
-    return add_member(cloud, owner, f"cand@{domain}", "candidate")
+def trial_owner(cloud, domain):
+    """The owner of a trial organization (a trial has every app and two staff seats, so no full cast)."""
+    return signup(cloud, "Trial Org", f"owner@{domain}")["owner"]
+
+
+def rep(cloud, org):
+    """The person who works the business's leads: a coach, a team member with no admin rights."""
+    return sign_in(cloud, org.coach)
 
 
 def configure(cloud, org, *, sources=None, linkedin=False, key=True):
@@ -107,14 +108,6 @@ def configure(cloud, org, *, sources=None, linkedin=False, key=True):
         owner = sign_in(cloud, org.owner)
         assert (
             owner.call("POST", "/api/airaapi/key", {"api_key": DEFAULT_KEY})[0] == 200
-        )
-
-
-def opt_in(cloud, org):
-    with cloud.db.write() as connection:
-        connection.execute(
-            "UPDATE workspaces SET linkedin_opt_in_at = ? WHERE candidate_id = ?",
-            (cloud.clock.now(), org.candidate.member_id),
         )
 
 
@@ -152,30 +145,37 @@ def test_every_leads_route_has_a_policy_entry():
     assert names <= set(POLICY), sorted(names - set(POLICY))
     for name in names:
         rule = POLICY[name]
-        assert rule.scope == "candidate", name
+        assert rule.scope == "org_api", (
+            name,
+            "Leads is part of Marketing: the business's shared pipeline",
+        )
         assert rule.feature in {"leads", "leads_outreach"}, name
-        assert rule.permission in {"leads.read", "leads.write", "leads.outreach"}, name
-        if rule.permission != "leads.outreach":
-            assert rule.write == (rule.permission == "leads.write"), name
+        assert rule.permission in {"suite.read", "suite.manage"}, name
+        assert rule.write == (rule.permission == "suite.manage"), name
 
 
-def test_leads_is_an_app_the_trial_includes_and_paid_plans_turn_on(cloud):
-    candidate = sign_in(cloud, trial_candidate(cloud, "trial.test"))
-    assert candidate.call("GET", "/api/leads/overview")[0] == 200, (
+def test_leads_comes_with_marketing_which_the_trial_includes_and_paid_plans_turn_on(
+    cloud,
+):
+    owner = sign_in(cloud, trial_owner(cloud, "trial.test"))
+    assert owner.call("GET", "/api/leads/overview")[0] == 200, (
         "the trial includes every app"
     )
     for plan_id in ("starter", "team"):
         assert "leads" not in plans.DEFAULT_PLANS[plan_id]["entitlements"]["features"]
-        assert plans.app_state(plan_id, "leads") == "addon"
+        assert plans.app_state(plan_id, "marketing") == "addon"
+        assert plans.app_state(plan_id, "leads") == "addon", "the old id is Marketing"
     assert "leads" in plans.DEFAULT_PLANS["enterprise"]["entitlements"]["features"]
     starter = build_org(
         cloud, "Starter Org", plan="starter", seats=5, slug_email="starter.test"
     )
-    status, body = sign_in(cloud, starter.candidate).call("GET", "/api/leads/overview")
-    assert status == 402 and body["code"] == "app_required" and body["app"] == "leads"
-    cloud.billing.subscribe_app(starter.owner, "leads")
-    assert (
-        sign_in(cloud, starter.candidate).call("GET", "/api/leads/overview")[0] == 200
+    status, body = rep(cloud, starter).call("GET", "/api/leads/overview")
+    assert status == 402 and body["code"] == "app_required"
+    assert body["app"] == "marketing" and body["name"] == "Marketing"
+    cloud.billing.subscribe_app(starter.owner, "marketing")
+    assert rep(cloud, starter).call("GET", "/api/leads/overview")[0] == 200
+    assert rep(cloud, starter).call("GET", "/api/marketing/overview")[0] != 402, (
+        "one subscription opens both sections"
     )
 
 
@@ -198,49 +198,51 @@ def test_a_plan_version_published_before_leads_gets_the_feature_and_limits():
     assert "leads" not in plans.with_later_limits("trial", {"features": []})["features"]
 
 
-def test_only_the_candidate_and_a_coach_with_act_scope_use_leads(cloud, serpapi):
+def test_the_business_team_shares_one_pipeline_and_candidates_have_none(cloud, serpapi):
     org = build_org(
         cloud, "Role Org", plan="team", seats=25, slug_email="roles.test", apps="all"
     )
     configure(cloud, org)
-    candidate = sign_in(cloud, org.candidate)
-    created = candidate.call(
+    coach = rep(cloud, org)
+    created = coach.call(
         "POST",
         "/api/leads/items/import-csv",
-        {"csv": "Name,Company\nSecret Person,Hidden Co\n"},
+        {"csv": "Name,Company\nShared Person,Shared Co\n"},
     )
-    assert created[0] == 201
-    cid = org.candidate.member_id
-    for who in (org.owner, org.admin, org.auditor, org.billing):
+    assert created[0] == 201, created
+    for who in (org.owner, org.admin, org.auditor):
+        status, body = sign_in(cloud, who).call("GET", "/api/leads/items")
+        assert status == 200 and body["total"] == 1, (who.role, status, body)
+        assert body["leads"][0]["name"] == "Shared Person"
+    admin = sign_in(cloud, org.admin)
+    assert (
+        admin.call(
+            "POST", "/api/leads/items", {"leads": [{"name": "Two", "company": "B"}]}
+        )[0]
+        == 201
+    )
+    assert coach.call("GET", "/api/leads/items")[1]["total"] == 2, (
+        "what one person adds, the whole team sees"
+    )
+    auditor = sign_in(cloud, org.auditor)
+    assert (
+        auditor.call("POST", "/api/leads/items/import-csv", {"csv": "Name\nx\n"})[0]
+        == 403
+    ), "an auditor reads, never writes"
+    for who in (org.candidate, org.other, org.billing):
         browser = sign_in(cloud, who)
-        status, body = browser.call("GET", "/api/leads/items", as_candidate=cid)
+        status, body = browser.call("GET", "/api/leads/items")
         assert status == 403, (who.role, status, body)
         assert (
-            browser.call(
-                "POST",
-                "/api/leads/items/import-csv",
-                {"csv": "Name\nx\n"},
-                as_candidate=cid,
-            )[0]
+            browser.call("POST", "/api/leads/items/import-csv", {"csv": "Name\nx\n"})[0]
             == 403
         )
-    coach = sign_in(cloud, org.coach)
-    cloud.tenancy.assign_coach(org.owner, org.coach.member_id, cid, "view")
-    assert coach.call("GET", "/api/leads/items", as_candidate=cid)[0] == 403, (
-        "a view scope sees progress, not contacts"
-    )
-    cloud.tenancy.assign_coach(org.owner, org.coach.member_id, cid, "act")
-    status, body = coach.call("GET", "/api/leads/items", as_candidate=cid)
-    assert status == 200 and body["total"] == 1
     assert (
-        coach.call("GET", "/api/leads/items", as_candidate=org.other.member_id)[0]
+        sign_in(cloud, org.candidate).call(
+            "GET", "/api/leads/items", as_candidate=org.candidate.member_id
+        )[0]
         == 403
-    )
-    assert (
-        candidate.call("GET", "/api/leads/items", as_candidate=org.other.member_id)[0]
-        == 403
-    )
-    assert not any(org.owner.member_id in json.dumps(x) for x in [body])
+    ), "naming a workspace does not open Leads to a candidate"
 
 
 def test_another_organizations_lead_ids_are_not_found(cloud, serpapi):
@@ -252,8 +254,8 @@ def test_another_organizations_lead_ids_are_not_found(cloud, serpapi):
     )
     for org in (a, b):
         configure(cloud, org, key=False)
-    ca, cb = sign_in(cloud, a.candidate), sign_in(cloud, b.candidate)
-    saved = ca.call(
+    ra, rb = rep(cloud, a), rep(cloud, b)
+    saved = ra.call(
         "POST", "/api/leads/items", {"leads": [{"name": "Only A", "company": "Acme"}]}
     )[1]
     lead_id = saved["leads"][0]["id"]
@@ -264,13 +266,10 @@ def test_another_organizations_lead_ids_are_not_found(cloud, serpapi):
         ("POST", f"/api/leads/items/{lead_id}/enrich", {}),
         ("POST", f"/api/leads/items/{lead_id}/draft", {}),
     ):
-        status, _ = cb.call(method, path, body)
+        status, _ = rb.call(method, path, body)
         assert status == 404, (method, path, status)
-    # the same id sent as another organization's candidate is refused before any data is read
-    assert cb.call(
-        "GET", f"/api/leads/items/{lead_id}", as_candidate=a.candidate.member_id
-    )[0] in (403, 404)
-    assert cb.call("GET", "/api/leads/items")[1]["total"] == 0
+    assert rb.call("GET", "/api/leads/items")[1]["total"] == 0
+    assert ra.call("GET", "/api/leads/items")[1]["total"] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -281,7 +280,7 @@ def test_another_organizations_lead_ids_are_not_found(cloud, serpapi):
 def test_google_lead_searches_follow_the_organizations_source_policy_and_kill_switch(
     cloud, team
 ):
-    candidate = sign_in(cloud, team.candidate)
+    candidate = rep(cloud, team)
     cloud.tenancy.update_policy(
         team.owner, {"allowed_sources": ["aira_jobs", "company_boards"]}
     )
@@ -306,7 +305,7 @@ def test_google_lead_searches_follow_the_organizations_source_policy_and_kill_sw
 def test_google_lead_searches_are_metered_and_a_plan_without_the_source_is_refused(
     cloud, team, serpapi
 ):
-    candidate = sign_in(cloud, team.candidate)
+    candidate = rep(cloud, team)
     assert used(cloud, team, "searches") == 0
     plan = candidate.call("POST", "/api/leads/search", {**MAPS, "dry_run": True})
     assert (
@@ -345,28 +344,25 @@ def test_google_lead_searches_are_metered_and_a_plan_without_the_source_is_refus
         plan="starter",
         seats=5,
         slug_email="st.test",
-        apps=["leads"],
+        apps=["marketing"],
     )
     cloud.tenancy.update_policy(starter.owner, {"allowed_sources": ALL_GOOGLE})
     sign_in(cloud, starter.owner).call(
         "POST", "/api/airaapi/key", {"api_key": DEFAULT_KEY}
     )
-    sc = sign_in(cloud, starter.candidate)
+    sc = rep(cloud, starter)
     assert sc.call("POST", "/api/leads/search", MAPS)[0] == 200
-    status, body = sc.call(
-        "POST", "/api/leads/search", {"source": "sales_navigator", "url": SALES_NAV_URL}
-    )
-    assert (
-        status == 402
-        and body["required_plan"] == "team"
-        and "Linkedin" in body["error"].title()
-    )
+    starter_used = used(cloud, starter, "searches")
+    cloud.tenancy.update_policy(starter.owner, {"allowed_sources": ["aira_jobs"]})
+    status, body = sc.call("POST", "/api/leads/search", MAPS)
+    assert status == 403 and body["code"] == "source_blocked"
+    assert used(cloud, starter, "searches") == starter_used
 
 
 def test_company_news_signals_are_gated_and_metered_like_other_google_searches(
     cloud, team, serpapi
 ):
-    candidate = sign_in(cloud, team.candidate)
+    candidate = rep(cloud, team)
     lead = candidate.call(
         "POST",
         "/api/leads/items",
@@ -405,11 +401,11 @@ def test_company_news_signals_are_gated_and_metered_like_other_google_searches(
         and used(cloud, team, "searches") == 2
     )
     assert (
-        sign_in(cloud, trial_candidate(cloud, "tr.test")).call(
+        sign_in(cloud, trial_owner(cloud, "tr.test")).call(
             "POST", f"/api/leads/items/{'0' * 32}/signals", {}
         )[0]
         == 402
-    )
+    ), "the trial has Marketing but not Google sources"
 
 
 def test_a_lead_search_with_the_pooled_key_spends_the_pooled_allowance(cloud, serpapi):
@@ -420,7 +416,7 @@ def test_a_lead_search_with_the_pooled_key_spends_the_pooled_allowance(cloud, se
     cloud.tenancy.update_policy(
         org.owner, {"allowed_sources": ALL_GOOGLE, "use_pooled_serpapi": True}
     )
-    candidate = sign_in(cloud, org.candidate)
+    candidate = rep(cloud, org)
     assert candidate.call("POST", "/api/leads/search", MAPS)[0] == 200
     assert (used(cloud, org, "pooled_searches"), used(cloud, org, "searches")) == (1, 1)
     assert candidate.call("POST", "/api/leads/search", MAPS)[1]["cache_hit"]
@@ -445,65 +441,15 @@ def nav_search(browser, **extra):
     )
 
 
-def test_sales_navigator_needs_every_linkedin_gate(cloud, team, bridge):
-    candidate = sign_in(cloud, team.candidate)
-    status, body = nav_search(candidate)
-    assert status == 403 and "turned LinkedIn on" in body["error"], (
-        "the candidate must have opted in themselves"
-    )
-    assert bridge.calls == []
-    opt_in(cloud, team)
-    cloud.tenancy.update_policy(team.owner, {"linkedin_allowed": False})
-    status, body = nav_search(candidate)
-    assert status == 403 and "policy" in body["error"] and bridge.calls == []
-    cloud.tenancy.update_policy(
-        team.owner,
-        {"linkedin_allowed": True, "allowed_sources": [*ALL_GOOGLE, "linkedin"]},
-    )
-    status, body = nav_search(candidate)
-    assert (
-        status == 200
-        and body["count"] == 1
-        and body["leads"][0]["name"] == "Maria Lopez"
-    )
-    assert (
-        bridge.calls[0]["tool"] == "search_sales_navigator"
-        and used(cloud, team, "searches") == 1
-    )
-    assert (
-        nav_search(candidate, dry_run=True)[1]["dry_run"]
-        and len(bridge.calls) == 1
-        and used(cloud, team, "searches") == 1
-    )
-    with cloud.db.write() as connection:
-        connection.execute(
-            "INSERT INTO blocked_sources (source, reason, blocked_at) VALUES ('linkedin', 'abuse review', ?)",
-            (cloud.clock.now(),),
-        )
-    status, body = nav_search(candidate)
-    assert status == 403 and "switched off" in body["error"] and len(bridge.calls) == 1
-    assert used(cloud, team, "searches") == 1
-
-
-def test_a_sales_navigator_search_runs_on_the_worker_that_holds_the_session(
-    cloud, team, bridge
-):
-    opt_in(cloud, team)
-    agent = AgentServer(cloud, Gateway(cloud), port=0).start()
-    cloud.queue.register_worker("w-1", "apply", "host", 4, 0, agent.url)
-    with cloud.db.write() as connection:
-        connection.execute(
-            "UPDATE workspaces SET linkedin_host = ? WHERE candidate_id = ?",
-            (agent.url, team.candidate.member_id),
-        )
-    candidate = sign_in(cloud, team.candidate)
-    status, body = nav_search(candidate, auto_add=True)
-    assert status == 200 and body["added"] == 1
-    assert [c["where"] for c in bridge.calls] == ["agent"], (
-        "read in the browser on the host that holds the session"
-    )
-    # a saved Sales Navigator search is forwarded the same way, and is gated by the same rules
-    saved = candidate.call(
+def test_the_shared_pipeline_never_reads_anyones_sales_navigator(cloud, team, bridge):
+    """Sales Navigator reads one person's own LinkedIn session; the business's Leads is shared, so it imports a
+    Sales Navigator list as a CSV file instead and no LinkedIn session is ever used."""
+    coach = rep(cloud, team)
+    for extra in ({}, {"dry_run": True}, {"auto_add": True}):
+        status, body = nav_search(coach, **extra)
+        assert status == 403 and body["code"] == "source_unavailable", body
+        assert "CSV" in body["error"]
+    saved = coach.call(
         "POST",
         "/api/leads/searches",
         {
@@ -511,23 +457,24 @@ def test_a_sales_navigator_search_runs_on_the_worker_that_holds_the_session(
             "source": "sales_navigator",
             "params": {"url": SALES_NAV_URL},
         },
-    )[1]["search"]
-    status, body = candidate.call("POST", f"/api/leads/searches/{saved['id']}/run", {})
-    assert status == 200 and [c["where"] for c in bridge.calls] == ["agent", "agent"]
-    cloud.tenancy.update_policy(team.owner, {"linkedin_allowed": False})
-    status, body = candidate.call("POST", f"/api/leads/searches/{saved['id']}/run", {})
-    assert status == 403 and len(bridge.calls) == 2
-    # a Google search never goes to the agent
-    cloud.tenancy.update_policy(team.owner, {"linkedin_allowed": True})
-    assert (
-        candidate.call("POST", "/api/leads/search", MAPS)[0] == 200
-        and len(bridge.calls) == 2
     )
-    agent.stop()
+    if saved[0] in (200, 201):
+        search_id = saved[1]["search"]["id"]
+        status, body = coach.call("POST", f"/api/leads/searches/{search_id}/run", {})
+        assert status == 403 and body["code"] == "source_unavailable"
+    assert bridge.calls == [] and used(cloud, team, "searches") == 0
+    imported = coach.call(
+        "POST",
+        "/api/leads/items/import-csv",
+        {"csv": "Name,Title,Company\nMaria Lopez,Director of Sales,Northwind Cloud\n"},
+    )
+    assert imported[0] == 201, "the way in for a Sales Navigator list"
+    # a Google search still works for the same person
+    assert coach.call("POST", "/api/leads/search", MAPS)[0] == 200
 
 
 def test_a_saved_google_search_is_gated_by_its_source_and_metered(cloud, team):
-    candidate = sign_in(cloud, team.candidate)
+    candidate = rep(cloud, team)
     saved = candidate.call(
         "POST",
         "/api/leads/searches",
@@ -555,7 +502,7 @@ def test_a_saved_google_search_is_gated_by_its_source_and_metered(cloud, team):
 
 def test_the_plan_limits_how_many_leads_are_stored(cloud, team):
     override(cloud, team, {"leads_stored": 3})
-    candidate = sign_in(cloud, team.candidate)
+    candidate = rep(cloud, team)
     ok = candidate.call(
         "POST",
         "/api/leads/items",
@@ -591,7 +538,7 @@ def test_a_search_that_would_overflow_the_plan_shows_results_without_saving_them
     cloud, team
 ):
     override(cloud, team, {"leads_stored": 2})
-    candidate = sign_in(cloud, team.candidate)
+    candidate = rep(cloud, team)
     status, body = candidate.call(
         "POST", "/api/leads/search", {**MAPS, "auto_add": True}
     )
@@ -636,7 +583,7 @@ def test_enrichment_is_metered_limited_and_only_reads_public_websites(
     cloud, team, site, monkeypatch
 ):
     override(cloud, team, {"lead_enrichments_per_month": 2})
-    candidate = sign_in(cloud, team.candidate)
+    candidate = rep(cloud, team)
     lead = candidate.call(
         "POST",
         "/api/leads/items",
@@ -710,36 +657,34 @@ def test_the_hosted_app_ignores_the_local_enrichment_switch_at_start(
 # ---------------------------------------------------------------------------
 
 
-def test_leads_are_in_exports_and_are_removed_with_the_workspace(cloud, team):
-    candidate = sign_in(cloud, team.candidate)
+def test_the_business_exports_its_leads_and_a_candidates_departure_leaves_them(
+    cloud, team
+):
+    coach = rep(cloud, team)
     seed_workspace(cloud, team.org_id, team.candidate.member_id)
-    candidate.call(
+    coach.call(
         "POST",
         "/api/leads/items/import-csv",
         {"csv": "Name,Title,Company,Email\nJane Doe,VP Sales,Acme,jane@acme.test\n"},
     )
+    status, body = sign_in(cloud, team.owner).call(
+        "GET", "/api/leads/export?format=csv", raw=True
+    )
+    assert status == 200 and "Jane Doe" in (
+        body.decode() if isinstance(body, bytes) else str(body)
+    ), "the business takes its own pipeline with it"
     export = cloud.lifecycle.export_candidate(team.candidate, team.candidate.member_id)
     _row, blob = cloud.lifecycle.export_for(team.candidate, export["export_id"])
-    data = json.loads(zipfile.ZipFile(io.BytesIO(blob)).read("workspace.json"))
-    assert [r["name"] for r in data["tables"]["leads"]] == ["Jane Doe"]
-    assert data["tables"]["lead_lists"], "lists travel with the leads"
-    org_export = cloud.lifecycle.export_organization(team.owner)
-    _row, blob = cloud.lifecycle.export_for(team.owner, org_export["export_id"])
-    inner = zipfile.ZipFile(io.BytesIO(blob)).read(
-        f"candidates/{team.candidate.member_id}.zip"
-    )
-    staff_copy = json.loads(zipfile.ZipFile(io.BytesIO(inner)).read("workspace.json"))
-    assert b"Jane Doe" not in json.dumps(staff_copy).encode()
-    assert not any(name.startswith("lead") for name in staff_copy["tables"]), (
-        "leads are third parties' personal data kept for the candidate: an owner's export never holds them"
-    )
-    admin_export = cloud.lifecycle.export_candidate(
-        team.admin, team.candidate.member_id
-    )
-    _row, blob = cloud.lifecycle.export_for(team.admin, admin_export["export_id"])
-    assert b"Jane Doe" not in zipfile.ZipFile(io.BytesIO(blob)).read("workspace.json")
+    assert b"Jane Doe" not in zipfile.ZipFile(io.BytesIO(blob)).read(
+        "workspace.json"
+    ), "the business's leads are not a candidate's data"
+    assert cloud.workspaces.leads_total(team.org_id) == 1
+    usage = cloud.dashboard.organization(team.owner)["plan_usage"]["leads"]
+    assert usage["stored"] == 1
     directory = cloud.workspaces.candidate_dir(team.org_id, team.candidate.member_id)
-    assert (directory / "workspace.sqlite3").exists()
     cloud.lifecycle.delete_candidate_workspace(team.owner, team.candidate.member_id)
-    assert not directory.exists(), "the database that held the leads is gone"
-    assert cloud.workspaces.leads_total(team.org_id) == 0
+    assert not directory.exists()
+    assert cloud.workspaces.leads_total(team.org_id) == 1, (
+        "a candidate leaving does not take the business's leads"
+    )
+    assert coach.call("GET", "/api/leads/items")[1]["total"] == 1

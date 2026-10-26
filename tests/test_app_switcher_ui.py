@@ -36,6 +36,9 @@ CAREERS_SECTIONS = [
     "analytics",
     "careers",
 ]
+# The Account group shows under every app: Today and Display and reading (each person's everyday pages), the
+# Business hub (industry apps) and Settings.
+ACCOUNT_SECTIONS = ["today", "display", "hub", "settings"]
 
 
 def shot(page, name: str) -> None:
@@ -76,8 +79,8 @@ def test_the_switcher_lists_the_apps_and_each_app_shows_only_its_sections(browse
     context, page, problems = signed_in_page(browser, env)
     go(page, env, "dashboard")
     page.wait_for_selector("#primaryNav a[data-section='dashboard']")
-    # Careers is the default app: its sections plus the Account group, nothing from Leads or API.
-    assert sections(page) == [*CAREERS_SECTIONS, "settings"]
+    # Careers is the default app: its sections plus the Account group, nothing from Marketing or Developers.
+    assert sections(page) == [*CAREERS_SECTIONS, *ACCOUNT_SECTIONS]
     assert labels(page)["careers"] == "Research"
     assert page.locator("#brandApp").inner_text() == "Careers"
     assert page.locator("#navAppHead strong").inner_text() == "Careers"
@@ -89,8 +92,27 @@ def test_the_switcher_lists_the_apps_and_each_app_shows_only_its_sections(browse
     tiles = switcher.locator(".app-tile")
     assert tiles.evaluate_all("tiles => tiles.map(t => t.dataset.app)") == [
         "careers",
-        "leads",
         "api",
+        # the everyday apps, then the business apps, each under its own heading: fewer apps, each with sections
+        "social",
+        "care",
+        "learn",
+        "play",
+        "planner",
+        "news",
+        "videos",
+        "studio",
+        "marketing",
+        "service",
+        "commerce",
+        "experiences",
+        "ads",
+    ]
+    assert [
+        t.lower() for t in switcher.locator(".popover-subtitle").all_inner_texts()
+    ] == [
+        "everyday",
+        "business apps",
     ]
     assert (
         switcher.locator(".app-tile[aria-current='true']").get_attribute("data-app")
@@ -100,14 +122,16 @@ def test_the_switcher_lists_the_apps_and_each_app_shows_only_its_sections(browse
     assert switcher.locator(".popover-title").text_content() == "Aira apps"
     shot(page, "02-switcher")
 
-    # Leads: one section, and the account group stays.
-    switcher.locator(".app-tile[data-app='leads']").click()
-    page.wait_for_url(re.compile(r"#/leads"))
+    # Marketing holds Leads: two sections, and the account group stays.
+    switcher.locator(".app-tile[data-app='marketing']").click()
+    page.wait_for_url(re.compile(r"#/marketing"))
     page.wait_for_selector("#primaryNav a[data-section='leads']")
     assert page.locator("#appSwitcher").is_hidden()
-    assert sections(page) == ["leads", "settings"]
-    assert page.locator("#brandApp").inner_text() == "Leads"
-    # The Leads view names its own tab in the breadcrumb: app, then the place inside it.
+    assert sections(page) == ["marketing", "leads", *ACCOUNT_SECTIONS]
+    assert page.locator("#brandApp").inner_text() == "Marketing"
+    page.click("#primaryNav a[data-section='leads']")
+    page.wait_for_url(re.compile(r"#/leads"))
+    # The Leads view names its own tab in the breadcrumb: the section, then the place inside it.
     until(page, lambda: "Find" in page.locator(".crumbs").inner_text())
     assert page.locator(".crumbs").inner_text().replace("\n", " ").split() == [
         "Leads",
@@ -115,22 +139,26 @@ def test_the_switcher_lists_the_apps_and_each_app_shows_only_its_sections(browse
         "Find",
     ]
     assert "Leads" in page.title()
+    assert page.locator("#brandApp").inner_text() == "Marketing"
+    assert sections(page) == ["marketing", "leads", *ACCOUNT_SECTIONS]
     shot(page, "03-leads")
 
-    # API: the console is its own app.
+    # Developers: the API console is its own app.
     open_switcher(page).locator(".app-tile[data-app='api']").click()
     page.wait_for_url(re.compile(r"#/airaapi"))
     page.wait_for_selector("#primaryNav a[data-section='airaapi']")
-    assert sections(page) == ["airaapi", "settings"]
-    assert page.locator("#brandApp").inner_text() == "API"
+    assert sections(page)[0] == "airaapi"
+    assert sections(page)[-len(ACCOUNT_SECTIONS) :] == ACCOUNT_SECTIONS
+    api_sections = sections(page)
+    assert page.locator("#brandApp").inner_text() == "Developers"
     shot(page, "04-api")
 
     # Settings belongs to the account: opening it keeps the app you were in.
     page.click("#primaryNav a[data-section='settings']")
     page.wait_for_url(re.compile(r"#/settings"))
     until(page, lambda: "Settings" in page.locator(".crumbs").inner_text())
-    assert sections(page) == ["airaapi", "settings"]
-    assert page.locator("#brandApp").inner_text() == "API"
+    assert sections(page) == api_sections
+    assert page.locator("#brandApp").inner_text() == "Developers"
     assert "/" not in page.locator(".crumbs").inner_text()
     assert not problems, problems
     context.close()
@@ -141,14 +169,14 @@ def test_deep_links_land_inside_the_right_app_and_chords_open_apps(browser, env)
     # #/careers is the Research section of the Careers app.
     go(page, env, "careers")
     page.wait_for_selector("#primaryNav a[data-section='careers'][aria-current='page']")
-    assert sections(page) == [*CAREERS_SECTIONS, "settings"]
+    assert sections(page) == [*CAREERS_SECTIONS, *ACCOUNT_SECTIONS]
     assert labels(page)["careers"] == "Research"
     assert page.locator("#brandApp").inner_text() == "Careers"
     # A section link inside the app does not redraw the sidebar as a whole, only the current mark.
     page.click("#primaryNav a[data-section='jobs']")
     page.wait_for_url(re.compile(r"#/jobs"))
     page.wait_for_selector("#primaryNav a[data-section='jobs'][aria-current='page']")
-    assert sections(page) == [*CAREERS_SECTIONS, "settings"]
+    assert sections(page) == [*CAREERS_SECTIONS, *ACCOUNT_SECTIONS]
     until(page, lambda: "Jobs" in page.locator(".crumbs").inner_text())
     assert page.locator(".crumbs").inner_text().replace("\n", " ").split() == [
         "Careers",
@@ -161,7 +189,10 @@ def test_deep_links_land_inside_the_right_app_and_chords_open_apps(browser, env)
     page.keyboard.press("l")
     page.wait_for_url(re.compile(r"#/leads"))
     page.wait_for_selector("#primaryNav a[data-section='leads']")
-    assert sections(page) == ["leads", "settings"]
+    assert sections(page) == ["marketing", "leads", *ACCOUNT_SECTIONS]
+    page.keyboard.press("g")
+    page.keyboard.press("2")
+    page.wait_for_url(re.compile(r"#/marketing"))
     page.keyboard.press("g")
     page.keyboard.press("p")
     page.wait_for_url(re.compile(r"#/airaapi"))
@@ -182,8 +213,8 @@ def test_deep_links_land_inside_the_right_app_and_chords_open_apps(browser, env)
     help_text = page.locator(".modal").inner_text()
     assert (
         "Careers app" in help_text
-        and "Leads app" in help_text
-        and "API app" in help_text
+        and "Marketing app" in help_text
+        and "Developers app" in help_text
     )
     assert "Research" in help_text and "Dashboard" in help_text
     page.keyboard.press("Escape")
@@ -206,13 +237,17 @@ def test_the_switcher_works_from_the_keyboard(browser, env):
     # Focus starts on the first app; the arrows move through the items; Escape closes and returns focus.
     assert page.evaluate("document.activeElement.dataset.app") == "careers"
     page.keyboard.press("ArrowRight")
-    assert page.evaluate("document.activeElement.dataset.app") == "leads"
-    page.keyboard.press("ArrowDown")
     assert page.evaluate("document.activeElement.dataset.app") == "api"
     page.keyboard.press("ArrowDown")
-    assert page.evaluate("document.activeElement.dataset.app") == "careers"
+    assert (
+        page.evaluate("document.activeElement.dataset.app") == "social"
+    )  # the everyday apps follow
+    page.keyboard.press("ArrowDown")
+    assert page.evaluate("document.activeElement.dataset.app") == "care"
     page.keyboard.press("End")
-    assert page.evaluate("document.activeElement.dataset.app") == "api"
+    assert page.evaluate("document.activeElement.dataset.app") == "ads"  # the last business app
+    page.keyboard.press("Home")
+    assert page.evaluate("document.activeElement.dataset.app") == "careers"
     page.keyboard.press("Escape")
     page.wait_for_selector("#appSwitcher", state="hidden")
     assert button.get_attribute("aria-expanded") == "false"
@@ -222,8 +257,8 @@ def test_the_switcher_works_from_the_keyboard(browser, env):
     page.wait_for_selector("#appSwitcher:not([hidden])")
     page.keyboard.press("ArrowRight")
     page.keyboard.press("Enter")
-    page.wait_for_url(re.compile(r"#/leads"))
-    page.wait_for_selector("#primaryNav a[data-section='leads']")
+    page.wait_for_url(re.compile(r"#/airaapi"))
+    page.wait_for_selector("#primaryNav a[data-section='airaapi']")
     # An outside click closes an open menu.
     open_switcher(page)
     page.mouse.click(400, 500)
@@ -276,8 +311,9 @@ def test_without_an_account_url_the_menu_has_no_account_link(browser, env):
     page.wait_for_selector("#primaryNav a[data-section='leads']")
     page.click("#accountBtn")
     page.wait_for_selector("#accountMenu:not([hidden])")
-    assert page.locator("#accountMenu a.menu-item").count() == 0
-    assert page.locator("#accountLinks").is_hidden()
+    # No link to an account; the person's own Display and reading is the only entry.
+    labels = page.locator("#accountMenu a.menu-item").all_inner_texts()
+    assert labels == ["Display and reading"], labels
     assert not problems, problems
     context.close()
 
@@ -306,13 +342,13 @@ def test_at_phone_width_the_switcher_lives_in_the_more_sheet(browser, env, dark)
     box = page.locator("#appSwitcher").bounding_box()
     assert box["x"] >= 0 and box["x"] + box["width"] <= 390
     shot(page, f"07-phone-switcher-{'dark' if dark else 'light'}")
-    page.locator("#appSwitcher .app-tile[data-app='leads']").click()
-    page.wait_for_url(re.compile(r"#/leads"))
+    page.locator("#appSwitcher .app-tile[data-app='marketing']").click()
+    page.wait_for_url(re.compile(r"#/marketing"))
     page.wait_for_selector("#bottomNav a[data-section='leads']")
     assert page.locator("#sidebar.open").count() == 0
     assert page.locator("#bottomNav a[data-section]").evaluate_all(
         "links => links.map(a => a.dataset.section)"
-    ) == ["leads", "more"]
+    ) == ["marketing", "leads", "more"]
     # Nothing overflows the viewport.
     assert page.evaluate("document.documentElement.scrollWidth") <= 390
     page.click("#accountBtn")
@@ -339,7 +375,7 @@ def test_the_app_catalog_in_the_browser_matches_the_server_catalog() -> None:
     assert [item["id"] for item in shown] == [item["id"] for item in expected]
     for item, catalog in zip(shown, expected, strict=True):
         for field in ("name", "tagline", "icon", "home", "key"):
-            assert item[field] == catalog[field], (item["id"], field)
+            assert item.get(field, "") == catalog[field], (item["id"], field)
 
 
 def test_desktop_dark_menus_fit_and_show_no_stray_text(browser, env):

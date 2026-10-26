@@ -78,6 +78,9 @@ Routes marked *no gate* work while a person has not yet verified their email or 
 | PATCH | `/api/auth/profile` | member session | no verified-email gate | body: `name` | Change the display name. |
 | GET | `/api/invites/{token}` | none |  |  | Organization name, role and email an invitation is for (does not consume it). |
 | POST | `/api/invites/{token}/accept` | none |  | body: `name`, `password` | Accept an invitation: choose a password; creates the member (and a candidate's workspace) and signs them in. Single use, 7 days. |
+| GET | `/api/workspace/own` | member session |  |  | Whether this owner or admin may keep a workspace of their own (`available`), whether it exists, its stage, and (once started) the candidate permissions they hold inside it. **Who:** owner, admin. |
+| POST | `/api/workspace/own` | member session | writes |  | Start a personal workspace: the owner or admin uses Careers and Leads themselves. Takes one candidate seat (`402 plan_required` when the seats are used up) and records the automation and sensitive-answer consents; no coach can be given access. Inside it, send `X-Aira-Candidate: <your member id>` and the candidate routes treat you as its candidate; nobody else in the organization can open it (`404`). **Who:** owner, admin. |
+| DELETE | `/api/workspace/own` | member session | writes |  | End the personal workspace: its data is deleted (archived instead while a legal hold is in place) and the seat is free. Removing the member, or changing them to a role other than owner or admin (`409` until it ends), has the same effect. **Who:** owner, admin. |
 | GET | `/api/me/consent` | member session | no verified-email gate |  | The candidate's consent state: version, what is granted, whether the required ones are complete. **Who:** candidate. |
 | POST | `/api/me/consent` | member session | writes | body: `kinds`, `version` | Grant consents (`kinds`: automation, coach_access, sensitive_policy, sensitive_access). **Who:** candidate. |
 | DELETE | `/api/me/consent/{kind}` | member session | writes |  | Revoke one consent. Revoking `automation` stops automation for the candidate. **Who:** candidate. |
@@ -206,9 +209,16 @@ Routes marked *no gate* work while a person has not yet verified their email or 
 | GET | `/api/platform/plans` | operator session |  |  | Plans with versions, subscription counts and scheduled migrations. **Who:** `platform.tenants.read`. |
 | PUT | `/api/platform/plans/{name}` | operator session |  | body: `entitlements`, `pricing` | Publish a new plan version (`entitlements`, `pricing`); existing subscriptions stay on theirs. **Who:** `platform.plans.manage`: platform admin. |
 | POST | `/api/platform/plans/{name}/migrate` | operator session |  | body: `effective_at`, `version` | Schedule moving subscriptions to a plan version (`version`, `effective_at`). **Who:** platform admin. |
+| GET | `/api/platform/apps` | operator session |  |  | Every app with its platform-wide switch, default and current seat prices per plan, the plans changed, and how many organizations pay for it or were granted it. **Who:** `platform.tenants.read`. |
+| PUT | `/api/platform/apps/{value}` | operator session |  | body: `enabled`, `note`, `prices` | Switch an app off (or on) for every organization (`enabled`), and/or set its seat price per plan (`prices`: `starter`, `team`, `enterprise` in cents per seat per month; `0` = included, `null` = not offered). Paying subscriptions are rewritten at the provider without proration, so they move from their next period; the answer says how many (`billing`). Careers cannot be priced or switched off. Recorded in the platform audit. **Who:** `platform.plans.manage`: platform admin. |
+| DELETE | `/api/platform/apps/{value}` | operator session |  |  | Back to the defaults: on for everyone with the standard prices (`404` when it already is). **Who:** platform admin. |
 | GET | `/api/platform/flags` | operator session |  |  | Feature flags. **Who:** `platform.tenants.read`. |
 | PUT | `/api/platform/flags` | operator session |  | body: `enabled`, `flag`, `percent`, `scope_id`, `scope_type` | Set a flag: `flag`, `scope_type` (global, plan, org), `scope_id`, `enabled`, `percent`. A global flag switched off is a kill switch. **Who:** `platform.flags.manage`: platform admin. |
 | DELETE | `/api/platform/flags` | operator session |  | query: `flag`, `scope_id`, `scope_type` | Delete a flag scope (`flag`, `scope_type`, `scope_id` as query). **Who:** platform admin. |
+| GET | `/api/platform/social/reports` | operator session |  | query: `status` | The Social moderation queue (`status` open, resolved or dismissed) with a preview of each reported thing, plus the blocked-words list. Social is one network for the whole platform, so its reports are Aira's. **Who:** `platform.moderation.manage`: support and platform admin. |
+| POST | `/api/platform/social/reports/{id}` | operator session |  | body: `action` | Act on a report: `hide` the post, comment, message or story, `suspend` its author, or `dismiss`. Recorded in the platform audit log. **Who:** `platform.moderation.manage`. |
+| POST | `/api/platform/social/accounts/{id}/suspend` | operator session |  | body: `suspended` | Suspend (or with `suspended: false`, reinstate) a Social account. **Who:** `platform.moderation.manage`. |
+| PUT | `/api/platform/social/blocklist` | operator session |  | body: `words` | Replace the blocked-words list: those words are masked with asterisks in posts, comments and messages. **Who:** `platform.moderation.manage`. |
 | GET | `/api/platform/support` | operator session |  |  | The operator's support grants. |
 | POST | `/api/platform/support/{id}/enter` | operator session |  |  | Switch the operator session into the tenant with the granted role. **Who:** an approved, unexpired grant. |
 | POST | `/api/platform/support/leave` | operator session |  |  | Leave the tenant. |
@@ -228,12 +238,36 @@ Routes marked *no gate* work while a person has not yet verified their email or 
 | POST | `/api/platform/operators` | operator session |  | body: `email`, `name`, `password`, `role` | Create an operator (`email`, `password`, `role`, `name`). **Who:** platform admin. |
 | PATCH | `/api/platform/operators/{id}` | operator session |  | body: `status` | Enable or disable an operator (`status`). **Who:** platform admin. |
 
+## Videos and Ads: moderation, creators' money and ad top-ups
+
+Videos is one catalog for the whole platform and an ad bought by one organization pays a creator in another, so this work is Aira's ([apps/videos.md](apps/videos.md), [apps/ads.md](apps/ads.md)). Money is in micros of a US dollar (1 cent = 10,000). Every operator action is in the platform audit log (`videos.*`, `ads.*`).
+
+| Method | Path | Auth | Flags | Body and query | What it does, and who may call it |
+| --- | --- | --- | --- | --- | --- |
+| POST | `/api/org/ads/topup` | member session | writes | body: `amount_cents` | Add money to the organization's ad balance ($5 to $10,000): one invoice item at its billing provider, billed with the next invoice, and the balance is credited once the provider accepted it; an `ads_topup` invoice row. `402 app_required` without Ads, `409 not_subscribed` without a paid subscription. Audited as `billing.ads_topup`. **Who:** `billing.manage` (owner, billing contact). |
+| POST | `/api/videos/copyright` | public |  | body: `video`, `name`, `email`, `organization`, `work`, `signature`, `good_faith`, `accurate` | The public copyright notice form (`/videos/copyright`): anyone, no account; ten an hour per sender. |
+| GET | `/api/platform/videos/reports` | operator session |  | query: `status` | The Videos moderation queue (open, resolved or dismissed) with a preview of each reported video, comment or channel. **Who:** `platform.moderation.manage`: support and platform admin. |
+| POST | `/api/platform/videos/reports/{id}` | operator session |  | body: `action` | Act on a report: `hide`, `restore`, `suspend` the channel, or `dismiss`. **Who:** `platform.moderation.manage`. |
+| POST | `/api/platform/videos/videos/{id}` | operator session |  | body: `action`, `reason` | Hide a video for everyone, or restore it, without a report. **Who:** `platform.moderation.manage`. |
+| POST | `/api/platform/videos/channels/{id}/suspend` | operator session |  | body: `suspended`, `reason` | Suspend (or reinstate) a channel: its videos and comments disappear and it cannot upload or earn. **Who:** `platform.moderation.manage`. |
+| GET | `/api/platform/videos/copyright` | operator session |  | query: `status` | Copyright notices with the claimant, the work, any counter-notice and the channel's strikes. **Who:** `platform.moderation.manage`. |
+| POST | `/api/platform/videos/copyright/{id}` | operator session |  | body: `action`, `note` | `takedown` or `reject` a notice; after a counter-notice `restore` the video or `uphold` the takedown. **Who:** `platform.moderation.manage`. |
+| GET | `/api/platform/ads/overview` | operator session |  |  | The books (gross ad revenue, creator earnings, platform revenue, estimated, payouts waiting and paid, refunds, balances, by month) and the payout requests; `can_manage_money`. **Who:** `platform.moderation.manage` reads; money changes need `platform.billing.manage`. |
+| GET | `/api/platform/ads/review` | operator session |  | query: `status` | Ads waiting for review (or approved, rejected) with their media, campaign, landing page and targeting. **Who:** `platform.moderation.manage`. |
+| GET | `/api/platform/ads/media/{id}` | operator session |  | query: `e`, `s` | An ad's video or picture by its signed address, in ranges. **Who:** `platform.moderation.manage`. |
+| POST | `/api/platform/ads/creatives/{id}/review` | operator session |  | body: `decision`, `note` | `approve` an ad (it can run) or `reject` it with a note for the advertiser. **Who:** `platform.moderation.manage`. |
+| PUT | `/api/platform/ads/settings` | operator session |  | body: `min_payout_cents`, `revenue_share_percent` | The creators' share of each charge (0 to 90%, default 55) and the minimum payout (default $10). **Who:** `platform.billing.manage`: platform admin. |
+| POST | `/api/platform/ads/payouts/{id}` | operator session |  | body: `action`, `note`, `reference` | Mark a creator's payout `paid` (with the reference of the payment made outside Aira) or `reject` it (with a note). The creator is told. **Who:** `platform.billing.manage`. |
+| POST | `/api/platform/ads/close-month` | operator session |  | body: `month` | Close a finished month: refund invalid traffic (over 20 counted impressions from one viewer to one channel in a day), then confirm the creators' earnings. Done automatically from the 2nd of the next month. **Who:** `platform.billing.manage`. |
+| POST | `/api/platform/ads/clawback` | operator session |  | body: `channel_id`, `month`, `reason` | Take a channel's earnings for a month back: its counted impressions become invalid and the advertisers are refunded. **Who:** `platform.billing.manage`. |
+
 ## Web interface, health, disclosure and legal pages
 
 | Method | Path | Auth | Flags | Body and query | What it does, and who may call it |
 | --- | --- | --- | --- | --- | --- |
 | GET | `/` | none |  |  | The web interface with the hosted scripts injected. |
 | GET | `/static/{file}` | none |  |  | Static assets for the interface. |
+| GET | `/static/i18n/{code}.json` | none |  |  | The screens' translations for one language (`te`, `hi`): English source text to translation. English is the source and has no file. |
 | GET | `/api/health` | none |  |  | Liveness. |
 | GET | `/api/ready` | none |  |  | Readiness: schema version, data directory, queue depth and workers. 503 when degraded. |
 | GET | `/.well-known/security.txt` | none |  |  | RFC 9116 disclosure file (contact from `AIRA_CLOUD_SECURITY_CONTACT`). |
@@ -565,6 +599,7 @@ Which workspace: a candidate's own, or `X-Aira-Candidate: <member id>` for staff
 | --- | --- | --- | --- |
 | GET | `/` | `ui_index` |  |
 | GET | `/static/([A-Za-z0-9_.-]+)` | `ui_static` |  |
+| GET | `/static/i18n/([a-z]{2})\.json` | `ui_i18n` |  |
 | GET | `/api/health` | `api_health` |  |
 | GET | `/api/ready` | `api_ready` |  |
 | GET | `/api/metrics` | `api_metrics` |  |

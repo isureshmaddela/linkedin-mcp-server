@@ -23,6 +23,7 @@ from aira_cloud.kms import KmsSettings, build_master_key
 from aira_cloud.dashboard import Dashboard
 from aira_cloud.db import open_db
 from aira_cloud.entitlements import (
+    AppSettings,
     Enforcer,
     EntitlementService,
     FlagService,
@@ -83,8 +84,14 @@ class CloudApp:
         self.catalog = PlanCatalog(self.db, self.clock)
         self.catalog.seed()
         self.flags = FlagService(self.db, self.clock)
+        self.app_settings = AppSettings(self.db, self.clock)
         self.entitlements = EntitlementService(
-            self.db, self.clock, self.config, self.catalog, self.flags
+            self.db,
+            self.clock,
+            self.config,
+            self.catalog,
+            self.flags,
+            self.app_settings,
         )
         self.usage = UsageService(self.db, self.clock)
         self.enforcer = Enforcer(self.entitlements, self.usage)
@@ -95,6 +102,14 @@ class CloudApp:
         self.agents = AgentClient(self)
         self.linkedin = LinkedInSessions(self)
         self.launch = LaunchTokens(self)
+        from aira_cloud.public_links import HostedPublicIndex
+
+        self.public_index = HostedPublicIndex(self)  # public links of the industry apps
+        from aira_cloud.oauth import OAuth
+        from aira_cloud.webhooks import Webhooks
+
+        self.oauth = OAuth(self)  # third-party apps and personal access tokens
+        self.webhooks = Webhooks(self)
         self.signed_requests = Verifier(self)
         self.tenancy = Tenancy(self)
         self.authz = Authorizer(

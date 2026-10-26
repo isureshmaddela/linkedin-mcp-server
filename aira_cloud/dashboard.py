@@ -531,7 +531,9 @@ class Dashboard:
                     r["candidate_id"]
                     for r in many(
                         connection,
-                        "SELECT candidate_id FROM workspaces WHERE org_id = ? AND status = 'active'",
+                        # Candidates' workspaces only: a staff member's personal workspace is theirs alone.
+                        """SELECT w.candidate_id FROM workspaces w JOIN members m ON m.member_id = w.candidate_id
+                        WHERE w.org_id = ? AND w.status = 'active' AND m.role = 'candidate'""",
                         (org_id,),
                     )
                 ]

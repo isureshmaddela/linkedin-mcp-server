@@ -26,6 +26,7 @@
     switch (app.status) {
       case "included": return "Included in your plan";
       case "granted": return "Granted to your organization at no charge";
+      case "disabled": return "Switched off by Aira for now";
       case "unavailable": return app.required_plan ? `Not on your plan: upgrade to ${titleCase(app.required_plan)}` : "Not available on your plan";
       default: return perSeat(app);
     }
@@ -39,6 +40,7 @@
       cancelling: ["Turning off", "warn"],
       unavailable: ["Not on your plan", ""],
       off: ["Off", ""],
+      disabled: ["Paused", "warn"],
     };
     const [label, kind] = map[app.status] || [titleCase(app.status), ""];
     return h("span", { class: `badge ca-status ${kind}`, text: label });
@@ -48,6 +50,7 @@
     if (app.status === "active") return `${money(app.monthly_cents, app.currency)} per month for ${app.seats} seat${app.seats === 1 ? "" : "s"}${data.period_end ? `; renews on ${fmt.date(data.period_end)}` : ""}.`;
     if (app.status === "cancelling") return `Turns off on ${app.effective_until ? fmt.date(app.effective_until) : "the period end"}. It keeps working until then.`;
     if (app.status === "granted") return app.note ? `Note from Aira: ${app.note}` : "";
+    if (app.status === "disabled") return "Nobody can open it until Aira switches it back on. Your data is kept, and it is not billed meanwhile.";
     if (app.status === "off") return data.status === "active" ? "Turning it on is billed with your plan and prorated for the rest of this period." : "Choose a plan under Plan & billing first; the trial includes every app.";
     return "";
   }
@@ -130,6 +133,8 @@
       h("div", { class: "ca-app-head" }, h("h2", { text: app.name }), statusBadge(app)),
       h("p", { class: "muted", text: app.tagline || "" }),
       h("p", { text: app.description || "" }),
+      app.industry ? h("p", { class: "muted small", text: `For ${app.industry.toLowerCase()}` }) : null,
+      (app.highlights || []).length ? h("ul", { class: "ca-highlights" }, ...app.highlights.map((item) => h("li", { text: item }))) : null,
       h("div", { class: "ca-price" }, h("strong", { text: priceLine(app) })),
       statusText(app, data) ? h("p", { class: "muted ca-status-text", text: statusText(app, data) }) : null,
       actionsFor(app, data));
@@ -162,7 +167,18 @@
     page.append(A.head("Apps", data.can_manage
       ? "The apps your organization can open. Turn one on and it is billed with your plan, per candidate seat; turn it off and it stops at the period end."
       : "The apps your organization can open. Owners and billing contacts turn them on and off under Plan & billing."));
-    page.append(h("div", { class: "ca-grid" }, ...data.apps.map((app) => card(app, data))));
+    const core = data.apps.filter((app) => app.category !== "industry" && app.category !== "life");
+    const everyday = data.apps.filter((app) => app.category === "life");
+    const industry = data.apps.filter((app) => app.category === "industry");
+    page.append(h("div", { class: "ca-grid" }, ...core.map((app) => card(app, data))));
+    if (everyday.length) {
+      page.append(h("h2", { class: "ca-group", text: "Everyday apps" }), h("p", { class: "muted", text: "For every member, every day: family chat and photos, medicine reminders, learning, games and the household planner. Each person's data is their own." }));
+      page.append(h("div", { class: "ca-grid" }, ...everyday.map((app) => card(app, data))));
+    }
+    if (industry.length) {
+      page.append(h("h2", { class: "ca-group", text: "Business apps" }), h("p", { class: "muted", text: "Sales, Marketing with Leads, Service, Commerce, and Courses & Events: they share your organization's customers, revenue and email in the Business hub." }));
+      page.append(h("div", { class: "ca-grid" }, ...industry.map((app) => card(app, data))));
+    }
     page.append(totals(data));
     stage.replaceChildren(page);
   };

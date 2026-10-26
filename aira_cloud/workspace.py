@@ -544,7 +544,8 @@ class WorkspaceManager:
         return snapshot
 
     def leads_total(self, org_id: str, *, refresh_candidate: str = "") -> int:
-        """Saved leads across the organization, from workspace snapshots (the writing candidate's is refreshed)."""
+        """Saved leads across the organization: the shared pipeline (Marketing > Leads, in the organization's
+        database) and any left in workspace snapshots (the writing candidate's is refreshed)."""
         if refresh_candidate:
             self.refresh(org_id, refresh_candidate, max_age=0)
         with self.app.db.read() as connection:
@@ -562,7 +563,20 @@ class WorkspaceManager:
                 )
             except Exception:  # noqa: BLE001 - a missing workspace does not count
                 continue
-        return total
+        return total + self.org_leads(org_id)
+
+    def org_leads(self, org_id: str) -> int:
+        """Leads in the organization's shared pipeline."""
+        if not self.org_api_path(org_id).exists():
+            return 0
+        connection = self.org_api_connection(org_id)
+        try:
+            row = connection.execute("SELECT COUNT(*) FROM leads").fetchone()
+            return int(row[0] or 0) if row else 0
+        except sqlite3.Error:  # no table yet: no leads
+            return 0
+        finally:
+            connection.close()
 
     @staticmethod
     def stage_of(snapshot: dict[str, Any], override: str = "") -> str:

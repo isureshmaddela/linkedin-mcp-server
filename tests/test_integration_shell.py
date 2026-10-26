@@ -49,18 +49,44 @@ def test_new_sections_are_in_the_navigation_with_icons_and_chords() -> None:
     assert nav["airaapi"]["app"] == "api"
     # The research workspace keeps its route id; inside the Careers app it is called Research.
     assert nav["careers"]["label"] == "Research" and nav["careers"]["app"] == "careers"
-    assert nav["leads"]["app"] == "leads" and nav["settings"]["app"] == "account"
-    assert len(nav) == 11
-    keys = [item["key"] for item in nav.values()]
+    # Leads is a section of Marketing (with its own `g l` chord); Settings belongs to the account.
+    assert nav["leads"]["app"] == "marketing" and nav["leads"]["key"] == "l"
+    assert nav["settings"]["app"] == "account"
+    assert nav["hub"]["app"] == "account" and nav["hub"]["key"] == "0"
+    assert nav["developers"]["app"] == "api"
+    # Fewer apps, each with sections: Commerce is Shop and Bookings, Courses & Events is Academy and Events,
+    # Social holds Family. A section is opened inside its app, so it has no chord of its own.
+    sections_of = {
+        "studio": {"studio"},
+        "marketing": {"marketing", "leads"},
+        "service": {"service"},
+        "commerce": {"shop", "bookings"},
+        "experiences": {"academy", "events"},
+        "social": {"social", "family"},
+        "care": {"care"},
+        "learn": {"learn"},
+        "play": {"play"},
+        "planner": {"planner"},
+        "news": {"news"},
+        "videos": {"videos"},
+        "ads": {"ads"},
+    }
+    for app_id, ids in sections_of.items():
+        assert {i for i, item in nav.items() if item["app"] == app_id} == ids, app_id
+        for section in ids - {"leads"}:
+            assert "key" not in nav[section], section
+    assert nav["today"]["app"] == "account" and nav["display"]["app"] == "account"
+    assert len(nav) == 31
+    keys = [item["key"] for item in nav.values() if "key" in item]
     assert len(set(keys)) == len(keys), "two sections share a g-chord"
     for item in nav.values():
         assert re.search(rf"\b{item['icon']}: '<svg", APP_JS), item["icon"]
     # Every section belongs to an app (or to the account, shown under every app).
     assert {item["app"] for item in nav.values()} == {
         "careers",
-        "leads",
         "api",
         "account",
+        *sections_of,
     }
     # Phones keep four quick items for the Careers app; the rest sit behind More.
     quick = [
@@ -81,8 +107,8 @@ def test_the_app_keys_do_not_collide_with_section_chords() -> None:
     block = re.search(r"const APPS = \[(.*?)\n\];", APP_JS, re.S)
     assert block is not None
     app_keys = dict(re.findall(r'id: "(\w+)".*?key: "(\w)"', block.group(1)))
-    section_keys = {item["id"]: item["key"] for item in _nav()}
-    # An app's key may only coincide with its own home section (Leads, API), never with another section.
+    section_keys = {item["id"]: item["key"] for item in _nav() if "key" in item}
+    # An app's key may only coincide with its own home section (Developers: `g p` opens the API console).
     for app_id, key in app_keys.items():
         owners = [
             section
@@ -97,7 +123,8 @@ def test_the_app_keys_do_not_collide_with_section_chords() -> None:
 
 def test_every_nav_section_has_a_registered_view() -> None:
     scripts = "".join(
-        path.read_text(encoding="utf-8") for path in STATIC.glob("views-*.js")
+        path.read_text(encoding="utf-8")
+        for path in [*STATIC.glob("views-*.js"), STATIC / "life.js"]
     )
     for item in _nav():
         assert re.search(rf"Aira\.views\.{item['id']}\s*=", scripts), item["id"]

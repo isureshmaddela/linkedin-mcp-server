@@ -616,6 +616,13 @@ def _leads_source_gate(ctx: Ctx, source: str, *, dry_run: bool) -> None:
     source = str(source or "").strip().lower()
     ctx.state["leads_source"] = source
     if source == "sales_navigator":
+        if not ctx.candidate_id:
+            # The shared pipeline belongs to the business; Sales Navigator reads one person's own LinkedIn session.
+            raise Forbidden(
+                "Sales Navigator reads a person's own LinkedIn session, which the business's shared Leads cannot "
+                "use. Export a list from Sales Navigator and import it here as a CSV file instead.",
+                code="source_unavailable",
+            )
         # Reading Sales Navigator is LinkedIn automation through the candidate's own session: exactly the
         # LinkedIn gates (plan feature, organization policy, opt-in, platform kill switch).
         ctx.gateway.check_source(ctx.org_id, ctx.candidate_id, "linkedin", ctx.audience)

@@ -55,6 +55,9 @@ SKIP_TABLES = frozenset(
         "sso_states",
         "remote_login_sessions",
         "launch_tokens",
+        "oauth_codes",  # short-lived; restoring would revive used codes
+        "oauth_tokens",  # people and apps sign in again after a restore
+        "webhook_deliveries",
         "worker_heartbeats",
         "usage_daily",
         "org_notices",
@@ -106,6 +109,7 @@ class BackupService:
                 "plan_versions",
                 "plan_migrations",
                 "feature_flags",
+                "platform_apps",
                 "announcements",
                 "operators",
                 "blocked_sources",

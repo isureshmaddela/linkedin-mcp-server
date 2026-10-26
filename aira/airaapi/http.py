@@ -28,7 +28,9 @@ from urllib.parse import unquote_plus
 from aira.airaapi.store import SecretStore
 from aira.observability import redact
 
-AuthMode = Literal["session", "api_key", "api_key_optional", "none"]
+# "public_link": no sign-in; the first group of the route pattern is a public link token, which names the
+# account whose database the handler opens (see aira.suite.public).
+AuthMode = Literal["session", "api_key", "api_key_optional", "none", "public_link"]
 
 
 class Headers(Protocol):
@@ -229,3 +231,6 @@ def load_route_modules() -> None:
         except ModuleNotFoundError as error:
             if index == 0 or error.name != name:
                 raise
+    from aira import suite
+
+    suite.load_apps()  # the industry apps and the Business hub

@@ -2,6 +2,9 @@
 
 from __future__ import annotations
 
+import sqlite3
+from contextlib import closing
+
 from aira.observability import metrics
 from aira_cloud.db import many
 from aira_cloud.errors import Conflict, ValidationFailed
@@ -359,6 +362,35 @@ def flag_delete(req: Req):  # noqa: ANN201
     return 200, {"ok": True}
 
 
+@cloud_route("GET", r"/api/platform/apps", auth="operator")
+def platform_apps(req: Req):  # noqa: ANN201
+    return 200, {"apps": req.app.platform.list_apps(req.principal)}
+
+
+@cloud_route("PUT", r"/api/platform/apps/([a-z0-9_-]+)", auth="operator")
+def platform_app_update(req: Req):  # noqa: ANN201
+    """Switch an app on or off for every organization and/or set its seat price per plan (cents, null = not offered)."""
+    body = req.body()
+    enabled = body.get("enabled")
+    if enabled is not None and not isinstance(enabled, bool):
+        raise ValidationFailed("enabled is true or false.")
+    prices = body.get("prices")
+    if prices is not None and not isinstance(prices, dict):
+        raise ValidationFailed("prices maps a plan to cents per seat per month.")
+    return 200, req.app.platform.update_app(
+        req.principal,
+        req.group(),
+        enabled=enabled,
+        prices=prices,
+        note=str(body.get("note", "")).strip(),
+    )
+
+
+@cloud_route("DELETE", r"/api/platform/apps/([a-z0-9_-]+)", auth="operator")
+def platform_app_reset(req: Req):  # noqa: ANN201
+    return 200, req.app.platform.reset_app(req.principal, req.group())
+
+
 # ----------------------------------------------------------------------------- support access
 
 
@@ -389,6 +421,94 @@ def support_leave(req: Req):  # noqa: ANN201
 def support_end(req: Req):  # noqa: ANN201
     req.app.platform.revoke_support(req.principal, req.group(), "ended by the operator")
     return 200, {"ok": True}
+
+
+# ----------------------------------------------------------------------------- Social moderation
+# Social is one network for the whole platform (aira.suite.social), so its reports are Aira's to handle:
+# an organization's owner cannot see other organizations' people, and support access never reaches it.
+
+
+def _social() -> closing[sqlite3.Connection]:
+    from aira.suite.social import db as social_db
+
+    return closing(social_db.connect())
+
+
+@cloud_route("GET", r"/api/platform/social/reports", auth="operator")
+def social_reports(req: Req):  # noqa: ANN201
+    from aira.suite.social import service as social
+
+    req.app.authz.require(req.principal, "platform.moderation.manage")
+    status = req.q("status", "open")
+    if status not in {"open", "resolved", "dismissed"}:
+        raise ValidationFailed("status is open, resolved or dismissed.")
+    with _social() as sc:
+        return 200, {
+            "reports": social.reports(sc, status=status),
+            "blocklist": social.blocklist(sc),
+        }
+
+
+@cloud_route("POST", r"/api/platform/social/reports/([0-9a-f]{32})", auth="operator")
+def social_moderate(req: Req):  # noqa: ANN201
+    from aira.suite.social import service as social
+
+    req.app.authz.require(req.principal, "platform.moderation.manage")
+    action = str(req.body().get("action", ""))
+    with _social() as sc:
+        result = social.moderate(sc, f"aira:{req.principal.email}", req.group(), action)
+    req.app.platform_audit.record(
+        "social.moderate",
+        operator=req.principal,
+        target_type="social_report",
+        target_id=req.group(),
+        detail={"action": result["action"]},
+    )
+    return 200, result
+
+
+@cloud_route(
+    "POST", r"/api/platform/social/accounts/([0-9a-f]{32})/suspend", auth="operator"
+)
+def social_suspend(req: Req):  # noqa: ANN201
+    from aira.suite.social import service as social
+
+    req.app.authz.require(req.principal, "platform.moderation.manage")
+    on = bool(req.body().get("suspended", True))
+    with _social() as sc:
+        found = sc.execute(
+            "SELECT 1 FROM so_accounts WHERE id = ?", (req.group(),)
+        ).fetchone()
+        if not found:
+            return 404, {"error": "That person was not found.", "code": "not_found"}
+        social.set_suspended(sc, req.group(), on)
+    req.app.platform_audit.record(
+        "social.suspend" if on else "social.unsuspend",
+        operator=req.principal,
+        target_type="social_account",
+        target_id=req.group(),
+    )
+    return 200, {"suspended": on}
+
+
+@cloud_route("PUT", r"/api/platform/social/blocklist", auth="operator")
+def social_blocklist(req: Req):  # noqa: ANN201
+    from aira.suite.social import service as social
+
+    req.app.authz.require(req.principal, "platform.moderation.manage")
+    words = req.body().get("words")
+    if not isinstance(words, list):
+        raise ValidationFailed("words is a list.")
+    with _social() as sc:
+        saved = social.save_blocklist(sc, words)
+    req.app.platform_audit.record(
+        "social.blocklist",
+        operator=req.principal,
+        target_type="social",
+        target_id="blocklist",
+        detail={"words": len(saved)},
+    )
+    return 200, {"blocklist": saved}
 
 
 # ----------------------------------------------------------------------------- announcements, health, audit, abuse

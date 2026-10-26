@@ -19,6 +19,7 @@ from aira_cloud.config import CloudConfig, Clock
 from aira_cloud.db import ControlDB, dumps, loads, many, one
 from aira import apps as app_catalog
 from aira_cloud.errors import (
+    AppDisabled,
     AppRequired,
     NotFound,
     PlanRequired,
@@ -26,9 +27,14 @@ from aira_cloud.errors import (
     ValidationFailed,
 )
 from aira_cloud.plans import (
+    APP_PLANS,
+    APP_PRICING,
     DEFAULT_PLANS,
     STATUS_RESTRICTIONS,
     Entitlements,
+    PriceOverrides,
+    app_price,
+    app_prices,
     app_state,
     day_key,
     merge_limits,
@@ -345,6 +351,151 @@ class FlagService:
 
 
 # --------------------------------------------------------------------------- #
+# App catalog controls
+# --------------------------------------------------------------------------- #
+
+
+class AppSettings:
+    """The superadmin's controls over the app catalog: an app switched off for everyone, and per-plan seat prices.
+
+    An app that is off is closed to every organization (the trial, Enterprise and grants too) and is not billed; the
+    organizations' data and add-on choices are kept, so switching it back on restores them. Prices change
+    ``plans.APP_PRICING`` per plan (cents per candidate seat per month, 0 = included, None = not offered); only the
+    differences are stored. Invoices and quotes read them when they are made, so a subscriber pays a new price from
+    its next billing period. Careers is part of every plan and cannot be priced or switched off.
+    """
+
+    MAX_CENTS = 100_000  # $1,000 per seat per month
+
+    def __init__(self, db: ControlDB, clock: Clock) -> None:
+        self.db = db
+        self.clock = clock
+        self._lock = threading.Lock()
+        self._cache: tuple[int, dict[str, dict[str, Any]]] | None = None
+
+    def _rows(self) -> dict[str, dict[str, Any]]:
+        now = self.clock.now()
+        with self._lock:
+            if self._cache and self._cache[0] > now:
+                return self._cache[1]
+        with self.db.read() as connection:
+            rows = {
+                r["app_id"]: {**r, "prices": loads(r["prices"], {})}
+                for r in many(connection, "SELECT * FROM platform_apps")
+            }
+        with self._lock:
+            self._cache = (now + 5, rows)
+        return rows
+
+    def invalidate(self) -> None:
+        with self._lock:
+            self._cache = None
+
+    def enabled(self, app_id: str) -> bool:
+        row = self._rows().get(app_catalog.current_id(app_id))
+        return not row or bool(row["enabled"])
+
+    def overrides(self) -> PriceOverrides:
+        return {
+            app_id: row["prices"]
+            for app_id, row in self._rows().items()
+            if row["prices"]
+        }
+
+    def state(self, plan_id: str, app_id: str) -> str:
+        return app_state(plan_id, app_id, self.overrides())
+
+    def price(self, plan_id: str, app_id: str) -> int | None:
+        return app_price(plan_id, app_id, self.overrides())
+
+    def plan_for(self, app_id: str) -> str | None:
+        return plan_for_app(app_id, self.overrides())
+
+    def describe(self) -> builtins.list[dict[str, Any]]:
+        """Every app with its switch, its default and current prices per plan, and who changed it last."""
+        rows = self._rows()
+        out = []
+        for app in app_catalog.APPS:
+            row = rows.get(app.id) or {}
+            sold = app.id in APP_PRICING
+            out.append(
+                {
+                    "id": app.id,
+                    "name": app.name,
+                    "category": app.category,
+                    "enabled": not row or bool(row["enabled"]),
+                    "priced": sold,
+                    "default_prices": dict(APP_PRICING.get(app.id, {})),
+                    "prices": app_prices(app.id, self.overrides()) if sold else {},
+                    "changed_plans": sorted((row.get("prices") or {}).keys()),
+                    "note": row.get("note", ""),
+                    "updated_by": row.get("updated_by", ""),
+                    "updated_at": row.get("updated_at"),
+                }
+            )
+        return out
+
+    def update(
+        self,
+        app_id: str,
+        *,
+        enabled: bool | None = None,
+        prices: dict[str, Any] | None = None,
+        note: str = "",
+        by: str = "",
+    ) -> dict[str, Any]:
+        """Switch an app on or off for everyone and/or set its seat price per plan (``None`` = not offered)."""
+        app_id = app_catalog.current_id(app_id)
+        if app_id not in app_catalog.BY_ID:
+            raise NotFound("App not found.")
+        if app_id not in APP_PRICING:
+            raise ValidationFailed(
+                f"{app_catalog.BY_ID[app_id].name} is part of every plan; it cannot be priced or switched off."
+            )
+        row = self._rows().get(app_id) or {}
+        changes = dict(row.get("prices") or {})
+        if prices is not None:
+            if not isinstance(prices, dict) or set(prices) - set(APP_PLANS):
+                raise ValidationFailed(
+                    "Prices are given per plan: starter, team or enterprise."
+                )
+            for plan_id, value in prices.items():
+                if value is not None and (
+                    isinstance(value, bool)
+                    or not isinstance(value, int)
+                    or not 0 <= value <= self.MAX_CENTS
+                ):
+                    raise ValidationFailed(
+                        "A price is whole cents per seat per month from 0 (included) to 100000, or null (not offered)."
+                    )
+                if value == APP_PRICING[app_id].get(plan_id):
+                    changes.pop(plan_id, None)  # back to the default: nothing to store
+                else:
+                    changes[plan_id] = value
+        on = bool(row["enabled"]) if row and enabled is None else enabled is not False
+        with self.db.write() as connection:
+            connection.execute(
+                """INSERT INTO platform_apps (app_id, enabled, prices, note, updated_by, updated_at)
+                VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(app_id) DO UPDATE SET enabled = excluded.enabled,
+                prices = excluded.prices, note = excluded.note, updated_by = excluded.updated_by,
+                updated_at = excluded.updated_at""",
+                (app_id, int(on), dumps(changes), note[:300], by, self.clock.now()),
+            )
+        self.invalidate()
+        return next(a for a in self.describe() if a["id"] == app_id)
+
+    def reset(self, app_id: str) -> bool:
+        """Back to the catalog's defaults: on, with the prices in ``plans.APP_PRICING``."""
+        with self.db.write() as connection:
+            removed = connection.execute(
+                "DELETE FROM platform_apps WHERE app_id = ?",
+                (app_catalog.current_id(app_id),),
+            ).rowcount
+        self.invalidate()
+        return removed > 0
+
+
+# --------------------------------------------------------------------------- #
 # Resolver
 # --------------------------------------------------------------------------- #
 
@@ -357,12 +508,14 @@ class EntitlementService:
         config: CloudConfig,
         catalog: PlanCatalog,
         flags: FlagService,
+        app_settings: AppSettings | None = None,
     ) -> None:
         self.db = db
         self.clock = clock
         self.config = config
         self.catalog = catalog
         self.flags = flags
+        self.app_settings = app_settings or AppSettings(db, clock)
         self._lock = threading.Lock()
         self._cache: dict[str, tuple[int, Entitlements]] = {}
 
@@ -418,16 +571,21 @@ class EntitlementService:
             elif decision is False:
                 features.discard(flag)
         status = sub["status"]
-        apps = self._apps_for(sub["plan_id"], features, {r["app_id"] for r in app_rows})
-        for app_id in apps:  # an app that is on carries its feature: the feature checks below keep working
-            feature = app_catalog.BY_ID[app_id].feature
-            if feature:
-                features.add(feature)
+        # rows stored under an old app id ("shop") count for the app it became (Commerce)
+        subscribed = {app_catalog.current_id(r["app_id"]) for r in app_rows}
+        apps = self._apps_for(sub["plan_id"], features, subscribed)
+        for app_id in apps:  # an app that is on carries its features: the feature checks below keep working
+            app = app_catalog.BY_ID[app_id]
+            for feature in (app.feature, *app.extra_features):
+                if feature:
+                    features.add(feature)
         for app in (
             app_catalog.APPS
-        ):  # an app that is off takes its feature away, even from an old plan version
-            if app.feature and app.id not in apps:
-                features.discard(app.feature)
+        ):  # an app that is off takes its features away, even from an old plan version
+            if app.id not in apps:
+                for feature in (app.feature, *app.extra_features):
+                    if feature:
+                        features.discard(feature)
         entitlements = Entitlements(
             org_id=org_id,
             plan_id=sub["plan_id"],
@@ -452,14 +610,16 @@ class EntitlementService:
             )
         return entitlements
 
-    @staticmethod
     def _apps_for(
-        plan_id: str, features: builtins.set[str], subscribed: builtins.set[str]
+        self, plan_id: str, features: builtins.set[str], subscribed: builtins.set[str]
     ) -> builtins.set[str]:
-        """The apps an organization may open: included by the plan, bought as add-ons, or granted by an operator."""
+        """The apps an organization may open: included by the plan, bought as add-ons, or granted by an operator,
+        unless an operator has switched the app off for everyone."""
         apps: builtins.set[str] = set()
         for app in app_catalog.APPS:
-            state = app_state(plan_id, app.id)
+            if not self.app_settings.enabled(app.id):
+                continue
+            state = self.app_settings.state(plan_id, app.id)
             if state == "included":
                 apps.add(app.id)
             elif app.id in subscribed:
@@ -478,11 +638,18 @@ class EntitlementService:
     ) -> Entitlements:
         """The organization must have the app that owns the route, or the call is ``402 app_required``."""
         entitlements = self.resolve(org_id)
+        app_id = app_catalog.current_id(app_id)
         if app_id not in app_catalog.BY_ID or entitlements.has_app(app_id):
             return entitlements
         app = app_catalog.BY_ID[app_id]
-        state = app_state(entitlements.plan_id, app_id)
-        needed = plan_for_app(app_id)
+        if not self.app_settings.enabled(app_id):
+            raise AppDisabled(
+                f"{app.name} is switched off for now. Your data is kept and comes back when it returns.",
+                app=app_id,
+                name=app.name,
+            )
+        state = self.app_settings.state(entitlements.plan_id, app_id)
+        needed = self.app_settings.plan_for(app_id)
         if audience == "candidate":
             message = f"{app.name} is not enabled for your organization."
             hint = "Ask an owner or administrator to turn it on."

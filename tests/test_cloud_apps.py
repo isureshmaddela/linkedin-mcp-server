@@ -28,7 +28,8 @@ from aira_cloud.config import DAY
 from aira_cloud.errors import AppRequired, Conflict, PlanRequired, SubscriptionInactive
 from aira_cloud.policy import APP_FREE_ROUTES, POLICY
 
-LEADS_SEAT = 400
+LEADS_SEAT = 400  # Marketing (with Leads) per seat on Team
+MARKETING_STARTER_SEAT = 500
 API_SEAT = 300
 
 
@@ -62,19 +63,19 @@ def test_the_pricing_table_decides_what_each_plan_includes():
         assert plans.app_state(plan_id, "careers") == "included"
         assert plans.app_price(plan_id, "careers") == 0
     assert (
-        plans.app_state("trial", "leads")
+        plans.app_state("trial", "marketing")
         == plans.app_state("trial", "api")
         == "included"
     )
     assert (
-        plans.app_state("starter", "leads") == "addon"
-        and plans.app_price("starter", "leads") == LEADS_SEAT
+        plans.app_state("starter", "marketing") == "addon"
+        and plans.app_price("starter", "marketing") == MARKETING_STARTER_SEAT
     )
     assert (
-        plans.app_state("team", "leads") == "addon"
-        and plans.app_price("team", "leads") == LEADS_SEAT
+        plans.app_state("team", "marketing") == "addon"
+        and plans.app_price("team", "marketing") == LEADS_SEAT
     )
-    assert plans.app_state("enterprise", "leads") == "included"
+    assert plans.app_state("enterprise", "marketing") == "included"
     assert (
         plans.app_state("starter", "api") == "unavailable"
         and plans.app_price("starter", "api") is None
@@ -85,7 +86,8 @@ def test_the_pricing_table_decides_what_each_plan_includes():
     )
     assert plans.app_state("enterprise", "api") == "included"
     assert (
-        plans.plan_for_app("api") == "team" and plans.plan_for_app("leads") == "starter"
+        plans.plan_for_app("api") == "team"
+        and plans.plan_for_app("marketing") == "starter"
     )
     assert plans.app_state("team", "unknown") == "unavailable"
     assert (
@@ -109,10 +111,11 @@ def test_entitlements_follow_the_plan_and_the_subscriptions(cloud):
     assert not entitlements.has("leads") and not entitlements.has("api.console"), (
         "an app that is off takes its feature away"
     )
-    cloud.billing.subscribe_app(team.owner, "leads")
+    cloud.billing.subscribe_app(team.owner, "marketing")
     entitlements = cloud.entitlements.resolve(team.org_id, fresh=True)
-    assert entitlements.has_app("leads") and entitlements.has("leads")
-    assert entitlements.as_dict()["apps"] == ["careers", "leads"]
+    assert entitlements.has_app("marketing") and entitlements.has("leads")
+    assert entitlements.has_app("leads")  # Leads is a section of Marketing
+    assert entitlements.as_dict()["apps"] == ["careers", "marketing"]
     operator = operator_browser(cloud)
     status, _ = operator.call(
         "POST",
@@ -135,8 +138,8 @@ def test_me_and_the_catalog_say_which_apps_are_on(cloud):
     by_id = {a["id"]: a for a in me["apps"]}
     assert by_id["careers"]["enabled"] is True and by_id["careers"]["reason"] == ""
     assert (
-        by_id["leads"]["enabled"] is False
-        and "not turned on" in by_id["leads"]["reason"].lower()
+        by_id["marketing"]["enabled"] is False
+        and "not turned on" in by_id["marketing"]["reason"].lower()
     )
     assert "api" in by_id and by_id["api"]["enabled"] is False
     status, data = candidate.call("GET", "/api/apps")
@@ -145,12 +148,14 @@ def test_me_and_the_catalog_say_which_apps_are_on(cloud):
     assert data["local_url"] == "http://127.0.0.1:8765"
     assert data["plan_id"] == "team"
     assert data["installation"] == "hosted"
-    leads = next(a for a in data["apps"] if a["id"] == "leads")
-    assert leads["name"] == "Leads" and leads["enabled"] is False and leads["reason"]
+    leads = next(a for a in data["apps"] if a["id"] == "marketing")
+    assert (
+        leads["name"] == "Marketing" and leads["enabled"] is False and leads["reason"]
+    )
     assert set(leads) >= {"id", "name", "tagline", "home", "sections"}
-    cloud.billing.subscribe_app(org.owner, "leads")
+    cloud.billing.subscribe_app(org.owner, "marketing")
     status, me = sign_in(cloud, org.candidate).call("GET", "/api/auth/me")
-    assert next(a for a in me["apps"] if a["id"] == "leads")["enabled"] is True
+    assert next(a for a in me["apps"] if a["id"] == "marketing")["enabled"] is True
     assert "leads" in me["features"]
 
 
@@ -162,9 +167,16 @@ def test_me_and_the_catalog_say_which_apps_are_on(cloud):
 def test_the_gateway_refuses_an_apps_routes_until_the_organization_subscribes(cloud):
     org = build_org(cloud, plan="team", seats=25)
     candidate = sign_in(cloud, org.candidate)
-    status, body = candidate.call("GET", "/api/leads/overview")
+    coach = sign_in(cloud, org.coach)
+    status, body = coach.call("GET", "/api/leads/overview")
     assert status == 402 and body["code"] == "app_required", body
-    assert body["app"] == "leads" and body["name"] == "Leads" and body["plan_hint"]
+    assert (
+        body["app"] == "marketing" and body["name"] == "Marketing" and body["plan_hint"]
+    )
+    assert body["audience"] == "staff", body
+    status, body = candidate.call("GET", "/api/care/medicines")
+    assert status == 402 and body["code"] == "app_required", body
+    assert body["app"] == "care" and body["name"] == "Health"
     assert body["audience"] == "candidate" and body["required_plan"] is None
     assert "upgrade" not in body["error"].lower(), (
         "a candidate sees the organization's rule, not a sales prompt"
@@ -180,9 +192,12 @@ def test_the_gateway_refuses_an_apps_routes_until_the_organization_subscribes(cl
     assert body.get("code") != "app_required" and status < 500, (status, body)
     status, body = owner.call("GET", "/api/airaapi/account")
     assert body.get("code") != "app_required", body
-    status, body = owner.call("POST", "/api/org/apps/leads/subscribe", {})
+    status, body = owner.call("POST", "/api/org/apps/marketing/subscribe", {})
     assert status == 200 and body["status"] == "active", body
-    assert candidate.call("GET", "/api/leads/overview")[0] == 200
+    assert coach.call("GET", "/api/leads/overview")[0] == 200
+    assert candidate.call("GET", "/api/leads/overview")[0] == 403, (
+        "Leads belongs to the business: a candidate has no Leads"
+    )
     starter = build_org(cloud, "Starter", plan="starter", seats=5, slug_email="s.test")
     status, body = sign_in(cloud, starter.owner).call(
         "POST", "/api/airaapi/search", {"engine": "google", "params": {"q": "x"}}
@@ -197,7 +212,7 @@ def test_every_app_route_prefix_is_known_to_the_gateway_and_the_policy():
     for app in app_catalog.APPS:
         for prefix in app.route_prefixes:
             assert app_of_path(prefix + "/anything") is app
-    assert app_of_path("/api/org/apps/leads/subscribe") is None, (
+    assert app_of_path("/api/org/apps/marketing/subscribe") is None, (
         "the Apps page itself is never gated by an app"
     )
     assert app_of_path("/api/apps") is None
@@ -217,7 +232,7 @@ def test_subscribing_quotes_prorates_and_bills_with_the_plan(cloud):
     owner = sign_in(cloud, org.owner)
     status, overview = owner.call("GET", "/api/org/apps")
     assert status == 200 and overview["can_manage"] is True
-    leads = card(overview, "leads")
+    leads = card(overview, "marketing")
     assert leads["state"] == "addon" and leads["status"] == "off"
     assert leads["seat_cents_month"] == LEADS_SEAT and leads["monthly_cents"] == 0
     assert card(overview, "careers")["status"] == "included"
@@ -226,14 +241,14 @@ def test_subscribing_quotes_prorates_and_bills_with_the_plan(cloud):
     assert overview["addons_monthly_cents"] == 0
     cloud.clock.advance(days=15)
     owner = sign_in(cloud, org.owner)  # the session did not outlive the jump in time
-    status, quote = owner.call("POST", "/api/org/apps/leads/quote", {})
+    status, quote = owner.call("POST", "/api/org/apps/marketing/quote", {})
     assert status == 200
     assert quote["monthly_cents"] == 25 * LEADS_SEAT == 10000
     assert abs(quote["prorated_charge_cents"] - 5000) <= 100, quote
-    status, result = owner.call("POST", "/api/org/apps/leads/subscribe", {})
+    status, result = owner.call("POST", "/api/org/apps/marketing/subscribe", {})
     assert status == 200 and result["status"] == "active"
     assert result["prorated_charge_cents"] == quote["prorated_charge_cents"]
-    row = app_row(cloud, org.org_id, "leads")
+    row = app_row(cloud, org.org_id, "marketing")
     assert row["status"] == "active" and row["seats_at_start"] == 25
     assert "billing.app_subscribed" in audit_actions(cloud, org.org_id, "billing.")
     invoices = cloud.billing.invoices(org.owner)
@@ -244,17 +259,19 @@ def test_subscribing_quotes_prorates_and_bills_with_the_plan(cloud):
         if isinstance(proration["lines"], list)
         else json.loads(proration["lines"])
     )
-    assert lines[0]["app_id"] == "leads" and "Leads" in lines[0]["description"]
+    assert lines[0]["app_id"] == "marketing" and "Marketing" in lines[0]["description"]
     record = cloud.billing.standin.subscription_record(f"sub_{org.org_id[:8]}")
-    assert record["addons"] == [{"app_id": "leads", "seats": 25, "amount_cents": 10000}]
+    assert record["addons"] == [
+        {"app_id": "marketing", "seats": 25, "amount_cents": 10000}
+    ]
     assert record["amount_cents"] == 25 * seat_price(cloud, "team") + 10000
     assert record["prorate"] is True
     summary = cloud.billing.summary(org.org_id)
-    assert card(summary, "leads")["status"] == "active"
-    assert card(summary, "leads")["monthly_cents"] == 10000
+    assert card(summary, "marketing")["status"] == "active"
+    assert card(summary, "marketing")["monthly_cents"] == 10000
     assert summary["addons_monthly_cents"] == 10000
     assert summary["monthly_cents"] == 25 * seat_price(cloud, "team") + 10000
-    status, body = owner.call("POST", "/api/org/apps/leads/subscribe", {})
+    status, body = owner.call("POST", "/api/org/apps/marketing/subscribe", {})
     assert status == 409 and body["code"] == "already_subscribed"
     status, body = owner.call("POST", "/api/org/apps/careers/subscribe", {})
     assert status == 409 and body["code"] == "included"
@@ -265,12 +282,12 @@ def test_subscribing_quotes_prorates_and_bills_with_the_plan(cloud):
     assert status == 200
     record = cloud.billing.standin.subscription_record(f"sub_{org.org_id[:8]}")
     assert {a["app_id"]: a["amount_cents"] for a in record["addons"]} == {
-        "leads": 10000,
+        "marketing": 10000,
         "api": 25 * API_SEAT,
     }
     # the plan quote carries the add-ons along
     quote = cloud.billing.quote(org.org_id, "team", 25)
-    assert {line["app_id"] for line in quote["addons"]} == {"leads", "api"}
+    assert {line["app_id"] for line in quote["addons"]} == {"marketing", "api"}
     assert quote["monthly_cents"] == 25 * (
         seat_price(cloud, "team") + LEADS_SEAT + API_SEAT
     )
@@ -278,19 +295,19 @@ def test_subscribing_quotes_prorates_and_bills_with_the_plan(cloud):
     quote = cloud.billing.quote(org.org_id, "starter", 10)
     assert quote["dropped_apps"] == ["api"] and [
         line["app_id"] for line in quote["addons"]
-    ] == ["leads"]
+    ] == ["marketing"]
 
 
 def test_who_may_change_apps(cloud):
     org = build_org(cloud, plan="team", seats=25)
     billing = sign_in(cloud, org.billing)
     assert billing.call("GET", "/api/org/apps")[0] == 200
-    assert billing.call("POST", "/api/org/apps/leads/subscribe", {})[0] == 200
+    assert billing.call("POST", "/api/org/apps/marketing/subscribe", {})[0] == 200
     admin = sign_in(cloud, org.admin)
     status, data = admin.call("GET", "/api/org/apps")
     assert status == 200 and data["can_manage"] is False
     assert admin.call("POST", "/api/org/apps/api/subscribe", {})[0] == 403
-    assert admin.call("POST", "/api/org/apps/leads/unsubscribe", {})[0] == 403
+    assert admin.call("POST", "/api/org/apps/marketing/unsubscribe", {})[0] == 403
     assert sign_in(cloud, org.auditor).call("GET", "/api/org/apps")[0] == 200
     assert sign_in(cloud, org.candidate).call("GET", "/api/org/apps")[0] == 403
     assert (
@@ -308,35 +325,37 @@ def test_an_app_that_the_plan_does_not_sell_or_a_trial_cannot_be_bought(cloud):
         cloud.billing.subscribe_app(starter.owner, "api")
     trial = signup(cloud, "Trial Org", "owner@trial.test")
     with pytest.raises(Conflict) as caught:
-        cloud.billing.subscribe_app(trial["owner"], "leads")
+        cloud.billing.subscribe_app(trial["owner"], "marketing")
     assert caught.value.code == "included", "the trial already has every app"
 
 
 def test_unsubscribing_runs_to_the_period_end_and_keep_undoes_it(cloud):
     org = build_org(cloud, plan="team", seats=25)
     owner = sign_in(cloud, org.owner)
-    assert owner.call("POST", "/api/org/apps/leads/subscribe", {})[0] == 200
+    assert owner.call("POST", "/api/org/apps/marketing/subscribe", {})[0] == 200
     assert owner.call("POST", "/api/org/apps/api/subscribe", {})[0] == 200
     period_end = cloud.billing.subscription(org.org_id)["period_end"]
-    status, body = owner.call("POST", "/api/org/apps/leads/unsubscribe", {})
+    status, body = owner.call("POST", "/api/org/apps/marketing/unsubscribe", {})
     assert (
         status == 200
         and body["status"] == "cancelling"
         and body["effective_at"] == period_end
     )
     assert "billing.app_cancelled" in audit_actions(cloud, org.org_id, "billing.")
-    assert "leads" in apps_of(cloud, org.org_id), "it keeps working until then"
+    assert "marketing" in apps_of(cloud, org.org_id), "it keeps working until then"
     overview = owner.call("GET", "/api/org/apps")[1]
-    assert card(overview, "leads")["status"] == "cancelling"
-    assert card(overview, "leads")["effective_until"] == period_end
-    assert card(overview, "leads")["monthly_cents"] == 10000, (
+    assert card(overview, "marketing")["status"] == "cancelling"
+    assert card(overview, "marketing")["effective_until"] == period_end
+    assert card(overview, "marketing")["monthly_cents"] == 10000, (
         "still on the bill this period"
     )
-    status, body = owner.call("POST", "/api/org/apps/leads/keep", {})
+    status, body = owner.call("POST", "/api/org/apps/marketing/keep", {})
     assert status == 200 and body["status"] == "active"
-    assert card(owner.call("GET", "/api/org/apps")[1], "leads")["status"] == "active"
-    assert owner.call("POST", "/api/org/apps/leads/keep", {})[0] == 409
-    assert owner.call("POST", "/api/org/apps/leads/unsubscribe", {})[0] == 200
+    assert (
+        card(owner.call("GET", "/api/org/apps")[1], "marketing")["status"] == "active"
+    )
+    assert owner.call("POST", "/api/org/apps/marketing/keep", {})[0] == 409
+    assert owner.call("POST", "/api/org/apps/marketing/unsubscribe", {})[0] == 200
     assert (
         owner.call("POST", "/api/org/apps/careers/unsubscribe", {})[1]["code"]
         == "included"
@@ -344,7 +363,7 @@ def test_unsubscribing_runs_to_the_period_end_and_keep_undoes_it(cloud):
     cloud.clock.advance(seconds=31 * DAY)
     cloud.billing.process_due()
     owner = sign_in(cloud, org.owner)  # the session did not outlive the jump in time
-    row = app_row(cloud, org.org_id, "leads")
+    row = app_row(cloud, org.org_id, "marketing")
     assert row["status"] == "cancelled" and row["cancelled_at"]
     assert apps_of(cloud, org.org_id) == {"careers", "api"}
     status, body = sign_in(cloud, org.candidate).call("GET", "/api/leads/overview")
@@ -365,20 +384,20 @@ def test_unsubscribing_runs_to_the_period_end_and_keep_undoes_it(cloud):
     assert [a["app_id"] for a in record["addons"]] == ["api"], (
         "the provider's subscription follows at the period end"
     )
-    status, body = owner.call("POST", "/api/org/apps/leads/subscribe", {})
+    status, body = owner.call("POST", "/api/org/apps/marketing/subscribe", {})
     assert (
-        status == 200 and app_row(cloud, org.org_id, "leads")["status"] == "active"
+        status == 200 and app_row(cloud, org.org_id, "marketing")["status"] == "active"
     ), "an app can be turned on again"
 
 
 def test_seat_changes_re_price_the_add_ons(cloud):
     org = build_org(cloud, plan="team", seats=25)
-    cloud.billing.subscribe_app(org.owner, "leads")
+    cloud.billing.subscribe_app(org.owner, "marketing")
     quote = cloud.billing.quote(org.org_id, "team", 30)
     assert quote["addons"] == [
         {
-            "app_id": "leads",
-            "name": "Leads",
+            "app_id": "marketing",
+            "name": "Marketing",
             "seat_cents_month": LEADS_SEAT,
             "seats": 30,
             "amount_cents": 12000,
@@ -389,35 +408,35 @@ def test_seat_changes_re_price_the_add_ons(cloud):
     assert result["applied"] is True and result["dropped_apps"] == []
     record = cloud.billing.standin.subscription_record(f"sub_{org.org_id[:8]}")
     assert record["seats"] == 30 and record["addons"] == [
-        {"app_id": "leads", "seats": 30, "amount_cents": 12000}
+        {"app_id": "marketing", "seats": 30, "amount_cents": 12000}
     ]
     summary = cloud.billing.summary(org.org_id)
     assert summary["addons_monthly_cents"] == 12000
     assert (
-        card(summary, "leads")["seats"] == 30
-        and card(summary, "leads")["monthly_cents"] == 12000
+        card(summary, "marketing")["seats"] == 30
+        and card(summary, "marketing")["monthly_cents"] == 12000
     )
 
 
 def test_a_downgrade_to_a_plan_without_the_app_cancels_it(cloud):
     org = build_org(cloud, plan="team", seats=25)
-    cloud.billing.subscribe_app(org.owner, "leads")
+    cloud.billing.subscribe_app(org.owner, "marketing")
     cloud.billing.subscribe_app(org.owner, "api")
     result = cloud.billing.change_plan(org.owner, "starter", 10)
     assert result["scheduled"] is True and result["dropped_apps"] == ["api"]
-    assert apps_of(cloud, org.org_id) == {"careers", "leads", "api"}, (
+    assert apps_of(cloud, org.org_id) == {"careers", "marketing", "api"}, (
         "nothing changes until then"
     )
     cloud.clock.advance(seconds=31 * DAY)
     cloud.billing.process_due()
     assert cloud.billing.subscription(org.org_id)["plan_id"] == "starter"
     assert app_row(cloud, org.org_id, "api")["status"] == "cancelled"
-    assert app_row(cloud, org.org_id, "leads")["status"] == "active", (
-        "Leads is sold on Starter too"
+    assert app_row(cloud, org.org_id, "marketing")["status"] == "active", (
+        "Marketing is sold on Starter too"
     )
-    assert apps_of(cloud, org.org_id) == {"careers", "leads"}
+    assert apps_of(cloud, org.org_id) == {"careers", "marketing"}
     record = cloud.billing.standin.subscription_record(f"sub_{org.org_id[:8]}")
-    assert [a["app_id"] for a in record["addons"]] == ["leads"]
+    assert [a["app_id"] for a in record["addons"]] == ["marketing"]
     with cloud.db.read() as connection:
         notices = [
             dict(r)
@@ -426,7 +445,8 @@ def test_a_downgrade_to_a_plan_without_the_app_cancels_it(cloud):
             ).fetchall()
         ]
     assert any(
-        "API" in n["body"] and "not available" in n["body"].lower() for n in notices
+        "Developers" in n["body"] and "not available" in n["body"].lower()
+        for n in notices
     ), notices
     cancelled = [
         row
@@ -435,33 +455,37 @@ def test_a_downgrade_to_a_plan_without_the_app_cancels_it(cloud):
     ]
     assert cancelled and "Starter" in json.dumps(cancelled[0]["detail"])
     # an upgrade applies now and takes the add-ons with it
-    cloud.billing.subscribe_app(org.owner, "leads") if app_row(
-        cloud, org.org_id, "leads"
+    cloud.billing.subscribe_app(org.owner, "marketing") if app_row(
+        cloud, org.org_id, "marketing"
     )["status"] != "active" else None
     result = cloud.billing.change_plan(org.owner, "team", 25)
     assert result["applied"] is True
     record = cloud.billing.standin.subscription_record(f"sub_{org.org_id[:8]}")
-    assert record["addons"] == [{"app_id": "leads", "seats": 25, "amount_cents": 10000}]
+    assert record["addons"] == [
+        {"app_id": "marketing", "seats": 25, "amount_cents": 10000}
+    ]
 
 
 def test_cancelling_the_plan_takes_the_apps_with_it(cloud):
     org = build_org(cloud, plan="team", seats=25)
-    cloud.billing.subscribe_app(org.owner, "leads")
+    cloud.billing.subscribe_app(org.owner, "marketing")
     cloud.billing.cancel(org.owner)
-    assert app_row(cloud, org.org_id, "leads")["cancel_at_period_end"] == 1
-    assert card(cloud.billing.summary(org.org_id), "leads")["status"] == "cancelling"
+    assert app_row(cloud, org.org_id, "marketing")["cancel_at_period_end"] == 1
+    assert (
+        card(cloud.billing.summary(org.org_id), "marketing")["status"] == "cancelling"
+    )
     cloud.billing.reactivate(org.owner)
-    assert app_row(cloud, org.org_id, "leads")["cancel_at_period_end"] == 0
+    assert app_row(cloud, org.org_id, "marketing")["cancel_at_period_end"] == 0
     cloud.billing.cancel(org.owner)
     cloud.clock.advance(seconds=31 * DAY)
     cloud.billing.process_due()
     assert cloud.billing.subscription(org.org_id)["status"] == "cancelled"
-    assert app_row(cloud, org.org_id, "leads")["status"] == "cancelled"
+    assert app_row(cloud, org.org_id, "marketing")["status"] == "cancelled"
 
 
 def test_dunning_and_read_only_block_app_changes(cloud):
     org = build_org(cloud, plan="team", seats=25)
-    cloud.billing.subscribe_app(org.owner, "leads")
+    cloud.billing.subscribe_app(org.owner, "marketing")
     webhook(
         cloud,
         "invoice.payment_failed",
@@ -473,10 +497,10 @@ def test_dunning_and_read_only_block_app_changes(cloud):
     owner = sign_in(cloud, org.owner)
     status, body = owner.call("POST", "/api/org/apps/api/subscribe", {})
     assert status == 402 and body["code"] == "subscription_inactive", body
-    status, body = owner.call("POST", "/api/org/apps/leads/unsubscribe", {})
+    status, body = owner.call("POST", "/api/org/apps/marketing/unsubscribe", {})
     assert status == 402 and body["code"] == "subscription_inactive"
     assert owner.call("GET", "/api/org/apps")[0] == 200, "reading stays possible"
-    assert "leads" in apps_of(cloud, org.org_id), (
+    assert "marketing" in apps_of(cloud, org.org_id), (
         "what was bought keeps working while dunning runs"
     )
     cloud.clock.advance(days=15)
@@ -528,10 +552,10 @@ def test_an_operator_grants_and_revokes_an_app(cloud):
         owner.call("POST", "/api/org/apps/api/unsubscribe", {})[1]["code"]
         == "not_subscribed"
     )
-    assert owner.call("POST", "/api/org/apps/leads/subscribe", {})[0] == 200
+    assert owner.call("POST", "/api/org/apps/marketing/subscribe", {})[0] == 200
     status, body = operator.call(
         "PUT",
-        f"/api/platform/tenants/{starter.org_id}/apps/leads",
+        f"/api/platform/tenants/{starter.org_id}/apps/marketing",
         {"status": "granted"},
     )
     assert status == 409 and body["code"] == "already_subscribed"
@@ -541,7 +565,7 @@ def test_an_operator_grants_and_revokes_an_app(cloud):
         {"status": "revoked", "note": "contract ended"},
     )
     assert status == 200 and card(body, "api")["status"] == "unavailable"
-    assert apps_of(cloud, starter.org_id) == {"careers", "leads"}
+    assert apps_of(cloud, starter.org_id) == {"careers", "marketing"}
     assert "billing.app_revoked" in audit_actions(cloud, starter.org_id, "billing.")
     assert (
         operator.call(
@@ -600,20 +624,23 @@ def test_stripe_gets_one_subscription_item_per_add_on(stripe_cloud, stripe):  # 
             "UPDATE subscriptions SET billing_provider = 'stripe', billing_subscription_id = ?, billing_customer_id = 'cus_1' WHERE org_id = ?",
             (sub_id, org.org_id),
         )
-    app.billing.subscribe_app(org.owner, "leads")
+    app.billing.subscribe_app(org.owner, "marketing")
     [update] = stripe.find("POST", f"/v1/subscriptions/{sub_id}")
     params = update["params"]
     assert params["proration_behavior"] == "create_prorations"
-    assert params["metadata"]["apps"] == "leads" and params["metadata"]["seats"] == "25"
+    assert (
+        params["metadata"]["apps"] == "marketing"
+        and params["metadata"]["seats"] == "25"
+    )
     plan_item, addon = params["items"][0], params["items"][1]
     assert plan_item["id"].startswith("si_") and plan_item["quantity"] == "25"
-    assert addon["metadata"]["app_id"] == "leads" and addon["quantity"] == "25"
+    assert addon["metadata"]["app_id"] == "marketing" and addon["quantity"] == "25"
     assert addon["price_data"]["unit_amount"] == str(LEADS_SEAT)
     assert addon["price_data"]["recurring"]["interval"] == "month"
     assert addon["price_data"]["product"].startswith("prod_") and "id" not in addon
     products = [c["params"]["name"] for c in stripe.find("POST", "/v1/products")]
-    assert any("Leads" in name and "add-on" in name for name in products), products
-    app.billing.unsubscribe_app(org.owner, "leads")
+    assert any("Marketing" in name and "add-on" in name for name in products), products
+    app.billing.unsubscribe_app(org.owner, "marketing")
     app.clock.advance(seconds=31 * DAY)
     app.billing.process_due()
     updates = stripe.find("POST", f"/v1/subscriptions/{sub_id}")
@@ -698,8 +725,8 @@ def test_the_apps_page_subscribes_and_cancels_in_a_real_browser(served):
             context, page, problems = _open(
                 chromium, base, sign_in(app, org.owner), "#/org/apps"
             )
-            page.wait_for_selector(".ca-app[data-app=leads]", timeout=30000)
-            leads = page.locator(".ca-app[data-app=leads]")
+            page.wait_for_selector(".ca-app[data-app=marketing]", timeout=30000)
+            leads = page.locator(".ca-app[data-app=marketing]")
             assert leads.get_attribute("data-status") == "off"
             assert "$4.00 per candidate seat per month" in leads.inner_text()
             assert (
@@ -719,36 +746,36 @@ def test_the_apps_page_subscribes_and_cancels_in_a_real_browser(served):
             ), modal_text
             page.locator(".modal .actions button", has_text="Subscribe").click()
             page.wait_for_selector(
-                ".ca-app[data-app=leads][data-status=active]", timeout=30000
+                ".ca-app[data-app=marketing][data-status=active]", timeout=30000
             )
-            assert app_row(app, org.org_id, "leads")["status"] == "active"
+            assert app_row(app, org.org_id, "marketing")["status"] == "active"
             assert (
                 "$100.00 per month for 25 seats"
-                in page.locator(".ca-app[data-app=leads]").inner_text()
+                in page.locator(".ca-app[data-app=marketing]").inner_text()
             )
             page.locator(
-                ".ca-app[data-app=leads] button[data-action=unsubscribe]"
+                ".ca-app[data-app=marketing] button[data-action=unsubscribe]"
             ).click()
             page.wait_for_selector(".modal", timeout=10000)
             page.locator(
                 ".modal .actions button", has_text="Turn off at period end"
             ).click()
             page.wait_for_selector(
-                ".ca-app[data-app=leads][data-status=cancelling]", timeout=30000
+                ".ca-app[data-app=marketing][data-status=cancelling]", timeout=30000
             )
-            assert app_row(app, org.org_id, "leads")["cancel_at_period_end"] == 1
-            page.locator(".ca-app[data-app=leads] button[data-action=keep]").click()
+            assert app_row(app, org.org_id, "marketing")["cancel_at_period_end"] == 1
+            page.locator(".ca-app[data-app=marketing] button[data-action=keep]").click()
             page.wait_for_selector(
-                ".ca-app[data-app=leads][data-status=active]", timeout=30000
+                ".ca-app[data-app=marketing][data-status=active]", timeout=30000
             )
-            assert app_row(app, org.org_id, "leads")["cancel_at_period_end"] == 0
+            assert app_row(app, org.org_id, "marketing")["cancel_at_period_end"] == 0
             assert not problems, problems
             context.close()
             # an administrator reads the page without the buttons
             context, page, problems = _open(
                 chromium, base, sign_in(app, org.admin), "#/org/apps"
             )
-            page.wait_for_selector(".ca-app[data-app=leads]", timeout=30000)
+            page.wait_for_selector(".ca-app[data-app=marketing]", timeout=30000)
             assert page.locator(".ca-app button[data-action]").count() == 0
             assert (
                 "owner or billing contact"
@@ -766,7 +793,7 @@ def test_an_app_required_error_names_the_app_for_the_page(cloud):
         cloud.entitlements.require_app(org.org_id, "api")
     error = caught.value
     assert error.status == 402 and error.code == "app_required"
-    assert error.extra["app"] == "api" and error.extra["name"] == "API"
+    assert error.extra["app"] == "api" and error.extra["name"] == "Developers"
     assert error.extra["required_plan"] == "team" and "Team" in error.extra["plan_hint"]
     assert cloud.entitlements.require_app(org.org_id, "careers").has_app("careers")
     assert cloud.entitlements.require_app(org.org_id, "not-an-app") is not None, (

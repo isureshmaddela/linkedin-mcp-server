@@ -1,4 +1,10 @@
+import os
+
 import pytest
+
+os.environ.setdefault(
+    "AIRA_SUITE_STRICT", "1"
+)  # a broken industry app fails the tests, never hides
 
 from cloud_support import cloud  # noqa: F401  (the hosted-shell fixture, available to every test module)
 
@@ -126,3 +132,46 @@ def pytest_sessionfinish(session, exitstatus):  # noqa: ARG001
     if pg_support.enabled():
         pg_support.drop_created()
         pg_support.drop_template()
+
+
+@pytest.fixture(autouse=True)
+def _reset_public_link_index():
+    """A hosted test installs its organization index and public address for public links; the next test starts
+    from the single-user build's defaults (in production the two builds are separate processes)."""
+    yield
+    from aira import suite
+    from aira.suite import public
+
+    public.reset_index()
+    suite.set_public_origin(None)
+    suite.set_actor_resolver(None)
+    suite.set_app_filter(None)
+    from aira.suite import kit
+
+    kit.set_event_listener(None)
+
+
+@pytest.fixture(autouse=True)
+def _isolate_social_database(tmp_path):
+    """Social has one database per server, outside every account: a test never reaches the real one."""
+    from aira.suite.social import db as social_db
+
+    social_db.set_path(lambda: tmp_path / "social.sqlite3")
+    yield
+    social_db.reset_path()
+
+
+@pytest.fixture(autouse=True)
+def _isolate_videos(tmp_path, monkeypatch):
+    """Videos (and Ads) have one database and one media folder per server: a test never reaches the real ones."""
+    from aira.suite.videos import db as videos_db
+    from aira.suite.videos import media as videos_media
+
+    monkeypatch.setenv("AIRA_MEDIA_DIR", "")
+    videos_db.set_path(lambda: tmp_path / "videos.sqlite3")
+    videos_media.set_root(lambda: tmp_path / "media")
+    yield
+    videos_db.reset_path()
+    videos_media.reset_root()
+    videos_media.set_quota(None)
+    videos_media.show_paths = True

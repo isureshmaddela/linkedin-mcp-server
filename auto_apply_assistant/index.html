@@ -44,8 +44,17 @@
         <button id="menuBtn" class="btn ghost icon menu-btn" type="button" aria-label="Open navigation" aria-controls="sidebar" aria-expanded="false">
           <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
         </button>
+        <a id="homeBtn" class="btn ghost home-btn" href="#/today" aria-label="Home: Today" title="Home (Today)" hidden>
+          <svg viewBox="0 0 24 24"><path d="M3 11 12 4l9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-5h4v5"/></svg><span class="home-label">Home</span>
+        </a>
         <div class="crumbs" id="crumbs"><span>Dashboard</span></div>
         <div class="spacer"></div>
+        <button id="langBtn" class="btn ghost lang-btn" type="button" aria-haspopup="menu" title="Language" translate="no">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/></svg><span class="lang-name">English</span>
+        </button>
+        <button id="readAloudBtn" class="btn ghost read-btn" type="button" aria-label="Read this page aloud" aria-pressed="false" title="Read aloud" hidden>
+          <svg viewBox="0 0 24 24"><path d="M4 10v4h4l5 4V6L8 10z"/><path d="M16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/></svg><span class="read-label">Read aloud</span>
+        </button>
         <div class="status-strip" id="statusStrip" aria-live="polite"></div>
         <div class="topbar-menu">
           <button id="appSwitcherBtn" class="btn ghost icon app-switch" type="button" aria-label="Switch app" title="Aira apps" aria-haspopup="menu" aria-expanded="false" aria-controls="appSwitcher">
@@ -80,6 +89,7 @@
   <div id="overlay"></div>
   <div id="toasts" class="toasts" role="region" aria-live="polite" aria-label="Notifications"></div>
   <script src="/static/app.js"></script>
+  <script src="/static/i18n.js"></script>
   <script src="/static/views-jobs.js"></script>
   <script src="/static/views-applications.js"></script>
   <script src="/static/views-crm.js"></script>
@@ -94,6 +104,26 @@
   <script src="/static/views-leads.js"></script>
   <script src="/static/views-leads-outreach.js"></script>
   <script src="/static/views-widgets.js"></script>
+  <script src="/static/suite-kit.js"></script>
+  <script src="/static/views-hub.js"></script>
+  <script src="/static/views-studio.js"></script>
+  <script src="/static/views-bookings.js"></script>
+  <script src="/static/views-shop.js"></script>
+  <script src="/static/views-academy.js"></script>
+  <script src="/static/views-events.js"></script>
+  <script src="/static/views-marketing.js"></script>
+  <script src="/static/life.js"></script>
+  <script src="/static/views-family.js"></script>
+  <script src="/static/views-care.js"></script>
+  <script src="/static/views-learn.js"></script>
+  <script src="/static/views-play.js"></script>
+  <script src="/static/views-planner.js"></script>
+  <script src="/static/views-news.js"></script>
+  <script src="/static/views-service.js"></script>
+  <script src="/static/views-social.js"></script>
+  <script src="/static/views-developers.js"></script>
+  <script src="/static/views-videos.js"></script>
+  <script src="/static/views-ads.js"></script>
   <!--aira:cloud-->
   <script src="/static/account-link.js"></script>
 </body>

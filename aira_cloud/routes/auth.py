@@ -134,6 +134,8 @@ def me_payload(app: Any, principal: Principal) -> dict[str, Any]:
         payload["consent"] = app.tenancy.consent_state(
             principal.org_id, principal.member_id
         )
+    elif not principal.is_operator:
+        payload["personal_workspace"] = app.tenancy.personal_workspace(principal)
     return payload
 
 
@@ -328,6 +330,25 @@ def invite_accept(req: Req):  # noqa: ANN201
         {"ok": True, "role": result["role"], "me": me_payload(req.app, principal)},
         cookies=[session_cookie(req, result["token"])],
     )
+
+
+# ----------------------------------------------------------------------------- an owner's or admin's own workspace
+
+
+@cloud_route("GET", r"/api/workspace/own")
+def own_workspace(req: Req):  # noqa: ANN201
+    return 200, req.app.tenancy.personal_workspace(req.principal)
+
+
+@cloud_route("POST", r"/api/workspace/own", writes=True)
+def own_workspace_start(req: Req):  # noqa: ANN201
+    """An owner or admin starts using the apps themselves (one candidate seat)."""
+    return 201, req.app.tenancy.start_personal_workspace(req.principal)
+
+
+@cloud_route("DELETE", r"/api/workspace/own", writes=True)
+def own_workspace_end(req: Req):  # noqa: ANN201
+    return 200, req.app.tenancy.end_personal_workspace(req.principal)
 
 
 # ----------------------------------------------------------------------------- candidate self-service

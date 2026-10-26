@@ -12,6 +12,7 @@ import logging
 import statistics
 from typing import TYPE_CHECKING, Any
 
+from aira.apps import LEGACY_IDS, current_id
 from aira_cloud.config import DAY
 from aira_cloud.db import dumps, loads, many, new_id, one, platform_scope
 from aira_cloud.errors import Conflict, Forbidden, NotFound, ValidationFailed
@@ -356,6 +357,83 @@ class PlatformAdmin:
             target_id=flag,
             detail={"scope": scope_type, "scope_id": scope_id},
         )
+
+    # ------------------------------------------------------------------ app catalog
+
+    def list_apps(self, operator: Principal) -> list[dict[str, Any]]:
+        """Every app with its platform-wide switch and prices, and how many organizations pay for it or were granted it."""
+        self.app.authz.require(operator, "platform.tenants.read")
+        apps = self.app.app_settings.describe()
+        with platform_scope(), self.db.read() as connection:
+            counts: dict[tuple[str, str], int] = {
+                (r["app_id"], r["status"]): int(r["n"])
+                for r in many(
+                    connection,
+                    "SELECT app_id, status, COUNT(*) AS n FROM org_apps WHERE status IN ('active', 'granted') GROUP BY app_id, status",
+                )
+            }
+        for app in apps:
+            old_ids = [app["id"], *(k for k, v in LEGACY_IDS.items() if v == app["id"])]
+            app["paying"] = sum(counts.get((i, "active"), 0) for i in old_ids)
+            app["granted"] = sum(counts.get((i, "granted"), 0) for i in old_ids)
+        return apps
+
+    def update_app(
+        self,
+        operator: Principal,
+        app_id: str,
+        *,
+        enabled: bool | None = None,
+        prices: dict[str, Any] | None = None,
+        note: str = "",
+    ) -> dict[str, Any]:
+        """Switch an app on or off for every organization and/or change its seat price per plan."""
+        self.app.authz.require(operator, "platform.plans.manage")
+        before = next(
+            (
+                a
+                for a in self.app.app_settings.describe()
+                if a["id"] == current_id(app_id)
+            ),
+            None,
+        )
+        app = self.app.app_settings.update(
+            app_id, enabled=enabled, prices=prices, note=note, by=operator.operator_id
+        )
+        billing = self.app.billing.resync_app(app["id"])
+        self.app.platform_audit.record(
+            "app.settings_update",
+            operator=operator,
+            target_type="app",
+            target_id=app["id"],
+            detail={
+                "enabled": app["enabled"],
+                "was_enabled": before["enabled"] if before else True,
+                "prices": app["prices"],
+                "previous_prices": before["prices"] if before else {},
+                "note": note[:300],
+                "billing": billing,
+            },
+        )
+        return {**app, "billing": billing}
+
+    def reset_app(self, operator: Principal, app_id: str) -> dict[str, Any]:
+        """Back to the catalog's defaults: on for everyone, with the standard prices."""
+        self.app.authz.require(operator, "platform.plans.manage")
+        if not self.app.app_settings.reset(app_id):
+            raise NotFound("That app already uses the defaults.")
+        app = next(
+            a for a in self.app.app_settings.describe() if a["id"] == current_id(app_id)
+        )
+        billing = self.app.billing.resync_app(app["id"])
+        self.app.platform_audit.record(
+            "app.settings_reset",
+            operator=operator,
+            target_type="app",
+            target_id=app["id"],
+            detail={"billing": billing},
+        )
+        return {**app, "billing": billing}
 
     # ------------------------------------------------------------------ support access
 

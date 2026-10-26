@@ -167,11 +167,15 @@
   const NAV_DEFS = [
     { sub: "tenants", id: "ptenants", label: "Tenants", icon: "dashboard", key: "t", quick: true },
     { sub: "plans", id: "pplans", label: "Plans", icon: "settings", key: "l" },
+    { sub: "apps", id: "papps", label: "Apps", icon: "hub", key: "p" },
     { sub: "flags", id: "pflags", label: "Feature flags", icon: "airaapi", key: "f" },
     { sub: "support", id: "psupport", label: "Support access", icon: "recruiters", key: "u", quick: true },
     { sub: "announcements", id: "pannounce", label: "Announcements", icon: "more", key: "n" },
     { sub: "health", id: "phealth", label: "Health", icon: "analytics", key: "h", quick: true },
     { sub: "audit", id: "paudit", label: "Audit", icon: "documents", key: "a", quick: true },
+    { sub: "moderation", id: "pmoderation", label: "Social moderation", icon: "recruiters", key: "m" },
+    { sub: "videos", id: "pvideos", label: "Videos moderation", icon: "videos", key: "v" },
+    { sub: "creators", id: "pcreators", label: "Creators & ads", icon: "ads", key: "e" },
     { sub: "abuse", id: "pabuse", label: "Abuse and compliance", icon: "careers", key: "b", admin: true },
     { sub: "operators", id: "poperators", label: "Operators", icon: "recruiters", key: "o", admin: true },
   ];
@@ -306,7 +310,8 @@
   };
 
   async function tenantDetail(stage, orgId) {
-    const [t, inv] = await Promise.all([api(`/api/platform/tenants/${orgId}`), api(`/api/platform/tenants/${orgId}/invoices`, { silent: true }).catch(() => ({ invoices: [] }))]);
+    const [t, inv, appsData] = await Promise.all([api(`/api/platform/tenants/${orgId}`), api(`/api/platform/tenants/${orgId}/invoices`, { silent: true }).catch(() => ({ invoices: [] })), api(`/api/platform/tenants/${orgId}/apps`, { silent: true }).catch(() => ({ apps: [] }))]);
+    const tenantApps = appsData.apps || [];
     const b = t.billing;
     const reload = () => Aira.router.render();
     const done = (text) => { Aira.toast(`${text} Recorded in the platform audit as ${P.me.email}.`, "success", { timeout: 7000 }); reload(); };
@@ -322,6 +327,7 @@
     act("Clear rate limit", async () => { await post("rate-limit", {}, "DELETE"); done("Rate limit cleared."); }, { show: t.flags.includes("rate_limited") });
     act("Extend trial", () => formModal({ title: "Extend the trial", fields: [{ name: "days", label: "Days (1 to 90)", type: "number", value: 14, min: 1, max: 90 }], submit: "Extend", onSubmit: async (v) => { const r = await post("extend-trial", v); done(`Trial now ends ${fmt.date(r.trial_end)}.`); } }), { show: b.plan_id === "trial" });
     act("Issue credit", () => formModal({ title: "Issue a credit", fields: [{ name: "amount", label: "Amount (USD)", type: "number", value: 50, min: 1, step: "0.01" }, { name: "reason", label: "Reason", type: "textarea", rows: 2 }], submit: "Issue credit", onSubmit: async (v) => { if (!v.amount || v.amount <= 0) throw new Error("Enter an amount."); await post("credit", { amount_cents: Math.round(v.amount * 100), reason: v.reason }); done(`Credit of ${dollars(Math.round(v.amount * 100))} issued.`); } }));
+    act("Set subscription", () => subscriptionForm(t, tenantApps, post, done));
     act("Activate Enterprise", () => enterpriseForm(t, post, done));
     act("Reconcile billing", async () => { const r = await post("reconcile"); Aira.modal({ title: "Reconciliation", body: h("div", {}, ui.kv([["Local state", r.local_status], ["Remote state", r.remote_status || "n/a"], ["Provider", r.provider || "none"], ["In sync", r.in_sync === undefined ? "unknown" : r.in_sync ? "Yes" : "No — investigate"], ["Error", r.error || ""]])), actions: [{ label: "Close", kind: "ghost" }] }); reload(); });
     act("Request support access", () => formModal({ title: `Ask ${t.name} for support access`, intro: "The organization's owner must approve. Access lasts at most 24 hours, shows a banner to the organization and is audited.", fields: [{ name: "reason", label: "Reason (the owner sees it)", type: "textarea", rows: 3 }, { name: "role", label: "Access", type: "select", options: [["auditor", "Read-only (auditor)"], ["admin", "With administrator rights"]] }], submit: "Send request", onSubmit: async (v) => { if (!v.reason) throw new Error("Give a reason."); await post("support-request", v); done("Support access requested."); } }), { admin: false });
@@ -344,11 +350,54 @@
       h("div", { class: "grid cols-2" },
         section("Billing", ui.kv([["State", b.status.replace("_", " ")], ["Provider", b.provider || "none"], ["Pending change", b.pending ? `${titleCase(b.pending.plan_id)} (${b.pending.seats} seats) on ${fmt.date(b.pending.effective_at)}` : ""], ["Past due since", b.past_due_since ? ts(b.past_due_since) : ""], ["Read-only since", b.read_only_at ? ts(b.read_only_at) : ""], ["Deletion scheduled", b.deletion_scheduled_at ? ts(b.deletion_scheduled_at) : ""], ["Export until", b.export_until ? ts(b.export_until) : ""], ["Over limits", (b.over_limits || []).join(", ")]])),
         section("Usage this month", usage.length ? ui.kv(usage) : h("p", { class: "muted", text: "No usage yet." }))),
+      section("Apps", h("p", { class: "muted", text: "What this account can open. Included apps come with the plan; an add-on is either paid by the organization or granted here (no charge)." }), appsTable(tenantApps, orgId, done)),
       section("Policy", ui.kv(Object.entries(t.policy || {}).map(([k, v]) => [titleCase(k), Array.isArray(v) ? v.join(", ") || "none" : String(v)]))),
       section("Invoices", table(["Date", "Kind", "#Amount", "Status", ""], invoices, "No invoices.")),
       section("Support access", table(["Requested", "Role", "Status", "Reason", "Expires"], grants, "No support access requested.")),
       section("Operator actions on this tenant", table(["When", "Operator", "Action", "Detail"], audit, "No operator has acted on this tenant.")),
     );
+  }
+
+  const APP_STATUS_LEVEL = { included: "ok", active: "ok", granted: "ok", cancelling: "warn", off: "", unavailable: "danger" };
+  function appsTable(apps, orgId, done) {
+    const rows = apps.map((a) => {
+      const canGrant = isAdmin() && (a.status === "off" || a.status === "unavailable");
+      const canRevoke = isAdmin() && a.status === "granted";
+      const toggle = canGrant || canRevoke ? h("button", { type: "button", class: `btn sm ${canRevoke ? "danger secondary" : "secondary"}`, text: canRevoke ? "Take back" : "Grant", onclick: async (event) => {
+        await Aira.withBusy(event.currentTarget, async () => {
+          await api(`/api/platform/tenants/${orgId}/apps/${a.id}`, { method: "PUT", body: { status: canRevoke ? "revoked" : "granted", note: "set from the admin console" } });
+          done(canRevoke ? `${a.name} grant taken back.` : `${a.name} granted.`);
+        });
+      } }) : null;
+      return h("tr", {}, td(h("strong", { text: a.name })), td(a.category === "industry" ? a.industry || "Business" : a.category === "life" ? "Everyone, every day" : "Core"), td(chip(a.status, APP_STATUS_LEVEL[a.status] || "")), td(a.seat_cents_month === null ? "not on this plan" : a.seat_cents_month ? `${dollars(a.seat_cents_month)} / seat` : "included", "num"), td(a.monthly_cents ? dollars(a.monthly_cents) : "—", "num"), td(toggle || ""));
+    });
+    return table(["App", "For", "Status", "#Price", "#Monthly", ""], rows, "No apps.");
+  }
+
+  // The superadmin sets a subscription the customer bought outside the product (an invoice, a transfer, a contract).
+  function subscriptionForm(t, apps, post, done) {
+    const b = t.billing;
+    const addons = apps.filter((a) => a.state !== "included" || a.status === "granted");
+    formModal({
+      title: `Set ${t.name}'s subscription`,
+      intro: "Use when the customer paid outside the product. The plan becomes active for the months you choose, with the seats you set. Ticked apps are granted at no extra charge; apps the organization pays for itself stay as they are.",
+      wide: true,
+      fields: [
+        { name: "plan_id", label: "Plan", type: "select", options: [["starter", "Starter"], ["team", "Team"], ["enterprise", "Enterprise"]], value: ["starter", "team", "enterprise"].includes(b.plan_id) ? b.plan_id : "team" },
+        { name: "seats", label: "Candidate seats", type: "number", value: Math.max(b.candidate_seats || 0, 5), min: 1, max: 100000 },
+        { name: "months", label: "Paid for (months)", type: "number", value: 12, min: 1, max: 36 },
+        ...addons.map((a) => ({ name: `app_${a.id}`, label: `${a.name}${a.status === "active" ? " (paid by the organization)" : ""}`, type: "checkbox", value: ["granted", "active", "cancelling"].includes(a.status) })),
+        { name: "note", label: "Note (invoice number, contract)", type: "textarea", rows: 2 },
+      ],
+      submit: "Set subscription",
+      onSubmit: async (v) => {
+        if (!v.seats || v.seats < 1) throw new Error("Enter the number of seats.");
+        const chosen = {};
+        for (const a of addons) chosen[a.id] = !!v[`app_${a.id}`];
+        const r = await post("subscription", { plan_id: v.plan_id, seats: v.seats, months: v.months, apps: chosen, note: v.note });
+        done(`Subscription set: ${titleCase(r.subscription.plan_id)}, ${r.subscription.candidate_seats} seats.`);
+      },
+    });
   }
 
   const tile = (label, value, sub) => h("div", { class: "stat" }, h("span", { class: "label", text: label }), h("span", { class: "value", text: value }), sub ? h("span", { class: "sub", text: sub }) : null);
@@ -401,6 +450,71 @@
     });
     put(stage, pageHead("Plans", "Entitlements and prices. A change publishes a new version: new subscriptions use it, existing ones keep theirs until a migration moves them."), readonlyNote(), ...cards);
   };
+
+  // ---------------------------------------------------------------------------
+  // Apps: switched on or off for everyone, and seat prices per plan
+  // ---------------------------------------------------------------------------
+  const APP_PLANS = [["starter", "Starter"], ["team", "Team"], ["enterprise", "Enterprise"]];
+  const APP_GROUPS = { core: "Core", industry: "Business", life: "Everyday" };
+  const priceText = (cents) => (cents == null ? "Not offered" : cents === 0 ? "Included" : `${dollars(cents)} / seat`);
+
+  SCREENS.apps = async (stage) => {
+    const { apps } = await api("/api/platform/apps");
+    const saved = (verb, app) => {
+      const b = app.billing || {};
+      Aira.toast(`${app.name} ${verb}.${b.organizations ? ` ${b.synced} of ${b.organizations} paying subscriptions updated${b.failed ? `; ${b.failed} failed: reconcile them from the tenant page` : ""}.` : ""}`, b.failed ? "error" : "success");
+      Aira.router.render();
+    };
+    const save = (app, body) => api(`/api/platform/apps/${app.id}`, { method: "PUT", body });
+    const rows = apps.map((app) => {
+      const cells = APP_PLANS.map(([plan]) => {
+        if (!app.priced) return td(plan === "starter" ? "Part of every plan" : "", "muted");
+        const changed = app.changed_plans.includes(plan);
+        return td(h("div", {}, h("span", { text: priceText(app.prices[plan]) }), changed ? h("div", { class: "muted", text: `was ${priceText(app.default_prices[plan])}` }) : null), changed ? "cp-changed" : "");
+      });
+      const actions = !isAdmin() || !app.priced ? null : h("div", { class: "btn-row" },
+        h("button", { type: "button", class: "btn sm secondary", text: "Prices", onclick: () => appPriceForm(app, save, saved) }),
+        app.enabled
+          ? h("button", { type: "button", class: "btn sm danger secondary", text: "Switch off", onclick: () => formModal({ title: `Switch off ${app.name} for every organization?`, intro: `Within a minute nobody can open it, including trials, Enterprise and grants${app.paying ? `, and the organizations paying for it (${app.paying}) stop being billed for it from their next period` : ""}. Their data and choices are kept; switching it back on restores them.`, fields: [{ name: "note", label: "Reason (kept in the platform audit log)", type: "textarea", rows: 2 }], submit: "Switch off", danger: true, onSubmit: async (v) => { if (!v.note) throw new Error("Give a reason."); saved("is off for everyone", await save(app, { enabled: false, note: v.note })); } }) })
+          : h("button", { type: "button", class: "btn sm", text: "Switch on", onclick: async () => saved("is on again", await save(app, { enabled: true, note: "switched back on" })) }),
+        !app.enabled || app.changed_plans.length ? h("button", { type: "button", class: "btn sm ghost", text: "Reset", onclick: async () => { if (await Aira.confirm({ title: `Reset ${app.name} to the defaults?`, message: "It is on for everyone with the standard prices; paying subscriptions move to them from their next period.", confirmLabel: "Reset" })) saved("is back to the defaults", await api(`/api/platform/apps/${app.id}`, { method: "DELETE" })); } }) : null);
+      return h("tr", { class: app.enabled ? "" : "cp-off" },
+        td(h("div", {}, h("strong", { text: app.name }), h("div", { class: "muted", text: `${APP_GROUPS[app.category] || titleCase(app.category)}${app.note && !app.enabled ? ` · ${app.note}` : ""}` }))),
+        td(app.enabled ? chip("on", "ok") : chip("OFF for everyone", "danger")),
+        ...cells,
+        td(app.priced ? `${app.paying} paying · ${app.granted} granted` : "everyone", "num"),
+        td(app.updated_at ? fmt.ago(app.updated_at) : "defaults"),
+        td(actions));
+    });
+    put(stage, pageHead("Apps", "Switch an app off for every organization, or change what it costs per candidate seat on each plan. Quotes and the Apps page use a new price at once; paying subscriptions move to it from their next billing period. The trial always has every app that is on."), readonlyNote(),
+      section(null, table(["App", "For everyone", "Starter", "Team", "Enterprise", "#Organizations", "Changed", ""], rows)));
+  };
+
+  function appPriceForm(app, save, saved) {
+    const fields = [];
+    for (const [plan, label] of APP_PLANS) {
+      const cents = app.prices[plan];
+      const fallback = app.default_prices[plan] || app.prices.team || 500;
+      fields.push({ name: `${plan}_mode`, label: `${label}`, type: "select", value: cents == null ? "none" : cents === 0 ? "included" : "addon", options: [["addon", "Sold per seat"], ["included", "Included in the plan"], ["none", "Not offered"]] });
+      fields.push({ name: `${plan}_price`, label: `${label} price per seat per month (USD)`, type: "number", min: 0.01, max: 1000, step: "0.01", value: ((cents || fallback) / 100).toFixed(2), hint: `Default: ${priceText(app.default_prices[plan])}` });
+    }
+    fields.push({ name: "note", label: "Note (kept in the platform audit log)", type: "textarea", rows: 2 });
+    formModal({ title: `${app.name} prices`, intro: `Sold per seat is billed with the plan for every candidate seat. Included gives the app to every organization on that plan at no charge; Not offered hides it there (an operator can still grant it). ${app.paying ? `Paying organizations (${app.paying}) move to new prices from their next billing period.` : "No organization pays for it yet."}`, fields, submit: "Save prices", wide: true, onSubmit: async (v) => {
+      const prices = {};
+      for (const [plan, label] of APP_PLANS) {
+        const mode = v[`${plan}_mode`];
+        if (mode === "none") prices[plan] = null;
+        else if (mode === "included") prices[plan] = 0;
+        else {
+          const amount = v[`${plan}_price`];
+          if (amount == null || !(amount > 0) || amount > 1000) throw new Error(`Enter a ${label} price between $0.01 and $1,000.`);
+          prices[plan] = Math.round(amount * 100);
+        }
+      }
+      if (!APP_PLANS.some(([plan]) => prices[plan] !== app.prices[plan])) throw new Error("Nothing changed.");
+      saved("prices saved", await save(app, { prices, note: v.note }));
+    } });
+  }
 
   function planFormState(plan) {
     const e = plan.entitlements, p = plan.pricing, o = p.overage || {};
@@ -581,6 +695,108 @@
     } catch { return; }
     if (!P.active) renderSupportBar();
   });
+
+  // ---------------------------------------------------------------------------
+  // Social moderation (one network for the whole platform, so its reports are Aira's)
+  // ---------------------------------------------------------------------------
+  SCREENS.moderation = async (stage) => {
+    const status = P.modStatus || "open";
+    const { reports, blocklist } = await api(`/api/platform/social/reports?status=${status}`);
+    const who = (person) => (person ? `${person.display_name || ""}${person.handle ? ` @${person.handle}` : ""}` : "—");
+    const act = async (report, action) => {
+      await api(`/api/platform/social/reports/${report.id}`, { method: "POST", body: { action } });
+      Aira.toast(action === "dismiss" ? "Report dismissed." : action === "hide" ? "Hidden for everyone." : "Account suspended.", "success");
+      Aira.router.render();
+    };
+    const buttons = (r) => status !== "open" ? chip(r.action || r.status) : h("div", { class: "btn-row" },
+      r.target_type === "account" ? null : h("button", { type: "button", class: "btn sm secondary", text: "Hide", onclick: () => act(r, "hide") }),
+      r.author ? h("button", { type: "button", class: "btn sm danger secondary", text: "Suspend author", onclick: () => { if (confirm(`Suspend ${who(r.author)} on Social?`)) act(r, "suspend"); } }) : null,
+      h("button", { type: "button", class: "btn sm secondary", text: "Dismiss", onclick: () => act(r, "dismiss") }));
+    const rows = reports.map((r) => h("tr", {}, td(ts(Date.parse(r.created_at) / 1000 || r.created_at)), td(chip(r.target_type)), td(h("strong", { text: r.reason || "reported" })), td(h("div", { class: "cp-preview", text: r.preview || "(nothing to preview)" })), td(who(r.author)), td(who(r.reporter)), td(buttons(r))));
+    const filter = h("div", { class: "btn-row" }, ...["open", "resolved", "dismissed"].map((name) => h("button", { type: "button", class: `btn sm ${name === status ? "" : "secondary"}`, text: titleCase(name), onclick: () => { P.modStatus = name; Aira.router.render(); } })));
+    const editWords = () => formModal({ title: "Blocked words", intro: "These are masked with asterisks in posts, comments and messages. One word or phrase per line (up to 40 characters).", fields: [{ name: "words", label: "Words", type: "textarea", rows: 10, value: (blocklist || []).join(String.fromCharCode(10)) }], onSubmit: async (v) => {
+      await api("/api/platform/social/blocklist", { method: "PUT", body: { words: String(v.words || "").split(/[\r\n]+/).map((w) => w.trim()).filter(Boolean) } });
+      Aira.toast("Blocked words saved.", "success");
+      Aira.router.render();
+    } });
+    put(stage, pageHead("Social moderation", "Reports from everyone on Aira Social. Hide what breaks the rules, suspend people who keep doing it, dismiss the rest. Every action is in the platform audit log.", h("button", { type: "button", class: "btn secondary", text: `Blocked words (${(blocklist || []).length})`, onclick: editWords })),
+      section("", filter, table(["Reported", "What", "Reason", "Content", "Author", "Reported by", ""], rows, status === "open" ? "Nothing to review. Reports appear here when someone flags a post, comment, message, story or profile." : `No ${status} reports.`)));
+  };
+
+  // ---------------------------------------------------------------------------
+  // Videos moderation (one catalog for the whole platform: reports and copyright notices are Aira's)
+  // ---------------------------------------------------------------------------
+  const NOTICE_LABEL = { received: "Received", taken_down: "Taken down", rejected: "Rejected", counter_filed: "Counter-notice", restored: "Back up", upheld: "Kept down" };
+  SCREENS.videos = async (stage) => {
+    const status = P.videoStatus || "open";
+    const [{ reports }, { notices }] = await Promise.all([api(`/api/platform/videos/reports?status=${status}`), api("/api/platform/videos/copyright")]);
+    const who = (channel) => (channel ? channel.name : "—");
+    const act = async (report, action) => {
+      await api(`/api/platform/videos/reports/${report.id}`, { method: "POST", body: { action } });
+      Aira.toast({ hide: "Hidden for everyone.", restore: "Restored.", suspend: "Channel suspended.", dismiss: "Report dismissed." }[action], "success");
+      Aira.router.render();
+    };
+    const buttons = (r) => status !== "open" ? chip(r.action || r.status) : h("div", { class: "btn-row" },
+      r.target_type === "channel" ? null : h("button", { type: "button", class: "btn sm secondary", text: r.hidden ? "Restore" : "Hide", onclick: () => act(r, r.hidden ? "restore" : "hide") }),
+      r.author ? h("button", { type: "button", class: "btn sm danger secondary", text: "Suspend channel", onclick: () => { if (confirm(`Suspend ${who(r.author)} on Videos?`)) act(r, "suspend"); } }) : null,
+      h("button", { type: "button", class: "btn sm secondary", text: "Dismiss", onclick: () => act(r, "dismiss") }));
+    const rows = reports.map((r) => h("tr", {}, td(ts(Date.parse(r.created_at) / 1000 || r.created_at)), td(chip(r.target_type)), td(h("strong", { text: r.reason || "reported" })), td(h("div", { class: "cp-preview", text: r.preview || "(nothing to preview)" })), td(who(r.author)), td(who(r.reporter)), td(buttons(r))));
+    const filter = h("div", { class: "btn-row" }, ...["open", "resolved", "dismissed"].map((name) => h("button", { type: "button", class: `btn sm ${name === status ? "" : "secondary"}`, text: titleCase(name), onclick: () => { P.videoStatus = name; Aira.router.render(); } })));
+    const decide = (notice, action) => formModal({ title: { takedown: "Take the video down", reject: "Reject the notice", restore: "Put the video back", uphold: "Keep the video down" }[action], intro: `${notice.video.title}: claimed by ${notice.claimant_name}${notice.claimant_organization ? ` for ${notice.claimant_organization}` : ""} (${notice.claimant_email}).`, fields: [{ name: "note", label: "Note (the uploader sees it)", type: "textarea", rows: 2 }], submit: "Confirm", danger: action === "takedown" || action === "uphold", onSubmit: async (v) => {
+      await api(`/api/platform/videos/copyright/${notice.id}`, { method: "POST", body: { action, note: v.note || "" } });
+      Aira.toast("Done.", "success");
+      Aira.router.render();
+    } });
+    const noticeRows = notices.map((n) => h("tr", {}, td(ts(Date.parse(n.created_at) / 1000 || n.created_at)), td(h("strong", { text: n.video.title })), td(`${n.claimant_name} · ${n.claimant_email}`), td(h("div", { class: "cp-preview", text: n.work })), td(n.counter_text ? h("div", { class: "cp-preview", text: `${n.counter_name}: ${n.counter_text}` }) : "—"), td(`${who(n.channel)}${n.strikes ? ` (${n.strikes} strikes)` : ""}`), td(chip(NOTICE_LABEL[n.status] || n.status, n.status === "taken_down" || n.status === "upheld" ? "danger" : n.status === "received" || n.status === "counter_filed" ? "warn" : "")),
+      td(h("div", { class: "btn-row" },
+        n.status === "received" ? h("button", { type: "button", class: "btn sm danger secondary", text: "Take down", onclick: () => decide(n, "takedown") }) : null,
+        n.status === "received" ? h("button", { type: "button", class: "btn sm secondary", text: "Reject", onclick: () => decide(n, "reject") }) : null,
+        n.status === "counter_filed" || n.status === "taken_down" ? h("button", { type: "button", class: "btn sm secondary", text: "Put back", onclick: () => decide(n, "restore") }) : null,
+        n.status === "counter_filed" ? h("button", { type: "button", class: "btn sm danger secondary", text: "Keep down", onclick: () => decide(n, "uphold") }) : null))));
+    put(stage, pageHead("Videos moderation", "Reports from everyone on Aira Videos, and copyright notices from the public form. Hide what breaks the rules, suspend channels that keep doing it, take down copied work and handle counter-notices. Every action is in the platform audit log."),
+      section("Reports", filter, table(["Reported", "What", "Reason", "Content", "Channel", "Reported by", ""], rows, status === "open" ? "Nothing to review. Reports appear here when someone flags a video, comment or channel." : `No ${status} reports.`)),
+      section("Copyright notices", h("p", { class: "muted", text: `Anyone can send one from ${location.origin}/videos/copyright. A takedown is a strike for 90 days; three stop a channel uploading.` }), table(["Received", "Video", "Claimant", "Their work", "Counter-notice", "Channel", "Status", ""], noticeRows, "No copyright notices.")));
+  };
+
+  // ---------------------------------------------------------------------------
+  // Creators & ads (the books, ad review, payouts; money changes are platform admins')
+  // ---------------------------------------------------------------------------
+  const micros = (value) => { const n = Number(value || 0) / 1e6; return n > 0 && n < 0.01 ? `$${n.toFixed(4)}` : dollars(Math.round(n * 100)); };
+  SCREENS.creators = async (stage) => {
+    const [overview, review] = await Promise.all([api("/api/platform/ads/overview"), api("/api/platform/ads/review")]);
+    const t = overview.totals, money = overview.can_manage_money;
+    const kpi = (label, value, hint) => h("div", { class: "suite-kpi" }, h("span", { class: "suite-kpi-label", text: label }), h("strong", { class: "suite-kpi-value", text: value }), hint ? h("span", { class: "suite-kpi-hint", text: hint }) : null);
+    const kpis = h("div", { class: "suite-kpis" },
+      kpi("Gross ad revenue", micros(t.gross_micros), "what advertisers were charged"),
+      kpi("Creator earnings", micros(t.creators_micros), `${t.settings.revenue_share_percent}% share`),
+      kpi("Platform revenue", micros(t.platform_micros), "what Aira keeps"),
+      kpi("Estimated, not yet confirmed", micros(t.estimated_micros)),
+      kpi("Payouts waiting", micros(t.requested_micros), `${t.payouts_waiting} requests`),
+      kpi("Paid to creators", micros(t.paid_micros)),
+      kpi("Refunded for invalid traffic", micros(t.refunded_micros)),
+      kpi("Advertiser balances", micros(t.balances_micros), `${micros(t.topped_up_micros)} topped up in all`));
+    const settings = money ? h("button", { type: "button", class: "btn secondary", text: "Share and minimum payout", onclick: () => formModal({ title: "Creators' share and payouts", intro: "The share applies to charges from now on; earnings already credited keep theirs.", fields: [{ name: "share", label: "Creators' share of each ad (percent, 0 to 90)", type: "number", min: 0, max: 90, value: t.settings.revenue_share_percent }, { name: "minimum", label: "Smallest payout (USD)", type: "number", min: 1, max: 1000, step: "0.01", value: (t.settings.min_payout_micros / 1e6).toFixed(2) }], onSubmit: async (v) => {
+      await api("/api/platform/ads/settings", { method: "PUT", body: { revenue_share_percent: Number(v.share), min_payout_cents: Math.round(Number(v.minimum) * 100) } });
+      Aira.toast("Saved.", "success");
+      Aira.router.render();
+    } }) }) : null;
+    const reviewRows = review.creatives.map((c) => h("tr", {}, td(h("div", {}, h("strong", { text: c.headline }), h("div", { class: "muted", text: `${c.kind_label} · ${c.cta}${c.body ? ` · ${c.body}` : ""}` }))), td(c.advertiser), td(c.mime.startsWith("video/") ? h("video", { src: c.media_url, controls: true, muted: true, preload: "metadata", style: { maxWidth: "220px", maxHeight: "140px" }, "aria-label": c.headline }) : h("img", { src: c.media_url, alt: c.headline, style: { maxWidth: "160px", maxHeight: "120px" } })), td(h("div", {}, h("div", { text: c.campaign.landing_url }), h("div", { class: "muted", text: `${c.campaign.family_safe ? "says family-safe · " : ""}${c.campaign.allow_mature ? "on adult videos too · " : ""}${(c.campaign.countries || []).join(", ") || "all countries"}` }))),
+      td(h("div", { class: "btn-row" },
+        h("button", { type: "button", class: "btn sm", text: "Approve", onclick: async () => { await api(`/api/platform/ads/creatives/${c.id}/review`, { method: "POST", body: { decision: "approve" } }); Aira.toast("Approved: it can run now.", "success"); Aira.router.render(); } }),
+        h("button", { type: "button", class: "btn sm danger secondary", text: "Reject", onclick: () => formModal({ title: "Reject this ad", fields: [{ name: "note", label: "What the advertiser must change", type: "textarea", rows: 3 }], submit: "Reject", danger: true, onSubmit: async (v) => { if (!v.note) throw new Error("Tell the advertiser why."); await api(`/api/platform/ads/creatives/${c.id}/review`, { method: "POST", body: { decision: "reject", note: v.note } }); Aira.router.render(); } }) })))));
+    const payoutRows = overview.payouts.map((p) => h("tr", {}, td(ts(Date.parse(p.requested_at) / 1000 || p.requested_at)), td(p.channel ? p.channel.name : "Removed"), td(micros(p.amount_micros), "num"), td(h("div", { class: "cp-preview", text: p.details })), td(micros((p.balances || {}).payable_micros), "num"),
+      td(money ? h("div", { class: "btn-row" },
+        h("button", { type: "button", class: "btn sm", text: "Mark paid", onclick: () => formModal({ title: `Paid ${micros(p.amount_micros)}?`, intro: "Pay it outside Aira (bank transfer, UPI), then give the reference here. The creator is told.", fields: [{ name: "reference", label: "Payment reference" }], submit: "Mark paid", onSubmit: async (v) => { if (!v.reference) throw new Error("Give the payment reference."); await api(`/api/platform/ads/payouts/${p.id}`, { method: "POST", body: { action: "paid", reference: v.reference } }); Aira.router.render(); } }) }),
+        h("button", { type: "button", class: "btn sm secondary", text: "Decline", onclick: () => formModal({ title: "Decline this payout", fields: [{ name: "note", label: "Why (the creator sees it)", type: "textarea", rows: 2 }], submit: "Decline", danger: true, onSubmit: async (v) => { if (!v.note) throw new Error("Say why."); await api(`/api/platform/ads/payouts/${p.id}`, { method: "POST", body: { action: "reject", note: v.note } }); Aira.router.render(); } }) })) : null)));
+    const monthRows = t.months.map((m) => h("tr", {}, td(m.month), td(micros(m.gross_micros), "num"), td(micros(m.creators_micros), "num"), td(micros(m.platform_micros), "num"), td(String(m.impressions), "num"), td(String(m.invalid), "num"),
+      td(m.closed ? chip("closed", "ok") : money ? h("button", { type: "button", class: "btn sm secondary", text: "Close month", onclick: async () => { if (await Aira.confirm({ title: `Close ${m.month}?`, message: "Its traffic is reviewed once more (too many ads from one viewer to one channel in a day are refunded), then creators' earnings are confirmed and can be paid.", confirmLabel: "Close month" })) { const r = await api("/api/platform/ads/close-month", { method: "POST", body: { month: m.month } }); Aira.toast(`${r.month} closed: ${r.invalid} impressions refunded.`, "success"); Aira.router.render(); } } }) : chip("open"))));
+    const clawback = money ? h("button", { type: "button", class: "btn secondary danger", text: "Claw back earnings", onclick: () => formModal({ title: "Take a channel's earnings back", intro: "Its counted ads for that month stop counting; advertisers are refunded and the creator is told.", fields: [{ name: "channel_id", label: "Channel id" }, { name: "month", label: "Month (YYYY-MM)" }, { name: "reason", label: "Reason", type: "textarea", rows: 2 }], submit: "Claw back", danger: true, onSubmit: async (v) => { const r = await api("/api/platform/ads/clawback", { method: "POST", body: v }); Aira.toast(`${r.impressions} impressions taken back.`, "success"); Aira.router.render(); } }) }) : null;
+    put(stage, pageHead("Creators & ads", "Advertisers prepay their balance (billed through their own subscription), ads are reviewed here before they run, and each counted impression or click pays the video's creator a share. Every change is in the platform audit log.", ...[settings, clawback].filter(Boolean)), readonlyNote(),
+      section(null, kpis),
+      section(`Ads to review (${review.creatives.length})`, table(["Ad", "Advertiser", "Media", "Landing page and targeting", ""], reviewRows, "Nothing to review.")),
+      section(`Payout requests (${overview.payouts.length})`, table(["Asked", "Creator", "#Amount", "Pay to", "#Payable", ""], payoutRows, "No payout requests.")),
+      section("Months", table(["Month", "#Gross", "#Creators", "#Platform", "#Impressions", "#Not counted", ""], monthRows, "No ads have run yet.")));
+  };
 
   // ---------------------------------------------------------------------------
   // Announcements

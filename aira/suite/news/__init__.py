@@ -1,0 +1,11 @@
+"""News: the latest headlines every day, in each person's own language and country.
+
+Headlines come from Google News's public RSS feeds (top stories, topics and keyword searches, no key needed)
+and from RSS or Atom feeds a person adds. Feeds are fetched safely (public addresses only, size and time capped,
+no DTDs) and cached in the account's database; a feed is refreshed when it is older than 30 minutes, and the
+background task keeps followed feeds fresh. Each person (a life profile) has their own language, region,
+topics, keywords, sources, saved and read articles; children get a child-safe mode.
+
+Modules: :mod:`.feeds` (languages, topics, URLs, fetching and parsing), :mod:`.store` (tables),
+:mod:`.service` (the rules), :mod:`.news_routes` (``/api/news/*``, Today card, pulse, background task).
+"""

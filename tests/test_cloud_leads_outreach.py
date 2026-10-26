@@ -1,4 +1,6 @@
-"""Aira Leads outreach in the hosted shell: who may send, plan gating, limits, the kill switch, safety and data handling.
+"""Leads outreach (part of Marketing) in the hosted shell: who may send, plan gating, limits, the kill switch, safety
+and data handling. Outreach belongs to the business: the team drafts, approves and sends from the organization's
+shared pipeline with the organization's sender settings.
 
 The mail server is a stand-in (``tests/smtp_stub.py``) on loopback. A hosted build refuses internal mail servers,
 so tests that need a message to arrive use the ``open_mail_servers`` fixture, the one test-only seam: it replaces
@@ -18,7 +20,15 @@ from typing import Any
 import pytest
 from cloud_support import build_org, local_module, seed_workspace, sign_in
 from smtp_stub import SmtpStub
-from test_cloud_leads import bridge, configure, override, serpapi, team, used  # noqa: F401
+from test_cloud_leads import (  # noqa: F401
+    bridge,
+    configure,
+    override,
+    rep,
+    serpapi,
+    team,
+    used,
+)
 
 from aira.leads import mail
 from aira_cloud import plans
@@ -74,8 +84,8 @@ def settings_for(smtp: SmtpStub, **extra: Any) -> dict[str, Any]:
 
 
 def prepare(cloud, org, smtp, *, count=3, password=PASSWORD):
-    """A candidate with sender settings saved and ``count`` approved messages."""
-    candidate = sign_in(cloud, org.candidate)
+    """The business's sender settings saved and ``count`` approved messages (written by a coach, a team member)."""
+    candidate = rep(cloud, org)
     status, body = candidate.call(
         "POST",
         "/api/leads/outreach/settings",
@@ -109,25 +119,25 @@ def outreach(cloud, team, smtp, open_mail_servers, no_pause):
 # ---------------------------------------------------------------------------
 
 OUTREACH = {
-    "services_get": ("leads.read", "leads"),
-    "outreach_settings_get": ("leads.outreach", "leads"),
-    "outreach_settings_save": ("leads.outreach", "leads_outreach"),
-    "outreach_test": ("leads.outreach", "leads_outreach"),
-    "outbox_list": ("leads.read", "leads"),
-    "outbox_drafts": ("leads.write", "leads"),
-    "outbox_update": ("leads.write", "leads"),
-    "outbox_delete": ("leads.write", "leads"),
-    "outbox_approve": ("leads.outreach", "leads_outreach"),
-    "outbox_reject": ("leads.write", "leads"),
-    "outbox_send": ("leads.outreach", "leads_outreach"),
-    "suppressions_list": ("leads.read", "leads"),
-    "suppressions_add": ("leads.write", "leads"),
-    "suppressions_remove": ("leads.outreach", "leads"),
-    "item_dial": ("leads.read", "leads"),
-    "item_call_script": ("leads.write", "leads"),
-    "item_calls": ("leads.read", "leads"),
-    "item_call_log": ("leads.write", "leads"),
-    "follow_ups": ("leads.read", "leads"),
+    "services_get": ("suite.read", "leads"),
+    "outreach_settings_get": ("suite.read", "leads"),
+    "outreach_settings_save": ("suite.manage", "leads_outreach"),
+    "outreach_test": ("suite.manage", "leads_outreach"),
+    "outbox_list": ("suite.read", "leads"),
+    "outbox_drafts": ("suite.manage", "leads"),
+    "outbox_update": ("suite.manage", "leads"),
+    "outbox_delete": ("suite.manage", "leads"),
+    "outbox_approve": ("suite.manage", "leads_outreach"),
+    "outbox_reject": ("suite.manage", "leads"),
+    "outbox_send": ("suite.manage", "leads_outreach"),
+    "suppressions_list": ("suite.read", "leads"),
+    "suppressions_add": ("suite.manage", "leads"),
+    "suppressions_remove": ("suite.manage", "leads"),
+    "item_dial": ("suite.read", "leads"),
+    "item_call_script": ("suite.manage", "leads"),
+    "item_calls": ("suite.read", "leads"),
+    "item_call_log": ("suite.manage", "leads"),
+    "follow_ups": ("suite.read", "leads"),
 }
 
 
@@ -139,21 +149,18 @@ def test_every_outreach_route_has_the_policy_it_should():
         assert name in names and name in POLICY, short
         rule = POLICY[name]
         assert (rule.scope, rule.permission, rule.feature) == (
-            "candidate",
+            "org_api",
             permission,
             feature,
         ), short
-    # sending, approving and the sender identity are the candidate's alone
-    from aira_cloud.rbac import CANDIDATE_ONLY
-
-    assert "leads.outreach" in CANDIDATE_ONLY
     for short in (
         "outreach_settings_save",
         "outreach_test",
         "outbox_approve",
         "outbox_send",
     ):
-        assert POLICY[f"airaapi__leads_routes__{short}"].write
+        rule = POLICY[f"airaapi__leads_routes__{short}"]
+        assert rule.write and rule.audit, short
 
 
 def test_the_plans_carry_the_outreach_feature_and_limits_and_old_versions_get_them():
@@ -192,9 +199,9 @@ def test_a_starter_plan_is_told_to_upgrade_to_team_for_every_send_step(cloud):
         plan="starter",
         seats=5,
         slug_email="startertwo.test",
-        apps=["leads"],
+        apps=["marketing"],
     )
-    candidate = sign_in(cloud, org.candidate)
+    candidate = rep(cloud, org)
     for method, path, body in (
         ("POST", "/api/leads/outreach/settings", {"from_name": "x"}),
         ("POST", "/api/leads/outreach/test", {}),
@@ -208,7 +215,7 @@ def test_a_starter_plan_is_told_to_upgrade_to_team_for_every_send_step(cloud):
             and response["required_plan"] == "team"
         ), (path, status, response)
     assert candidate.call("GET", "/api/leads/outbox")[0] == 200
-    # a draft needs no mail server: writing one is part of Aira Leads on every paid plan
+    # a draft needs no mail server: writing one is part of Leads on every paid plan
     assert candidate.call("POST", "/api/leads/items/import-csv", {"csv": CSV})[0] == 201
     ids = [lead["id"] for lead in candidate.call("GET", "/api/leads/items")[1]["leads"]]
     status, drafts = candidate.call(
@@ -218,16 +225,11 @@ def test_a_starter_plan_is_told_to_upgrade_to_team_for_every_send_step(cloud):
 
 
 def test_a_trial_organization_has_leads_but_cannot_send(cloud):
-    from cloud_support import add_member, signup
+    from cloud_support import signup
 
-    owner = signup(cloud, "Trial Out", "owner@trialout.test")["owner"]
-    candidate = sign_in(
-        cloud, add_member(cloud, owner, "cand@trialout.test", "candidate")
-    )
-    assert candidate.call("GET", "/api/leads/outbox")[0] == 200, (
-        "the trial has every app"
-    )
-    status, body = candidate.call(
+    owner = sign_in(cloud, signup(cloud, "Trial Out", "owner@trialout.test")["owner"])
+    assert owner.call("GET", "/api/leads/outbox")[0] == 200, "the trial has every app"
+    status, body = owner.call(
         "POST", "/api/leads/outreach/settings", {"from_name": "x"}
     )
     assert status == 402 and body["required_plan"] == "team", (
@@ -235,92 +237,60 @@ def test_a_trial_organization_has_leads_but_cannot_send(cloud):
     )
 
 
-def test_a_coach_drafts_and_edits_but_only_the_candidate_approves_and_sends(
+def test_the_team_works_one_outbox_an_auditor_reads_and_candidates_have_none(
     cloud, team, smtp, open_mail_servers, no_pause
 ):
     prepare(cloud, team, smtp, count=2)
-    candidate = sign_in(cloud, team.candidate)
-    cid = team.candidate.member_id
-    coach = sign_in(cloud, team.coach)
-    cloud.tenancy.assign_coach(team.owner, team.coach.member_id, cid, "act")
-    messages = coach.call("GET", "/api/leads/outbox", as_candidate=cid)[1]["messages"]
-    assert len(messages) == 2, "a coach with act scope sees the outbox"
+    admin = sign_in(cloud, team.admin)
+    messages = admin.call("GET", "/api/leads/outbox")[1]["messages"]
+    assert len(messages) == 2, "an admin sees the outbox the coach wrote"
     mid = messages[0]["id"]
-    status, edited = coach.call(
-        "PATCH",
-        f"/api/leads/outbox/{mid}",
-        {"body": "A coach's edit."},
-        as_candidate=cid,
+    status, edited = admin.call(
+        "PATCH", f"/api/leads/outbox/{mid}", {"body": "An admin's edit."}
     )
     assert status == 200 and edited["message"]["status"] == "draft", (
-        "an edit withdraws the candidate's approval"
+        "an edit withdraws the approval"
+    )
+    assert admin.call("POST", "/api/leads/outbox/reject", {"ids": [mid]})[0] == 200
+    lead = admin.call("GET", "/api/leads/items")[1]["leads"][0]
+    assert (
+        admin.call("POST", "/api/leads/suppressions", {"value": "nope.test"})[0] == 201
     )
     assert (
-        coach.call(
-            "POST", "/api/leads/outbox/reject", {"ids": [mid]}, as_candidate=cid
-        )[0]
-        == 200
-    )
-    lead = candidate.call("GET", "/api/leads/items")[1]["leads"][0]
-    assert (
-        coach.call(
-            "POST", "/api/leads/suppressions", {"value": "nope.test"}, as_candidate=cid
-        )[0]
-        == 201
+        admin.call("POST", f"/api/leads/items/{lead['id']}/call-script", {})[0] == 200
     )
     assert (
-        coach.call(
-            "POST", f"/api/leads/items/{lead['id']}/call-script", {}, as_candidate=cid
-        )[0]
-        == 200
-    )
-    assert (
-        coach.call(
-            "POST",
-            f"/api/leads/items/{lead['id']}/calls",
-            {"outcome": "no_answer"},
-            as_candidate=cid,
+        admin.call(
+            "POST", f"/api/leads/items/{lead['id']}/calls", {"outcome": "no_answer"}
         )[0]
         == 201
     )
+    auditor = sign_in(cloud, team.auditor)
+    assert auditor.call("GET", "/api/leads/outbox")[0] == 200
+    settings = auditor.call("GET", "/api/leads/outreach/settings")
+    assert settings[0] == 200 and PASSWORD not in json.dumps(settings[1])
     for method, path, body in (
-        ("POST", "/api/leads/outreach/settings", {"from_name": "Coach"}),
+        ("POST", "/api/leads/outreach/settings", {"from_name": "Auditor"}),
         ("POST", "/api/leads/outreach/test", {}),
         ("POST", "/api/leads/outbox/approve", {"ids": [messages[1]["id"]]}),
         ("POST", SEND, {}),
         ("POST", "/api/leads/suppressions/remove", {"key": "domain:nope.test"}),
-        ("GET", "/api/leads/outreach/settings", None),
+        ("POST", "/api/leads/outbox/drafts", {"lead_ids": [lead["id"]]}),
     ):
-        status, response = coach.call(method, path, body, as_candidate=cid)
+        status, response = auditor.call(method, path, body)
         assert status == 403, (path, status, response)
-    assert smtp.messages == []
-    for who in (team.owner, team.admin, team.auditor, team.billing):
+    for who in (team.candidate, team.other, team.billing):
         browser = sign_in(cloud, who)
         for method, path, body in (
             ("GET", "/api/leads/outbox", None),
+            ("GET", "/api/leads/outreach/settings", None),
             ("POST", "/api/leads/outbox/drafts", {"lead_ids": [lead["id"]]}),
             ("POST", SEND, {}),
             ("GET", "/api/leads/suppressions", None),
+            ("GET", "/api/leads/follow-ups", None),
         ):
-            assert browser.call(method, path, body, as_candidate=cid)[0] == 403, (
-                who.role,
-                path,
-            )
-
-
-def test_a_view_scope_coach_sees_no_outreach_at_all(
-    cloud, team, smtp, open_mail_servers, no_pause
-):
-    prepare(cloud, team, smtp, count=1)
-    cid = team.candidate.member_id
-    coach = sign_in(cloud, team.coach)
-    cloud.tenancy.assign_coach(team.owner, team.coach.member_id, cid, "view")
-    for path in (
-        "/api/leads/outbox",
-        "/api/leads/follow-ups",
-        "/api/leads/suppressions",
-    ):
-        assert coach.call("GET", path, as_candidate=cid)[0] == 403, path
+            assert browser.call(method, path, body)[0] == 403, (who.role, path)
+    assert smtp.messages == []
 
 
 # ---------------------------------------------------------------------------
@@ -328,9 +298,7 @@ def test_a_view_scope_coach_sees_no_outreach_at_all(
 # ---------------------------------------------------------------------------
 
 
-def test_the_candidate_sends_and_the_month_counts_messages_actually_sent(
-    cloud, outreach
-):
+def test_the_team_sends_and_the_month_counts_messages_actually_sent(cloud, outreach):
     org, candidate, _leads, message_ids, smtp = outreach
     status, body = candidate.call("POST", SEND, {})
     assert status == 200 and body["sent"] == 3 and body["failed"] == 0, body
@@ -381,7 +349,7 @@ def test_the_monthly_allowance_is_a_hard_stop_that_resets_next_month(
     )
     assert len(smtp.messages) == 2
     cloud.clock.advance(days=35)
-    candidate = sign_in(cloud, team.candidate)  # the session expired with the month
+    candidate = rep(cloud, team)  # the session expired with the month
     status, body = candidate.call("POST", SEND, {})
     assert status == 200 and body["sent"] == 1 and len(smtp.messages) == 3
 
@@ -401,7 +369,7 @@ def test_overage_never_buys_extra_emails(
 def test_the_daily_cap_is_clamped_by_the_plan_on_the_server(
     cloud, team, smtp, open_mail_servers
 ):
-    candidate = sign_in(cloud, team.candidate)
+    candidate = rep(cloud, team)
     status, body = candidate.call(
         "POST",
         "/api/leads/outreach/settings",
@@ -438,12 +406,12 @@ def test_a_setting_stored_before_a_downgrade_is_clamped_again_at_send_time(
     cloud, team, smtp, open_mail_servers, no_pause
 ):
     candidate, *_ = prepare(cloud, team, smtp, count=3)
-    local = local_module()
-    with cloud.workspaces.bind(
-        team.org_id, team.candidate.member_id, kind="system", source="test"
-    ):
-        with local._connect() as connection:
-            mail.save_settings(connection, {"daily_cap": 100, "delay_seconds": 300})
+    connection = cloud.workspaces.org_api_connection(team.org_id)
+    try:
+        mail.save_settings(connection, {"daily_cap": 100, "delay_seconds": 300})
+        connection.commit()
+    finally:
+        connection.close()
     override(cloud, team, {"lead_email_daily_cap": 2})
     status, body = candidate.call("POST", SEND, {})
     assert status == 200 and body["sent"] == 2 and body["daily_cap"] == 2, (
@@ -526,9 +494,7 @@ def test_an_operator_can_stop_all_outbound_lead_email_at_once(cloud, outreach):
     assert candidate.call("POST", SEND, {})[1]["sent"] == 3
 
 
-@pytest.mark.parametrize(
-    "state", ["org_paused", "past_due", "candidate_paused", "suspended"]
-)
+@pytest.mark.parametrize("state", ["org_paused", "past_due", "suspended"])
 def test_an_organization_that_may_not_automate_cannot_send(cloud, outreach, state):
     org, candidate, _leads, _ids, smtp = outreach
     if state == "org_paused":
@@ -537,8 +503,6 @@ def test_an_organization_that_may_not_automate_cannot_send(cloud, outreach, stat
         from cloud_support import webhook
 
         webhook(cloud, "invoice.payment_failed", org_id=org.org_id)
-    elif state == "candidate_paused":
-        cloud.tenancy.pause_candidate(org.owner, org.candidate.member_id, "on leave")
     else:
         operator = operator_for(cloud)
         cloud.platform.suspend(operator, org.org_id, "test")
@@ -569,7 +533,7 @@ def test_a_hosted_build_refuses_internal_mail_servers_whatever_the_environment_s
     cloud, team, smtp, monkeypatch
 ):
     assert mail._strict() is True
-    candidate = sign_in(cloud, team.candidate)
+    candidate = rep(cloud, team)
     status, body = candidate.call(
         "POST", "/api/leads/outreach/settings", settings_for(smtp)
     )
@@ -629,7 +593,7 @@ def test_the_mail_password_is_encrypted_and_appears_nowhere_else(
     cloud, team, smtp, open_mail_servers, caplog
 ):
     caplog.set_level(logging.DEBUG)
-    candidate = sign_in(cloud, team.candidate)
+    candidate = rep(cloud, team)
     saved = candidate.call(
         "POST",
         "/api/leads/outreach/settings",
@@ -651,25 +615,21 @@ def test_the_mail_password_is_encrypted_and_appears_nowhere_else(
     assert needle not in _zip_bytes(cloud.backup.backup_org(team.org_id)), (
         "not in a backup"
     )
-    export = cloud.lifecycle.export_candidate(team.candidate, team.candidate.member_id)
-    _row, blob = cloud.lifecycle.export_for(team.candidate, export["export_id"])
-    assert needle not in _zip_bytes(blob), "not in the candidate's own export"
     org_export = cloud.lifecycle.export_organization(team.owner)
     _row, blob = cloud.lifecycle.export_for(team.owner, org_export["export_id"])
     assert needle not in _zip_bytes(blob), "not in the organization's export"
     audit = json.dumps(cloud.audit.list(team.org_id, limit=200), default=str)
     assert PASSWORD not in audit and "smtp_password" not in audit
     assert PASSWORD not in caplog.text
-    # the workspace holds only the encrypted secret: with the wrong key it cannot be read
-    local = local_module()
-    with cloud.workspaces.bind(
-        team.org_id, team.candidate.member_id, kind="system", source="test"
-    ):
-        with local._connect() as connection:
-            row = connection.execute(
-                "SELECT ciphertext FROM airaapi_secrets WHERE name = ?",
-                (mail.PASSWORD_SECRET,),
-            ).fetchone()
+    # the organization's database holds only the encrypted secret: with the wrong key it cannot be read
+    connection = cloud.workspaces.org_api_connection(team.org_id)
+    try:
+        row = connection.execute(
+            "SELECT ciphertext FROM airaapi_secrets WHERE name = ?",
+            (mail.PASSWORD_SECRET,),
+        ).fetchone()
+    finally:
+        connection.close()
     assert row is not None and PASSWORD.encode() not in bytes(row[0])
 
 
@@ -679,29 +639,25 @@ def test_settings_changes_approvals_and_sends_are_audited_without_text_or_passwo
     org, candidate, _leads, _ids, smtp = outreach
     candidate.call("POST", SEND, {})
     entries = cloud.audit.list(org.org_id, limit=200)
-    by_action = {e["action"]: e for e in entries}
-    sending = by_action["candidate.airaapi__leads_routes__outbox_send"]
+    by_action = {e["action"].rsplit(".", 1)[-1]: e for e in entries}
+    sending = by_action["airaapi__leads_routes__outbox_send"]
     assert (
-        sending["actor_id"] == team_candidate_id(org) and sending["detail"]["sent"] == 3
-    )
-    approving = by_action["candidate.airaapi__leads_routes__outbox_approve"]
+        sending["actor_id"] == org.coach.member_id and sending["detail"]["sent"] == 3
+    ), "the person who sent is on record"
+    approving = by_action["airaapi__leads_routes__outbox_approve"]
     assert approving["detail"]["approved"] == 3
-    saving = by_action["candidate.airaapi__leads_routes__outreach_settings_save"]
+    saving = by_action["airaapi__leads_routes__outreach_settings_save"]
     assert (
         saving["detail"]["smtp_host"] == "127.0.0.1"
         and saving["detail"]["credentials_changed"] is True
     )
-    drafting = by_action["candidate.airaapi__leads_routes__outbox_drafts"]
+    drafting = by_action["airaapi__leads_routes__outbox_drafts"]
     assert drafting["detail"]["created"] == 3
     dump = json.dumps(entries, default=str)
     assert PASSWORD not in dump and "Hosted Rep" not in dump
     for message in smtp.messages:
         body = message["data"].split("\n\n", 1)[-1][:40]
         assert body.strip() not in dump
-
-
-def team_candidate_id(org) -> str:
-    return org.candidate.member_id
 
 
 # ---------------------------------------------------------------------------
@@ -722,7 +678,7 @@ def test_another_organizations_messages_and_leads_are_not_found(
         apps="all",
     )
     configure(cloud, other, key=False)
-    stranger = sign_in(cloud, other.candidate)
+    stranger = rep(cloud, other)
     for method, path, body in (
         ("PATCH", f"/api/leads/outbox/{message_ids[0]}", {"body": "hijack"}),
         ("DELETE", f"/api/leads/outbox/{message_ids[0]}", None),
@@ -747,9 +703,7 @@ def test_another_organizations_messages_and_leads_are_not_found(
     )
 
 
-def test_staff_exports_leave_the_outreach_tables_out_and_the_candidates_own_has_them(
-    cloud, outreach
-):
+def test_the_outreach_data_belongs_to_the_business_not_to_a_candidate(cloud, outreach):
     org, candidate, _leads, _ids, smtp = outreach
     candidate.call("POST", SEND, {})
     lead_id = candidate.call("GET", "/api/leads/items")[1]["leads"][0]["id"]
@@ -764,59 +718,22 @@ def test_staff_exports_leave_the_outreach_tables_out_and_the_candidates_own_has_
     seed_workspace(cloud, org.org_id, org.candidate.member_id)
     own = cloud.lifecycle.export_candidate(org.candidate, org.candidate.member_id)
     _row, blob = cloud.lifecycle.export_for(org.candidate, own["export_id"])
-    tables = json.loads(zipfile.ZipFile(io.BytesIO(blob)).read("workspace.json"))[
-        "tables"
-    ]
-    for name in (
-        "lead_messages",
-        "lead_suppressions",
-        "lead_calls",
-        "lead_settings",
-        "leads",
-    ):
-        assert tables[name], name
-    for staff in (org.admin, org.auditor, org.owner):
-        made = cloud.lifecycle.export_candidate(staff, org.candidate.member_id)
-        _row, blob = cloud.lifecycle.export_for(staff, made["export_id"])
-        text = zipfile.ZipFile(io.BytesIO(blob)).read("workspace.json").decode()
-        for name in (
-            "lead_messages",
-            "lead_suppressions",
-            "lead_calls",
-            "lead_settings",
-        ):
-            assert name not in text, (staff.role, name)
-        assert (
-            "private call note" not in text
-            and "blocked.test" not in text
-            and "rep@seller.test" not in text
-        )
-    everything = cloud.lifecycle.export_organization(org.owner)
-    _row, blob = cloud.lifecycle.export_for(org.owner, everything["export_id"])
-    assert b"private call note" not in _zip_bytes(blob)
-
-
-def test_deleting_a_candidate_removes_the_outreach_data_and_a_legal_hold_blocks_it(
-    cloud, outreach
-):
-    org, candidate, *_ = outreach
-    candidate.call("POST", SEND, {})
-    directory = cloud.workspaces.candidate_dir(org.org_id, org.candidate.member_id)
-    assert (directory / "workspace.sqlite3").exists()
-    from aira_cloud.errors import Conflict
-
-    override(cloud, org, {"features": {"add": ["legal_hold"]}})
-    cloud.tenancy.update_policy(org.owner, {"legal_hold": True})
-    with pytest.raises(Conflict) as raised:
-        cloud.lifecycle.delete_candidate_workspace(org.owner, org.candidate.member_id)
-    assert raised.value.code == "legal_hold" and directory.exists(), (
-        "a legal hold keeps the data"
-    )
-    cloud.tenancy.update_policy(org.owner, {"legal_hold": False})
+    text = zipfile.ZipFile(io.BytesIO(blob)).read("workspace.json").decode()
+    assert (
+        "private call note" not in text
+        and "blocked.test" not in text
+        and "rep@seller.test" not in text
+    ), "a candidate's export holds their own workspace, never the business's outreach"
+    calls = candidate.call("GET", f"/api/leads/items/{lead_id}/calls")[1]
+    assert "private call note" in json.dumps(calls)
+    assert "blocked.test" in json.dumps(
+        sign_in(cloud, org.admin).call("GET", "/api/leads/suppressions")[1]
+    ), "the suppression list is the whole team's"
     cloud.lifecycle.delete_candidate_workspace(org.owner, org.candidate.member_id)
-    assert not directory.exists(), (
-        "the messages, call log and suppression list went with the workspace"
-    )
+    assert candidate.call("GET", "/api/leads/outbox?status=sent")[0] == 200
+    assert "blocked.test" in json.dumps(
+        candidate.call("GET", "/api/leads/suppressions")[1]
+    ), "a candidate leaving takes nothing of the business's"
 
 
 # ---------------------------------------------------------------------------
@@ -833,7 +750,7 @@ INTENT = {
 def test_a_search_for_requests_is_a_google_search_gated_and_metered_like_the_others(
     cloud, team, serpapi
 ):
-    candidate = sign_in(cloud, team.candidate)
+    candidate = rep(cloud, team)
     status, plan = candidate.call(
         "POST", "/api/leads/search", {**INTENT, "dry_run": True}
     )
@@ -872,7 +789,7 @@ def test_the_pooled_allowance_settles_by_credits_for_a_request_search(cloud, ser
     )
     configure(cloud, org, key=False)
     cloud.tenancy.update_policy(org.owner, {"use_pooled_serpapi": True})
-    candidate = sign_in(cloud, org.candidate)
+    candidate = rep(cloud, org)
     status, body = candidate.call("POST", "/api/leads/search", INTENT)
     if status == 200:
         assert used(cloud, org, "pooled_searches") == body["credits"]

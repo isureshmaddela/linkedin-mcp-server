@@ -19,7 +19,7 @@ identifiers cannot be probed across tenants.
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from typing import Any
 
 from aira_cloud.db import ControlDB, one
@@ -62,6 +62,8 @@ ORG_PERMISSIONS: dict[str, frozenset[str]] = {
             "candidates.list",
             "candidates.manage",
             "sso.manage",
+            "suite.read",
+            "suite.manage",
         }
     ),
     ADMIN: frozenset(
@@ -79,9 +81,14 @@ ORG_PERMISSIONS: dict[str, frozenset[str]] = {
             "candidates.list",
             "candidates.manage",
             "sso.manage",
+            "suite.read",
+            "suite.manage",
         }
     ),
-    COACH: frozenset({"dashboard.read", "candidates.list"}),
+    # Industry apps (aira/suite) are the organization's: a coach works in them as a team member.
+    COACH: frozenset(
+        {"dashboard.read", "candidates.list", "suite.read", "suite.manage"}
+    ),
     CANDIDATE: frozenset({"dashboard.read"}),
     BILLING: frozenset({"billing.manage", "usage.read"}),
     AUDITOR: frozenset(
@@ -92,8 +99,17 @@ ORG_PERMISSIONS: dict[str, frozenset[str]] = {
             "audit.read",
             "candidates.list",
             "integrations.read",
+            "suite.read",
         }
     ),
+}
+
+# Life apps (aira/suite: Family, Health, Learn, Play, Planner) are for every member, whatever their role: the
+# data is each person's own (or their family's), and the apps scope it to the person.
+LIFE_PERMISSIONS = frozenset({"life.read", "life.manage"})
+ORG_PERMISSIONS = {
+    role: permissions | LIFE_PERMISSIONS
+    for role, permissions in ORG_PERMISSIONS.items()
 }
 
 # Candidate-level permissions by the scope level that unlocks them for a coach.
@@ -133,6 +149,9 @@ ADMIN_CANDIDATE = frozenset(
         "automation.pause.candidate",
     }
 )
+# Staff who may keep a workspace of their own and use the apps themselves (a personal workspace). Inside it they
+# are its candidate; nobody else in the organization can open it.
+PERSONAL_ROLES = (OWNER, ADMIN)
 AUDITOR_CANDIDATE = frozenset(
     {"candidates.read", "documents.read", "dashboard.candidate"}
 )
@@ -151,6 +170,9 @@ NEVER_VIA_SUPPORT = frozenset(
         "messages.read",
         "messages.send",
         "sso.manage",
+        # members' personal life data (health, family chat, budget) is never shown to platform staff
+        "life.read",
+        "life.manage",
         # anything that can leave access behind once the grant ends: new members, keys, MFA resets
         "members.manage",
         "integrations.manage",
@@ -166,6 +188,7 @@ PLATFORM_PERMISSIONS: dict[str, frozenset[str]] = {
             "platform.announcements.manage",
             "platform.health.read",
             "platform.audit.read",
+            "platform.moderation.manage",
         }
     ),
     OPERATOR_ADMIN: frozenset(
@@ -180,6 +203,7 @@ PLATFORM_PERMISSIONS: dict[str, frozenset[str]] = {
             "platform.health.read",
             "platform.audit.read",
             "platform.abuse.manage",
+            "platform.moderation.manage",
             "platform.operators.manage",
         }
     ),
@@ -204,6 +228,24 @@ class Principal:
     extra: dict[str, Any] = field(default_factory=dict)
 
     @property
+    def personal(self) -> bool:
+        """Acting in their own personal workspace (an owner or admin using the apps themselves)."""
+        return bool(self.extra.get("personal"))
+
+    @property
+    def staff_role(self) -> str:
+        """The organization role, also while the person acts as their personal workspace's candidate."""
+        return str(self.extra.get("staff_role") or self.role)
+
+    def as_own_candidate(self) -> Principal:
+        """The same person as the candidate of their personal workspace (for that request only)."""
+        return replace(
+            self,
+            role=CANDIDATE,
+            extra={**self.extra, "personal": True, "staff_role": self.role},
+        )
+
+    @property
     def is_operator(self) -> bool:
         return self.kind == "operator"
 
@@ -219,7 +261,7 @@ class Principal:
     def label(self) -> str:
         if self.is_operator:
             return f"operator:{self.email}"
-        return f"{self.role}:{self.email}"
+        return f"{self.staff_role}:{self.email}"
 
 
 class Authorizer:
@@ -240,14 +282,24 @@ class Authorizer:
         with self.db.read() as connection:
             row = one(
                 connection,
-                """SELECT m.member_id, m.org_id, m.email, m.name, m.status, w.status AS workspace_status
+                """SELECT m.member_id, m.org_id, m.email, m.name, m.status, m.role, w.status AS workspace_status
                 FROM members m JOIN workspaces w ON w.candidate_id = m.member_id
-                WHERE m.member_id = ? AND m.org_id = ? AND m.role = 'candidate' AND m.removed_at IS NULL""",
-                (candidate_id, org_id),
+                WHERE m.member_id = ? AND m.org_id = ? AND m.role IN ('candidate', ?, ?) AND m.removed_at IS NULL""",
+                (candidate_id, org_id, *PERSONAL_ROLES),
             )
         if row is None:
             raise NotFound("Candidate not found.")
         return row
+
+    def is_personal(self, org_id: str, candidate_id: str) -> bool:
+        """Is this workspace a staff member's own (an owner or admin), not a candidate's?"""
+        with self.db.read() as connection:
+            row = one(
+                connection,
+                "SELECT role FROM members WHERE member_id = ? AND org_id = ?",
+                (candidate_id, org_id),
+            )
+        return row is not None and row["role"] != CANDIDATE
 
     def assignment_scope(
         self, org_id: str, coach_id: str, candidate_id: str
@@ -308,6 +360,10 @@ class Authorizer:
             return (
                 permission in CANDIDATE_PERMISSION_LEVEL or permission in CANDIDATE_ONLY
             )
+        if role in (OWNER, ADMIN, AUDITOR) and self.is_personal(
+            principal.org_id, candidate_id
+        ):
+            return False  # someone else's personal workspace (their own goes through as_own_candidate)
         if role in (OWNER, ADMIN):
             return permission in ADMIN_CANDIDATE
         if role == AUDITOR:
@@ -344,8 +400,11 @@ class Authorizer:
         self, principal: Principal, permission: str, *, candidate_id: str | None = None
     ) -> None:
         if candidate_id is not None:
-            # Existence first: a candidate outside the organization is a 404 for every role.
-            self.candidate(principal.org_id, candidate_id)
+            # Existence first: a candidate outside the organization is a 404 for every role, and so is a
+            # staff member's personal workspace for anyone but its owner.
+            row = self.candidate(principal.org_id, candidate_id)
+            if row["role"] != CANDIDATE and principal.member_id != candidate_id:
+                raise NotFound("Candidate not found.")
         if not self.can(principal, permission, candidate_id=candidate_id):
             raise Forbidden(
                 "You do not have permission to do that.", permission=permission

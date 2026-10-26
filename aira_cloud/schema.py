@@ -642,6 +642,108 @@ CREATE TABLE org_apps (
 );
 """
 
+# Public links of the industry apps (aira.suite.public): token hash -> organization, so a customer's
+# request finds the business's database without signing in. ``org_id`` first so the tenant policy covers it.
+_V6 = """
+CREATE TABLE public_links (
+    token_hash TEXT PRIMARY KEY,
+    org_id TEXT NOT NULL,
+    app TEXT NOT NULL,
+    created_at INTEGER NOT NULL
+);
+CREATE INDEX public_links_org ON public_links (org_id);
+"""
+
+# The developer platform (aira_cloud/oauth.py, webhooks.py): apps registered for OAuth, authorization codes,
+# tokens (access, refresh, personal) kept only as hashes, and webhook endpoints with their deliveries.
+_V7 = """
+CREATE TABLE oauth_clients (
+    org_id TEXT NOT NULL,
+    client_id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    homepage TEXT NOT NULL DEFAULT '',
+    secret_hash TEXT NOT NULL DEFAULT '',
+    redirect_uris TEXT NOT NULL DEFAULT '[]',
+    scopes TEXT NOT NULL DEFAULT '[]',
+    grants TEXT NOT NULL DEFAULT '[]',
+    confidential INTEGER NOT NULL DEFAULT 1,
+    created_by TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    revoked_at INTEGER
+);
+CREATE INDEX oauth_clients_org ON oauth_clients (org_id);
+CREATE TABLE oauth_codes (
+    org_id TEXT NOT NULL,
+    code_hash TEXT PRIMARY KEY,
+    client_id TEXT NOT NULL,
+    member_id TEXT NOT NULL,
+    redirect_uri TEXT NOT NULL,
+    scopes TEXT NOT NULL,
+    challenge TEXT NOT NULL DEFAULT '',
+    family_id TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER NOT NULL,
+    used_at INTEGER
+);
+CREATE TABLE oauth_tokens (
+    org_id TEXT NOT NULL,
+    token_hash TEXT PRIMARY KEY,
+    kind TEXT NOT NULL,
+    client_id TEXT NOT NULL DEFAULT '',
+    member_id TEXT NOT NULL DEFAULT '',
+    scopes TEXT NOT NULL DEFAULT '[]',
+    family_id TEXT NOT NULL,
+    name TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    expires_at INTEGER,
+    last_used_at INTEGER,
+    rotated_at INTEGER,
+    revoked_at INTEGER
+);
+CREATE INDEX oauth_tokens_family ON oauth_tokens (family_id);
+CREATE INDEX oauth_tokens_member ON oauth_tokens (org_id, member_id, kind);
+CREATE TABLE webhook_endpoints (
+    org_id TEXT NOT NULL,
+    endpoint_id TEXT PRIMARY KEY,
+    url TEXT NOT NULL,
+    events TEXT NOT NULL DEFAULT '[]',
+    description TEXT NOT NULL DEFAULT '',
+    active INTEGER NOT NULL DEFAULT 1,
+    created_by TEXT NOT NULL DEFAULT '',
+    created_at INTEGER NOT NULL,
+    deleted_at INTEGER
+);
+CREATE INDEX webhook_endpoints_org ON webhook_endpoints (org_id);
+CREATE TABLE webhook_deliveries (
+    org_id TEXT NOT NULL,
+    delivery_id TEXT PRIMARY KEY,
+    endpoint_id TEXT NOT NULL,
+    event TEXT NOT NULL,
+    payload TEXT NOT NULL,
+    status TEXT NOT NULL DEFAULT 'pending',
+    attempts INTEGER NOT NULL DEFAULT 0,
+    response_status INTEGER,
+    last_error TEXT NOT NULL DEFAULT '',
+    next_attempt_at INTEGER,
+    created_at INTEGER NOT NULL,
+    delivered_at INTEGER
+);
+CREATE INDEX webhook_deliveries_endpoint ON webhook_deliveries (endpoint_id, created_at);
+"""
+
+# The superadmin's app catalog controls (entitlements.AppSettings): one row per app that differs from the
+# defaults: switched off for everyone, and/or seat prices per plan that replace plans.APP_PRICING.
+_V8 = """
+CREATE TABLE platform_apps (
+    app_id TEXT PRIMARY KEY,
+    enabled INTEGER NOT NULL DEFAULT 1,
+    prices TEXT NOT NULL DEFAULT '{}',
+    note TEXT NOT NULL DEFAULT '',
+    updated_by TEXT NOT NULL DEFAULT '',
+    updated_at INTEGER NOT NULL
+);
+"""
+
 # (version, name, SQL script)
 MIGRATIONS: list[tuple[int, str, str]] = [
     (1, "initial", _V1),
@@ -649,4 +751,7 @@ MIGRATIONS: list[tuple[int, str, str]] = [
     (3, "worker_agents", _V3),
     (4, "org_apps", _V4),
     (5, "launch_tokens", _V5),
+    (6, "public_links", _V6),
+    (7, "developer_platform", _V7),
+    (8, "platform_apps", _V8),
 ]

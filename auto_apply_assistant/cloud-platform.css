@@ -68,6 +68,7 @@
 .cp-head-state { display: flex; flex-wrap: wrap; align-items: center; gap: 8px; }
 .cp-detail { display: block; max-width: 38ch; font: 11.5px/1.4 var(--mono); color: var(--muted); overflow-wrap: anywhere; }
 .cp-mono { font-family: var(--mono); font-size: 12.5px; }
+.cp-preview { max-width: 360px; white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; }
 .cp-form { display: grid; gap: 12px; min-width: min(420px, 78vw); }
 .cp-form textarea { width: 100%; }
 .cp-row { display: flex; align-items: center; gap: 10px; }
@@ -83,6 +84,8 @@
 
 .cp-quicklist { display: grid; gap: 8px; }
 .cp-quick { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 10px 14px; align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.cp-table td.cp-changed { background: var(--warning-soft); }
+.cp-table tr.cp-off td:first-child strong { color: var(--danger); }
 .cp-quick.off { border-color: var(--danger); background: var(--danger-soft); }
 
 .cp-support-bar { position: sticky; top: 0; z-index: 70; display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: 6px 14px; padding: 8px 14px; background: var(--warning-soft); color: var(--warning); border-bottom: 2px solid var(--warning); font-size: 13.5px; }

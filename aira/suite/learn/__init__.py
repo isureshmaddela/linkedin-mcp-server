@@ -1,0 +1,8 @@
+"""Learn: a little learning every day, for every age.
+
+Flashcard decks (a person's own, or shared with the household) studied with spaced repetition (SM-2, per person
+per card), a daily goal with a streak (one free streak freeze a week), XP, levels and badges, quizzes made from a
+deck and maths practice graded on the server, starter decks written for children, adults and seniors, decks made on
+any topic by the writing model (with a template when none runs), a reading log, and a family leaderboard. Today
+shows what to practise; the pulse counts cards due and, in the evening, warns when a streak would break.
+"""

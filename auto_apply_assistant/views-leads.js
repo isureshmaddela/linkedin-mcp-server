@@ -51,6 +51,8 @@
     { id: "csv", api: "import", mode: "", label: "CSV file", detail: "Import leads you already have", needsKey: false },
   ];
   const SOURCE_IDS = SOURCES.map((s) => s.id);
+  // The hosted build's Leads is the business's shared pipeline: it never reads one person's own LinkedIn session.
+  const sourceOffered = (source) => !(source.api === "sales_navigator" && Aira.cloud);
   const FIELDS = {
     maps: [
       { name: "query", label: "What kind of business?", placeholder: "dentists, coffee roasters, plumbers", required: true },
@@ -546,7 +548,7 @@
       gapOnly: false,
       results: [], response: null, selected: new Set(), listId: "", running: false, payload: null,
     };
-    if (!SOURCE_IDS.includes(state.source)) state.source = "maps";
+    if (!SOURCE_IDS.includes(state.source) || !sourceOffered(sourceById(state.source))) state.source = "maps";
     if (deep.source) Object.assign(state.forms[deep.source], deep.form, deep.source === "requests" && !(deep.form.services || []).length ? { services: offered.slice() } : {});
     const lists = overview.lists.slice();
     const picker = listPicker(lists, { id: "ldSaveList" });
@@ -597,7 +599,7 @@
     const savedBox = h("div", { class: "ld-saved" });
     const searches = overview.searches.slice();
 
-    const paintSources = () => fill(sourceRow, ...SOURCES.map((source) => {
+    const paintSources = () => fill(sourceRow, ...SOURCES.filter(sourceOffered).map((source) => {
       const on = source.id === state.source;
       const info = availability(source.id);
       return h("button", { type: "button", class: `ld-source${on ? " on" : ""}${info.ok ? "" : " off"}`, role: "radio", "aria-checked": on ? "true" : "false", id: `ldSource-${source.id}`, onclick: () => { state.source = source.id; remember("source", source.id); paintSources(); paintForm(); fill(resultsBox); }, onkeydown: (event) => { const buttons = [...sourceRow.querySelectorAll("button")]; const index = buttons.indexOf(event.currentTarget); if (event.key === "ArrowRight" || event.key === "ArrowDown") { event.preventDefault(); buttons[(index + 1) % buttons.length].focus(); buttons[(index + 1) % buttons.length].click(); } if (event.key === "ArrowLeft" || event.key === "ArrowUp") { event.preventDefault(); buttons[(index - 1 + buttons.length) % buttons.length].focus(); buttons[(index - 1 + buttons.length) % buttons.length].click(); } } },
@@ -1235,7 +1237,7 @@
     const content = h("div", { class: "ld-content", id: "ldContent", role: "region", "aria-label": label, tabindex: "-1" });
     const nav = h("nav", { class: "subnav ld-subnav", "aria-label": "Leads workspaces" }, ...TABS.map(([id, text]) => h("a", { href: link(id), "aria-current": id === tab ? "page" : "false" }, text)));
     main.replaceChildren(
-      h("div", { class: "page-head ld-head" }, h("div", {}, h("h1", { text: "Leads" }), h("p", { text: "Find people and businesses that need what you sell, from Google Maps, Google, public requests, your own LinkedIn Sales Navigator or a CSV file; score them against your ideal customer; add contact details from the company's own website; and keep track of who you contacted. Aira finds and prepares. An email is sent only after you approve it, through your own mail server; you place every call yourself." }))),
+      h("div", { class: "page-head ld-head" }, h("div", {}, h("h1", { text: "Leads" }), h("p", { text: Aira.cloud ? "Find people and businesses that need what you sell, from Google Maps, Google, public requests or a CSV file (a Sales Navigator list too); score them against your ideal customer; add contact details from the company's own website; and keep track of who you contacted. Aira finds and prepares. An email is sent only after you approve it, through your own mail server; you place every call yourself." : "Find people and businesses that need what you sell, from Google Maps, Google, public requests, your own LinkedIn Sales Navigator or a CSV file; score them against your ideal customer; add contact details from the company's own website; and keep track of who you contacted. Aira finds and prepares. An email is sent only after you approve it, through your own mail server; you place every call yourself." }))),
       nav, live, content);
     content.replaceChildren(ui.skeleton(5));
     let overview;

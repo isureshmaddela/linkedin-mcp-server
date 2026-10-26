@@ -29,7 +29,7 @@ CLAIMS = {
     "member_id": "1" * 32,
     "role": "candidate",
     "app": "local",
-    "apps": ["careers", "leads"],
+    "apps": ["careers", "marketing"],
 }
 
 
@@ -135,7 +135,7 @@ def test_a_launch_token_creates_a_local_account_with_no_password_and_signs_in(
     assert status == 200, body
     assert body["email"] == "linked.person@example.test" and body["apps"] == [
         "careers",
-        "leads",
+        "marketing",
     ]
     assert body["account"] == {
         "linked": True,
@@ -152,8 +152,20 @@ def test_a_launch_token_creates_a_local_account_with_no_password_and_signs_in(
     assert apps["account"]["linked"] is True and apps["account_url"] == account.base
     assert apps["installation"] == "local" and [a["id"] for a in apps["apps"]] == [
         "careers",
-        "leads",
         "api",
+        "studio",
+        "marketing",
+        "service",
+        "commerce",
+        "experiences",
+        "ads",
+        "social",
+        "care",
+        "learn",
+        "play",
+        "planner",
+        "news",
+        "videos",
     ]
     # the account row holds no password and remembers where it came from
     user = env.user()

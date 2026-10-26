@@ -72,6 +72,8 @@ POLICY: dict[str, Rule] = {
     # -- static and health ---------------------------------------------------------------
     "ui_index": PUBLIC,
     "ui_static": PUBLIC,
+    "ui_i18n": PUBLIC,
+    "ui_copyright": PUBLIC,  # the Videos copyright notice form (anyone, no account)
     "api_health": PUBLIC,
     "api_ready": PUBLIC,
     "api_metrics": OPERATOR,
@@ -348,102 +350,101 @@ POLICY: dict[str, Rule] = {
     ),
     "airaapi__careers_routes__alert_dismiss": write("search.run"),
     # -- Aira Leads (the candidate's own workspace; owners, admins, auditors and billing contacts do not read it) ----------
-    "airaapi__leads_routes__overview": read("leads.read", feature="leads"),
-    "airaapi__leads_routes__icp_get": read("leads.read", feature="leads"),
-    "airaapi__leads_routes__lists_get": read("leads.read", feature="leads"),
-    "airaapi__leads_routes__searches_list": read("leads.read", feature="leads"),
-    "airaapi__leads_routes__items_list": read("leads.read", feature="leads"),
-    "airaapi__leads_routes__item_get": read("leads.read", feature="leads"),
-    "airaapi__leads_routes__export": read("leads.read", feature="leads", audit=True),
-    "airaapi__leads_routes__icp_save": write(
-        "leads.write", feature="leads", kind="leads_changed"
+    # Leads is the business's shared pipeline (Marketing): organization-level, like the industry apps.
+    "airaapi__leads_routes__overview": _org("suite.read", feature="leads"),
+    "airaapi__leads_routes__icp_get": _org("suite.read", feature="leads"),
+    "airaapi__leads_routes__lists_get": _org("suite.read", feature="leads"),
+    "airaapi__leads_routes__searches_list": _org("suite.read", feature="leads"),
+    "airaapi__leads_routes__items_list": _org("suite.read", feature="leads"),
+    "airaapi__leads_routes__item_get": _org("suite.read", feature="leads"),
+    "airaapi__leads_routes__export": _org("suite.read", feature="leads", audit=True),
+    "airaapi__leads_routes__icp_save": _org(
+        "suite.manage", feature="leads", kind="leads_changed"
     ),
-    "airaapi__leads_routes__lists_create": write("leads.write", feature="leads"),
-    "airaapi__leads_routes__lists_update": write("leads.write", feature="leads"),
-    "airaapi__leads_routes__lists_delete": write(
-        "leads.write", feature="leads", kind="leads_changed", audit=True
+    "airaapi__leads_routes__lists_create": _org("suite.manage", feature="leads"),
+    "airaapi__leads_routes__lists_update": _org("suite.manage", feature="leads"),
+    "airaapi__leads_routes__lists_delete": _org(
+        "suite.manage", feature="leads", kind="leads_changed", audit=True
     ),
-    "airaapi__leads_routes__search": write(
-        "leads.write", feature="leads", kind="leads_search"
+    "airaapi__leads_routes__search": _org(
+        "suite.manage", feature="leads", kind="leads_search"
     ),
-    "airaapi__leads_routes__searches_create": write("leads.write", feature="leads"),
-    "airaapi__leads_routes__searches_delete": write("leads.write", feature="leads"),
-    "airaapi__leads_routes__searches_run": write(
-        "leads.write", feature="leads", kind="leads_search"
+    "airaapi__leads_routes__searches_create": _org("suite.manage", feature="leads"),
+    "airaapi__leads_routes__searches_delete": _org("suite.manage", feature="leads"),
+    "airaapi__leads_routes__searches_run": _org(
+        "suite.manage", feature="leads", kind="leads_search"
     ),
-    "airaapi__leads_routes__items_save": write(
-        "leads.write", feature="leads", kind="leads_save"
+    "airaapi__leads_routes__items_save": _org(
+        "suite.manage", feature="leads", kind="leads_save"
     ),
-    "airaapi__leads_routes__items_import_csv": write(
-        "leads.write", feature="leads", kind="leads_save", audit=True
+    "airaapi__leads_routes__items_import_csv": _org(
+        "suite.manage", feature="leads", kind="leads_save", audit=True
     ),
-    "airaapi__leads_routes__items_bulk": write(
-        "leads.write", feature="leads", kind="leads_changed"
+    "airaapi__leads_routes__items_bulk": _org(
+        "suite.manage", feature="leads", kind="leads_changed"
     ),
-    "airaapi__leads_routes__item_update": write("leads.write", feature="leads"),
-    "airaapi__leads_routes__item_delete": write(
-        "leads.write", feature="leads", kind="leads_changed"
+    "airaapi__leads_routes__item_update": _org("suite.manage", feature="leads"),
+    "airaapi__leads_routes__item_delete": _org(
+        "suite.manage", feature="leads", kind="leads_changed"
     ),
-    "airaapi__leads_routes__item_enrich": write(
-        "leads.write", feature="leads", kind="leads_enrich"
+    "airaapi__leads_routes__item_enrich": _org(
+        "suite.manage", feature="leads", kind="leads_enrich"
     ),
-    "airaapi__leads_routes__item_draft": write("leads.write", feature="leads"),
-    # -- Aira Leads: finding people who need services, email outreach and call assist ----------------------
-    # A coach with act scope may draft, edit, reject, keep the do-not-contact list and prepare calls; only the
-    # candidate approves, sends, changes the sender identity or the mail server, or removes a do-not-contact entry.
-    "airaapi__leads_routes__services_get": read("leads.read", feature="leads"),
-    "airaapi__leads_routes__outreach_settings_get": read(
-        "leads.outreach", feature="leads"
-    ),
-    "airaapi__leads_routes__outreach_settings_save": write(
-        "leads.outreach",
+    "airaapi__leads_routes__item_draft": _org("suite.manage", feature="leads"),
+    # -- Leads (part of Marketing): finding people who need services, email outreach and call assist --------
+    # The business's shared pipeline, like a CRM: owners, admins and coaches (team members) work on it together,
+    # auditors read it; the organization's database holds it. 402 until Marketing is on.
+    "airaapi__leads_routes__services_get": _org("suite.read", feature="leads"),
+    "airaapi__leads_routes__outreach_settings_get": _org("suite.read", feature="leads"),
+    "airaapi__leads_routes__outreach_settings_save": _org(
+        "suite.manage",
         feature="leads_outreach",
         kind="leads_outreach_settings",
         audit=True,
     ),
-    "airaapi__leads_routes__outreach_test": write(
-        "leads.outreach",
+    "airaapi__leads_routes__outreach_test": _org(
+        "suite.manage",
         feature="leads_outreach",
         kind="leads_outreach_test",
         audit=True,
     ),
-    "airaapi__leads_routes__outbox_list": read("leads.read", feature="leads"),
-    "airaapi__leads_routes__outbox_drafts": write(
-        "leads.write", feature="leads", kind="leads_outreach_count", audit=True
+    "airaapi__leads_routes__outbox_list": _org("suite.read", feature="leads"),
+    "airaapi__leads_routes__outbox_drafts": _org(
+        "suite.manage", feature="leads", kind="leads_outreach_count", audit=True
     ),
-    "airaapi__leads_routes__outbox_update": write("leads.write", feature="leads"),
-    "airaapi__leads_routes__outbox_delete": write("leads.write", feature="leads"),
-    "airaapi__leads_routes__outbox_approve": write(
-        "leads.outreach",
+    "airaapi__leads_routes__outbox_update": _org("suite.manage", feature="leads"),
+    "airaapi__leads_routes__outbox_delete": _org("suite.manage", feature="leads"),
+    "airaapi__leads_routes__outbox_approve": _org(
+        "suite.manage",
         feature="leads_outreach",
         kind="leads_outreach_count",
         audit=True,
     ),
-    "airaapi__leads_routes__outbox_reject": write(
-        "leads.write", feature="leads", kind="leads_outreach_count"
+    "airaapi__leads_routes__outbox_reject": _org(
+        "suite.manage", feature="leads", kind="leads_outreach_count"
     ),
-    "airaapi__leads_routes__outbox_send": write(
-        "leads.outreach",
+    "airaapi__leads_routes__outbox_send": _org(
+        "suite.manage",
         feature="leads_outreach",
         kind="leads_outreach_send",
         audit=True,
     ),
-    "airaapi__leads_routes__suppressions_list": read("leads.read", feature="leads"),
-    "airaapi__leads_routes__suppressions_add": write(
-        "leads.write", feature="leads", audit=True
+    "airaapi__leads_routes__suppressions_list": _org("suite.read", feature="leads"),
+    "airaapi__leads_routes__suppressions_add": _org(
+        "suite.manage", feature="leads", audit=True
     ),
-    "airaapi__leads_routes__suppressions_remove": write(
-        "leads.outreach", feature="leads", audit=True
+    "airaapi__leads_routes__suppressions_remove": _org(
+        "suite.manage", feature="leads", audit=True
     ),
-    "airaapi__leads_routes__item_dial": read("leads.read", feature="leads"),
-    "airaapi__leads_routes__item_call_script": write("leads.write", feature="leads"),
-    "airaapi__leads_routes__item_calls": read("leads.read", feature="leads"),
-    "airaapi__leads_routes__item_call_log": write(
-        "leads.write", feature="leads", audit=True
+    "airaapi__leads_routes__item_dial": _org("suite.read", feature="leads"),
+    "airaapi__leads_routes__item_call_script": _org("suite.manage", feature="leads"),
+    "airaapi__leads_routes__item_calls": _org("suite.read", feature="leads"),
+    "airaapi__leads_routes__item_call_log": _org(
+        "suite.manage", feature="leads", audit=True
     ),
-    "airaapi__leads_routes__follow_ups": read("leads.read", feature="leads"),
-    "airaapi__leads_routes__item_signals": write(
-        "leads.write", feature="leads", kind="leads_search"
+    "airaapi__leads_routes__follow_ups": _org("suite.read", feature="leads"),
+    "airaapi__leads_routes__item_signals": _org(
+        "suite.manage", feature="leads", kind="leads_search"
     ),
 }
 
@@ -483,3 +484,53 @@ def unclassified(routes: list[tuple[str, object, str, bool]]) -> list[str]:
     return sorted(
         {name for _method, _pattern, name, _auth in routes if name not in POLICY}
     )
+
+
+def suite_rules() -> dict[str, Rule]:
+    """Rules for the industry apps and the Business hub (aira.suite), derived from their routes.
+
+    Their data is the organization's (``org_api``): a member who may read it (``suite.read``) calls the
+    GET routes, a member who may manage it (``suite.manage``) the others. The life apps and their core
+    (``/api/life``) use ``life.read`` / ``life.manage``, which every member has. A route module can mark a
+    non-GET route as a read with ``HOSTED_RULES = {"handler_name": "read"}``, or refuse it in the hosted build with
+    ``"deny"`` (a computer owner's page that the platform console replaces). Public link routes answer a
+    business's customers without a session (``public_link``: the token names the organization).
+    """
+    import sys
+
+    from aira.airaapi import http as airaapi_http
+
+    airaapi_http.load_route_modules()
+    rules: dict[str, Rule] = {"ui_public": PUBLIC}
+    for entry in airaapi_http.AIRA_ROUTES:
+        module = entry.handler.__module__
+        if not module.startswith("aira.suite."):
+            continue
+        if entry.auth == "public_link":
+            rules[entry.attr] = Rule("public_link")
+            continue
+        if entry.auth == "none":
+            rules[entry.attr] = PUBLIC
+            continue
+        override = getattr(sys.modules.get(module), "HOSTED_RULES", {}).get(
+            getattr(entry.handler, "__name__", "")
+        )
+        if override == "deny":
+            rules[entry.attr] = DENY
+            continue
+        reads = override == "read" or (override is None and entry.method == "GET")
+        family = "life" if _is_life_module(module) else "suite"
+        rules[entry.attr] = _org(f"{family}.read" if reads else f"{family}.manage")
+    return rules
+
+
+def _is_life_module(module: str) -> bool:
+    """The life apps (everyday use by every member: ``life.*``) as opposed to the industry apps (``suite.*``)."""
+    from aira import suite
+
+    if module == "aira.suite.life_routes":
+        return True
+    return any(module.startswith(f"aira.suite.{name}.") for name in suite.LIFE_PACKAGES)
+
+
+POLICY.update(suite_rules())

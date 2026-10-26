@@ -250,6 +250,23 @@ def handle_org_monitors_due(app: CloudApp, job: dict[str, Any]) -> dict[str, Any
     return {"ran": "organization monitors"}
 
 
+def handle_suite_tick(app: CloudApp, job: dict[str, Any]) -> dict[str, Any]:
+    """The organization's industry and life apps: periodic checks and messages that are due."""
+    from aira.suite import background
+
+    local = _local()
+    org_id = job["org_id"]
+    with app.workspaces.bind_org_api(org_id, correlation_id=job["job_id"]):
+        with local._connect() as connection:
+            return background.run(connection, local._airaapi_secret_store())
+
+
+def handle_webhook_deliver(app: CloudApp, job: dict[str, Any]) -> dict[str, Any]:
+    """One delivery attempt of a webhook event (it schedules its own retries)."""
+    delivery_id = str((job.get("payload") or {}).get("delivery_id") or "")
+    return app.webhooks.deliver(job["org_id"], delivery_id)
+
+
 def handle_rotate_keys(app: CloudApp, job: dict[str, Any]) -> dict[str, Any]:
     return app.lifecycle.rotate_org_keys(job["org_id"])
 
@@ -261,6 +278,8 @@ HANDLERS: dict[str, Callable[[Any, dict[str, Any]], Any]] = {
     "schedules.due": handle_schedules_due,
     "monitors.due": handle_monitors_due,
     "monitors.org": handle_org_monitors_due,
+    "suite.tick": handle_suite_tick,
+    "webhook.deliver": handle_webhook_deliver,
 }
 
 

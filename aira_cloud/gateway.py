@@ -53,7 +53,7 @@ from aira_cloud.policy import (
     remote_assignment,
     APP_FREE_ROUTES,
 )
-from aira_cloud.rbac import CANDIDATE, Principal
+from aira_cloud.rbac import CANDIDATE, PERSONAL_ROLES, Principal
 from aira_cloud.webio import (
     CLOUD_ROUTES,
     OPERATOR_COOKIE,
@@ -131,6 +131,9 @@ class Gateway:
             limit=app.config.member_requests_per_minute, window_seconds=60
         )
         self.v1_limiter = RateLimiter(limit=10_000, window_seconds=60)
+        # Customers on a business's public pages: generous for reading, tight for actions.
+        self.public_view_limiter = RateLimiter(limit=300, window_seconds=60)
+        self.public_action_limiter = RateLimiter(limit=60, window_seconds=60)
         self.agents = app.agents
         self.stats: dict[str, dict[str, int]] = defaultdict(
             lambda: {"requests": 0, "errors": 0, "limited": 0}
@@ -322,6 +325,17 @@ class Gateway:
         )
         if member is not None:
             return member
+        # An app or a script with an OAuth access token or a personal access token (aira_cloud/oauth.py).
+        authorization = request.headers.get("authorization", "")
+        if authorization[:7].lower() == "bearer ":
+            token = authorization[7:].strip()
+            principal = self.app.oauth.principal(token)
+            if principal is None:
+                raise Unauthorized(
+                    "The access token is not valid or has expired.",
+                    code="invalid_token",
+                )
+            return principal
         operator = identity.principal_for_token(
             request.cookie(OPERATOR_COOKIE), kind="operator"
         )
@@ -406,6 +420,9 @@ class Gateway:
             ):
                 raise Unauthorized("Sign in to continue.")
             self.check_session_gates(principal, verified=route.verified, mfa=route.mfa)
+            self.app.oauth.require_scope(principal, request.path, request.method)
+            if route.auth == "member" and request.path.startswith("/api/me/"):
+                principal = self._own_workspace(request, principal)
             org_id = principal.org_id
             if org_id:
                 if route.auth == "member":
@@ -456,6 +473,11 @@ class Gateway:
             from aira_cloud.v1 import run_v1
 
             return run_v1(self, request, name, match, rule, correlation), name, ""
+        if rule.scope == "public_link":
+            from aira_cloud.public_links import run_public_link
+
+            response, org_id = run_public_link(self, request, name, match, correlation)
+            return response, name, org_id
         if rule.scope == "operator":
             principal = self.principal_for(request, kind="operator")
             if principal is None:
@@ -474,6 +496,9 @@ class Gateway:
         if principal is None:
             raise Unauthorized("Sign in to continue.")
         self.check_session_gates(principal, verified=True, mfa=True)
+        self.app.oauth.require_scope(principal, request.path, request.method)
+        if rule.scope == "candidate":
+            principal = self._own_workspace(request, principal)
         org_id = principal.org_id
         set_scope(org_id)
         self.rate_check(principal, org_id)
@@ -698,6 +723,25 @@ class Gateway:
         if owner is None or not owner.feature or route_name in APP_FREE_ROUTES:
             return
         self.app.entitlements.require_app(org_id, owner.id, audience=audience)
+
+    def _own_workspace(self, request: HttpRequest, principal: Principal) -> Principal:
+        """An owner or admin who names their own workspace acts as its candidate for this request.
+
+        Everything a candidate route checks (consent, privacy, the candidate's own switches) then applies to them
+        in their own workspace, while their organization role is unchanged everywhere else.
+        """
+        if principal.is_operator or principal.role not in PERSONAL_ROLES:
+            return principal
+        explicit = request.headers.get("x-aira-candidate", "") or request.q("candidate")
+        if explicit != principal.member_id:
+            return principal
+        if not self.app.tenancy.has_personal_workspace(
+            principal.org_id, principal.member_id
+        ):
+            raise NotFound(
+                "Start your own workspace first.", code="personal_workspace_missing"
+            )
+        return principal.as_own_candidate()
 
     def _target_candidate(self, request: HttpRequest, principal: Principal) -> str:
         explicit = request.headers.get("x-aira-candidate", "") or request.q("candidate")

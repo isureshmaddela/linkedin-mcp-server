@@ -99,7 +99,7 @@ class AuditLog:
             actor_role = actor_role or (
                 f"support:{actor.role}"
                 if actor.via_support
-                else actor.role or actor.operator_role
+                else actor.staff_role or actor.operator_role
             )
         audit_id = new_id()
         fields = {
