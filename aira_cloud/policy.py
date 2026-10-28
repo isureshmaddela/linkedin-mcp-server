@@ -174,6 +174,32 @@ POLICY: dict[str, Rule] = {
     "api_recruiter_delete": write(),
     "api_recruiter_interaction": write(),
     "api_interaction_delete": write(),
+    # Recruiter contacts (aira/recruiter_contacts.py): finding people and a contact's story read the candidate's
+    # own LinkedIn messages and emails, so they need the messages permission (the candidate, or a coach the
+    # organization lets in); lists are ordinary contact data in the candidate's workspace.
+    "api_recruiters_find": read("messages.read"),
+    "api_recruiters_find_save": write("messages.read"),
+    "api_recruiter_story": read("messages.read"),
+    "api_recruiter_story_summary": write("messages.read", kind="model"),
+    "api_recruiter_lists": read(),
+    "api_recruiter_lists_create": write(),
+    "api_recruiter_lists_preview": read(),
+    "api_recruiter_list_update": write(),
+    "api_recruiter_list_delete": write(),
+    "api_recruiter_list_members": read(),
+    "api_recruiter_list_csv": read(audit=True),
+    "api_recruiter_dnc": read(),
+    "api_recruiter_dnc_add": write(),
+    "api_recruiter_dnc_remove": write(),
+    # LinkedIn drafts for a list only fill reply boxes; the candidate sends each one from Messages.
+    "api_recruiter_list_linkedin_preview": write("messages.send"),  # records opt-outs it finds
+    "api_recruiter_list_linkedin_drafts": write("messages.send"),
+    # Recruiter email goes through the shared outbox and the mail server of the single-user build (Business hub >
+    # Email); a hosted organization's mail, consent and sending policy are not wired to it, so it is refused.
+    "api_recruiter_outreach": DENY,
+    "api_recruiter_outreach_save": DENY,
+    "api_recruiter_list_email_preview": DENY,
+    "api_recruiter_list_email_send": DENY,
     "api_tasks_create": write(),
     "api_task_update": write(),
     "api_task_delete": write(),

@@ -2831,3 +2831,41 @@ body.less-motion .ai-typing span { animation: none; opacity: .7; }
   .cas-value { font-size: 24px; }
   .cas-row { grid-template-columns: minmax(0, 1fr); }
 }
+
+/* Recruiter contacts: Find recruiters, Lists, the contact story (views-recruiter-contacts.js) */
+.rcx-intro p { margin: 6px 0 10px; }
+.rcx-scanned { margin: 4px 0 10px; }
+.rcx-toolbar { margin: 6px 0 10px; flex-wrap: wrap; }
+.panel > .rcx-scanned, .panel > .rcx-toolbar, .rcx-detail > p { padding: 0 16px; }
+.rc-waiting:empty { display: none; }
+.rc-waiting-note { margin: 0 0 12px; }
+.rcx-proposal, .rcx-mail { display: grid; grid-template-columns: 28px minmax(0, 1fr); gap: 8px; align-items: start; text-align: left; }
+.rcx-pick { padding-top: 2px; }
+.rcx-pick input { width: 18px; height: 18px; }
+.rcx-nobox { display: inline-block; width: 18px; }
+.rcx-body { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+.rcx-body p { margin: 2px 0; }
+.rcx-body .title, .rcx-body .sub { overflow-wrap: anywhere; }
+.rcx-body .badge.stage { text-transform: none; }
+.rcx-links { display: flex; flex-wrap: wrap; gap: 4px 12px; }
+.rcx-presets { display: flex; flex-direction: column; gap: 6px; align-items: stretch; }
+.rcx-presets .btn { justify-content: flex-start; text-align: left; white-space: normal; }
+.rcx-lists .row.active { background: var(--brand-soft); }
+.rcx-members { width: 100%; }
+.rcx-members td { overflow-wrap: anywhere; }
+.rcx-detail { overflow-x: auto; }
+.rcx-flow .form-grid { margin-top: 10px; }
+.rcx-preview { margin-top: 12px; }
+.rcx-letter summary { cursor: pointer; font-size: 13px; }
+.rcx-letter pre, .rcx-draft { white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; font-size: 13px; margin: 6px 0 0; padding: 8px 10px; border-radius: 6px; background: var(--brand-soft); }
+.rcx-summary { margin: 6px 0 10px; }
+.rcx-summary-text p { margin: 4px 0; }
+.rcx-found { margin: 4px 0 8px; align-items: center; }
+.rcx-item-title { font-weight: 600; overflow-wrap: anywhere; }
+.rcx-item-text { white-space: pre-wrap; overflow-wrap: anywhere; color: var(--ink-2); max-height: 9em; overflow: hidden; }
+.danger-text { color: var(--danger); }
+@media (max-width: 600px) {
+  .rcx-members thead { display: none; }
+  .rcx-members tr { display: grid; grid-template-columns: minmax(0, 1fr); padding: 6px 0; }
+  .rcx-members td { border: 0; padding: 2px 0; }
+}

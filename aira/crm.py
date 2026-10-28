@@ -250,7 +250,9 @@ def list_recruiters(
         f"""SELECT recruiters.*,
             (SELECT COUNT(*) FROM recruiter_interactions WHERE recruiter_interactions.recruiter_id = recruiters.recruiter_id) AS interaction_count,
             (SELECT MAX(occurred_at) FROM recruiter_interactions WHERE recruiter_interactions.recruiter_id = recruiters.recruiter_id) AS last_interaction_at,
-            (SELECT MIN(follow_up_at) FROM recruiter_interactions WHERE recruiter_interactions.recruiter_id = recruiters.recruiter_id AND follow_up_at IS NOT NULL AND follow_up_at >= ?) AS next_follow_up_at
+            (SELECT MIN(follow_up_at) FROM recruiter_interactions WHERE recruiter_interactions.recruiter_id = recruiters.recruiter_id AND follow_up_at IS NOT NULL AND follow_up_at >= ?) AS next_follow_up_at,
+            (SELECT MAX(last_contact_at) FROM recruiter_sources WHERE recruiter_sources.recruiter_id = recruiters.recruiter_id) AS last_found_contact_at,
+            (SELECT group_concat(DISTINCT kind) FROM recruiter_sources WHERE recruiter_sources.recruiter_id = recruiters.recruiter_id) AS found_in
         FROM recruiters WHERE {" AND ".join(clauses)}
         ORDER BY COALESCE(last_interaction_at, recruiters.updated_at) DESC LIMIT ? OFFSET ?""",
         (_now(), *params, max(1, min(limit, 500)), max(0, offset)),

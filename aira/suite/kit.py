@@ -1051,8 +1051,11 @@ def send_outbox(
     *,
     limit: int = 25,
     sender: Callable[..., None] | None = None,
+    ids: Sequence[str] | None = None,
 ) -> dict[str, Any]:
-    """Send approved messages whose time has come, through the business's own mail server."""
+    """Send approved messages whose time has come, through the business's own mail server.
+
+    ``ids`` limits the pass to those messages (an app sending what the person just approved)."""
     from aira.leads import mail as transport
 
     ensure_core(connection)
@@ -1074,8 +1077,13 @@ def send_outbox(
     due = fetch_all(
         connection,
         "SELECT * FROM suite_outbox WHERE status = 'approved' AND (send_after IS NULL OR send_after <= ?) ORDER BY approved_at LIMIT ?",
-        (now(), max(1, min(limit, 100))),
+        (now(), max(1, min(limit, 100)) if ids is None else 1000),
     )
+    if ids is not None:
+        wanted = {str(item) for item in ids}
+        due = [message for message in due if message["id"] in wanted][
+            : max(1, min(limit, 100))
+        ]
     result = {"sent": 0, "failed": 0, "details": []}
     for message in due:
         try:

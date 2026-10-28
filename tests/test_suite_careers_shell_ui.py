@@ -402,7 +402,12 @@ def test_the_left_menu_follows_a_job_search_and_old_links_still_work(browser, en
     page.wait_for_selector("#main .empty:has-text('No past interviews')")
 
     page.click("#primaryNav a[data-section='recruiters']")
-    assert folders(page, "recruiters") == ["Contacts", "Messages"]
+    assert folders(page, "recruiters") == [
+        "Contacts",
+        "Messages",
+        "Find recruiters",
+        "Lists",
+    ]
 
     page.click("#primaryNav a[data-section='documents']")
     assert folders(page, "documents")[:2] == ["All files", "Resumes"]

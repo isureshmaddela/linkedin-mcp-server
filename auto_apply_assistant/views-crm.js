@@ -112,10 +112,22 @@
   // -------------------------------------------------------------------------
   // Recruiters
   // -------------------------------------------------------------------------
-  const PEOPLE_TABS = [{ id: "contacts", label: "Contacts", icon: "recruiters" }, { id: "messages", label: "Messages", icon: "careers-chat" }];
+  const PEOPLE_TABS = [
+    { id: "contacts", label: "Contacts", icon: "recruiters" },
+    { id: "messages", label: "Messages", icon: "careers-chat" },
+    { id: "find", label: "Find recruiters", icon: "careers-sparkle" },
+    { id: "lists", label: "Lists", icon: "careers-list" },
+  ];
+  // Where a contact came from: every place they were found, else how they were added.
+  const CONTACT_SOURCES = { linkedin_inbox: "LinkedIn inbox", email: "Email", interview: "Interview", manual: "Added by you" };
+  const contactSources = (r) => {
+    const kinds = new Set(String(r.found_in || "").split(",").filter((kind) => CONTACT_SOURCES[kind]));
+    if (!kinds.size) kinds.add({ linkedin: "linkedin_inbox", email: "email", interview: "interview" }[r.source] || "manual");
+    return Object.keys(CONTACT_SOURCES).filter((kind) => kinds.has(kind));
+  };
   Aira.views.recruiters = async (main, route) => {
     const making = Aira.careersTakeNew(route);
-    const tab = route.query.tab === "messages" ? "messages" : "contacts";
+    const tab = PEOPLE_TABS.some((item) => item.id === route.query.tab) ? route.query.tab : "contacts";
     Aira.careersFolders("recruiters", PEOPLE_TABS, tab);
     const content = h("div", {});
     main.replaceChildren(
@@ -124,20 +136,31 @@
       content,
     );
     if (tab === "messages") { await Aira.renderMessages(content, route); return; }
+    if (tab === "find") { await Aira.renderRecruiterFind(content); return; }
+    if (tab === "lists") { await Aira.renderRecruiterLists(content, route); return; }
     const search = h("input", { type: "search", "data-search": "1", placeholder: "Search by name, company, or email", value: route.query.q || "" });
     let timer;
     search.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(load, 300); });
     const list = h("div", { class: "panel" });
     const followUps = h("div", { class: "panel" });
-    content.replaceChildren(h("div", { class: "filters" }, h("div", { class: "field grow" }, h("label", { for: "recruiterSearch", text: "Search" }), Object.assign(search, { id: "recruiterSearch" }))), h("div", { class: "grid sidebar-right" }, list, followUps));
+    // People found in the LinkedIn inbox, emails and interviews wait here for review (Find recruiters) and, once
+    // saved, are contacts like any other, with where they were found as badges.
+    const waiting = h("div", { class: "rc-waiting" });
+    content.replaceChildren(h("div", { class: "filters" }, h("div", { class: "field grow" }, h("label", { for: "recruiterSearch", text: "Search" }), Object.assign(search, { id: "recruiterSearch" })), h("div", { class: "field" }, h("label", { text: " " }), h("a", { class: "btn secondary", id: "rcFindButton", href: "#/recruiters?tab=find", text: "Find recruiters" }))), waiting, h("div", { class: "grid sidebar-right" }, list, followUps));
+    api("/api/recruiters/find", { silent: true }).then((found) => {
+      const fresh = found.proposals.filter((item) => item.action === "new").length;
+      const updates = found.proposals.length - fresh;
+      if (!found.proposals.length) return;
+      waiting.replaceChildren(h("div", { class: "note rc-waiting-note" }, h("span", { text: `Waiting for review: ${fmt.plural(fresh, "new contact")} and ${fmt.plural(updates, "update")} from your LinkedIn inbox, emails and interviews.` }), " ", h("a", { href: "#/recruiters?tab=find", text: "Review and save" })));
+    }).catch(() => {}); // a role that may not read messages (hosted) simply sees no banner
     async function load() {
       list.replaceChildren(ui.skeleton(4));
       try {
         const data = await api(`/api/recruiters?q=${encodeURIComponent(search.value)}`);
         const rows = h("div", { class: "list", "data-roving": "1" });
         if (!data.recruiters.length && search.value.trim()) rows.append(ui.empty(`No contacts match “${search.value.trim()}”`, "Search by name, company, title or email.", h("button", { type: "button", class: "btn secondary", text: "Show every contact", onclick: () => { search.value = ""; load(); } })));
-        else if (!data.recruiters.length) rows.append(ui.empty("No recruiters yet", "Add contacts manually or import a recruiter email.", h("button", { type: "button", class: "btn", text: "+ Add recruiter", onclick: () => recruiterForm(null, load) })));
-        for (const r of data.recruiters) rows.append(h("button", { type: "button", class: "row", "data-roving-item": "1", onclick: () => openRecruiter(r.recruiter_id, load) }, h("div", {}, h("span", { class: "title", text: r.name }), h("span", { class: "sub", text: [r.title, r.company, r.email].filter(Boolean).join(" · ") }), h("div", { class: "meta" }, h("span", { class: "badge", text: `${fmt.plural(r.interaction_count || 0, "interaction")}` }), r.next_follow_up_at ? h("span", { class: "badge stage needs_review", text: `Follow up ${fmt.date(r.next_follow_up_at)}` }) : null, r.source === "email" ? h("span", { class: "badge", text: "From email" }) : null)), h("small", { class: "muted", text: r.last_interaction_at ? fmt.ago(r.last_interaction_at) : "" })));
+        else if (!data.recruiters.length) rows.append(ui.empty("No recruiters yet", "Add contacts yourself, or let Monosage find them in your LinkedIn inbox, emails and interviews.", h("div", { class: "btn-row", style: { justifyContent: "center" } }, h("button", { type: "button", class: "btn", text: "+ Add recruiter", onclick: () => recruiterForm(null, load) }), h("a", { class: "btn secondary", href: "#/recruiters?tab=find", text: "Find recruiters" }))));
+        for (const r of data.recruiters) rows.append(h("button", { type: "button", class: "row", "data-roving-item": "1", onclick: () => openRecruiter(r.recruiter_id, load) }, h("div", {}, h("span", { class: "title", text: r.name }), h("span", { class: "sub", text: [r.title, r.company, r.email].filter(Boolean).join(" · ") }), h("div", { class: "meta" }, h("span", { class: "badge", text: `${fmt.plural(r.interaction_count || 0, "interaction")}` }), r.next_follow_up_at ? h("span", { class: "badge stage needs_review", text: `Follow up ${fmt.date(r.next_follow_up_at)}` }) : null, ...contactSources(r).map((kind) => h("span", { class: "badge rc-source", dataset: { source: kind }, text: CONTACT_SOURCES[kind] })))), h("small", { class: "muted", text: (() => { const last = [r.last_interaction_at, r.last_found_contact_at].filter(Boolean).sort().pop(); return last ? fmt.ago(last) : ""; })() })));
         list.replaceChildren(h("div", { class: "panel-head" }, h("h3", { text: search.value.trim() ? `Contacts matching “${search.value.trim()}”` : "Contacts" }), h("small", { class: "muted", text: String(data.recruiters.length) })), rows);
         followUps.replaceChildren(h("div", { class: "panel-head" }, h("h3", { text: "Upcoming follow-ups" })), data.follow_ups.length ? h("div", { class: "list" }, ...data.follow_ups.map((f) => h("button", { type: "button", class: "row", onclick: () => openRecruiter(f.recruiter_id, load) }, h("div", {}, h("span", { class: "title", text: f.name }), h("span", { class: "sub", text: `${fmt.datetime(f.follow_up_at)} · ${f.summary.slice(0, 80)}` }))))) : h("div", { class: "empty", text: "No follow-ups scheduled." }));
       } catch (error) { list.replaceChildren(ui.error(error, load)); }
@@ -161,6 +184,8 @@
     const jobLink = Aira.jobPicker("");
     const addBtn = h("button", { type: "button", class: "btn sm", text: "Log interaction" });
     addBtn.addEventListener("click", () => withBusy(addBtn, async () => { await api(`/api/recruiters/${id}/interactions`, { method: "POST", body: { kind: kind.value, direction: direction.value, summary: summary.value, occurred_at: when.value ? new Date(when.value).toISOString() : null, follow_up_at: followUp.value ? new Date(followUp.value).toISOString() : null, job_id: jobLink.jobId() || null } }); toast("Interaction logged.", "success"); openRecruiter(id, refresh); }));
+    // One timeline: LinkedIn messages, emails, interviews, jobs and logged interactions (views-recruiter-contacts.js).
+    const story = h("div", { style: { marginTop: "14px" } });
     // Element.replaceChildren prints a null as the text "null": drop the empty slots.
     body.replaceChildren(...[
       h("div", { class: "btn-row", style: { marginBottom: "12px" } }, h("button", { type: "button", class: "btn sm", text: "Edit", onclick: () => recruiterForm(r, () => openRecruiter(id, refresh)) }), r.email ? h("a", { class: "btn secondary sm", href: `mailto:${r.email}`, text: "Email" }) : null, h("button", { type: "button", class: "btn ghost sm danger", text: "Delete", onclick: async (event) => { if (await Aira.confirm({ title: "Delete this recruiter?", message: "The contact is removed from lists; interactions stay in history.", confirmLabel: "Delete", danger: true })) await withBusy(event.currentTarget, async () => { await api(`/api/recruiters/${id}`, { method: "DELETE" }); toast("Recruiter deleted.", "success"); Aira.closeDrawer(); }); } })),
@@ -168,10 +193,11 @@
         h("div", { class: "card" }, h("h3", { text: "Contact" }), ui.kv([["Title", r.title || null], ["Company", r.company || null], ["Email", r.email || null], ["Phone", r.phone || null], ["LinkedIn profile", r.linkedin_url || null], ["Source", r.source], ["Consent note", r.consent_note || null], ["Notes", r.notes || null]])),
         h("div", { class: "card" }, h("h3", { text: "Related" }), r.related_jobs.length ? h("ul", { class: "inline-list" }, ...r.related_jobs.map((j) => h("li", {}, h("a", { href: "#", text: `${j.title} (${fmt.stage(j.stage)})`, onclick: (event) => { event.preventDefault(); Aira.openJob(j.job_id); } })))) : h("p", { class: "muted", text: "No linked jobs yet. Link one when logging an interaction." }), r.interviews.length ? h("ul", { class: "inline-list" }, ...r.interviews.map((i) => h("li", {}, h("a", { href: `#/interviews/${i.interview_id}`, text: `${fmt.title(fmt.stage(i.interview_type))} · ${fmt.datetime(i.start_at)} · ${i.status}` })))) : null),
       ),
+      story,
       (r.threads || []).length ? h("div", { class: "card", style: { marginTop: "14px" } }, h("h3", { text: "LinkedIn conversations" }), ...r.threads.map((t) => h("div", { class: "row", style: { padding: "6px 0" } }, h("div", {}, h("span", { class: "title", text: t.participant || "Conversation" }), h("span", { class: "sub", text: t.mode === "auto" ? "Auto-reply is on" : "Manual send" })), h("a", { class: "btn secondary sm", href: `#/recruiters?tab=messages&thread=${encodeURIComponent(t.thread_id)}&participant=${encodeURIComponent(t.participant || "")}`, text: "Open conversation", onclick: () => Aira.closeDrawer() })))) : null,
       h("div", { class: "card", style: { marginTop: "14px" } }, h("h3", { text: "Log an interaction" }), h("div", { class: "form-grid" }, ui.field("Type", kind), ui.field("Direction", direction), ui.field("When", when), ui.field("Follow-up reminder", followUp), Aira.jobPickerField("Related job", jobLink), h("div", { class: "field wide" }, h("label", { for: "intSummary", text: "Summary" }), Object.assign(summary, { id: "intSummary" }))), h("div", { style: { marginTop: "10px" } }, addBtn)),
-      h("div", { class: "card", style: { marginTop: "14px" } }, h("h3", { text: "Communication history" }), r.interactions.length ? h("ul", { class: "timeline" }, ...r.interactions.map((x) => h("li", {}, h("strong", { text: `${fmt.title(x.kind)} · ${x.direction === "inbound" ? "from them" : "from you"}` }), h("div", { text: x.summary }), h("small", { text: `${fmt.datetime(x.occurred_at)}${x.job_title ? ` · ${x.job_title}` : ""}${x.follow_up_at ? ` · follow up ${fmt.datetime(x.follow_up_at)}` : ""}` }), h("button", { type: "button", class: "btn ghost sm", text: "Remove", onclick: async (event) => { if (await Aira.confirm({ title: "Remove this interaction?", message: "", confirmLabel: "Remove", danger: true })) await withBusy(event.currentTarget, async () => { await api(`/api/interactions/${x.interaction_id}`, { method: "DELETE" }); openRecruiter(id, refresh); }); } })))) : h("p", { class: "muted", text: "No interactions logged yet." })),
     ].filter(Boolean));
+    Aira.renderRecruiterStory(story, id, () => openRecruiter(id, refresh));
   }
 
   function recruiterForm(existing, onSaved) {

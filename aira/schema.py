@@ -580,6 +580,12 @@ def _leads_outreach(connection: sqlite3.Connection) -> None:
     ensure_schema(connection)
 
 
+def _recruiter_contacts(connection: sqlite3.Connection) -> None:
+    from aira.recruiter_contacts import ensure_schema
+
+    ensure_schema(connection)
+
+
 def _normalize_stages(connection: sqlite3.Connection) -> None:
     """Rename the old stage names again.
 
@@ -713,6 +719,13 @@ MIGRATIONS: tuple[Migration, ...] = (
         "leads_outreach",
         "Monosage Leads outreach: the email outbox with approval, the suppression list and the call log.",
         _leads_outreach,
+    ),
+    Migration(
+        20,
+        "recruiter_contacts",
+        "Recruiter contacts: where each contact was found (LinkedIn inbox, email, interview), saved contact lists, "
+        "cached AI summaries of a contact's story and the do-not-contact list for recruiter outreach.",
+        _recruiter_contacts,
     ),
 )
 

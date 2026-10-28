@@ -1,6 +1,6 @@
 # Career Copilot Progress
 
-Last updated: 2026-10-23.
+Last updated: 2026-10-28.
 
 ## Completed
 
@@ -462,3 +462,58 @@ app working end to end with one account, tests per app, more features where they
 - **Tests:** `test_suite_careers_shell_ui.py` (menu groups and order, redirects, source chips, Saved, Profile &
   resume folders, Needs you page with the menu count and phone dot), `test_app_switcher_ui.py`,
   `test_integration_shell.py` updated. te/hi translations for the 32 new strings (`i18n_check` clean for both).
+
+## Recruiter contacts: find, story, lists, careful outreach (2026-10-28)
+- **Where:** Careers > Messages & recruiters. Folders: Contacts, Messages, Find recruiters, Lists. Contacts lists every
+  saved contact with source badges (LinkedIn inbox, Email, Interview, Added by you), has a "Find recruiters" button,
+  and shows "Waiting for review: N new contacts and M updates" while unsaved people are found. Code:
+  `aira/recruiter_contacts.py` (find, story, lists), `aira/recruiter_outreach.py` (email and LinkedIn drafts),
+  `views-recruiter-contacts.js`, routes in `auto_apply_assistant.py`; migration 20 `recruiter_contacts`
+  (`recruiter_sources`, `recruiter_lists`, `recruiter_summaries`, `recruiter_do_not_contact`).
+- **Find recruiters** (`GET /api/recruiters/find`, `POST /api/recruiters/find/save {keys}`): reads the stored inbox
+  (`inbox_threads`/`inbox_messages`), imported emails (not dismissed) and interview participants. Fields come only
+  from text: the LinkedIn headline line under the person's name (before the first message), a self introduction in
+  their own message ("I'm a recruiter at Acme"), a single email address in their messages, the email's
+  sender/signature/company, an interview participant's role, email and the interview's company. No lookups, no
+  guessing: no email in the text means no email. The user's own name is skipped; a LinkedIn conversation counts
+  when it reads as recruiting (inbox flag, headline/intro words) or is already linked. One person across sources is
+  one proposal (same email, or same name with compatible company and email; different companies stay apart).
+  Matching existing contacts: the sources they already have (thread link, email interaction, recorded source),
+  then `crm.find_duplicate` (email, LinkedIn URL, name and company); a same-name-only match is offered as an
+  unticked update with a warning. Updates fill only empty fields. Save re-runs the scan and saves only the chosen
+  keys (stale keys are reported), records each source (`linkedin_inbox`/`email`/`interview`, link, last contact)
+  and links the LinkedIn thread to the contact if no live contact has it.
+- **Contact story** (`GET /api/recruiters/{id}/story`): one newest-first timeline of LinkedIn messages (both
+  directions), emails, interviews, linked jobs (applied or not), logged interactions (with Remove), recruiter emails
+  sent from Lists and LinkedIn drafts waiting. It replaces the drawer's old "Communication history" card. Optional
+  AI summary (`POST .../story/summary`): relationship and next step through `_ollama_json` (Claude when chosen);
+  cached with a fingerprint and marked out of date when the story changes. No model: the button is disabled and
+  the page says so; a model error comes back as a message, never an error page.
+- **Lists** (`/api/recruiters/lists`, `.../preview`, `.../{id}`, `.../{id}/members`, `.../{id}/export.csv`): saved
+  filters (at companies I applied to, no reply in N days = you wrote last and they have not answered for N days,
+  has email, found in a source or added by you, text search), with four presets. CSV export neutralises formulas.
+  The list id is the seam: `recruiter_contacts.members(connection, list_id)`.
+- **Email from a list** (step 4, rules decided by the user): `POST .../{id}/email/preview` then `.../email/send
+  {recruiter_ids, confirm: true}`. Personalised from a template (`{first_name}`, `{company|fallback}`, `{job}` from
+  the story, `{last_contact}`, `{my_name}`...); a detail missing without a fallback skips the contact. Reuses the
+  shared outbox (`suite_outbox`, app `careers`, kind `recruiter_email`) and its sender `kit.send_outbox` (new `ids`
+  argument so only the confirmed messages go) through Business hub > Email (own SMTP or Gmail app password). Daily
+  limit 20 by default, 1 to 100 (`GET/POST /api/recruiters/outreach`). Every email ends with an opt-out line.
+  Skipped with the reason shown: no email (LinkedIn only, never looked up), do-not-contact (own table plus the
+  Leads suppression list, so both apps share it), "unsubscribe"/"stop emailing me" in their email or LinkedIn
+  message (put on the list automatically), replied after our first email (sending stops for good), emailed in the
+  last 14 days, over today's limit. The send log shows in the contact's story. Do not contact by hand:
+  `POST/DELETE /api/recruiters/{id}/do-not-contact`, `GET /api/recruiters/do-not-contact`.
+- **LinkedIn from a list: drafts only** (`.../linkedin/preview`, `.../linkedin/drafts`): one personalised draft per
+  contact written into the conversation's reply box (`message_drafts`); never overwrites a waiting draft, never
+  calls LinkedIn. The person opens each conversation in Messages and presses Send (existing flow and guardrails).
+- **Hosted:** find/story need `messages.read`; drafts `messages.send`; lists and do-not-contact are ordinary
+  candidate routes; recruiter email (outreach settings, email preview and send) is DENY (the outbox and mail server
+  are the single-user build's). The Email button is hidden when `Aira.cloud` is set.
+- **Tests:** `tests/test_recruiter_contacts.py` (17: parsing, find/save/no duplicates, updates, story, filters,
+  CSV, templates, skip rules, sending through a stand-in sender and the SMTP stub, LinkedIn drafts sent once through
+  the existing reply flow with the stand-in LinkedIn worker, hosted policy), `tests/test_suite_careers_recruiters_ui.py`
+  (2: desktop light walk of Contacts, Find, story, Lists, email via the SMTP stub, LinkedIn drafts; phone dark).
+  `test_suite_careers_shell_ui.py` folder list updated. te/hi: 147 new strings, `i18n_check` clean for both.
+- **Not built:** a public unsubscribe link (opt-out is by reply, detected in imported emails and the inbox); recruiter
+  email in the hosted build; automatic follow-up sequences.

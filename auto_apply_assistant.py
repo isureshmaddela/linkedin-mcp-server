@@ -130,6 +130,7 @@ from aira.email_intel import (
     suggest_action,
 )
 from aira import inbox_store
+from aira import recruiter_contacts, recruiter_outreach
 from aira.airaapi import careers as airaapi_careers
 from aira.airaapi import careers_tracker
 from aira.leads import mail as leads_mail
@@ -4209,6 +4210,69 @@ def _link_thread_recruiter(
     )
     return {"policy": policy, "recruiter": recruiter}
 
+
+def _my_name() -> str:
+    """The person's own name, for signing outreach (Profile & resume)."""
+    names = _own_display_names()
+    return names[0] if names else ""
+
+
+def _summarize_recruiter(recruiter_id: str) -> dict[str, Any]:
+    """A two-line AI summary of a contact's story. Without a model it says so instead of failing."""
+    with _connect() as connection:
+        told = recruiter_contacts.story(connection, recruiter_id)
+    if HOSTING.model_json is None and not _ollama_available():
+        return {
+            "summary": None,
+            "model_ready": False,
+            "message": "No AI model is set up. Start Ollama or choose Claude in Settings > Integrations to get a summary.",
+        }
+    if not told["items"]:
+        return {
+            "summary": None,
+            "model_ready": True,
+            "message": "There is nothing in this contact's story to summarize yet.",
+        }
+    prompt = recruiter_contacts.summary_prompt(told["recruiter"], told["items"])
+    try:
+        generated = _ollama_json(_setting("default_model") or DEFAULT_MODEL, prompt)
+        summary = recruiter_contacts.parse_summary(generated)
+    except (RuntimeError, ValueError, OSError) as error:
+        logger.info("Recruiter summary failed: %s", error)
+        return {
+            "summary": None,
+            "model_ready": True,
+            "message": f"The AI model could not write a summary: {error}",
+        }
+    with _connect() as connection:
+        saved = recruiter_contacts.save_summary(
+            connection, recruiter_id, summary, told["fingerprint"]
+        )
+    saved["stale"] = False
+    return {"summary": saved, "model_ready": True, "message": ""}
+
+
+def _recruiter_outreach_view() -> dict[str, Any]:
+    """The outreach templates, the daily limit and whether email is set up (Business hub > Email)."""
+    with _connect() as connection:
+        settings = recruiter_outreach.get_settings(connection)
+        email = suite_kit.email_settings(connection)
+        has_password = bool(
+            _airaapi_secret_store().get(connection, suite_kit.SMTP_PASSWORD_SECRET)
+        )
+        sent = recruiter_outreach.sent_today(connection)
+        connection.commit()
+    return {
+        "settings": settings,
+        "placeholders": list(recruiter_outreach.PLACEHOLDERS),
+        "opt_out_line": recruiter_outreach.OPT_OUT_LINE,
+        "sent_today": sent,
+        "email": {
+            "ready": bool(email.get("smtp_host") and email.get("from_email")),
+            "from_email": email.get("from_email") or "",
+            "has_password": has_password,
+        },
+    }
 
 def _start_inbox_pass_now(user: dict[str, Any]) -> dict[str, Any]:
     """Run one inbox check (drafts plus allowed auto-replies) in the background."""
@@ -10055,6 +10119,361 @@ class RequestHandler(BaseHTTPRequestHandler):
             deleted = delete_interaction(connection, match.group(1))
         if not deleted:
             raise LookupError("Interaction not found.")
+        self._send_json(200, {"ok": True})
+
+    # -- recruiter contacts: find, story, lists, outreach (aira/recruiter_contacts.py, aira/recruiter_outreach.py) --
+
+    @route("GET", r"/api/recruiters/find")
+    def api_recruiters_find(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        own = _own_display_names()
+        with _connect() as connection:
+            found = recruiter_contacts.find_proposals(connection, own_names=own)
+        self._send_json(200, found)
+
+    @route("POST", r"/api/recruiters/find/save")
+    def api_recruiters_find_save(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        keys = payload.get("keys")
+        if not isinstance(keys, list):
+            raise ValueError("Send the people to save as a list of keys.")
+        own = _own_display_names()
+        with _connect() as connection:
+            result = recruiter_contacts.save_proposals(
+                connection, [str(key) for key in keys], own_names=own
+            )
+        _audit(
+            "recruiter.bulk_import",
+            "recruiter",
+            "",
+            {
+                "created": result["created"],
+                "updated": result["updated"],
+                "failed": len(result["failed"]),
+            },
+        )
+        self._send_json(200, result)
+
+    @route("GET", r"/api/recruiters/([0-9a-f]{32})/story")
+    def api_recruiter_story(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        with _connect() as connection:
+            told = recruiter_contacts.story(connection, match.group(1))
+            cached = recruiter_contacts.cached_summary(connection, match.group(1))
+        if cached:
+            cached["stale"] = cached["fingerprint"] != told["fingerprint"]
+        told["summary"] = cached
+        told["model_ready"] = HOSTING.model_json is not None or _ollama_available()
+        self._send_json(200, told)
+
+    @route("POST", r"/api/recruiters/([0-9a-f]{32})/story/summary")
+    def api_recruiter_story_summary(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        self._send_json(200, _summarize_recruiter(match.group(1)))
+
+    @route("GET", r"/api/recruiters/lists")
+    def api_recruiter_lists(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        with _connect() as connection:
+            lists = recruiter_contacts.list_lists(connection)
+        self._send_json(
+            200,
+            {
+                "lists": lists,
+                "presets": list(recruiter_contacts.PRESETS),
+                "sources": list(recruiter_contacts.LIST_SOURCES),
+            },
+        )
+
+    @route("POST", r"/api/recruiters/lists")
+    def api_recruiter_lists_create(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        with _connect() as connection:
+            created = recruiter_contacts.create_list(connection, payload)
+        self._send_json(201, {"list": created})
+
+    @route("POST", r"/api/recruiters/lists/preview")
+    def api_recruiter_lists_preview(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        with _connect() as connection:
+            people = recruiter_contacts.filter_people(
+                connection, payload.get("filters") or {}
+            )
+        self._send_json(200, {"count": len(people), "members": people[:200]})
+
+    @route("PATCH", r"/api/recruiters/lists/([0-9a-f]{32})")
+    def api_recruiter_list_update(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        with _connect() as connection:
+            updated = recruiter_contacts.update_list(connection, match.group(1), payload)
+        self._send_json(200, {"list": updated})
+
+    @route("DELETE", r"/api/recruiters/lists/([0-9a-f]{32})")
+    def api_recruiter_list_delete(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        with _connect() as connection:
+            deleted = recruiter_contacts.delete_list(connection, match.group(1))
+        if not deleted:
+            raise LookupError("List not found.")
+        self._send_json(200, {"ok": True})
+
+    @route("GET", r"/api/recruiters/lists/([0-9a-f]{32})/members")
+    def api_recruiter_list_members(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        with _connect() as connection:
+            chosen = recruiter_contacts.get_list(connection, match.group(1))
+            people = recruiter_contacts.members(connection, match.group(1))
+        self._send_json(200, {"list": chosen, "members": people})
+
+    @route("GET", r"/api/recruiters/lists/([0-9a-f]{32})/export\.csv")
+    def api_recruiter_list_csv(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        with _connect() as connection:
+            chosen = recruiter_contacts.get_list(connection, match.group(1))
+            people = recruiter_contacts.members(connection, match.group(1))
+        slug = re.sub(r"[^a-z0-9]+", "-", chosen["name"].lower()).strip("-") or "list"
+        _audit(
+            "recruiter.list_export",
+            "recruiter_list",
+            match.group(1),
+            {"rows": len(people)},
+        )
+        self._send_bytes(
+            200,
+            ("﻿" + recruiter_contacts.members_csv(people)).encode("utf-8"),
+            "text/csv; charset=utf-8",
+            filename=f"recruiters-{slug[:40]}.csv",
+        )
+
+    @route("GET", r"/api/recruiters/outreach")
+    def api_recruiter_outreach(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        self._send_json(200, _recruiter_outreach_view())
+
+    @route("POST", r"/api/recruiters/outreach")
+    def api_recruiter_outreach_save(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        with _connect() as connection:
+            recruiter_outreach.save_settings(connection, payload)
+        self._send_json(200, _recruiter_outreach_view())
+
+    @route("POST", r"/api/recruiters/lists/([0-9a-f]{32})/email/preview")
+    def api_recruiter_list_email_preview(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        my_name = _my_name()
+        with _connect() as connection:
+            settings = recruiter_outreach.get_settings(connection)
+            plan = recruiter_outreach.email_plan(
+                connection,
+                match.group(1),
+                subject=str(payload.get("subject") or settings["email_subject"]),
+                body=str(payload.get("body") or settings["email_body"]),
+                my_name=my_name,
+            )
+        plan["email"] = _recruiter_outreach_view()["email"]
+        self._send_json(200, plan)
+
+    @route("POST", r"/api/recruiters/lists/([0-9a-f]{32})/email/send")
+    def api_recruiter_list_email_send(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        if payload.get("confirm") is not True:
+            raise ValueError(
+                "Confirm that you read the preview and want to send these emails."
+            )
+        ids = payload.get("recruiter_ids")
+        if not isinstance(ids, list):
+            raise ValueError("Send the contacts to email as a list of ids.")
+        my_name = _my_name()
+        with _connect() as connection:
+            settings = recruiter_outreach.get_settings(connection)
+            subject = str(payload.get("subject") or settings["email_subject"])
+            body = str(payload.get("body") or settings["email_body"])
+            recruiter_outreach.save_settings(
+                connection, {"email_subject": subject, "email_body": body}
+            )
+            connection.commit()
+            password = (
+                _airaapi_secret_store().get(connection, suite_kit.SMTP_PASSWORD_SECRET)
+                or ""
+            )
+            result = recruiter_outreach.send_emails(
+                connection,
+                match.group(1),
+                [str(item) for item in ids],
+                subject=subject,
+                body=body,
+                my_name=my_name,
+                password=password,
+            )
+        _audit(
+            "recruiter.list_email",
+            "recruiter_list",
+            match.group(1),
+            {
+                "sent": result["sent"],
+                "failed": result["failed"],
+                "skipped": result["skipped"],
+            },
+        )
+        self._send_json(200, result)
+
+    @route("POST", r"/api/recruiters/lists/([0-9a-f]{32})/linkedin/preview")
+    def api_recruiter_list_linkedin_preview(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        my_name = _my_name()
+        with _connect() as connection:
+            settings = recruiter_outreach.get_settings(connection)
+            plan = recruiter_outreach.linkedin_plan(
+                connection,
+                match.group(1),
+                body=str(payload.get("body") or settings["linkedin_body"]),
+                my_name=my_name,
+            )
+        self._send_json(200, plan)
+
+    @route("POST", r"/api/recruiters/lists/([0-9a-f]{32})/linkedin/drafts")
+    def api_recruiter_list_linkedin_drafts(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        ids = payload.get("recruiter_ids")
+        if not isinstance(ids, list):
+            raise ValueError("Send the contacts to draft for as a list of ids.")
+        my_name = _my_name()
+        with _connect() as connection:
+            settings = recruiter_outreach.get_settings(connection)
+            body = str(payload.get("body") or settings["linkedin_body"])
+            recruiter_outreach.save_settings(connection, {"linkedin_body": body})
+            result = recruiter_outreach.make_linkedin_drafts(
+                connection,
+                match.group(1),
+                [str(item) for item in ids],
+                body=body,
+                my_name=my_name,
+            )
+        self._send_json(200, result)
+
+    @route("GET", r"/api/recruiters/do-not-contact")
+    def api_recruiter_dnc(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        with _connect() as connection:
+            people = recruiter_outreach.list_do_not_contact(connection)
+        self._send_json(200, {"contacts": people})
+
+    @route("POST", r"/api/recruiters/([0-9a-f]{32})/do-not-contact")
+    def api_recruiter_dnc_add(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        with _connect() as connection:
+            entry = recruiter_outreach.add_do_not_contact(
+                connection, match.group(1), str(payload.get("reason") or "")
+            )
+        _audit("recruiter.do_not_contact", "recruiter", match.group(1))
+        self._send_json(200, {"do_not_contact": entry})
+
+    @route("DELETE", r"/api/recruiters/([0-9a-f]{32})/do-not-contact")
+    def api_recruiter_dnc_remove(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        with _connect() as connection:
+            recruiter_outreach.remove_do_not_contact(connection, match.group(1))
+        _audit("recruiter.contact_allowed", "recruiter", match.group(1))
         self._send_json(200, {"ok": True})
 
     # -- tasks ------------------------------------------------------------------------
