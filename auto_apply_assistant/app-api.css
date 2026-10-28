@@ -1,0 +1,59 @@
+/* Styles for the api app only. Loaded on every page: scope every selector to the app's own class names. */
+
+/* ---- Rank tracker -------------------------------------------------------------------------------------------- */
+.aa-rank-head { align-items: flex-start; gap: 12px; flex-wrap: wrap; }
+.aa-rank-head h2 { margin: 6px 0 2px; }
+.aa-rank-head p { margin: 0; overflow-wrap: anywhere; }
+.aa-back { display: inline-flex; align-items: center; gap: 4px; font-size: 13px; font-weight: 700; color: var(--brand); text-decoration: none; }
+.aa-back:hover, .aa-back:focus-visible { text-decoration: underline; }
+.aa-rank-pos { font-family: var(--font-num, inherit); font-weight: 800; font-size: 16px; color: var(--ink); white-space: nowrap; }
+.aa-rank-pos.top3 { color: var(--good); }
+.aa-rank-pos.top10 { color: var(--brand); }
+.aa-rank-pos.none { font-weight: 600; font-size: 13px; color: var(--muted); }
+.aa-up { color: var(--good); font-weight: 700; white-space: nowrap; }
+.aa-down { color: var(--danger); font-weight: 700; white-space: nowrap; }
+.aa-rank-spark { color: var(--brand); display: block; overflow: visible; }
+.aa-rank-url { overflow-wrap: anywhere; font-size: 13px; }
+.aa-rank-above { color: var(--muted); font-size: 13px; overflow-wrap: anywhere; }
+.aa-rank-table td { vertical-align: middle; }
+.aa-rank-table .aa-acts { flex-wrap: nowrap; }
+.aa-rank-mini { list-style: none; margin: 8px 0; padding: 0; display: grid; gap: 4px; }
+.aa-rank-mini li { display: flex; justify-content: space-between; gap: 8px; font-size: 13px; }
+.aa-rank-mini li span:first-child { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.aa-rank-card h4 a { color: inherit; text-decoration: none; }
+.aa-rank-card h4 a:hover, .aa-rank-card h4 a:focus-visible { text-decoration: underline; }
+.aa-rank-card p { margin: 2px 0 0; overflow-wrap: anywhere; }
+.aa-rank-form textarea { width: 100%; min-height: 120px; font: inherit; }
+.aa-rank-note { margin-bottom: 12px; }
+
+/* ---- Selling keys and earnings ------------------------------------------------------------------------------- */
+.aa-sell { border: 1px solid var(--line); border-radius: var(--radius-sm, 8px); padding: 10px 12px; margin: 4px 0 12px; background: var(--surface-2); }
+.aa-sell > summary { cursor: pointer; font-weight: 700; }
+.aa-sell[open] > summary { margin-bottom: 6px; }
+.aa-sell p { margin: 0 0 10px; }
+.aa-key-terms { margin-top: 6px; }
+.aa-key-month { display: block; margin-top: 6px; }
+.aa-earn-month { display: flex; align-items: center; gap: 8px; }
+.aa-earn-month select { min-width: 160px; }
+.aa-earn-settings { display: grid; gap: 12px; }
+.aa-earn-settings .btn { justify-self: start; }
+.aa-terms { margin-top: 4px; }
+
+@media (max-width: 640px) {
+  .aa-rank-head .btn-row { width: 100%; }
+  .aa-earn-month { width: 100%; }
+  .aa-earn-month select { flex: 1; min-width: 0; }
+  .aa-rank-table .aa-acts { flex-wrap: wrap; }
+}
+
+/* ---- In the Aira frame (shell.js) ---------------------------------------------------------------------------- */
+/* The console's tabs are folders in the left menu on wider screens, so the strip under the heading is only for
+   phones and tablets, where that menu is folded away. The heading names the tab; the app's name sits above it. */
+.aa-head .aa-eyebrow { margin: 0 0 2px; color: var(--muted); font-size: 12px; font-weight: 800; letter-spacing: 0.06em; text-transform: uppercase; }
+@media (min-width: 901px) {
+  .aa-subnav { display: none; }
+}
+@media (max-width: 640px) {
+  .aa-head h1 { font-size: 26px; }
+  .aa-head p:not(.aa-eyebrow) { font-size: 14px; }
+}

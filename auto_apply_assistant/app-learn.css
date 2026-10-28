@@ -1,0 +1,44 @@
+/* Styles for the learn app only. Loaded on every page: scope every selector to the app's own class names. */
+
+/* Search and filter rows: the search box takes the room, the select keeps its size; both wrap on a phone. */
+.ln-filters { align-items: center; }
+.ln-filters input[type="search"] { flex: 1 1 220px; width: auto; min-width: 0; min-height: 44px; }
+.ln-filters select { flex: 0 1 auto; width: auto; min-height: 44px; max-width: 100%; }
+.ln-study-head { align-items: flex-end; }
+
+/* The progress calendar: one column a week, seven days down, darker for more practice. */
+.ln-cal { display: grid; grid-template-columns: repeat(12, minmax(0, 1fr)); gap: 4px; max-width: 440px; }
+.ln-cal-week { display: grid; grid-template-rows: repeat(7, auto); gap: 4px; }
+.ln-cal-day { display: grid; place-items: center; aspect-ratio: 1; min-width: 12px; border-radius: 4px; border: 1px solid var(--line); background: var(--surface); font-size: 11px; line-height: 1; color: var(--on-brand, #fff); }
+.ln-cal-day.ln-l1 { background: color-mix(in srgb, var(--brand) 25%, var(--surface)); }
+.ln-cal-day.ln-l2 { background: color-mix(in srgb, var(--brand) 50%, var(--surface)); }
+.ln-cal-day.ln-l3 { background: color-mix(in srgb, var(--brand) 75%, var(--surface)); }
+.ln-cal-day.ln-l4 { background: var(--brand); }
+.ln-cal-day.ln-l0.ln-frozen, .ln-cal-day.ln-l1.ln-frozen { color: var(--ink); }
+.ln-cal-day.ln-l1.ln-goal { color: var(--ink); }
+.ln-cal-day.ln-today { outline: 2px solid var(--ink); outline-offset: 1px; }
+.ln-cal-legend { display: flex; flex-wrap: wrap; align-items: center; gap: 4px; margin-top: 8px; }
+.ln-cal-legend .ln-cal-day { width: 14px; min-width: 14px; }
+
+.ln-steps { margin: 0; padding-left: 22px; display: grid; gap: 6px; }
+.ln-code { font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size: 22px; letter-spacing: 1px; user-select: all; }
+.ln-notice { border-color: var(--warning, #b45309); }
+.ln-books .life-line, .ln-sale, .ln-for-sale .life-line { flex-wrap: wrap; }
+.ln-grow { flex: 1 1 240px; min-width: 0; }
+.ln-book-actions { justify-content: flex-end; }
+
+/* In the Aira frame: the left menu lists the tabs as folders, so on a wide screen the bar under the title would say it
+   twice; phones and tablets, where the menu is a sheet, keep the bar. */
+@media (min-width: 901px) {
+  .ln-page > .tabs { display: none; }
+}
+
+/* What the search across the top found: cards and books under the decks, and the row it led to, marked for a moment. */
+.ln-results-for { margin: 0; }
+.ln-hits .life-line { align-items: center; }
+.ln-hit-icon { display: inline-grid; place-items: center; flex: 0 0 auto; width: 36px; height: 36px; border-radius: 10px; background: var(--brand-soft); color: var(--brand); }
+.ln-hit-icon svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.life-line.ln-picked { background: var(--brand-soft); border-radius: 6px; box-shadow: 0 0 0 6px var(--brand-soft), 0 0 0 8px var(--brand); transition: background 0.4s, box-shadow 0.4s; }
+@media (prefers-reduced-motion: reduce) { .life-line.ln-picked { transition: none; } }
+.ln-alone { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 10px; border-top: 1px solid var(--line); padding-top: 12px; }
+.ln-alone p { margin: 0; flex: 1 1 260px; }

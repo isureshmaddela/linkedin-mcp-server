@@ -37,13 +37,31 @@
     ["history", "History"],
     ["locations", "Locations"],
     ["monitors", "Monitors & saved"],
-    ["account", "Account"],
+    ["rank", "Rank tracker"],
     ["keys", "API keys"],
+    ["earnings", "Earnings"],
+    ["account", "Account"],
     ["docs", "Docs"],
     ["status", "Status"],
   ];
   const TAB_IDS = TABS.map(([id]) => id);
   const tabs = {};
+  // Each tab as a folder in the app's left menu (shell.js), with its icon, and the line under the page heading.
+  const TAB_ICONS = { overview: "dashboard", playground: "aa-play", engines: "jobs", history: "aa-clock", locations: "aa-place", monitors: "aa-bell", rank: "analytics", keys: "aa-key", earnings: "aa-coin", account: "aa-shield", docs: "aa-book", status: "aa-pulse" };
+  const TAB_LINES = {
+    overview: "Searches, plan and spending at a glance.",
+    playground: "Pick an engine, fill in the request and run it. Ctrl+Enter runs it too.",
+    engines: "Every SerpApi engine, plus Aira's own free Aira Jobs engine.",
+    history: "Every search Aira has run, with its result and what it cost.",
+    locations: "Exact place names for the location parameter. Free, no key needed.",
+    monitors: "Searches you run often, and the ones Aira re-runs on a schedule.",
+    rank: "Where a website shows up on Google for its keywords, for you or for clients.",
+    keys: "Keys for the SerpApi-compatible /v1 endpoint: for your own scripts, or to sell to clients.",
+    earnings: "What clients owe you this month, against what their searches cost you.",
+    account: "Your SerpApi key, plan and local limits.",
+    docs: "The /v1 reference and how to move from SerpApi.",
+    status: "SerpApi reachability, throttle and queue.",
+  };
 
   // ===========================================================================
   // Small helpers
@@ -85,9 +103,16 @@
     shield: '<path d="M12 3 5 6v6c0 4.2 2.9 7.3 7 9 4.1-1.7 7-4.8 7-9V6z"/><path d="m9 12 2 2 4-4"/>',
     save: '<path d="M5 4h11l3 3v13H5zM8 4v5h7V4M8 20v-6h8v6"/>',
     filter: '<path d="M4 5h16l-6 8v6l-4-2v-4z"/>',
+    info: '<circle cx="12" cy="12" r="9"/><path d="M12 11v6M12 7.5v.5"/>',
   };
   function ico(name) {
     return h("span", { class: "sk-icon", "aria-hidden": "true", html: `<svg viewBox="0 0 24 24" focusable="false">${ICON_PATHS[name] || ""}</svg>` });
+  }
+  // The menu folders and "+ New" draw icons by name from Aira.ICONS; the console's own ones join it as aa-<name>.
+  const PLACE = '<path d="M12 21s-6-5.6-6-11a6 6 0 0 1 12 0c0 5.4-6 11-6 11z"/><circle cx="12" cy="10" r="2.2"/>';
+  const COIN = '<circle cx="12" cy="12" r="9"/><path d="M15 9.5c-.5-1-1.6-1.5-3-1.5-1.7 0-3 .8-3 2s1.3 1.7 3 2 3 .8 3 2-1.3 2-3 2c-1.4 0-2.5-.5-3-1.5M12 6.5v11"/>';
+  for (const [name, paths] of [...["play", "clock", "bell", "key", "book", "pulse", "save", "shield"].map((id) => [id, ICON_PATHS[id]]), ["place", PLACE], ["coin", COIN]]) {
+    if (Aira.ICONS && !Aira.ICONS[`aa-${name}`]) Aira.ICONS[`aa-${name}`] = `<svg viewBox="0 0 24 24">${paths}</svg>`;
   }
 
   /** Button or link with an optional icon. kind: "" (primary), "secondary", "ghost", "danger". */
@@ -290,6 +315,8 @@
   function failure(error, retry) {
     const code = error && error.code;
     if (code === "not_configured") return setupPanel();
+    // a child or teen profile on a shared household account: a calm note, not an error
+    if (code === "adult_only") return ui.empty("This page is for the account holder", error.message, btn("Go to the Playground", { kind: "", href: link("playground") }));
     const box = ui.error(error, retry);
     const hints = {
       invalid_api_key: ["SerpApi rejected the stored key. ", h("a", { href: link("account"), text: "Replace it in Account" }), "."],
@@ -367,19 +394,21 @@
     if (crumbs) crumbs.replaceChildren(h("span", { text: "API" }), h("span", { class: "muted", "aria-hidden": "true", text: "/" }), h("span", { text: label }));
 
     const content = h("div", { class: "aa-content", id: "aaContent", role: "region", "aria-label": label, tabindex: "-1" });
+    // On a phone the tabs are a strip under the heading; on wider screens they are the folders in the left menu.
     const nav = h("nav", { class: "subnav aa-subnav", "aria-label": "API sections" },
       ...TABS.map(([id, text]) => h("a", { href: link(id), "aria-current": id === tab ? "page" : "false", text })));
+    if (Aira.shell && Aira.shell.tabs) Aira.shell.tabs("airaapi", TABS.map(([id, text]) => ({ id, label: text, icon: TAB_ICONS[id] })), tab);
     main.replaceChildren(
       h("div", { class: "page-head aa-head" },
-        h("div", {}, h("h1", { text: "API" }), h("p", { text: "Every SerpApi engine plus Aira's own free Aira Jobs engine behind one console: search, inspect, compare, monitor and call them from your own code through a local, cached, SerpApi-compatible endpoint." }))),
+        h("div", {}, h("p", { class: "aa-eyebrow", text: "API" }), h("h1", { text: label }), TAB_LINES[tab] ? h("p", { text: TAB_LINES[tab] }) : null)),
       nav, content);
     const active = nav.querySelector('[aria-current="page"]');
-    if (active && active.scrollIntoView) active.scrollIntoView({ inline: "center", block: "nearest" });
+    if (active) nav.scrollLeft = Math.max(0, active.offsetLeft - (nav.clientWidth - active.offsetWidth) / 2);
 
     const ctx = { route, query: route.query, tab, content, setQuery };
     const render = tabs[tab];
     if (!render) {
-      content.replaceChildren(ui.empty("This page is not available", "Choose another section from the navigation above.", btn("Back to Overview", { href: link("overview"), kind: "" })));
+      content.replaceChildren(ui.empty("This page is not available", "Choose another section from the menu.", btn("Back to Overview", { href: link("overview"), kind: "" })));
       return;
     }
     content.replaceChildren(loading(5));
@@ -387,7 +416,114 @@
     catch (error) {
       console.error(error);
       content.replaceChildren(failure(error, () => router.render()));
+      return;
     }
+    if (route.query.new) openNew(tab, route.query.new, content);
+  };
+
+  // ===========================================================================
+  // The Aira frame: "+ New", the search across the top (shell.js)
+  // ===========================================================================
+
+  // Keys, client prices, rank tracking and earnings belong to the account holder: not a child or teen on a shared
+  // household account, and in the hosted build only roles that manage integrations. Asking for them with several
+  // people and nobody picked would open the "who is this?" picker, so they wait for a pick.
+  const grownUp = () => {
+    const life = Aira.life;
+    if (!life) return true;
+    if (life.me) return !life.me.age_group || ["adult", "senior"].includes(life.me.age_group);
+    return !(life.profiles && life.profiles.length > 1);
+  };
+  const hostedCan = (permission) => !Aira.cloud || !Aira.cloud.can || Aira.cloud.can(permission);
+  const mayChange = () => hostedCan("integrations.manage");
+  const mayEarn = () => mayChange() && grownUp();
+  const mayRead = () => hostedCan("integrations.read") && (!Aira.cloud || !Aira.cloud.has || Aira.cloud.has("api.console_read"));
+
+  /** Opens the create form a "+ New" link asked for (?new=), then drops ?new= so Back or a reload does not open it again. */
+  function openNew(tab, kind, content) {
+    setQuery({ new: "" });
+    if (tab === "monitors" && (kind === "saved" || kind === "monitor")) {
+      const button = content.querySelector(kind === "saved" ? "#aaSavedNew" : "#aaMonNew");
+      if (button) button.click();
+    } else if (tab === "rank" && kind === "project") {
+      const button = content.querySelector("#aaRankNew");
+      if (button) button.click();
+    } else if (tab === "keys" && kind === "key") {
+      const name = content.querySelector("#aaKeyName");
+      if (name) { name.scrollIntoView({ block: "center" }); name.focus(); }
+    } else if (tab === "playground" && kind === "search") {
+      // The Playground draws its request form after it has loaded the engine.
+      let tries = 0;
+      const focus = () => {
+        const field = content.querySelector(".pg-form-host input:not([type=hidden]):not([type=checkbox]), .pg-form-host textarea");
+        if (field) field.focus();
+        else if (tries++ < 20 && content.isConnected) setTimeout(focus, 150);
+      };
+      focus();
+    }
+  }
+
+  (Aira.appNew = Aira.appNew || {}).api = () => {
+    const items = [];
+    if (mayChange()) {
+      items.push(
+        { label: "New search", icon: "aa-play", href: link("playground", { new: "search" }) },
+        { label: "New saved search", icon: "aa-save", href: link("monitors", { new: "saved" }) },
+        { label: "New monitor", icon: "aa-bell", href: link("monitors", { new: "monitor" }) });
+      if (mayEarn()) items.push(
+        { label: "New rank project", icon: "analytics", href: link("rank", { new: "project" }) },
+        { label: "New API key", icon: "aa-key", href: link("keys", { new: "key" }) });
+    }
+    // The hosted build's personal access tokens (views-developers.js): anyone who sees Developers may make one.
+    if (Aira.cloud) items.push({ label: "New access token", icon: "aa-key", href: "#/developers?tab=tokens&new=token" });
+    return items;
+  };
+
+  // Lists the search box reads; kept for a few seconds so typing does not ask the server again for each letter.
+  const listCache = new Map();
+  function cachedList(path, ttl = 20000) {
+    const hit = listCache.get(path);
+    if (hit && Date.now() - hit.at < ttl) return hit.promise;
+    const promise = api(path, { silent: true });
+    promise.catch(() => listCache.delete(path));
+    listCache.set(path, { at: Date.now(), promise });
+    return promise;
+  }
+
+  (Aira.appSearch = Aira.appSearch || {}).api = {
+    placeholder: "Search searches, engines and projects",
+    async suggest(query) {
+      const text = String(query || "").trim();
+      const needle = text.toLowerCase();
+      if (!needle || !mayRead()) return [];
+      const has = (...fields) => fields.some((field) => String(field || "").toLowerCase().includes(needle));
+      const [records, saved, projects, catalog] = await Promise.all([
+        api(`${BASE}/searches?${qs({ q: text, limit: 3 })}`, { silent: true }).then((data) => data.items || []).catch(() => []),
+        cachedList(`${BASE}/saved`).then((data) => (data.saved || []).filter((s) => !s.rank_tracker)).catch(() => []),
+        mayEarn() ? cachedList(`${BASE}/rank`).then((data) => data.projects || []).catch(() => []) : Promise.resolve([]),
+        loadEngines().then((data) => data.engines || []).catch(() => []),
+      ]);
+      const groups = [
+        projects.filter((p) => has(p.name, p.domain, p.client_name, ...(p.keywords || []).map((k) => k.keyword)))
+          .map((p) => ({ label: p.name, sub: `Rank project · ${[p.domain, p.client_name && `for ${p.client_name}`].filter(Boolean).join(" · ")}`, icon: "analytics", href: link("rank", { project: p.id }) })),
+        saved.filter((s) => has(s.name, s.engine_name, s.engine, ...(s.tags || []), JSON.stringify(s.params || {})))
+          .map((s) => ({ label: s.name, sub: `Saved search · ${s.engine_name || s.engine}`, icon: "aa-save", href: playgroundLink(s.engine, s.params) })),
+        records.map((r) => ({ label: recordTitle(r), sub: `${r.engine_name || r.engine} · ${fmt.ago(r.created_at)}`, icon: "aa-clock", href: link("history", { q: text, search: r.id }) })),
+        catalog.filter((e) => !e.deprecated && has(e.name, e.id)).sort((a, b) => Number(!a.name.toLowerCase().startsWith(needle)) - Number(!b.name.toLowerCase().startsWith(needle)))
+          .map((e) => ({ label: e.name, sub: `Engine · ${e.id}`, icon: "jobs", href: playgroundLink(e.id) })),
+      ];
+      // A few of each kind, in turn, up to six.
+      const out = [];
+      for (let round = 0; out.length < 6 && groups.some((group) => group.length > round); round += 1) {
+        for (const group of groups) if (group[round] && out.length < 6) out.push(group[round]);
+      }
+      return out;
+    },
+    // Enter: the stored searches that match, on History (its search box takes the words).
+    run(query) {
+      const target = link("history", { q: String(query || "").trim() });
+      if (location.hash === target) router.render(); else location.hash = target;
+    },
   };
 
   // ===========================================================================
@@ -1529,7 +1665,8 @@
         paintQueue(running.items); pollQueue(running.items);
         if (!items.length) {
           tableHost.replaceChildren(activeFilters().length
-            ? ui.empty("No searches match", "Loosen a filter, or clear them all to see the full history.", btn("Reset filters", { kind: "", onClick: () => reset.click() }))
+            ? ui.empty(state.q.trim() ? `No stored search matches “${state.q.trim()}”` : "No searches match", state.q.trim() ? "Aira keeps the searches it has run. Look for an engine with that name, or clear the filters to see the full history." : "Loosen a filter, or clear them all to see the full history.",
+              h("div", { class: "btn-row" }, btn("Reset filters", { kind: "", onClick: () => reset.click() }), state.q.trim() ? btn("Find engines", { icon: "search", href: link("engines", { q: state.q.trim() }) }) : null))
             : ui.empty("No searches stored yet", "Every search Aira runs is kept here for the retention period, with its parameters, result and cost. Run one in the Playground to start the archive.", btn("Open Playground", { icon: "play", kind: "", href: link("playground") })));
         } else paintTable();
         paintPager(); paintBulk();
@@ -1698,14 +1835,16 @@
 
   tabs.monitors = async (content) => {
     const [savedData, monitorData] = await Promise.all([api(`${BASE}/saved`), api(`${BASE}/monitors`)]);
-    let saved = savedData.saved, monitors = monitorData.monitors;
+    // Rank-tracker keywords are saved searches with monitors too, but they are managed on the Rank tracker tab.
+    let rankMonitors = monitorData.monitors.filter((m) => m.rank_tracker);
+    let saved = savedData.saved.filter((s) => !s.rank_tracker), monitors = monitorData.monitors.filter((m) => !m.rank_tracker);
     const limits = monitorData.limits || { min_interval_minutes: 15, max_monitors: 20 };
     const account = await api(`${BASE}/overview`, { silent: true }).then((data) => data.account).catch(() => null);
     const filter = { q: "", tag: "" };
 
     const reload = async () => {
       const [s, m] = await Promise.all([api(`${BASE}/saved`, { silent: true }), api(`${BASE}/monitors`, { silent: true })]);
-      saved = s.saved; monitors = m.monitors;
+      saved = s.saved.filter((x) => !x.rank_tracker); monitors = m.monitors.filter((x) => !x.rank_tracker); rankMonitors = m.monitors.filter((x) => x.rank_tracker);
       paint();
     };
     const monitorOf = (savedId) => monitors.find((m) => m.saved_id === savedId);
@@ -1783,7 +1922,7 @@
         try { await api(`${BASE}/monitors/${m.id}`, { method: "PATCH", body: { pause_on_error: on } }); toast(on ? "A failed run will pause this monitor." : "Failed runs will be retried on schedule.", "success", { timeout: 2200 }); } catch (error) { pauseOnError.set(!on); Aira.reportError(error); }
       });
       const runNow = btn("Run now", { icon: "play", sm: true, kind: "", disabled: waiting, title: waiting ? "This month's budget is used up. Raise it to run now." : "", onClick: (event) => run(event.currentTarget, async () => {
-        if (!(await serp.confirmCost(1, "Running this monitor now"))) return;
+        if (!(await serp.confirmCost(1, "Running this monitor now", { live: true }))) return;
         const outcome = await api(`${BASE}/monitors/${m.id}/run`, { method: "POST", body: {} });
         await reload();
         if (outcome.diff && outcome.diff.changed_any) { toast(`Changed: ${outcome.summary}`, "success", { timeout: 4500 }); showDiff(outcome.diff.a.id, outcome.diff.b.id, reload); }
@@ -1830,16 +1969,19 @@
     function paint() {
       const active = monitors.filter((m) => m.enabled);
       const failing = monitors.filter((m) => /^Run failed/.test(m.last_change_summary || ""));
-      const burn = active.reduce((sum, m) => sum + m.estimated_monthly_searches, 0);
+      const rankActive = rankMonitors.filter((m) => m.enabled);
+      const rankBurn = rankActive.reduce((sum, m) => sum + m.estimated_monthly_searches, 0);
+      const burn = active.reduce((sum, m) => sum + m.estimated_monthly_searches, 0) + rankBurn;
       const left = account ? account.total_searches_left ?? account.plan_searches_left : null;
       summaryHost.replaceChildren(
         statTile({ label: "Monitors", value: `${active.length} / ${monitors.length}`, sub: "active of total" }),
         statTile({ label: "Monthly burn", value: num(burn), sub: left !== null && left !== undefined ? `${Math.round((burn / Math.max(1, left)) * 100)}% of ${num(left)} left` : "searches a month", tone: left && burn > left * 0.5 ? "bad" : "" }),
         statTile({ label: "Failing", value: num(failing.length), sub: failing.length ? "check the key and quota" : "all runs succeeded", tone: failing.length ? "bad" : "" }),
         statTile({ label: "Saved searches", value: num(saved.length), sub: `${num(saved.filter((s) => monitorOf(s.id)).length)} monitored` }));
-      monitorsHost.replaceChildren(monitors.length
+      const rankNote = rankMonitors.length ? h("div", { class: "sk-note aa-rank-note", role: "status" }, ico("pulse"), h("span", {}, `${pluralize(rankMonitors.length, "rank-tracker keyword")} ${rankActive.length ? `checked on a schedule (about ${num(rankBurn)} searches a month, included above)` : "checked by hand"}. `, h("a", { href: link("rank"), text: "Manage them in Rank tracker" }), ".")) : null;
+      fill(monitorsHost, rankNote, monitors.length
         ? h("div", { class: "aa-card-grid" }, ...monitors.map(monitorCard))
-        : ui.empty("No monitors yet", "A monitor re-runs a saved search on a schedule and tells you when the results change: rank tracking, price watching, job alerts.", btn("New monitor", { icon: "bell", kind: "", onClick: () => monitorDialog() })));
+        : ui.empty("No monitors yet", "A monitor re-runs a saved search on a schedule and tells you when the results change: price watching, news, job alerts. To follow a website's Google position, use the Rank tracker.", btn("New monitor", { icon: "bell", kind: "", onClick: () => monitorDialog() })));
       const needle = filter.q.trim().toLowerCase();
       const shown = saved.filter((s) => (!filter.tag || s.tags.includes(filter.tag)) && (!needle || `${s.name} ${s.engine_name} ${s.tags.join(" ")} ${JSON.stringify(s.params)}`.toLowerCase().includes(needle)))
         .sort((a, b) => Number(b.pinned) - Number(a.pinned) || a.name.localeCompare(b.name));
@@ -1855,8 +1997,8 @@
 
     content.replaceChildren(
       summaryHost,
-      h("section", { "aria-labelledby": "aaMonTitle" }, h("div", { class: "aa-sec-head" }, h("h2", { id: "aaMonTitle", text: "Monitors" }), btn("New monitor", { icon: "bell", kind: "", sm: true, onClick: () => monitorDialog() })), monitorsHost),
-      h("section", { "aria-labelledby": "aaSavedTitle" }, h("div", { class: "aa-sec-head" }, h("h2", { id: "aaSavedTitle", text: "Saved searches" }), btn("New saved search", { icon: "plus", kind: "secondary", sm: true, onClick: () => savedForm(null) })), savedHost));
+      h("section", { "aria-labelledby": "aaMonTitle" }, h("div", { class: "aa-sec-head" }, h("h2", { id: "aaMonTitle", text: "Monitors" }), Object.assign(btn("New monitor", { icon: "bell", kind: "", sm: true, onClick: () => monitorDialog() }), { id: "aaMonNew" })), monitorsHost),
+      h("section", { "aria-labelledby": "aaSavedTitle" }, h("div", { class: "aa-sec-head" }, h("h2", { id: "aaSavedTitle", text: "Saved searches" }), Object.assign(btn("New saved search", { icon: "plus", kind: "secondary", sm: true, onClick: () => savedForm(null) }), { id: "aaSavedNew" })), savedHost));
     paint();
   };
 
@@ -2050,7 +2192,8 @@
   }
 
   tabs.keys = async (content) => {
-    const [keysData, overview] = await Promise.all([api(`${BASE}/keys`), api(`${BASE}/overview`, { silent: true }).catch(() => null)]);
+    const [keysData, overview, earnings] = await Promise.all([api(`${BASE}/keys`), api(`${BASE}/overview`, { silent: true }).catch(() => null), api(`${BASE}/earnings`, { silent: true }).catch(() => null)]);
+    const currency = earnings ? earnings.settings.currency : "USD";
     const keys = keysData.keys;
     const active = keys.filter((k) => !k.revoked_at);
     const apiCalls = overview ? (overview.usage.by_source.find((s) => s.source === "api") || { searches: 0 }).searches : null;
@@ -2060,15 +2203,20 @@
     const limit = h("input", { type: "number", id: "aaKeyLimit", min: "0", max: "1000000", step: "1", value: "0", inputmode: "numeric" });
     const create = btn("Create key", { icon: "plus", kind: "" });
     create.type = "submit";
+    const terms = keyTermFields();
+    const sell = h("details", { class: "aa-sell" }, h("summary", { text: "Selling access to a client? (optional)" }),
+      h("p", { class: "sk-dim", text: "Give the key to a customer and Aira counts what they use, stops them at their monthly allowance and builds their statement on the Earnings tab. Answers from the cache cost you nothing, so they are pure profit." }),
+      terms.node);
     const form = h("form", { class: "aa-keycreate", novalidate: true },
       ui.field("Name", name, "Something you will recognise in the list."),
       ui.field("Hourly limit", limit, "Live and cached calls per hour. 0 means unlimited."),
+      sell,
       create);
     form.addEventListener("submit", (event) => {
       event.preventDefault();
       if (!name.value.trim()) { toast("Name the key first.", "error"); name.focus(); return; }
       run(create, async () => {
-        const created = await api(`${BASE}/keys`, { method: "POST", body: { name: name.value.trim(), hourly_limit: Number(limit.value) || 0 } });
+        const created = await api(`${BASE}/keys`, { method: "POST", body: { name: name.value.trim(), hourly_limit: Number(limit.value) || 0, ...(sell.open ? terms.values() : {}) } });
         showNewKey(created, reload);
       });
     });
@@ -2080,16 +2228,21 @@
         if (!ok) return;
         await run(event.currentTarget, async () => { await api(`${BASE}/keys/${k.id}`, { method: "DELETE" }); toast("Key revoked.", "success"); reload(); });
       } });
+      const editTerms = btn("Terms", { icon: "edit", sm: true, kind: "ghost", aria: `Edit the terms of ${k.name}`, onClick: () => keyTermsDialog(k, reload) });
+      const termChips = [k.client_name ? serp.chip(`Client: ${k.client_name}`, "good") : null, k.price_per_1000 ? serp.chip(priceText(k, currency)) : null, k.allowed_engines.length ? serp.chip(`${pluralize(k.allowed_engines.length, "engine")} only`) : null].filter(Boolean);
+      const month = k.monthly_quota
+        ? h("div", { class: "aa-key-month" }, h("small", { class: "sk-dim", text: `${num(k.used_this_month)} of ${num(k.monthly_quota)} this month` }), meter({ value: k.used_this_month, max: k.monthly_quota, label: `Searches this month for ${k.name}`, tone: k.used_this_month >= k.monthly_quota ? "danger" : k.used_this_month / k.monthly_quota >= 0.8 ? "warn" : "" }))
+        : h("small", { class: "sk-dim aa-key-month", text: `${num(k.used_this_month)} this month` });
       return h("tr", { class: revoked ? "revoked" : "" },
-        h("td", { class: "aa-main" }, h("strong", { text: k.name }), h("div", { class: "aa-sub" }, h("code", { text: `${k.prefix}${"•".repeat(12)}` })),
-          h("div", { class: "aa-mobile-meta" }, h("span", { class: `badge ${revoked ? "aa-bad" : "aa-good"}`, text: revoked ? "Revoked" : "Active" }), h("span", { class: "sk-dim" }, "Used ", timeNode(k.last_used_at)), revoked ? null : h("span", { class: "sk-dim", text: k.hourly_limit ? `${num(k.used_this_hour)} of ${num(k.hourly_limit)} this hour` : `${num(k.used_this_hour)} this hour, no limit` }))),
+        h("td", { class: "aa-main" }, h("strong", { text: k.name }), h("div", { class: "aa-sub" }, h("code", { text: `${k.prefix}${"•".repeat(12)}` })), termChips.length ? h("div", { class: "sk-chips aa-key-terms" }, ...termChips) : null,
+          h("div", { class: "aa-mobile-meta" }, h("span", { class: `badge ${revoked ? "aa-bad" : "aa-good"}`, text: revoked ? "Revoked" : "Active" }), h("span", { class: "sk-dim" }, "Used ", timeNode(k.last_used_at)), revoked ? null : h("span", { class: "sk-dim", text: k.hourly_limit ? `${num(k.used_this_hour)} of ${num(k.hourly_limit)} this hour` : `${num(k.used_this_hour)} this hour, no limit` }), revoked ? null : h("span", { class: "sk-dim", text: k.monthly_quota ? `${num(k.used_this_month)} of ${num(k.monthly_quota)} this month` : `${num(k.used_this_month)} this month` }))),
         h("td", { class: "hide-sm" }, h("span", { class: `badge ${revoked ? "aa-bad" : "aa-good"}`, text: revoked ? "Revoked" : "Active" })),
         h("td", { class: "hide-md" }, timeNode(k.created_at)),
         h("td", { class: "hide-sm" }, timeNode(k.last_used_at)),
         h("td", { class: "aa-usage-cell hide-sm" }, revoked ? h("span", { class: "sk-dim", text: "–" }) : k.hourly_limit
           ? h("div", {}, h("div", { class: "aa-tp-top" }, h("span", { text: `${num(k.used_this_hour)} of ${num(k.hourly_limit)} this hour` })), meter({ value: k.used_this_hour, max: k.hourly_limit, label: `Calls this hour for ${k.name}`, tone: k.used_this_hour / k.hourly_limit >= 0.8 ? "warn" : "" }))
-          : h("span", { text: `${num(k.used_this_hour)} this hour · no limit` })),
-        h("td", { class: "aa-acts" }, revoked ? null : revoke));
+          : h("span", { text: `${num(k.used_this_hour)} this hour · no limit` }), revoked ? null : month),
+        h("td", { class: "aa-acts" }, revoked ? null : h("div", { class: "btn-row" }, editTerms, revoke)));
     });
     const table = keys.length
       ? h("div", { class: "table-wrap aa-table-wrap" }, h("table", { class: "table aa-table aa-keys-table" }, h("caption", { class: "visually-hidden", text: "API keys" }),
@@ -2101,7 +2254,8 @@
       h("div", { class: "stats aa-stats" },
         statTile({ label: "Active keys", value: num(active.length), sub: `${num(keys.length - active.length)} revoked` }),
         statTile({ label: "/v1 calls, 30 days", value: apiCalls === null ? "–" : num(apiCalls), sub: "from scripts and apps", href: apiCalls ? link("history", { source: "api" }) : null }),
-        statTile({ label: "Base URL", value: "/v1", sub: location.origin })),
+        statTile({ label: "Base URL", value: "/v1", sub: location.origin }),
+        statTile({ label: "Client keys", value: num(active.filter((k) => k.client_name || k.price_per_1000).length), sub: "see what they owe in Earnings", href: link("earnings") })),
       overview && !overview.configured ? h("div", { class: "sk-note warn", role: "status" }, ico("key"), h("span", {}, "No SerpApi key is connected yet, so /v1 searches answer 409 until you ", h("a", { href: link("account"), text: "connect one" }), ". You can still create keys now.")) : null,
       h("div", { class: "aa-cols" },
         panel("Create an API key", { sub: "for the SerpApi-compatible /v1 endpoint", body: panelBody(form) }),
@@ -2110,6 +2264,336 @@
           h("p", { class: "sk-dim" }, "Moving from SerpApi? Change the base URL and the key, nothing else. ", h("a", { href: link("docs", { page: "migrate" }), text: "Migration guide" }))) })),
       panel("Your keys", { sub: "secrets are stored as hashes and shown once", body: table }),
       panel("Code samples", { sub: "against this Aira server", body: panelBody(serp.snippetPanel("google", { q: "coffee" })) }));
+  };
+
+  // ===========================================================================
+  // Earning with the API: client keys (reselling) and rank tracking for clients
+  // ===========================================================================
+
+  /** A money amount in the account's currency; an unknown code falls back to plain digits. */
+  function money(n, currency) {
+    const value = Number(n) || 0;
+    try { return value.toLocaleString([], { style: "currency", currency: currency || "USD", maximumFractionDigits: 2 }); }
+    catch { return `${value.toFixed(2)} ${currency || ""}`.trim(); }
+  }
+  const SCHEDULES = [["0", "By hand only"], ["1440", "Every day"], ["10080", "Every week"]];
+  const scheduleLabel = (minutes) => (SCHEDULES.find(([value]) => Number(value) === Number(minutes)) || SCHEDULES[0])[1];
+  const runsPerMonth = (minutes) => (Number(minutes) ? Math.ceil((30 * 24 * 60) / Number(minutes)) : 0);
+  /** Keywords typed one per line (or, on a single line, separated by commas), without repeats. */
+  function keywordLines(text) {
+    const raw = String(text || "");
+    const parts = raw.includes("\n") ? raw.split("\n") : raw.split(",");
+    const seen = new Map();
+    for (const part of parts) { const clean = part.trim().replace(/\s+/g, " "); if (clean && !seen.has(clean.toLowerCase())) seen.set(clean.toLowerCase(), clean); }
+    return [...seen.values()];
+  }
+  const priceText = (k, currency) => (k.price_per_1000 ? `${money(k.price_per_1000, currency)} per 1,000` : "");
+
+  /** Fields for a key's client terms; shared by the create form and the edit dialog. */
+  function keyTermFields(initial = {}) {
+    const client = h("input", { type: "text", maxlength: "120", placeholder: "Acme Ltd", autocomplete: "off", value: initial.client_name || "" });
+    const price = h("input", { type: "number", min: "0", max: "100000", step: "0.01", inputmode: "decimal", value: String(initial.price_per_1000 || 0) });
+    const quota = h("input", { type: "number", min: "0", max: "10000000", step: "1", inputmode: "numeric", value: String(initial.monthly_quota || 0) });
+    const engines = h("input", { type: "text", placeholder: "google, google_jobs", autocomplete: "off", spellcheck: "false", value: (initial.allowed_engines || []).join(", ") });
+    const node = h("div", { class: "form-grid aa-terms" },
+      ui.field("Client", client, "Who you give this key to."),
+      ui.field("Price per 1,000 searches", price, "What the client pays you, in the currency set on the Earnings tab."),
+      ui.field("Monthly allowance", quota, "Searches a month before the key stops. 0 means no limit."),
+      ui.field("Engines allowed", engines, "Engine ids, separated by commas. Empty means every engine."));
+    const values = () => ({ client_name: client.value.trim(), price_per_1000: Number(price.value) || 0, monthly_quota: Math.floor(Number(quota.value) || 0), allowed_engines: engines.value.split(",").map((s) => s.trim()).filter(Boolean) });
+    return { node, values, focus: () => client.focus() };
+  }
+
+  /** Enter in one of ``fields`` presses the dialog's main button, like any short form. */
+  function submitOnEnter(dialog, fields) {
+    const primary = dialog && dialog.box ? dialog.box.querySelector(".actions .btn:not(.ghost)") : null;
+    if (!primary) return;
+    for (const field of fields) {
+      field.addEventListener("keydown", (event) => {
+        if (event.key !== "Enter" || event.isComposing || event.defaultPrevented || event.shiftKey || event.altKey || event.ctrlKey || event.metaKey) return;
+        event.preventDefault();
+        if (!primary.disabled) primary.click();
+      });
+    }
+  }
+
+  function keyTermsDialog(k, afterSave) {
+    const terms = keyTermFields(k);
+    const name = h("input", { type: "text", maxlength: "80", value: k.name, autocomplete: "off" });
+    const hourly = h("input", { type: "number", min: "0", max: "1000000", step: "1", inputmode: "numeric", value: String(k.hourly_limit || 0) });
+    const problem = h("p", { class: "sk-err", role: "alert", hidden: true });
+    const dialog = Aira.modal({ title: `Terms for "${k.name}"`, body: h("div", { class: "aa-dialog" }, h("div", { class: "form-grid" }, ui.field("Name", name), ui.field("Hourly limit", hourly, "0 means unlimited.")), terms.node, problem), actions: [
+      { label: "Cancel", kind: "ghost" },
+      { label: "Save terms", kind: "", onClick: async () => {
+        problem.hidden = true;
+        try { await api(`${BASE}/keys/${k.id}`, { method: "PATCH", body: { name: name.value.trim(), hourly_limit: Math.floor(Number(hourly.value) || 0), ...terms.values() } }); }
+        catch (error) { problem.textContent = error.message; problem.hidden = false; return false; }
+        toast("Key terms saved.", "success");
+        afterSave();
+        return undefined;
+      } },
+    ] });
+    submitOnEnter(dialog, [name, hourly, ...terms.node.querySelectorAll("input")]);
+    setTimeout(() => name.focus(), 30);
+  }
+
+  // ---- Rank tracker -------------------------------------------------------------------------------------------------
+
+  /** Position over time as a tiny line; the top of the box is position 1. */
+  function rankSpark(history) {
+    const points = (history || []).map((p) => p.position);
+    const known = points.filter((v) => v !== null && v !== undefined);
+    if (known.length < 2) return h("span", { class: "sk-dim", text: points.length ? `${pluralize(points.length, "check")}` : "–" });
+    const W = 96, H = 28, n = points.length, worst = Math.max(10, ...known);
+    const x = (i) => (n === 1 ? W / 2 : 2 + (i * (W - 4)) / (n - 1));
+    const y = (v) => 2 + ((v - 1) / Math.max(1, worst - 1)) * (H - 4);
+    let d = "";
+    points.forEach((v, i) => { if (v === null || v === undefined) return; d += `${d && points[i - 1] !== null && points[i - 1] !== undefined ? "L" : "M"}${x(i).toFixed(1)},${y(v).toFixed(1)}`; });
+    const spoken = points.map((v) => (v === null || v === undefined ? "not found" : `#${v}`)).join(", ");
+    return svg("svg", { viewBox: `0 0 ${W} ${H}`, width: W, height: H, class: "aa-rank-spark", role: "img", "aria-label": `Position over the last ${n} checks: ${spoken}` },
+      svg("path", { d, fill: "none", stroke: "currentColor", "stroke-width": "2", "stroke-linejoin": "round", "stroke-linecap": "round" }));
+  }
+  function positionNode(k) {
+    if (!k.checked_at) return h("span", { class: "sk-dim", text: "not checked yet" });
+    if (k.position === null || k.position === undefined) return h("span", { class: "aa-rank-pos none", text: `Not in top ${k.depth || 10}` });
+    return h("span", { class: `aa-rank-pos${k.position <= 3 ? " top3" : k.position <= 10 ? " top10" : ""}`, text: `#${k.position}` });
+  }
+  function moveNode(k) {
+    if (!k.checked_at) return h("span", { class: "sk-dim", text: "–" });
+    if (k.entered) return h("span", { class: "aa-up", text: "new in results" });
+    if (k.dropped) return h("span", { class: "aa-down", text: "dropped out" });
+    if (!k.change) return h("span", { class: "sk-dim", text: k.checks < 2 ? "first check" : "no change" });
+    const up = k.change > 0;
+    return h("span", { class: up ? "aa-up" : "aa-down" }, h("span", { "aria-hidden": "true", text: `${up ? "▲" : "▼"} ${Math.abs(k.change)}` }), h("span", { class: "visually-hidden", text: `${up ? "up" : "down"} ${pluralize(Math.abs(k.change), "place")}` }));
+  }
+
+  /** Create or edit a rank project. Resolves after a save (with the project) or undefined when cancelled. */
+  function rankProjectDialog(existing, { onSaved } = {}) {
+    const domain = h("input", { type: "text", maxlength: "253", placeholder: "example.com", autocomplete: "off", spellcheck: "false", value: existing ? existing.domain : "" });
+    const name = h("input", { type: "text", maxlength: "120", placeholder: "Same as the website", autocomplete: "off", value: existing ? existing.name : "" });
+    const client = h("input", { type: "text", maxlength: "120", placeholder: "Leave empty for your own site", autocomplete: "off", value: existing ? existing.client_name : "" });
+    const keywords = h("textarea", { rows: "6", placeholder: "coffee beans online\nbest espresso machine\ncoffee shop near me", spellcheck: "false" });
+    keywords.value = existing ? existing.keywords.map((k) => k.keyword).join("\n") : "";
+    const location = serp.locationPicker({ value: existing ? existing.location : "", placeholder: "Anywhere, or a city such as Austin, Texas" });
+    const locationInput = location.querySelector("input");
+    const gl = h("input", { type: "text", maxlength: "7", placeholder: "us", autocomplete: "off", spellcheck: "false", value: existing ? existing.gl : "" });
+    const hl = h("input", { type: "text", maxlength: "7", placeholder: "en", autocomplete: "off", spellcheck: "false", value: existing ? existing.hl : "" });
+    const device = ui.select([["", "Desktop (default)"], ["mobile", "Phone"], ["tablet", "Tablet"]], existing ? existing.device : "", { "aria-label": "Device" });
+    const schedule = ui.select(SCHEDULES, String(existing ? existing.interval_minutes : 1440), { "aria-label": "How often to check" });
+    const fee = h("input", { type: "number", min: "0", max: "1000000", step: "0.01", inputmode: "decimal", value: String(existing ? existing.monthly_fee || 0 : 0) });
+    const notify = serp.toggleSwitch("Tell me about big moves", existing ? existing.notify : true, () => {}, { hint: "A notification when a keyword enters or leaves the results, reaches the top 3 or moves 3 places or more." });
+    const checkNow = serp.toggleSwitch("Check positions now", !existing, () => paint(), { hint: "Uses one search per keyword." });
+    const estimate = h("p", { class: "sk-hint", "aria-live": "polite" });
+    const problem = h("p", { class: "sk-err", role: "alert", hidden: true });
+    function paint() {
+      const count = keywordLines(keywords.value).length;
+      const runs = runsPerMonth(schedule.value);
+      estimate.textContent = !count ? "Add the keywords people type into Google to find this website, one per line."
+        : runs ? `${pluralize(count, "keyword")} checked ${scheduleLabel(schedule.value).toLowerCase()}: about ${num(count * runs)} searches a month.`
+          : `${pluralize(count, "keyword")}. Each check by hand uses ${pluralize(count, "search", "searches")}.`;
+    }
+    keywords.addEventListener("input", paint);
+    schedule.addEventListener("change", paint);
+    paint();
+    const body = h("div", { class: "aa-dialog aa-rank-form" },
+      h("div", { class: "form-grid" },
+        ui.field("Website", domain, "The domain whose position you want to see."),
+        ui.field("Project name", name),
+        ui.field("Client", client, "Who this report is for, if you track it for someone."),
+        ui.field("Monthly fee", fee, "What the client pays you a month, for the Earnings tab. 0 if none.")),
+      ui.field("Keywords", keywords, "One per line, up to 25."),
+      h("div", { class: "form-grid" },
+        ui.field("Search from", location, "Results differ by place. Leave empty for Google's default."),
+        ui.field("Country code", gl, "Two letters, for example us, gb, in."),
+        ui.field("Language code", hl, "For example en, es, hi."),
+        ui.field("Device", device),
+        ui.field("How often", schedule)),
+      estimate, notify.node, existing ? null : checkNow.node, problem);
+    return new Promise((resolve) => {
+      let saved;
+      const dialog = Aira.modal({ title: existing ? "Edit rank project" : "New rank project", wide: true, body, onClose: () => resolve(saved), actions: [
+        { label: "Cancel", kind: "ghost" },
+        { label: existing ? "Save changes" : "Start tracking", kind: "", onClick: async () => {
+          problem.hidden = true;
+          const payload = { domain: domain.value.trim(), name: name.value.trim(), client_name: client.value.trim(), keywords: keywordLines(keywords.value), location: locationInput ? locationInput.value.trim() : "", gl: gl.value.trim(), hl: hl.value.trim(), device: device.value, interval_minutes: Number(schedule.value), monthly_fee: Number(fee.value) || 0, notify: notify.get() };
+          if (!payload.domain) { problem.textContent = "Enter the website to track."; problem.hidden = false; domain.focus(); return false; }
+          if (!payload.keywords.length) { problem.textContent = "Add at least one keyword."; problem.hidden = false; keywords.focus(); return false; }
+          try { saved = await api(existing ? `${BASE}/rank/${existing.id}` : `${BASE}/rank`, { method: existing ? "PATCH" : "POST", body: payload }); }
+          catch (error) { problem.textContent = error.message; problem.hidden = false; return false; }
+          if (!existing && checkNow.get()) saved.checkNow = true;
+          toast(existing ? "Project saved." : "Rank project created.", "success");
+          if (onSaved) onSaved(saved);
+          return undefined;
+        } },
+      ] });
+      // not the keywords box (Enter starts a new line) or the location search (Enter picks a suggestion)
+      submitOnEnter(dialog, [domain, name, client, gl, hl, fee]);
+      setTimeout(() => (existing ? name : domain).focus(), 30);
+    });
+  }
+
+  async function runRankCheck(project, button, { keyword } = {}) {
+    const count = keyword ? 1 : project.keywords.length;
+    if (count > 1 && !(await serp.confirmCost(count, `Checking ${pluralize(count, "keyword")} for ${project.domain}`, { live: true }))) return null;
+    return run(button, async () => {
+      const outcome = await api(`${BASE}/rank/${project.id}/run`, { method: "POST", body: keyword ? { keyword_id: keyword.id } : {} });
+      const failed = outcome.failed ? ` ${pluralize(outcome.failed, "keyword")} failed: ${outcome.results.filter((r) => !r.ok).map((r) => r.error)[0]}` : "";
+      toast(`Checked ${pluralize(outcome.results.length - outcome.failed, "keyword")}.${failed}`, outcome.failed ? "error" : "success", { timeout: 4500 });
+      return outcome;
+    });
+  }
+
+  function downloadButtons(path, base, label) {
+    return [
+      btn(`${label} (web page)`, { icon: "download", sm: true, onClick: (event) => run(event.currentTarget, () => Aira.download(`${path}${path.includes("?") ? "&" : "?"}format=html`, `${base}.html`)) }),
+      btn("CSV", { icon: "download", sm: true, kind: "ghost", aria: `${label} as CSV`, onClick: (event) => run(event.currentTarget, () => Aira.download(`${path}${path.includes("?") ? "&" : "?"}format=csv`, `${base}.csv`)) }),
+    ];
+  }
+
+  async function rankDetail(content, ctx, projectId) {
+    let project;
+    try { project = await api(`${BASE}/rank/${projectId}`); }
+    catch (error) {
+      if (error.status === 404) { content.replaceChildren(ui.empty("This rank project is gone", "It may have been deleted.", btn("All projects", { kind: "", href: link("rank") }))); return; }
+      throw error;
+    }
+    const reload = () => rankDetail(content, ctx, projectId);
+    const s = project.stats;
+    const checkAll = btn("Check now", { icon: "refresh", kind: "", onClick: async (event) => { const outcome = await runRankCheck(project, event.currentTarget); if (outcome) reload(); } });
+    const rows = project.keywords.map((k) => [
+      h("div", { class: "aa-main" }, h("strong", { text: k.keyword }), k.status ? h("div", { class: "aa-sub sk-dim", text: k.status }) : null),
+      positionNode(k),
+      moveNode(k),
+      k.best ? `#${k.best}` : "–",
+      rankSpark(k.history),
+      k.url ? externalLink(k.url, k.url.replace(/^https?:\/\/(www\.)?/, "").slice(0, 60), { class: "aa-rank-url" }) : h("span", { class: "sk-dim", text: "–" }),
+      k.competitors.length ? h("span", { class: "aa-rank-above", text: k.competitors.join(", ") }) : h("span", { class: "sk-dim", text: k.position === 1 ? "nobody" : "–" }),
+      h("div", { class: "btn-row aa-acts" },
+        btn("Check", { icon: "refresh", sm: true, aria: `Check ${k.keyword} now`, onClick: async (event) => { const outcome = await runRankCheck(project, event.currentTarget, { keyword: k }); if (outcome) reload(); } }),
+        k.search_id ? btn("Result", { sm: true, kind: "ghost", aria: `Google result for ${k.keyword}`, onClick: () => openDetail(k.search_id, [k.search_id]) }) : null),
+    ]);
+    const where = [project.location, project.gl && `country ${project.gl}`, project.hl && `language ${project.hl}`, project.device].filter(Boolean).join(", ") || "Google default location";
+    const slug = project.domain.replace(/[^a-z0-9]+/gi, "-");
+    fill(content,
+      h("div", { class: "aa-sec-head aa-rank-head" },
+        h("div", {}, h("a", { href: link("rank"), class: "aa-back" }, ico("left"), "All projects"),
+          h("h2", { text: project.name }),
+          h("p", { class: "sk-dim" }, h("strong", { text: project.domain }), ` · ${where} · ${scheduleLabel(project.interval_minutes)}`, project.client_name ? ` · for ${project.client_name}` : "")),
+        h("div", { class: "btn-row" }, checkAll,
+          btn("Edit", { icon: "edit", onClick: async () => { const saved = await rankProjectDialog(project); if (saved) reload(); } }),
+          btn("Delete", { icon: "trash", kind: "danger secondary", onClick: async () => {
+            if (!(await Aira.confirm({ title: `Delete "${project.name}"?`, message: "Its keywords stop being checked and their position history is removed. Stored searches stay in History, and the months it was billed stay on the Earnings tab.", confirmLabel: "Delete project", danger: true }))) return;
+            try { await api(`${BASE}/rank/${project.id}`, { method: "DELETE" }); toast("Rank project deleted.", "success"); location.hash = link("rank"); } catch (error) { Aira.reportError(error); }
+          } }))),
+      h("div", { class: "stats aa-stats" },
+        statTile({ label: "Average position", value: s.average === null ? "–" : String(s.average), sub: `of ${pluralize(s.ranked, "keyword")} found` }),
+        statTile({ label: "Top 3", value: num(s.top3), sub: `of ${pluralize(s.keywords, "keyword")}` }),
+        statTile({ label: "First page", value: num(s.top10), sub: "positions 1 to 10" }),
+        statTile({ label: "Moved", value: `${num(s.improved)} up · ${num(s.declined)} down`, sub: "since the check before", tone: s.declined > s.improved ? "bad" : "" })),
+      !project.stats.checked ? h("div", { class: "sk-note", role: "status" }, ico("info"), h("span", { text: `No positions yet. Press Check now to look up ${pluralize(project.keywords.length, "keyword")} (one search each).` })) : null,
+      panel("Keywords", { sub: project.last_checked_at ? `last checked ${fmt.ago(project.last_checked_at)}` : "not checked yet", aside: h("div", { class: "btn-row" }, ...downloadButtons(`${BASE}/rank/${project.id}/report`, `rank-report-${slug}`, "Client report")),
+        body: simpleTable("Keyword positions", ["Keyword", "Position", "Change", "Best", "Trend", "Ranking page", "Above you", { label: "Actions" }], rows, { cls: "aa-rank-table" }) }),
+      h("p", { class: "sk-hint", text: "Position is the website's first organic result on Google for the keyword, read from the first page of results. Checks run live, so each one uses a search." }));
+  }
+
+  tabs.rank = async (content, ctx) => {
+    if (ctx.query.project) { await rankDetail(content, ctx, ctx.query.project); return; }
+    const [data, overview, earnings] = await Promise.all([api(`${BASE}/rank`), api(`${BASE}/overview`, { silent: true }).catch(() => null), api(`${BASE}/earnings`, { silent: true }).catch(() => null)]);
+    const projects = data.projects;
+    const currency = earnings ? earnings.settings.currency : "USD";
+    const create = async () => {
+      const saved = await rankProjectDialog(null);
+      if (!saved) return;
+      if (saved.checkNow) {
+        const outcome = await run(null, () => api(`${BASE}/rank/${saved.id}/run`, { method: "POST", body: {} }));
+        if (outcome) toast(`Checked ${pluralize(outcome.results.length - outcome.failed, "keyword")}.`, "success");
+      }
+      location.hash = link("rank", { project: saved.id });
+    };
+    const keywordsTracked = projects.reduce((sum, p) => sum + p.stats.keywords, 0);
+    const fees = projects.reduce((sum, p) => sum + (Number(p.monthly_fee) || 0), 0);
+    const burn = projects.reduce((sum, p) => sum + p.searches_per_month, 0);
+    const card = (p) => h("article", { class: "aa-saved aa-rank-card", "aria-label": `Rank project ${p.name}` },
+      h("header", {}, h("div", {}, h("h4", {}, h("a", { href: link("rank", { project: p.id }), text: p.name })), h("p", { class: "sk-dim", text: [p.domain, p.client_name && `for ${p.client_name}`].filter(Boolean).join(" · ") }))),
+      h("div", { class: "sk-chips" }, serp.chip(pluralize(p.stats.keywords, "keyword")), serp.chip(scheduleLabel(p.interval_minutes)), p.monthly_fee ? serp.chip(`${money(p.monthly_fee, currency)} a month`, "good") : null),
+      p.stats.checked
+        ? h("dl", { class: "kv aa-facts" }, h("dt", { text: "Average position" }), h("dd", { text: p.stats.average === null ? "not found" : String(p.stats.average) }), h("dt", { text: "Top 3 / first page" }), h("dd", { text: `${p.stats.top3} / ${p.stats.top10}` }), h("dt", { text: "Last checked" }), h("dd", {}, timeNode(p.last_checked_at)))
+        : h("p", { class: "sk-dim", text: "Not checked yet." }),
+      h("ul", { class: "aa-rank-mini" }, ...p.keywords.slice(0, 4).map((k) => h("li", {}, h("span", { text: k.keyword }), positionNode({ ...k, depth: 10, checks: 0 })))),
+      h("footer", { class: "btn-row" }, btn("Open", { kind: "", sm: true, href: link("rank", { project: p.id }) })));
+    fill(content,
+      h("div", { class: "stats aa-stats" },
+        statTile({ label: "Projects", value: num(projects.length), sub: `up to ${data.limits.projects}` }),
+        statTile({ label: "Keywords tracked", value: num(keywordsTracked), sub: `up to ${data.limits.keywords_total} in all` }),
+        statTile({ label: "Searches a month", value: num(burn), sub: "for scheduled checks" }),
+        statTile({ label: "Monthly fees", value: fees ? money(fees, currency) : "–", sub: "from clients", href: link("earnings") })),
+      overview && !overview.configured ? h("div", { class: "sk-note warn", role: "status" }, ico("key"), h("span", {}, "Checks need a SerpApi key. ", h("a", { href: link("account"), text: "Connect one in Account" }), ".")) : null,
+      h("section", { "aria-labelledby": "aaRankTitle" },
+        h("div", { class: "aa-sec-head" }, h("h2", { id: "aaRankTitle", text: "Projects" }), Object.assign(btn("New project", { icon: "plus", kind: "", sm: true, onClick: create }), { id: "aaRankNew" })),
+        projects.length ? h("div", { class: "aa-card-grid" }, ...projects.map(card))
+          : ui.empty("Track where a website shows up on Google", "Add a website and the keywords it should win. Aira checks its position on a schedule, shows what moved and builds a report you can send. Agencies and freelancers sell this to clients every month.", btn("New project", { icon: "plus", kind: "", onClick: create }))));
+  };
+
+  // ---- Earnings ------------------------------------------------------------------------------------------------------
+
+  tabs.earnings = async (content, ctx) => {
+    const month = /^\d{4}-\d{2}$/.test(ctx.query.month || "") ? ctx.query.month : "";
+    const report = await api(`${BASE}/earnings${month ? `?month=${month}` : ""}`);
+    const cur = report.settings.currency;
+    const reload = (nextMonth = report.month) => { ctx.setQuery({ month: nextMonth }); return tabs.earnings(content, { ...ctx, query: { ...ctx.query, month: nextMonth } }); };
+    const monthLabel = (m) => new Date(`${m}-01T00:00:00`).toLocaleDateString([], { month: "long", year: "numeric" });
+    const picker = ui.select(report.months.map((m) => [m, monthLabel(m)]), report.month, { "aria-label": "Month", id: "aaEarnMonth" });
+    picker.addEventListener("change", () => reload(picker.value));
+
+    const currency = h("input", { type: "text", id: "aaEarnCurrency", maxlength: "3", value: cur, autocomplete: "off", spellcheck: "false", autocapitalize: "characters" });
+    const cost = h("input", { type: "number", id: "aaEarnCost", min: "0", max: "100", step: "0.0001", inputmode: "decimal", value: String(report.settings.cost_per_search || 0) });
+    const business = h("input", { type: "text", id: "aaEarnBusiness", maxlength: "120", value: report.settings.business_name, autocomplete: "organization", placeholder: "Your name or company" });
+    const save = btn("Save", { icon: "check", kind: "" });
+    save.type = "submit";
+    const settingsForm = h("form", { class: "aa-earn-settings", novalidate: true },
+      h("div", { class: "form-grid" },
+        ui.field("Currency", currency, "Three letters, for example USD, EUR, INR."),
+        ui.field("Your cost per search", cost, "What one search costs you on your SerpApi plan. Example: 75 for 5,000 searches is 0.015."),
+        ui.field("Business name", business, "Printed on statements and rank reports.")),
+      save);
+    settingsForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      run(save, async () => { await api(`${BASE}/earnings/settings`, { method: "PUT", body: { currency: currency.value.trim(), cost_per_search: Number(cost.value) || 0, business_name: business.value.trim() } }); toast("Earnings settings saved.", "success"); await reload(); });
+    });
+
+    const t = report.totals;
+    const keyRows = report.keys.map((line) => [
+      h("div", { class: "aa-main" }, h("strong", { text: line.client_name || line.name }), h("div", { class: "aa-sub sk-dim" }, h("code", { text: `${line.prefix}…` }), line.client_name ? ` ${line.name}` : "", line.revoked ? " · revoked" : "")),
+      num(line.calls),
+      num(line.cached),
+      line.price_per_1000 ? money(line.price_per_1000, cur) : h("span", { class: "sk-dim", text: "no price" }),
+      money(line.billed, cur),
+      report.cost_known ? money(line.cost, cur) : "–",
+      report.cost_known ? h("strong", { class: line.margin < 0 ? "aa-down" : "", text: money(line.margin, cur) }) : "–",
+      h("div", { class: "btn-row aa-acts" }, ...downloadButtons(`${BASE}/earnings/statement/${line.id}?month=${report.month}`, `statement-${(line.client_name || line.name).replace(/[^a-z0-9]+/gi, "-")}-${report.month}`, "Statement")),
+    ]);
+    const rankRows = report.rank.map((line) => [
+      h("div", { class: "aa-main" }, line.deleted ? h("strong", { text: line.client_name || line.name }) : h("a", { href: link("rank", { project: line.id }), text: line.client_name || line.name }), h("div", { class: "aa-sub sk-dim", text: line.deleted ? `${line.domain} · project deleted` : line.domain })),
+      money(line.monthly_fee, cur),
+      num(line.checks),
+      report.cost_known ? money(line.cost, cur) : "–",
+      report.cost_known ? h("strong", { class: line.margin < 0 ? "aa-down" : "", text: money(line.margin, cur) }) : "–",
+      line.deleted ? h("span", { class: "sk-dim", text: "–" }) : h("div", { class: "btn-row aa-acts" }, ...downloadButtons(`${BASE}/rank/${line.id}/report`, `rank-report-${line.domain.replace(/[^a-z0-9]+/gi, "-")}`, "Report")),
+    ]);
+    const nothing = !report.keys.length && !report.rank.length;
+    fill(content,
+      h("div", { class: "aa-sec-head" }, h("h2", { text: "Clients and costs" }), h("div", { class: "aa-earn-month" }, h("label", { for: "aaEarnMonth", class: "sk-dim", text: "Month" }), picker)),
+      h("div", { class: "stats aa-stats" },
+        statTile({ label: "To bill", value: money(t.billed, cur), sub: `${monthLabel(report.month)}` }),
+        statTile({ label: "Your cost", value: report.cost_known ? money(t.cost, cur) : "–", sub: report.cost_known ? `${num(t.calls - t.cached + t.checks)} live searches` : "set your cost per search below" }),
+        statTile({ label: "Profit", value: report.cost_known ? money(t.margin, cur) : "–", sub: t.cached ? `${pluralize(t.cached, "answer")} from the cache cost you nothing` : "billed minus cost", tone: t.margin < 0 ? "bad" : "" }),
+        statTile({ label: "Clients", value: num(t.clients), sub: `${pluralize(report.keys.length, "key")} · ${pluralize(report.rank.length, "rank project")}` })),
+      nothing ? ui.empty("Nothing to bill yet", "Two ways to earn here: give a client their own API key with a price per 1,000 searches, or track a client's Google positions for a monthly fee and send them the report.",
+        h("div", { class: "btn-row" }, btn("Create a client key", { icon: "key", kind: "", href: link("keys", { new: "key" }) }), btn("Start rank tracking", { icon: "pulse", href: link("rank", { new: "project" }) }))) : null,
+      report.keys.length ? panel("API access you sell", { sub: "successful searches are billed, cached answers included", body: simpleTable("API keys and what each client owes", ["Client", { label: "Searches", num: true }, { label: "From cache", num: true }, { label: "Per 1,000", num: true }, { label: "To bill", num: true }, { label: "Cost", num: true }, { label: "Profit", num: true }, { label: "Statement" }], keyRows) }) : null,
+      report.rank.length ? panel("Rank tracking you sell", { sub: "monthly fee against the checks it took", body: simpleTable("Rank projects and their fees", ["Client", { label: "Monthly fee", num: true }, { label: "Checks", num: true }, { label: "Cost", num: true }, { label: "Profit", num: true }, { label: "Report" }], rankRows) }) : null,
+      t.own_checks ? h("p", { class: "sk-hint aa-earn-own", text: `Rank tracking for your own sites used ${pluralize(t.own_checks, "check")} this month${report.cost_known ? `, costing you ${money(t.own_cost, cur)}` : ""}. It is not billed to anyone, so it is left out of the totals above.` }) : null,
+      panel("Settings", { sub: "used for every statement", body: panelBody(settingsForm) }));
   };
 
   // ===========================================================================

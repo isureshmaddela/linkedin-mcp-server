@@ -29,7 +29,7 @@ from aira.suite.social.store import new_id, row, rows, stamp
 REACTIONS = ("❤️", "👍", "😂", "😮", "😢", "🎉")
 AUDIENCES = ("public", "friends", "only_me")
 VISIBILITIES = ("public", "private")
-REPORT_TARGETS = ("post", "comment", "message", "account", "story")
+REPORT_TARGETS = ("post", "comment", "message", "account", "story", "listing")
 LIMITS = {
     "post": 30,
     "comment": 120,
@@ -37,6 +37,8 @@ LIMITS = {
     "friend_request": 40,
     "report": 30,
     "story": 20,
+    "group": 10,
+    "page": 10,
 }
 DEFAULT_BLOCKLIST = ("fuck", "shit", "bitch", "bastard", "cunt", "motherfucker")
 HANDLE = re.compile(r"^[a-z][a-z0-9_.]{2,29}$")
@@ -393,6 +395,8 @@ def relation(
     found = friendship(sc, viewer["id"], target["id"])
     if found and found["status"] == "accepted":
         return "friends"
+    if _guardian_entry(sc, viewer["id"], target["id"]):
+        return "awaiting_parent"
     if found:
         return (
             "request_sent"
@@ -486,9 +490,16 @@ def search(sc: sqlite3.Connection, me_: dict[str, Any], q: str) -> dict[str, Any
 
 
 def request_friend(
-    sc: sqlite3.Connection, me_: dict[str, Any], other_id: str
+    sc: sqlite3.Connection,
+    me_: dict[str, Any],
+    other_id: str,
+    *,
+    approved: bool = False,
 ) -> dict[str, Any]:
-    """Ask to be friends, or accept their request. Returns the relation now."""
+    """Ask to be friends, or accept their request. Returns the relation now.
+
+    A child's new friend from outside their household waits for a grown-up of the household to say yes
+    (``awaiting_parent``); :func:`answer_guardian` then sends or accepts the request for the child."""
     other = visible_account(sc, me_, other_id)
     if other["id"] == me_["id"]:
         raise ValueError("You cannot be friends with yourself.")
@@ -496,6 +507,10 @@ def request_friend(
     moment = stamp()
     if found and found["status"] == "accepted":
         return {"relation": "friends"}
+    if minor(me_) and not approved and not _same_household(me_, other):
+        if found and found["requested_by"] == me_["id"]:
+            return {"relation": "request_sent"}
+        return _ask_guardian(sc, me_, other, "accept" if found else "request")
     if found and found["requested_by"] != me_["id"]:
         x, y = _pair(me_["id"], other["id"])
         sc.execute(
@@ -542,6 +557,152 @@ def _same_household(a: dict[str, Any], b: dict[str, Any]) -> bool:
     return bool(a.get("home")) and a.get("home") == b.get("home")
 
 
+# ---------------------------------------------------------------------------
+# a grown-up says yes to a child's new friends
+# ---------------------------------------------------------------------------
+
+
+def _guardian_entry(
+    sc: sqlite3.Connection, child_id: str, other_id: str
+) -> dict[str, Any] | None:
+    return row(
+        sc,
+        "SELECT * FROM so_guardian WHERE child_id = ? AND other_id = ?",
+        (child_id, other_id),
+    )
+
+
+def guardians(sc: sqlite3.Connection, child: dict[str, Any]) -> list[dict[str, Any]]:
+    """The grown-ups of the child's household (or organization) who have Social."""
+    if not child.get("home"):
+        return []
+    found = [
+        _account(r)
+        for r in rows(
+            sc,
+            "SELECT * FROM so_accounts WHERE home = ? AND id != ? AND age_group IN ('adult', 'senior') AND suspended_at IS NULL",
+            (child["home"], child["id"]),
+        )
+    ]
+    return [item for item in found if item]
+
+
+def is_guardian(
+    sc: sqlite3.Connection, me_: dict[str, Any], child: dict[str, Any]
+) -> bool:
+    return (
+        minor(child)
+        and me_["age_group"] in ("adult", "senior")
+        and not me_.get("suspended_at")
+        and _same_household(me_, child)
+    )
+
+
+def _ask_guardian(
+    sc: sqlite3.Connection, child: dict[str, Any], other: dict[str, Any], action: str
+) -> dict[str, Any]:
+    grown_ups = guardians(sc, child)
+    if not grown_ups:
+        raise PermissionError(
+            "Ask a grown-up in your family to join Social first: they say yes to new friends."
+        )
+    rate(sc, child, "friend_request")
+    sc.execute(
+        """INSERT INTO so_guardian (child_id, other_id, action, created_at) VALUES (?, ?, ?, ?)
+        ON CONFLICT(child_id, other_id) DO UPDATE SET action = excluded.action""",
+        (child["id"], other["id"], action, stamp()),
+    )
+    for grown_up in grown_ups:
+        notify(
+            sc,
+            grown_up["id"],
+            "guardian_request",
+            child["id"],
+            "guardian",
+            other["id"],
+            f"{child['display_name']} wants to be friends with {other['display_name']} (@{other['handle']}). "
+            "Say yes or no under Friends.",
+        )
+    sc.commit()
+    return {"relation": "awaiting_parent"}
+
+
+def guardian_requests(
+    sc: sqlite3.Connection, me_: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """The household's children's new friends waiting for a grown-up's yes (empty for anyone else)."""
+    if me_["age_group"] not in ("adult", "senior") or not me_.get("home"):
+        return []
+    out = []
+    for item in rows(
+        sc,
+        """SELECT g.* FROM so_guardian g JOIN so_accounts c ON c.id = g.child_id
+        WHERE c.home = ? AND c.age_group = 'child' ORDER BY g.created_at""",
+        (me_["home"],),
+    ):
+        try:
+            child, other = account(sc, item["child_id"]), account(sc, item["other_id"])
+        except LookupError:
+            continue
+        if other.get("suspended_at"):
+            continue
+        out.append(
+            {
+                "child": mini(child),
+                "other": {
+                    **mini(other),
+                    "young": other["age_group"] in ("child", "teen"),
+                    "friends_with_you": are_friends(sc, me_["id"], other["id"]),
+                    "mutual_friends": len(
+                        friend_ids(sc, other["id"]) & friend_ids(sc, me_["id"])
+                    ),
+                },
+                "action": item["action"],
+                "created_at": item["created_at"],
+            }
+        )
+    return out
+
+
+def answer_guardian(
+    sc: sqlite3.Connection,
+    me_: dict[str, Any],
+    child_id: str,
+    other_id: str,
+    approve: bool,
+) -> dict[str, Any]:
+    """A grown-up says yes (the request is sent, or accepted, for the child) or no (nothing is sent)."""
+    child = account(sc, child_id)
+    store.check_id(other_id, "person")
+    entry = _guardian_entry(sc, child["id"], other_id)
+    if not entry or not is_guardian(sc, me_, child):
+        raise LookupError("That request was not found.")
+    sc.execute(
+        "DELETE FROM so_guardian WHERE child_id = ? AND other_id = ?",
+        (child["id"], other_id),
+    )
+    other = account(sc, other_id)
+    if approve:
+        result = request_friend(sc, child, other_id, approved=True)
+        text = (
+            f"{me_['display_name']} said yes: you and {other['display_name']} are friends now."
+            if result["relation"] == "friends"
+            else f"{me_['display_name']} said yes: your friend request went to {other['display_name']}."
+        )
+    else:
+        if entry["action"] == "accept":
+            x, y = _pair(child["id"], other_id)
+            sc.execute(
+                "DELETE FROM so_friends WHERE a_id = ? AND b_id = ? AND status = 'pending'",
+                (x, y),
+            )
+        result = {"relation": "none"}
+        text = f"{me_['display_name']} said not this time for {other['display_name']}."
+    notify(sc, child["id"], "guardian_answer", me_["id"], "account", other_id, text)
+    sc.commit()
+    return result
+
+
 def child_can_be_found(
     sc: sqlite3.Connection, viewer: dict[str, Any], child: dict[str, Any]
 ) -> bool:
@@ -557,6 +718,10 @@ def remove_friend(
     store.check_id(other_id, "person")
     x, y = _pair(me_["id"], other_id)
     sc.execute("DELETE FROM so_friends WHERE a_id = ? AND b_id = ?", (x, y))
+    sc.execute(
+        "DELETE FROM so_guardian WHERE child_id = ? AND other_id = ?",
+        (me_["id"], other_id),
+    )
     sc.commit()
     return {"relation": "none"}
 
@@ -567,7 +732,15 @@ def friends_overview(sc: sqlite3.Connection, me_: dict[str, Any]) -> dict[str, A
         "SELECT * FROM so_friends WHERE a_id = ? OR b_id = ?",
         (me_["id"], me_["id"]),
     )
-    friends, incoming, outgoing = [], [], []
+    friends, incoming, outgoing, waiting = [], [], [], []
+    asked = {
+        r["other_id"]: r["action"]
+        for r in rows(
+            sc,
+            "SELECT other_id, action FROM so_guardian WHERE child_id = ?",
+            (me_["id"],),
+        )
+    }
     for item in found:
         other_id = item["b_id"] if item["a_id"] == me_["id"] else item["a_id"]
         try:
@@ -581,12 +754,23 @@ def friends_overview(sc: sqlite3.Connection, me_: dict[str, Any]) -> dict[str, A
             friends.append(entry)
         elif item["requested_by"] == me_["id"]:
             outgoing.append(entry)
+        elif asked.pop(other_id, None):
+            waiting.append(entry)
         else:
             incoming.append(entry)
+    for other_id in asked:
+        try:
+            other = account(sc, other_id)
+        except LookupError:
+            continue
+        if not other.get("suspended_at") and not blocked(sc, me_["id"], other_id):
+            waiting.append({**mini(other), "since": ""})
     return {
         "friends": sorted(friends, key=lambda f: f["name"].lower()),
         "incoming": incoming,
         "outgoing": outgoing,
+        "awaiting_parent": waiting,
+        "children_asking": guardian_requests(sc, me_),
         "suggestions": suggestions(sc, me_),
     }
 
@@ -681,6 +865,10 @@ def block(sc: sqlite3.Connection, me_: dict[str, Any], other_id: str) -> dict[st
     )
     x, y = _pair(me_["id"], other["id"])
     sc.execute("DELETE FROM so_friends WHERE a_id = ? AND b_id = ?", (x, y))
+    sc.execute(
+        "DELETE FROM so_guardian WHERE (child_id = ? AND other_id = ?) OR (child_id = ? AND other_id = ?)",
+        (me_["id"], other["id"], other["id"], me_["id"]),
+    )
     sc.execute(
         "DELETE FROM so_follows WHERE target_type = 'account' AND ((follower_id = ? AND target_id = ?) OR (follower_id = ? AND target_id = ?))",
         (me_["id"], other["id"], other["id"], me_["id"]),
@@ -869,6 +1057,19 @@ def can_see_post(
 ) -> bool:
     if post.get("deleted_at") or post.get("hidden_at"):
         return False
+    # a deleted group or page takes its posts with it, for their authors too
+    if post.get("group_id") and not row(
+        sc,
+        "SELECT 1 AS x FROM so_groups WHERE id = ? AND archived_at IS NULL",
+        (post["group_id"],),
+    ):
+        return False
+    if post.get("page_id") and not row(
+        sc,
+        "SELECT 1 AS x FROM so_pages WHERE id = ? AND archived_at IS NULL",
+        (post["page_id"],),
+    ):
+        return False
     if post["author_id"] == viewer["id"]:
         return True
     try:
@@ -1037,7 +1238,8 @@ def edit_post(
     post = _post_row(sc, post_id)
     if post["author_id"] != me_["id"] or post["deleted_at"]:
         raise LookupError("That post was not found.")
-    values: dict[str, Any] = {"updated_at": stamp()}
+    moment = stamp()
+    values: dict[str, Any] = {"updated_at": moment, "edited_at": moment}
     if "text" in raw:
         values["text"] = filtered(
             sc, kit.text(raw["text"], "the text", max_len=2000, multiline=True)
@@ -1108,6 +1310,7 @@ def react(
                 post["id"],
                 f"{me_['display_name']} reacted {emoji} to your post.",
             )
+    sc.execute("UPDATE so_posts SET updated_at = ? WHERE id = ?", (stamp(), post["id"]))
     sc.commit()
     return post_view(sc, me_, _post_row(sc, post["id"]))
 
@@ -1234,7 +1437,7 @@ def post_view(
         "tags": [t for t in post["tags"].split() if t],
         "created_at": post["created_at"],
         "updated_at": post["updated_at"],
-        "edited": post["updated_at"] != post["created_at"],
+        "edited": bool(post.get("edited_at")),
         "reactions": reactions,
         "my_reaction": mine,
         "comments": kit.count(
@@ -1501,6 +1704,58 @@ def can_message(
     return bool(other["open_messages"])
 
 
+def may_send_direct(
+    sc: sqlite3.Connection,
+    me_: dict[str, Any],
+    other: dict[str, Any],
+    chat: dict[str, Any],
+) -> bool:
+    """Whether a message may go into this one-to-one chat now. The rule is the one for starting a chat (an
+    unfriended stranger cannot keep writing to a teen through an old chat), plus a chat an adult started
+    about a Marketplace listing, which stays open between the two adults while that listing is still for sale
+    to the buyer (and a little while after it sold, to arrange the pick-up). Once it is removed, hidden, no
+    longer visible to them or long sold, the ordinary rule applies again."""
+    if can_message(sc, me_, other):
+        return True
+    if (
+        chat.get("context") == "market"
+        and _listing_still_open(sc, chat.get("listing_id") or "", me_, other)
+        and not blocked(sc, me_["id"], other["id"])
+        and not other.get("suspended_at")
+        and not me_.get("suspended_at")
+    ):
+        return me_["age_group"] not in ("child", "teen") and other["age_group"] not in (
+            "child",
+            "teen",
+        )
+    return False
+
+
+MARKET_CHAT_DAYS_AFTER_SALE = 14
+
+
+def _listing_still_open(
+    sc: sqlite3.Connection, listing_id: str, a: dict[str, Any], b: dict[str, Any]
+) -> bool:
+    """The Marketplace listing a chat between ``a`` and ``b`` is about is still one the buyer may ask about."""
+    if not listing_id:
+        return False
+    listing = row(sc, "SELECT * FROM so_listings WHERE id = ?", (listing_id,))
+    if not listing or listing["deleted_at"] or listing["hidden_at"]:
+        return False
+    if listing["seller_id"] not in (a["id"], b["id"]):
+        return False
+    buyer = b if listing["seller_id"] == a["id"] else a
+    if listing["audience"] == "friends" and not are_friends(
+        sc, buyer["id"], listing["seller_id"]
+    ):
+        return False
+    if listing["status"] == "sold":
+        sold = store.parse(listing["sold_at"] or listing["updated_at"])
+        return sold > store.utcnow() - timedelta(days=MARKET_CHAT_DAYS_AFTER_SALE)
+    return True
+
+
 def _member(
     sc: sqlite3.Connection, chat_id: str, account_id: str, *, active: bool = True
 ) -> dict[str, Any] | None:
@@ -1653,6 +1908,11 @@ def chat_summary(
     blocked_direct = chat["kind"] == "direct" and any(
         blocked(sc, me_["id"], o["id"]) for o in others
     )
+    can_send = not me_.get("suspended_at") and not blocked_direct
+    if can_send and chat["kind"] == "direct":
+        can_send = all(
+            may_send_direct(sc, me_, account(sc, o["id"]), chat) for o in others
+        )
     return {
         "id": chat["id"],
         "kind": chat["kind"],
@@ -1664,6 +1924,8 @@ def chat_summary(
         "unread": _unread(sc, chat["id"], member),
         "updated_at": chat["updated_at"],
         "blocked": blocked_direct,
+        "can_send": bool(can_send),
+        "listing_id": chat.get("listing_id") or "",
         "last": None
         if not last
         else {
@@ -1759,7 +2021,21 @@ def messages(
                 > store.utcnow() - timedelta(hours=DELETE_WINDOW_HOURS),
             }
         )
-    return {"chat": chat_summary(sc, me_, chat), "messages": out, "now": stamp()}
+    # how far the others have read: the browser marks "Seen" from it without fetching the whole chat again
+    read_upto = max(
+        (
+            m["last_read_at"] or ""
+            for m in members
+            if m["account_id"] != me_["id"] and m["account_id"] not in hidden
+        ),
+        default="",
+    )
+    return {
+        "chat": chat_summary(sc, me_, chat),
+        "messages": out,
+        "read_upto": read_upto,
+        "now": stamp(),
+    }
 
 
 def send(
@@ -1786,6 +2062,10 @@ def send(
                 continue
             if other.get("suspended_at"):
                 raise PermissionError("This person cannot get messages right now.")
+            if not may_send_direct(sc, me_, other, chat):
+                raise PermissionError(
+                    "You can message friends, and people who accept messages from everyone."
+                )
     text = filtered(
         sc, kit.text(raw.get("text"), "a message", max_len=4000, multiline=True)
     )
@@ -1988,6 +2268,7 @@ def create_group(
     _active(me_)
     if me_["age_group"] == "child":
         raise PermissionError("Ask an adult to make a group.")
+    rate(sc, me_, "group")
     group_id = new_id()
     moment = stamp()
     sc.execute(
@@ -2185,6 +2466,90 @@ def approve_member(
     return group_view(sc, me_, group)
 
 
+def update_group(
+    sc: sqlite3.Connection, me_: dict[str, Any], group_id: str, raw: dict[str, Any]
+) -> dict[str, Any]:
+    group = group_row(sc, group_id)
+    if not _group_admin(sc, group["id"], me_["id"]):
+        raise PermissionError("Only the group's admins change it.")
+    values: dict[str, Any] = {}
+    if "name" in raw:
+        values["name"] = kit.text(
+            raw["name"], "a group name", max_len=80, required=True
+        )
+    if "about" in raw:
+        values["about"] = kit.text(
+            raw["about"], "what the group is about", max_len=1000, multiline=True
+        )
+    if "visibility" in raw:
+        values["visibility"] = kit.choice(
+            raw["visibility"], "who can see the group", VISIBILITIES
+        )
+    _update(sc, "so_groups", group["id"], values)
+    sc.commit()
+    return group_view(sc, me_, group_row(sc, group["id"]))
+
+
+def delete_group(sc: sqlite3.Connection, me_: dict[str, Any], group_id: str) -> None:
+    """An admin closes the group: it and its posts disappear for everyone."""
+    group = group_row(sc, group_id)
+    if not _group_admin(sc, group["id"], me_["id"]):
+        raise PermissionError("Only the group's admins delete it.")
+    moment = stamp()
+    sc.execute(
+        "UPDATE so_groups SET archived_at = ? WHERE id = ?", (moment, group["id"])
+    )
+    sc.execute(
+        "UPDATE so_posts SET updated_at = ? WHERE group_id = ? AND deleted_at IS NULL",
+        (moment, group["id"]),
+    )
+    sc.commit()
+
+
+def update_page(
+    sc: sqlite3.Connection, me_: dict[str, Any], page_id: str, raw: dict[str, Any]
+) -> dict[str, Any]:
+    found = page(sc, page_id)
+    if not _page_admin(sc, found["id"], me_["id"]):
+        raise PermissionError("Only the page's admins change it.")
+    values: dict[str, Any] = {}
+    if "name" in raw:
+        values["name"] = kit.text(raw["name"], "a page name", max_len=80, required=True)
+    if "about" in raw:
+        values["about"] = kit.text(
+            raw["about"], "what the page is about", max_len=1000, multiline=True
+        )
+    if "category" in raw:
+        values["category"] = kit.text(raw["category"], "a category", max_len=40)
+    if "link" in raw:
+        link = kit.url(raw["link"], "the link")
+        if link and not link.lower().startswith("https://"):
+            raise ValueError("The link must start with https://.")
+        values["link"] = link
+    _update(sc, "so_pages", found["id"], values)
+    sc.commit()
+    return page_view(sc, me_, page(sc, found["id"]))
+
+
+def delete_page(sc: sqlite3.Connection, me_: dict[str, Any], page_id: str) -> None:
+    found = page(sc, page_id)
+    if not _page_admin(sc, found["id"], me_["id"]):
+        raise PermissionError("Only the page's admins delete it.")
+    moment = stamp()
+    sc.execute(
+        "UPDATE so_pages SET archived_at = ? WHERE id = ?", (moment, found["id"])
+    )
+    sc.execute(
+        "DELETE FROM so_follows WHERE target_type = 'page' AND target_id = ?",
+        (found["id"],),
+    )
+    sc.execute(
+        "UPDATE so_posts SET updated_at = ? WHERE page_id = ? AND deleted_at IS NULL",
+        (moment, found["id"]),
+    )
+    sc.commit()
+
+
 def page(sc: sqlite3.Connection, page_id: str) -> dict[str, Any]:
     found = row(
         sc,
@@ -2205,6 +2570,7 @@ def create_page(
     link = kit.url(raw.get("link"), "the link")
     if link and not link.lower().startswith("https://"):
         raise ValueError("The link must start with https://.")
+    rate(sc, me_, "page")
     page_id = new_id()
     sc.execute(
         "INSERT INTO so_pages (id, name, about, category, link, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
@@ -2326,6 +2692,10 @@ def report(
             or are_friends(sc, me_["id"], found["author_id"])
         ):
             raise LookupError("That story was not found.")
+    elif target_type == "listing":
+        from aira.suite.social import market
+
+        market.visible(sc, me_, target_id)
     else:
         visible_account(sc, me_, target_id)
     if row(
@@ -2352,6 +2722,7 @@ def _target(
         "message": "so_messages",
         "story": "so_stories",
         "account": "so_accounts",
+        "listing": "so_listings",
     }[target_type]
     return row(sc, f"SELECT * FROM {table} WHERE id = ?", (target_id,))  # noqa: S608 - fixed table names
 
@@ -2359,6 +2730,7 @@ def _target(
 def _author_of(target_type: str, target: dict[str, Any]) -> str:
     return str(
         target.get("author_id")
+        or target.get("seller_id")
         or (target.get("id") if target_type == "account" else "")
         or ""
     )
@@ -2413,9 +2785,12 @@ def reports(
                 **item,
                 "reporter": reporter,
                 "author": author,
-                "preview": (target.get("text") or target.get("display_name") or "")[
-                    :300
-                ],
+                "preview": (
+                    target.get("text")
+                    or target.get("title")
+                    or target.get("display_name")
+                    or ""
+                )[:300],
                 "hidden": bool(target.get("hidden_at") or target.get("suspended_at")),
                 "can_suspend": home is None or _home_of(sc, author_id) == home,
             }
@@ -2460,9 +2835,12 @@ def moderate(
             "comment": "so_comments",
             "message": "so_messages",
             "story": "so_stories",
+            "listing": "so_listings",
         }[found["target_type"]]
         extra = (
-            ", updated_at = ?" if found["target_type"] in ("post", "message") else ""
+            ", updated_at = ?"
+            if found["target_type"] in ("post", "message", "listing")
+            else ""
         )
         params = (
             (moment, moment, found["target_id"])
@@ -2473,9 +2851,7 @@ def moderate(
     elif action == "suspend" or (
         action == "hide" and found["target_type"] == "account"
     ):
-        author_id = target.get("author_id") or (
-            target.get("id") if found["target_type"] == "account" else ""
-        )
+        author_id = _author_of(found["target_type"], target)
         if author_id:
             set_suspended(sc, author_id, True)
     sc.execute(
@@ -2554,6 +2930,17 @@ def export_account(sc: sqlite3.Connection, account_id: str) -> dict[str, Any]:
                 (account_id, account_id, account_id),
             )
         ],
+        "stories": rows(
+            sc,
+            "SELECT id, text, photo, created_at, expires_at FROM so_stories WHERE author_id = ? AND deleted_at IS NULL ORDER BY created_at",
+            (account_id,),
+        ),
+        "listings": rows(
+            sc,
+            """SELECT id, title, about, price_cents, currency, category, condition, place, photos, audience, status,
+            buyer, sold_cents, sold_at, created_at FROM so_listings WHERE seller_id = ? AND deleted_at IS NULL ORDER BY created_at""",
+            (account_id,),
+        ),
     }
 
 
@@ -2595,6 +2982,9 @@ def erase_accounts(sc: sqlite3.Connection, account_ids: Iterable[str]) -> int:
             "DELETE FROM so_blocks WHERE blocker_id = ? OR blocked_id = ?",
             "DELETE FROM so_reports WHERE reporter_id = ? OR (target_type = 'account' AND target_id = ?)",
             "DELETE FROM so_rate WHERE account_id = ?",
+            "DELETE FROM so_listing_saves WHERE account_id = ? OR listing_id IN (SELECT id FROM so_listings WHERE seller_id = ?)",
+            "DELETE FROM so_listings WHERE seller_id = ?",
+            "DELETE FROM so_guardian WHERE child_id = ? OR other_id = ?",
             "DELETE FROM so_accounts WHERE id = ?",
         ):
             sc.execute(statement, (account_id,) * statement.count("?"))
@@ -2624,6 +3014,18 @@ def today_cards(
             )
         if len(lines) >= 3:
             break
+    for asking in guardian_requests(sc, acct)[:3]:
+        lines.append(
+            {
+                "text": f"{asking['child']['name']} wants to be friends with {asking['other']['name']}",
+                "sub": f"@{asking['other']['handle']} · say yes or no",
+                "action": life.action(
+                    "Say yes",
+                    f"/api/social/guardian/{asking['child']['id']}/{asking['other']['id']}",
+                    body={"approve": True},
+                ),
+            }
+        )
     for incoming in friends_overview(sc, acct)["incoming"][:3]:
         lines.append(
             {

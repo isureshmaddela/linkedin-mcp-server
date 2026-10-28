@@ -45,6 +45,15 @@ SETTINGS_DEFAULTS: dict[str, Any] = {
     "proposal_prefix": "PRO-",
     "proposal_valid_days": 30,
     "default_rate_cents": 0,
+    "default_deposit_percent": 0,
+    # what Studio does by itself (the background task, every few minutes)
+    "auto_retainers": True,  # draft each retainer's invoice on its date
+    "retainer_auto_send": False,  # ... and send it to the client (the email waits in the outbox)
+    "auto_reminders": False,  # queue a friendly reminder for an overdue invoice
+    "reminder_after_days": 3,  # days after the due date for the first reminder
+    "reminder_every_days": 7,  # days between reminders
+    "reminder_max": 3,  # reminders per invoice, at most
+    "proposal_followup_days": 0,  # follow up a sent proposal with no answer after this many days (0: never)
 }
 
 
@@ -93,6 +102,41 @@ def save_settings(
         ),
         "default_rate_cents": cents_field(
             merged["default_rate_cents"], "the hourly rate"
+        ),
+        # the same rule as the deposit on a proposal: a percent with up to two decimals (12.5 is fine)
+        "default_deposit_percent": _percent_number(
+            deposit_bp(merged["default_deposit_percent"])
+        ),
+        "auto_retainers": kit.flag(merged["auto_retainers"]),
+        "retainer_auto_send": kit.flag(merged["retainer_auto_send"]),
+        "auto_reminders": kit.flag(merged["auto_reminders"]),
+        "reminder_after_days": kit.integer(
+            merged["reminder_after_days"],
+            "the days before the first reminder",
+            default=3,
+            minimum=0,
+            maximum=90,
+        ),
+        "reminder_every_days": kit.integer(
+            merged["reminder_every_days"],
+            "the days between reminders",
+            default=7,
+            minimum=1,
+            maximum=90,
+        ),
+        "reminder_max": kit.integer(
+            merged["reminder_max"],
+            "the number of reminders",
+            default=3,
+            minimum=1,
+            maximum=10,
+        ),
+        "proposal_followup_days": kit.integer(
+            merged["proposal_followup_days"],
+            "the days before a follow-up",
+            default=0,
+            minimum=0,
+            maximum=60,
         ),
     }
     kit.set_setting(connection, APP, "settings", clean)
@@ -204,22 +248,32 @@ def clean_items(raw: Any) -> list[dict[str, Any]]:
 
 
 def totals(
-    items: list[dict[str, Any]], discount_cents: int, tax_rate_bp: int
+    items: list[dict[str, Any]],
+    discount_cents: int,
+    tax_rate_bp: int,
+    credit_cents: int = 0,
 ) -> dict[str, int]:
+    """Subtotal, less the discount, plus tax; then less a credit (a deposit already invoiced, tax included)."""
     subtotal = sum(int(item["amount_cents"]) for item in items)
     discount = max(0, min(int(discount_cents or 0), subtotal))
     taxable = subtotal - discount
     tax = tax_of(taxable, int(tax_rate_bp or 0))
+    credit = max(0, min(int(credit_cents or 0), taxable + tax))
     return {
         "subtotal_cents": subtotal,
         "discount_cents": discount,
         "tax_cents": tax,
-        "total_cents": taxable + tax,
+        "credit_cents": credit,
+        "total_cents": taxable + tax - credit,
     }
 
 
 def _money_fields(
-    connection: sqlite3.Connection, raw: dict[str, Any], current: dict[str, Any] | None
+    connection: sqlite3.Connection,
+    raw: dict[str, Any],
+    current: dict[str, Any] | None,
+    *,
+    credit_cents: int | None = None,
 ) -> dict[str, Any]:
     base = current or {}
     items = (
@@ -238,7 +292,14 @@ def _money_fields(
         rate = int(base.get("tax_rate_bp") or 0)
     else:
         rate = int(kit.business(connection)["tax_rate_bp"] or 0)
-    return {"items": items, "tax_rate_bp": rate, **totals(items, discount, rate)}
+    credit = (
+        int(base.get("credit_cents") or 0) if credit_cents is None else credit_cents
+    )
+    return {
+        "items": items,
+        "tax_rate_bp": rate,
+        **totals(items, discount, rate, credit),
+    }
 
 
 def cents_field(value: Any, label: str, *, default: int = 0, minimum: int = 0) -> int:
@@ -248,6 +309,43 @@ def cents_field(value: Any, label: str, *, default: int = 0, minimum: int = 0) -
     if isinstance(value, float) and value.is_integer():
         value = int(value)
     return kit.integer(value, label, minimum=minimum, maximum=10_000_000_00)
+
+
+def deposit_bp(value: Any) -> int:
+    """A deposit typed as a percent ("30", "12.5", "") -> hundredths of a percent (3000, 1250, 0)."""
+    text = str(value if value is not None else "").strip().rstrip("%").strip()
+    if not text:
+        return 0
+    try:
+        number = Decimal(text)
+    except InvalidOperation:
+        raise ValueError("The deposit must be a percent like 30.") from None
+    if not number.is_finite() or number < 0 or number > 100:
+        raise ValueError("The deposit must be between 0 and 100 percent.")
+    return int((number * 100).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
+
+
+def _percent_number(bp: int) -> int | float:
+    """Hundredths of a percent as the percent people type: 3000 -> 30, 1250 -> 12.5."""
+    return bp // 100 if bp % 100 == 0 else bp / 100
+
+
+def deposit_of(document: dict[str, Any]) -> dict[str, int]:
+    """The deposit a proposal asks for: its share of the total before tax, then the same tax rate."""
+    bp = int(document.get("deposit_bp") or 0)
+    if bp <= 0:
+        return {"deposit_bp": 0, "net_cents": 0, "tax_cents": 0, "total_cents": 0}
+    taxable = int(document["subtotal_cents"]) - int(document["discount_cents"])
+    net = tax_of(
+        taxable, bp
+    )  # tax_of is "x hundredths of a percent of", rounded half up
+    tax = tax_of(net, int(document.get("tax_rate_bp") or 0))
+    return {
+        "deposit_bp": bp,
+        "net_cents": net,
+        "tax_cents": tax,
+        "total_cents": net + tax,
+    }
 
 
 def _number(prefix: str, seq: int) -> str:
@@ -586,7 +684,11 @@ def create_invoice(
     *,
     today: str,
     retainer: tuple[str, str] | None = None,
+    credit: tuple[int, str, str] | None = None,
+    kind: str = "",
 ) -> dict[str, Any]:
+    """A draft invoice. ``credit`` is (cents, label, deposit invoice id): what was already invoiced as a deposit,
+    taken off the total. ``kind`` is "deposit" for a proposal's deposit invoice, otherwise empty."""
     client_id = _require_client(connection, raw.get("client_id"))
     terms = int(settings(connection)["payment_terms_days"])
     issue = kit.day(raw.get("issue_date")) or today
@@ -596,11 +698,9 @@ def create_invoice(
     project_id = kit.text(raw.get("project_id"), "a project", max_len=64)
     if project_id:
         store.get(connection, "st_projects", project_id, "project")
-    seq = store.next_seq(connection, "st_invoices")
+    prefix = settings(connection)["invoice_prefix"]
     values = {
         "id": kit.new_id(),
-        "number": _number(settings(connection)["invoice_prefix"], seq),
-        "seq": seq,
         "client_id": client_id,
         "project_id": project_id,
         "proposal_id": kit.text(raw.get("proposal_id"), "a proposal", max_len=64),
@@ -616,14 +716,21 @@ def create_invoice(
             raw.get("internal_notes"), "internal notes", max_len=2000, multiline=True
         ),
         "customer_notices": "[]",
+        "credit_label": (credit[1] if credit else "")[:120],
+        "credit_invoice_id": credit[2] if credit else "",
+        "kind": kind if kind in ("", "deposit") else "",
         "created_at": kit.now(),
         "updated_at": kit.now(),
     }
-    money = _money_fields(connection, raw, None)
+    money = _money_fields(
+        connection, raw, None, credit_cents=credit[0] if credit else 0
+    )
     if not money["items"]:
         raise ValueError("Add at least one line to the invoice.")
     values.update({**money, "items": kit.dumps(money["items"])})
-    store.insert(connection, "st_invoices", values)
+    store.insert_numbered(
+        connection, "st_invoices", values, lambda seq: _number(prefix, seq)
+    )
     kit.log(
         connection,
         APP,
@@ -706,6 +813,48 @@ def _unbill_time(connection: sqlite3.Connection, invoice_id: str) -> None:
     )
 
 
+def _give_back_deposit_credit(
+    connection: sqlite3.Connection, deposit: dict[str, Any]
+) -> None:
+    """A deposit invoice is voided or deleted: the final invoices that took it off charge the full amount again."""
+    if deposit.get("kind") != "deposit":
+        return
+    for final in store.rows(
+        connection,
+        "SELECT * FROM st_invoices WHERE credit_invoice_id = ? AND id != ? AND state != 'void' AND credit_cents > 0",
+        (deposit["id"], deposit["id"]),
+    ):
+        money = totals(final["items"], final["discount_cents"], final["tax_rate_bp"], 0)
+        kit.update_row(
+            connection,
+            "st_invoices",
+            final["id"],
+            {
+                **money,
+                "credit_label": "",
+                "credit_invoice_id": "",
+                "updated_at": kit.now(),
+            },
+        )
+        kit.log(
+            connection,
+            APP,
+            "invoice",
+            f"Invoice {final['number']} no longer takes off deposit {deposit['number']}",
+            detail="The deposit invoice was cancelled, so the full amount is due on this invoice.",
+            ref_type="invoice",
+            ref_id=final["id"],
+            amount_cents=money["total_cents"],
+        )
+
+
+def _free_proposal(connection: sqlite3.Connection, invoice_id: str) -> None:
+    """The final invoice of a proposal is gone (voided or deleted): its proposal can be started again."""
+    connection.execute(
+        "UPDATE st_proposals SET invoice_id = '' WHERE invoice_id = ?", (invoice_id,)
+    )
+
+
 def void_invoice(
     connection: sqlite3.Connection, invoice_id: str, *, today: str
 ) -> dict[str, Any]:
@@ -723,6 +872,8 @@ def void_invoice(
         invoice_id,
         {"state": "void", "voided_at": kit.now(), "updated_at": kit.now()},
     )
+    _give_back_deposit_credit(connection, invoice)
+    _free_proposal(connection, invoice_id)
     kit.log(
         connection,
         APP,
@@ -745,8 +896,14 @@ def delete_invoice(connection: sqlite3.Connection, invoice_id: str) -> None:
         raise ValueError("A sent invoice cannot be deleted. Void it instead.")
     _unbill_time(connection, invoice_id)
     _revoke(connection, "invoice", invoice_id)
+    _give_back_deposit_credit(connection, invoice)
+    _free_proposal(connection, invoice_id)
     connection.execute(
-        "UPDATE st_proposals SET invoice_id = '' WHERE invoice_id = ?", (invoice_id,)
+        "UPDATE st_proposals SET deposit_invoice_id = '' WHERE deposit_invoice_id = ?",
+        (invoice_id,),
+    )
+    connection.execute(
+        "UPDATE st_deals SET invoice_id = '' WHERE invoice_id = ?", (invoice_id,)
     )
     connection.execute(
         "UPDATE st_retainers SET last_invoice_id = '' WHERE last_invoice_id = ?",
@@ -898,7 +1055,8 @@ def proposal_view(proposal: dict[str, Any], today: str) -> dict[str, Any]:
     return {
         **proposal,
         "status": status,
-        "converted": bool(proposal["project_id"] or proposal["invoice_id"]),
+        # both made: a project or invoice deleted later can be made again with the same button
+        "converted": bool(proposal["project_id"] and proposal["invoice_id"]),
     }
 
 
@@ -909,6 +1067,7 @@ def get_proposal(
     return {
         **proposal_view(proposal, today),
         **_client_name(connection, proposal["client_id"]),
+        "deposit": deposit_of(proposal),
     }
 
 
@@ -953,24 +1112,32 @@ def create_proposal(
     connection: sqlite3.Connection, raw: dict[str, Any], *, today: str
 ) -> dict[str, Any]:
     client_id = _require_client(connection, raw.get("client_id"))
-    seq = store.next_seq(connection, "st_proposals")
     config = settings(connection)
     money = _money_fields(connection, raw, None)
+    money.pop("credit_cents", None)
     values = {
         "id": kit.new_id(),
-        "number": _number(config["proposal_prefix"], seq),
-        "seq": seq,
         "client_id": client_id,
         **_proposal_text(raw, None),
         **money,
         "items": kit.dumps(money["items"]),
         "valid_until": kit.day(raw.get("valid_until"), "the valid-until date")
         or add_days(today, int(config["proposal_valid_days"])),
+        "deposit_bp": deposit_bp(
+            raw.get("deposit_percent")
+            if "deposit_percent" in raw
+            else config["default_deposit_percent"]
+        ),
         "status": "draft",
         "created_at": kit.now(),
         "updated_at": kit.now(),
     }
-    store.insert(connection, "st_proposals", values)
+    store.insert_numbered(
+        connection,
+        "st_proposals",
+        values,
+        lambda seq: _number(config["proposal_prefix"], seq),
+    )
     kit.log(
         connection,
         APP,
@@ -994,8 +1161,11 @@ def update_proposal(
         )
     values: dict[str, Any] = {**_proposal_text(raw, current)}
     if any(key in raw for key in ("items", "discount_cents", "tax_rate_bp")):
-        money = _money_fields(connection, raw, current)
+        money = _money_fields(connection, raw, current, credit_cents=0)
+        money.pop("credit_cents", None)
         values.update({**money, "items": kit.dumps(money["items"])})
+    if "deposit_percent" in raw:
+        values["deposit_bp"] = deposit_bp(raw.get("deposit_percent"))
     if "client_id" in raw:
         values["client_id"] = _require_client(connection, raw["client_id"])
     if "valid_until" in raw:
@@ -1015,6 +1185,9 @@ def delete_proposal(connection: sqlite3.Connection, proposal_id: str) -> None:
             "An accepted proposal is your client's signed agreement and cannot be deleted."
         )
     _revoke(connection, "proposal", proposal_id)
+    connection.execute(
+        "UPDATE st_deals SET proposal_id = '' WHERE proposal_id = ?", (proposal_id,)
+    )
     connection.execute("DELETE FROM st_proposals WHERE id = ?", (proposal_id,))
     kit.log(
         connection,
@@ -1049,13 +1222,22 @@ def mark_proposal_sent(connection: sqlite3.Connection, proposal_id: str) -> None
 
 
 def set_proposal_status(
-    connection: sqlite3.Connection, proposal_id: str, status: str, *, today: str
+    connection: sqlite3.Connection,
+    proposal_id: str,
+    status: str,
+    *,
+    today: str,
+    source: Any = None,
 ) -> dict[str, Any]:
     """The owner records an outcome by hand (agreed on a call, declined by email) or reopens a draft."""
     wanted = kit.choice(status, "the status", ("draft", "sent", "accepted", "declined"))
     proposal = store.get(connection, "st_proposals", proposal_id, "proposal")
     if proposal["status"] == "accepted" and wanted != "accepted":
         raise ValueError("An accepted proposal stays accepted.")
+    if proposal["status"] == wanted == "accepted":
+        return get_proposal(
+            connection, proposal_id, today
+        )  # already done: no second deposit invoice
     values: dict[str, Any] = {"status": wanted, "updated_at": kit.now()}
     if wanted == "accepted" and proposal["status"] != "accepted":
         values.update(
@@ -1065,7 +1247,15 @@ def set_proposal_status(
         values["declined_at"] = kit.now()
     if wanted == "sent" and not proposal["sent_at"]:
         values["sent_at"] = kit.now()
-    kit.update_row(connection, "st_proposals", proposal_id, values)
+    if not _change_if(connection, proposal_id, proposal["status"], values):
+        fresh = store.get(connection, "st_proposals", proposal_id, "proposal")
+        if fresh["status"] == wanted:
+            return get_proposal(connection, proposal_id, today)
+        raise ValueError(
+            "Your client answered this proposal just now. Open it again to see their answer."
+            if fresh["status"] in ("accepted", "declined")
+            else "This proposal changed just now. Open it again and try once more."
+        )
     kit.log(
         connection,
         APP,
@@ -1076,8 +1266,28 @@ def set_proposal_status(
     )
     connection.commit()
     if wanted == "accepted":
-        _win_linked_deals(connection, proposal_id)
+        _after_accept(connection, proposal_id, today=today, source=source)
     return get_proposal(connection, proposal_id, today)
+
+
+def _change_if(
+    connection: sqlite3.Connection,
+    proposal_id: str,
+    was: str,
+    values: dict[str, Any],
+) -> bool:
+    """Change a proposal only if its status is still ``was``. Two answers arriving together (the client accepts in
+    two tabs, or while the business marks it accepted) cannot both win: the second finds the status changed."""
+    columns = list(values)
+    cursor = connection.execute(
+        f"UPDATE st_proposals SET {', '.join(f'{column} = ?' for column in columns)} "  # noqa: S608 - fixed names
+        "WHERE id = ? AND status = ?",
+        (*[values[column] for column in columns], proposal_id, was),
+    )
+    if cursor.rowcount == 1:
+        return True
+    connection.commit()
+    return False
 
 
 def _win_linked_deals(connection: sqlite3.Connection, proposal_id: str) -> None:
@@ -1111,10 +1321,10 @@ def accept_proposal(
     signer = kit.text(name, "your full name", max_len=120, required=True)
     if len(signer) < 2:
         raise ValueError("Type your full name to accept.")
-    kit.update_row(
+    if not _change_if(
         connection,
-        "st_proposals",
         proposal_id,
+        "sent",
         {
             "status": "accepted",
             "accepted_at": kit.now(),
@@ -1122,7 +1332,11 @@ def accept_proposal(
             "accepted_from": str(visitor.get("client") or "")[:64],
             "updated_at": kit.now(),
         },
-    )
+    ):
+        _open_for_answer(
+            store.get(connection, "st_proposals", proposal_id, "proposal"), today
+        )
+        raise ValueError("This proposal is not open for an answer yet.")
     kit.log(
         connection,
         APP,
@@ -1135,7 +1349,7 @@ def accept_proposal(
         public=True,
     )
     connection.commit()
-    _win_linked_deals(connection, proposal_id)
+    _after_accept(connection, proposal_id, today=today, source=visitor)
     return get_proposal(connection, proposal_id, today)
 
 
@@ -1145,17 +1359,21 @@ def decline_proposal(
     proposal = store.get(connection, "st_proposals", proposal_id, "proposal")
     _open_for_answer(proposal, today)
     why = kit.text(reason, "a reason", max_len=1000, multiline=True)
-    kit.update_row(
+    if not _change_if(
         connection,
-        "st_proposals",
         proposal_id,
+        "sent",
         {
             "status": "declined",
             "declined_at": kit.now(),
             "decline_reason": why,
             "updated_at": kit.now(),
         },
-    )
+    ):
+        _open_for_answer(
+            store.get(connection, "st_proposals", proposal_id, "proposal"), today
+        )
+        raise ValueError("This proposal is not open for an answer yet.")
     kit.log(
         connection,
         APP,
@@ -1174,13 +1392,24 @@ def convert_proposal(
     connection: sqlite3.Connection, proposal_id: str, *, today: str
 ) -> dict[str, Any]:
     """An accepted proposal becomes a project (budget = the total) and a draft invoice with the same lines.
-    Converting again returns what was made the first time."""
+    Converting again returns what was made the first time; a project deleted or an invoice voided or deleted since
+    is made again. The deposit invoice joins the project, so the project's earnings include it."""
     proposal = store.get(connection, "st_proposals", proposal_id, "proposal")
     if proposal["status"] != "accepted":
         raise ValueError(
             "Only an accepted proposal can be turned into a project and an invoice."
         )
     project_id, invoice_id = proposal["project_id"], proposal["invoice_id"]
+    if project_id and not kit.fetch_one(
+        connection, "SELECT id FROM st_projects WHERE id = ?", (project_id,)
+    ):
+        project_id = ""
+    if invoice_id and not kit.fetch_one(
+        connection,
+        "SELECT id FROM st_invoices WHERE id = ? AND state != 'void'",
+        (invoice_id,),
+    ):
+        invoice_id = ""
     if not project_id:
         project = create_project(
             connection,
@@ -1195,6 +1424,18 @@ def convert_proposal(
         )
         project_id = project["id"]
     if not invoice_id:
+        credit = None
+        deposit = kit.fetch_one(
+            connection,
+            "SELECT id, number, total_cents FROM st_invoices WHERE id = ? AND state != 'void'",
+            (proposal["deposit_invoice_id"] or "",),
+        )
+        if deposit:
+            credit = (
+                int(deposit["total_cents"]),
+                f"Deposit already invoiced ({deposit['number']})",
+                str(deposit["id"]),
+            )
         invoice = create_invoice(
             connection,
             {
@@ -1214,8 +1455,14 @@ def convert_proposal(
                 "notes": f"As agreed in proposal {proposal['number']}: {proposal['title']}.",
             },
             today=today,
+            credit=credit,
         )
         invoice_id = invoice["id"]
+    if proposal["deposit_invoice_id"]:
+        connection.execute(
+            "UPDATE st_invoices SET project_id = ? WHERE id = ? AND project_id = ''",
+            (project_id, proposal["deposit_invoice_id"]),
+        )
     kit.update_row(
         connection,
         "st_proposals",
@@ -1487,6 +1734,9 @@ def delete_project(connection: sqlite3.Connection, project_id: str) -> None:
     connection.execute(
         "UPDATE st_invoices SET project_id = '' WHERE project_id = ?", (project_id,)
     )
+    connection.execute(
+        "UPDATE st_deals SET project_id = '' WHERE project_id = ?", (project_id,)
+    )
     _delete_project_rows(connection, project_id)
     kit.log(
         connection,
@@ -1558,11 +1808,10 @@ def add_time(
     store.get(connection, "st_projects", project_id, "project")
     if raw.get("minutes") in (None, "") and raw.get("hours") not in (None, ""):
         try:
-            minutes = int(
-                (Decimal(str(raw["hours"])) * 60).quantize(
-                    Decimal("1"), rounding=ROUND_HALF_UP
-                )
-            )
+            typed = Decimal(str(raw["hours"]).strip().replace(",", "."))
+            if not typed.is_finite():
+                raise InvalidOperation
+            minutes = int((typed * 60).quantize(Decimal("1"), rounding=ROUND_HALF_UP))
         except InvalidOperation:
             raise ValueError("Hours must be a number like 1.5.") from None
     else:
@@ -1714,7 +1963,11 @@ def list_retainers(connection: sqlite3.Connection) -> list[dict[str, Any]]:
 
 
 def update_retainer(
-    connection: sqlite3.Connection, retainer_id: str, raw: dict[str, Any]
+    connection: sqlite3.Connection,
+    retainer_id: str,
+    raw: dict[str, Any],
+    *,
+    today: str = "",
 ) -> dict[str, Any]:
     current = store.get(connection, "st_retainers", retainer_id, "retainer")
     values = _retainer_fields(raw, current)
@@ -1723,6 +1976,12 @@ def update_retainer(
             raw["next_date"], "the next invoice date", required=True
         )
         values["anchor_day"] = _date(values["next_date"]).day
+    elif today and values["active"] and not current["active"]:
+        # Resuming skips the months it was paused: the next invoice is the first date from today on.
+        next_date = current["next_date"]
+        while next_date < today:
+            next_date = add_month(next_date, int(current["anchor_day"]))
+        values["next_date"] = next_date
     values["updated_at"] = kit.now()
     kit.update_row(connection, "st_retainers", retainer_id, values)
     connection.commit()
@@ -1790,6 +2049,431 @@ def run_retainers(
         )
     connection.commit()
     return created
+
+
+# ---------------------------------------------------------------------------
+# sending: the client page, the email in the outbox, reminders and follow-ups
+# ---------------------------------------------------------------------------
+
+
+def share_invoice(
+    connection: sqlite3.Connection, invoice_id: str, *, today: str
+) -> dict[str, Any]:
+    """The invoice's client page (made once). Sharing it issues the invoice: a draft becomes sent."""
+    from aira.suite import public
+
+    invoice = get_invoice(connection, invoice_id, today)
+    if invoice["status"] == "void":
+        raise ValueError("A void invoice cannot be shared.")
+    link = public.create_link(
+        connection, APP, "invoice", invoice_id, title=f"Invoice {invoice['number']}"
+    )
+    mark_sent(connection, invoice_id)
+    return link
+
+
+def email_invoice(
+    connection: sqlite3.Connection,
+    invoice_id: str,
+    *,
+    today: str,
+    reminder: bool,
+    source: Any = None,
+    to: str = "",
+) -> dict[str, Any]:
+    """Share the invoice and put an email (or a reminder) with its link in the outbox. ``message`` is None when
+    the client has no email address."""
+    if reminder:
+        current = get_invoice(connection, invoice_id, today)
+        if current["status"] not in ("sent", "partially_paid", "overdue"):
+            raise ValueError("Only an unpaid invoice that was sent can get a reminder.")
+    link = share_invoice(connection, invoice_id, today=today)
+    invoice = get_invoice(connection, invoice_id, today)
+    recipient = kit.email(to) or invoice["client_email"]
+    message = None
+    if recipient:
+        subject, body = invoice_email(
+            connection, invoice, kit.public_url(link["path"], source), reminder=reminder
+        )
+        message = kit.queue_email(
+            connection,
+            APP,
+            "invoice_reminder" if reminder else "invoice",
+            to=recipient,
+            subject=subject,
+            body=body,
+            ref_type="invoice",
+            ref_id=invoice_id,
+        )
+        if reminder:
+            kit.update_row(
+                connection,
+                "st_invoices",
+                invoice_id,
+                {
+                    "reminded_at": kit.now(),
+                    "reminder_count": int(invoice.get("reminder_count") or 0) + 1,
+                },
+            )
+        connection.commit()
+    return {"link": link, "message": message}
+
+
+def share_proposal(
+    connection: sqlite3.Connection, proposal_id: str, *, today: str
+) -> dict[str, Any]:
+    """The proposal's client page (made once). Sharing it sends the proposal: a draft becomes sent."""
+    from aira.suite import public
+
+    proposal = get_proposal(connection, proposal_id, today)
+    if proposal["status"] == "declined":
+        raise ValueError("This proposal was declined. Make a new one to share.")
+    link = public.create_link(
+        connection,
+        APP,
+        "proposal",
+        proposal_id,
+        title=f"Proposal {proposal['number']}: {proposal['title']}",
+    )
+    mark_proposal_sent(connection, proposal_id)
+    return link
+
+
+def email_proposal(
+    connection: sqlite3.Connection,
+    proposal_id: str,
+    *,
+    today: str,
+    source: Any = None,
+    to: str = "",
+    follow_up: bool = False,
+) -> dict[str, Any]:
+    link = share_proposal(connection, proposal_id, today=today)
+    proposal = get_proposal(connection, proposal_id, today)
+    recipient = kit.email(to) or proposal["client_email"]
+    message = None
+    if recipient:
+        subject, body = proposal_email(
+            connection,
+            proposal,
+            kit.public_url(link["path"], source),
+            follow_up=follow_up,
+        )
+        message = kit.queue_email(
+            connection,
+            APP,
+            "proposal_followup" if follow_up else "proposal",
+            to=recipient,
+            subject=subject,
+            body=body,
+            ref_type="proposal",
+            ref_id=proposal_id,
+        )
+        if follow_up:
+            kit.update_row(
+                connection, "st_proposals", proposal_id, {"followed_up_at": kit.now()}
+            )
+        connection.commit()
+    return {"link": link, "message": message}
+
+
+def _percent(bp: int) -> str:
+    return f"{int(bp) / 100:g}%"
+
+
+def deposit_invoice(
+    connection: sqlite3.Connection, proposal_id: str, *, today: str, source: Any = None
+) -> dict[str, Any] | None:
+    """When a proposal that asks for a deposit is accepted: an invoice for the deposit, sent to the client at once
+    (its email waits in the outbox like every other). Made once; None when the proposal asks for no deposit."""
+    proposal = store.get(connection, "st_proposals", proposal_id, "proposal")
+    if proposal["status"] != "accepted":
+        return None
+    if proposal["deposit_invoice_id"] and kit.fetch_one(
+        connection,
+        "SELECT id FROM st_invoices WHERE id = ?",
+        (proposal["deposit_invoice_id"],),
+    ):
+        return get_invoice(connection, proposal["deposit_invoice_id"], today)
+    deposit = deposit_of(proposal)
+    if deposit["net_cents"] <= 0:
+        return None
+    invoice = create_invoice(
+        connection,
+        {
+            "client_id": proposal["client_id"],
+            "proposal_id": proposal_id,
+            "issue_date": today,
+            "due_date": today,
+            "items": [
+                {
+                    "description": f"Deposit ({_percent(deposit['deposit_bp'])}) for proposal "
+                    f"{proposal['number']}: {proposal['title']}"[:300],
+                    "quantity": "1",
+                    "unit_cents": deposit["net_cents"],
+                }
+            ],
+            "tax_rate_bp": proposal["tax_rate_bp"],
+            "notes": f"The deposit to start the work agreed in proposal {proposal['number']}. "
+            "It is taken off the final invoice.",
+        },
+        today=today,
+        kind="deposit",
+    )
+    kit.update_row(
+        connection,
+        "st_proposals",
+        proposal_id,
+        {"deposit_invoice_id": invoice["id"], "updated_at": kit.now()},
+    )
+    connection.commit()
+    email_invoice(connection, invoice["id"], today=today, reminder=False, source=source)
+    return get_invoice(connection, invoice["id"], today)
+
+
+def _after_accept(
+    connection: sqlite3.Connection, proposal_id: str, *, today: str, source: Any = None
+) -> None:
+    deposit_invoice(connection, proposal_id, today=today, source=source)
+    _win_linked_deals(connection, proposal_id)
+
+
+def _days_since(stamp: str | None, today: str) -> int | None:
+    if not stamp:
+        return None
+    return (_date(today) - _date(str(stamp)[:10])).days
+
+
+def tick(connection: sqlite3.Connection, *, today: str) -> dict[str, int]:
+    """What Studio does by itself every few minutes: draft (and send) retainer invoices on their date, remind
+    clients of overdue invoices, and follow up proposals with no answer. Every email waits in the outbox for
+    approval unless the business turned on automatic sending for its kind. Safe to run any number of times.
+    ``no_email`` counts the late invoices and proposals that are due a reminder or follow-up but whose client has
+    no email address: nothing is sent (or shared again) for them, and the business is told why."""
+    config = settings(connection)
+    done = {"retainer_invoices": 0, "reminders": 0, "followups": 0, "no_email": 0}
+    if config["auto_retainers"]:
+        for invoice in run_retainers(connection, today=today):
+            done["retainer_invoices"] += 1
+            if config["retainer_auto_send"]:
+                email_invoice(connection, invoice["id"], today=today, reminder=False)
+    if config["auto_reminders"]:
+        for invoice in list_invoices(connection, today=today, status="overdue"):
+            if int(invoice.get("days_overdue") or 0) < int(
+                config["reminder_after_days"]
+            ):
+                continue
+            if int(invoice["reminder_count"] or 0) >= int(config["reminder_max"]):
+                continue
+            since = _days_since(invoice["reminded_at"], today)
+            if since is not None and since < int(config["reminder_every_days"]):
+                continue
+            if not invoice["client_email"]:
+                done["no_email"] += 1
+                continue
+            sent = email_invoice(connection, invoice["id"], today=today, reminder=True)
+            if sent["message"]:
+                done["reminders"] += 1
+    wait = int(config["proposal_followup_days"])
+    if wait > 0:
+        for proposal in list_proposals(connection, today=today, status="sent"):
+            if proposal["followed_up_at"]:
+                continue
+            since = _days_since(proposal["sent_at"], today)
+            if since is None or since < wait:
+                continue
+            if not proposal["client_email"]:
+                done["no_email"] += 1
+                continue
+            sent = email_proposal(
+                connection, proposal["id"], today=today, follow_up=True
+            )
+            if sent["message"]:
+                done["followups"] += 1
+    return done
+
+
+# ---------------------------------------------------------------------------
+# earnings report: what came in, who pays best, what is late, which work pays best
+# ---------------------------------------------------------------------------
+
+AGING = (
+    ("current", "Not due yet", None, 0),
+    ("1_30", "1 to 30 days late", 1, 30),
+    ("31_60", "31 to 60 days late", 31, 60),
+    ("61_90", "61 to 90 days late", 61, 90),
+    ("90_plus", "More than 90 days late", 91, None),
+)
+
+
+def _month_keys(today: str, months: int) -> list[str]:
+    year, month = int(today[:4]), int(today[5:7])
+    keys = []
+    for _ in range(max(1, min(int(months), 24))):
+        keys.append(f"{year:04d}-{month:02d}")
+        month -= 1
+        if month == 0:
+            year, month = year - 1, 12
+    return list(reversed(keys))
+
+
+def payments_received(
+    connection: sqlite3.Connection, *, since: str = "", until: str = ""
+) -> list[dict[str, Any]]:
+    """Every payment on an invoice that is not void (newest first), with the invoice and the client."""
+    clauses, params = ["i.state != 'void'"], []
+    if since:
+        clauses.append("p.day >= ?")
+        params.append(since)
+    if until:
+        clauses.append("p.day <= ?")
+        params.append(until)
+    return kit.fetch_all(
+        connection,
+        f"""SELECT p.id, p.day, p.amount_cents, p.method, p.note, i.id AS invoice_id, i.number, i.project_id,
+        i.client_id, c.name AS client_name, c.company AS client_company
+        FROM st_payments p JOIN st_invoices i ON i.id = p.invoice_id LEFT JOIN st_clients c ON c.id = i.client_id
+        WHERE {" AND ".join(clauses)} ORDER BY p.day DESC, p.created_at DESC LIMIT 20000""",  # noqa: S608
+        tuple(params),
+    )
+
+
+def reports(
+    connection: sqlite3.Connection, *, today: str, months: int = 12
+) -> dict[str, Any]:
+    keys = _month_keys(today, months)
+    since = f"{keys[0]}-01"
+    received = payments_received(connection, since=since, until=today)
+    by_month: dict[str, dict[str, Any]] = {
+        key: {"month": key, "received_cents": 0, "invoiced_cents": 0} for key in keys
+    }
+    by_method: dict[str, int] = {}
+    by_client: dict[str, dict[str, Any]] = {}
+    for payment in received:
+        amount = int(payment["amount_cents"])
+        if payment["day"][:7] in by_month:
+            by_month[payment["day"][:7]]["received_cents"] += amount
+        by_method[payment["method"]] = by_method.get(payment["method"], 0) + amount
+        entry = by_client.setdefault(
+            payment["client_id"],
+            {
+                "id": payment["client_id"],
+                "name": payment["client_name"] or "",
+                "company": payment["client_company"] or "",
+                "received_cents": 0,
+                "payments": 0,
+            },
+        )
+        entry["received_cents"] += amount
+        entry["payments"] += 1
+    for row in kit.fetch_all(
+        connection,
+        """SELECT substr(issue_date, 1, 7) AS month, SUM(total_cents) AS total FROM st_invoices
+        WHERE state = 'sent' AND issue_date >= ? GROUP BY substr(issue_date, 1, 7)""",
+        (since,),
+    ):
+        if row["month"] in by_month:
+            by_month[row["month"]]["invoiced_cents"] = int(row["total"] or 0)
+    total_received = sum(int(p["amount_cents"]) for p in received)
+    owed = client_money(connection)
+    for client_id, figures in owed.items():
+        if client_id in by_client:
+            by_client[client_id]["outstanding_cents"] = max(
+                0, figures["billed_cents"] - figures["paid_cents"]
+            )
+    clients = sorted(
+        by_client.values(), key=lambda c: c["received_cents"], reverse=True
+    )
+    for client in clients:
+        client.setdefault("outstanding_cents", 0)
+        client["share"] = (
+            round(client["received_cents"] * 100 / total_received)
+            if total_received
+            else 0
+        )
+    # what is still owed, by how late it is
+    aging: dict[str, dict[str, Any]] = {
+        key: {"key": key, "label": label, "cents": 0, "count": 0}
+        for key, label, _, _ in AGING
+    }
+    invoices = list_invoices(connection, today=today)
+    for invoice in invoices:
+        if invoice["status"] not in ("sent", "partially_paid", "overdue"):
+            continue
+        late = int(invoice.get("days_overdue") or 0)
+        for key, _label, low, high in AGING:
+            if (low is None and late == 0) or (
+                low is not None and late >= low and (high is None or late <= high)
+            ):
+                aging[key]["cents"] += int(invoice["balance_cents"])
+                aging[key]["count"] += 1
+                break
+    # how long clients take to pay (invoices paid in full, by their last payment)
+    waits = []
+    for invoice in invoices:
+        if invoice["status"] != "paid":
+            continue
+        last = kit.fetch_one(
+            connection,
+            "SELECT MAX(day) AS day FROM st_payments WHERE invoice_id = ?",
+            (invoice["id"],),
+        )
+        if last and last.get("day"):
+            waits.append(
+                max(0, (_date(last["day"]) - _date(invoice["issue_date"])).days)
+            )
+    # which work pays best: invoiced per hour logged
+    projects = []
+    for row in kit.fetch_all(
+        connection,
+        """SELECT p.id, p.name, p.status, p.budget_cents, c.name AS client_name, c.company AS client_company,
+        (SELECT COALESCE(SUM(total_cents), 0) FROM st_invoices WHERE project_id = p.id AND state != 'void') AS invoiced_cents,
+        (SELECT COALESCE(SUM(minutes), 0) FROM st_time WHERE project_id = p.id) AS minutes
+        FROM st_projects p LEFT JOIN st_clients c ON c.id = p.client_id""",
+    ):
+        invoiced, minutes = int(row["invoiced_cents"] or 0), int(row["minutes"] or 0)
+        if not invoiced and not minutes:
+            continue
+        projects.append(
+            {
+                **row,
+                "invoiced_cents": invoiced,
+                "minutes": minutes,
+                "hourly_cents": round(invoiced * 60 / minutes) if minutes else None,
+            }
+        )
+    projects.sort(
+        key=lambda p: (
+            p["hourly_cents"] is None,
+            -(p["hourly_cents"] or 0),
+            -p["invoiced_cents"],
+        )
+    )
+    this_year = sum(
+        int(p["amount_cents"])
+        for p in payments_received(connection, since=f"{today[:4]}-01-01", until=today)
+    )
+    months_with_income = [m for m in by_month.values() if m["received_cents"]]
+    return {
+        "currency": kit.business(connection)["currency"],
+        "months": list(by_month.values()),
+        "received_cents": total_received,
+        "received_this_year_cents": this_year,
+        "average_month_cents": round(total_received / len(keys)) if keys else 0,
+        "best_month": max(months_with_income, key=lambda m: m["received_cents"])
+        if months_with_income
+        else None,
+        "outstanding_cents": sum(bucket["cents"] for bucket in aging.values()),
+        "aging": list(aging.values()),
+        "average_days_to_pay": round(sum(waits) / len(waits)) if waits else None,
+        "paid_invoices": len(waits),
+        "methods": [
+            {"method": method, "cents": cents}
+            for method, cents in sorted(by_method.items(), key=lambda item: -item[1])
+        ],
+        "clients": clients,
+        "projects": projects,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1977,6 +2661,9 @@ def public_invoice(
         "tax_label": business["tax_label"],
         "tax_rate_bp": view["tax_rate_bp"],
         "tax_cents": view["tax_cents"],
+        "credit_cents": view["credit_cents"],
+        "credit_label": view["credit_label"],
+        "deposit": view["kind"] == "deposit",
         "total_cents": view["total_cents"],
         "paid_cents": view["paid_cents"],
         "balance_cents": view["balance_cents"],
@@ -2012,6 +2699,35 @@ def public_proposal(
         "accepted_name": view["accepted_name"] if view["status"] == "accepted" else "",
         "accepted_at": view["accepted_at"] if view["status"] == "accepted" else None,
         "currency": business["currency"],
+        "deposit_bp": view["deposit"]["deposit_bp"],
+        "deposit_cents": view["deposit"]["total_cents"],
+        "deposit_invoice": _public_deposit(connection, view, today),
+    }
+
+
+def _public_deposit(
+    connection: sqlite3.Connection, proposal: dict[str, Any], today: str
+) -> dict[str, Any] | None:
+    """After acceptance, the deposit invoice the client can pay now (through its own client page)."""
+    from aira.suite import public
+
+    if proposal["status"] != "accepted" or not proposal["deposit_invoice_id"]:
+        return None
+    row = kit.fetch_one(
+        connection,
+        "SELECT * FROM st_invoices WHERE id = ?",
+        (proposal["deposit_invoice_id"],),
+    )
+    if not row:
+        return None
+    invoice = invoice_view(connection, store.decode(row), today)
+    link = public.link_for(connection, APP, "invoice", invoice["id"])
+    return {
+        "number": invoice["number"],
+        "status": invoice["status"],
+        "total_cents": invoice["total_cents"],
+        "balance_cents": invoice["balance_cents"],
+        "path": link["path"] if link else "",
     }
 
 
@@ -2047,15 +2763,35 @@ def invoice_email(
 
 
 def proposal_email(
-    connection: sqlite3.Connection, proposal: dict[str, Any], url: str
+    connection: sqlite3.Connection,
+    proposal: dict[str, Any],
+    url: str,
+    *,
+    follow_up: bool = False,
 ) -> tuple[str, str]:
     business = kit.business(connection)
     me = business["name"] or "us"
     first = (proposal["client_name"] or "").split(" ")[0] or "there"
+    if follow_up:
+        return (
+            f"Following up: {proposal['title']}",
+            f"Hi {first},\n\nI wanted to check whether you had a chance to look at our proposal for "
+            f"{proposal['title']} ({kit.fmt_money(proposal['total_cents'], business['currency'])}). It is valid "
+            f"until {proposal['valid_until']}.\n\nYou can read it and accept it online here:\n{url}\n\n"
+            f"If anything should change, just reply and we will update it.\n\nBest regards,\n{me}",
+        )
     subject = f"Proposal: {proposal['title']}"
     body = (
         f"Hi {first},\n\nHere is our proposal for {proposal['title']} "
         f"({kit.fmt_money(proposal['total_cents'], business['currency'])}), valid until {proposal['valid_until']}.\n\n"
-        f"Read it and accept it online here:\n{url}\n\nHappy to answer any questions.\n\nBest regards,\n{me}"
+        f"Read it and accept it online here:\n{url}\n\n"
+        + (
+            f"A deposit of {_percent(proposal['deposit']['deposit_bp'])} "
+            f"({kit.fmt_money(proposal['deposit']['total_cents'], business['currency'])}) is due when you "
+            "accept, and is taken off the final invoice.\n\n"
+            if proposal.get("deposit", {}).get("total_cents")
+            else ""
+        )
+        + f"Happy to answer any questions.\n\nBest regards,\n{me}"
     )
     return subject, body

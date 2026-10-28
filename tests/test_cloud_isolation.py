@@ -63,6 +63,7 @@ EXEMPT_GROUPS = {
     r"[a-z0-9_-]+": "app ids are a fixed catalog (careers, leads, api)",
     r"[a-z_]{2,40}": "public page action names are a fixed vocabulary per page kind",
     r"[a-z]{2}": "language codes of the screens' translations are a fixed public list",
+    r"[a-z]{2,20}": "AI agent ids are a fixed catalog (life, planner, ...); their settings are the caller's own",
     r"[A-Za-z0-9_-]{40,64}": "public link tokens: possession is the credential (aira.suite.public), and each resolves to its own organization",
 }
 # Routes with no tenant selector in the path; mutating ones are covered by body-identifier tests below.

@@ -85,6 +85,13 @@ POLICY: dict[str, Rule] = {
     "api_auth_launch": DENY,  # the hosted build is the account; a launch opens a local installation, not this one
     "api_auth_account_link": DENY,
     "api_auth_logout": DENY,
+    "api_auth_password_forgot": DENY,
+    "api_auth_password_reset": DENY,
+    "api_account_password": DENY,
+    "api_settings_reset_mail": DENY,  # the hosted build sends its own account emails
+    "api_settings_reset_mail_save": DENY,
+    "api_settings_reset_mail_clear": DENY,
+    "api_settings_reset_mail_test": DENY,
     "api_account_delete": DENY,
     "api_account_export": read("export.own", kind="account_export", audit=True),
     # -- LinkedIn session (personal) ---------------------------------------------------------

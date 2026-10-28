@@ -56,9 +56,11 @@ def ensure(connection):
     kit.ensure(connection, "bookings.v1", SCHEMA)
 ```
 
-* Prefix your tables with a short app prefix (`st_`, `bk_`, `sh_`, `ac_`, `ev_`, `mk_`). Ids are `kit.new_id()`
+* Prefix your tables with a short app prefix that no other app uses (`st_` Studio, `bk_`, `sh_`, `ac_`, `ev_`, `mk_`, `jr_` Life, `ai_` AI, `stk_` Stocks): every app shares the account's database. Ids are `kit.new_id()`
   (32 hex), times `kit.now()` (ISO UTC), money integer cents (`kit.cents()` to parse, `kit.fmt_money()` to show),
   currency from `kit.business(connection)["currency"]`.
+* A child's or a teen's household profile must not open money or customers: call
+  `life.require_grown_up(request, connection)` in a business app's routes (the Business hub does).
 * Validate every input with `kit.text/email/phone/url/integer/cents/cents_value/choice/day/moment/flag/tags`. `kit.cents` parses an amount a person typed (`"12.50"` -> 1250); a value that is already cents (the UI kit's `type: "money"` fields send cents, so `price_cents` from the browser) goes through `kit.cents_value`. They raise
   `ValueError` with a sentence a person can act on; the server answers 400. Raise `LookupError` for 404 and
   `PermissionError` for 403.

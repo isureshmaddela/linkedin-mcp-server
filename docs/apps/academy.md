@@ -15,7 +15,8 @@ coaches manage it, auditors can read it.
 3. Add a **quiz** to any lesson: multiple choice, 2 to 6 options, one right answer, an explanation and a pass
    mark. **Draft from the lesson** writes questions from the lesson text. Quizzes are graded on the server: the
    right options are never sent to the student's browser, and are shown only once the quiz is passed.
-4. **Publish**, then share the **course page** link.
+4. **Publish**: the **course page** link is made at once; share it. (Courses lists the page of every published
+   course; search the list and filter it by status.)
 
 ## Students
 
@@ -28,6 +29,9 @@ coaches manage it, auditors can read it.
 * **Students** lists everyone with progress, status and last activity; filter, search and download CSV. Open a
   student to **mark paid** (the payment is recorded once in Revenue), **refund** (lessons lock, the payment stops
   counting), move them to a cohort, email their link again, or turn their link off.
+* Enrolment is checked and saved in one step, so two people can never take the last seat of a course or a cohort.
+  A cohort that has already started is not offered on the course page and cannot be picked there (you can still
+  place someone in it by hand).
 * A student who completes every lesson and passes every quiz gets a **certificate** with a code and its own
   verification page (printable). Look a code up with `GET /api/academy/certificates?code=...`.
 
@@ -40,13 +44,21 @@ coaches manage it, auditors can read it.
   certificate), `announcement`, `nudge`. They wait for your approval in **Business hub > Outbox** unless you turn on
   automatic sending for that kind under **Email**.
 
+## Reviews, partners and earnings
+
+Students rate the course from their own page after their first lesson; the course page shows the average and the
+latest reviews, and **Reviews** lets you hide one. **Partners** earn a commission on the students they send
+(a partner code also works in **Enrol a student**), and **Earnings** ranks every course and event from the top
+earner to the lowest. See [experiences.md](experiences.md).
+
 ## Numbers
 
-Overview shows students, active this week, completion rate, revenue this month, payments waiting and the top
-courses, with a setup checklist. The Business hub shows the same headline numbers next to your other apps.
+Overview shows students, active this week, completion rate, revenue this month, payments waiting, the average
+rating and the top courses, with a setup checklist and your catalog page. The Business hub shows the same headline numbers next to your other apps.
 
 ## API
 
 Everything the screen does is under `/api/academy/*` (courses, modules, lessons, quizzes, outline and quiz drafts,
-students, cohorts, announcements, nudges, overview). Public pages: `academy/course` (action `enrol`),
-`academy/student` (actions `complete`, `quiz`) and `academy/certificate`.
+students, cohorts, announcements, nudges, overview). Public pages: `academy/course` (action `enrol`, with an optional
+partner `ref`), `academy/student` (actions `complete`, `quiz`, `review`), `academy/certificate`, `academy/catalog`
+and `academy/partner`.

@@ -2,9 +2,15 @@
  *
  * Tabs (?tab=): overview (what is selling, what is waiting for payment, setup), events (list; ?event=<id> opens one:
  * details, ticket types, the public event page, its orders, messages to ticket holders), orders, check-in
- * (?event=<id>: type a code at the door or find a name), promo codes, sponsors and the waitlist.
- * Everything runs through /api/events/* (aira/suite/events/events_routes.py). Times are shown in the business's
- * time zone (Business hub > Business profile).
+ * (?event=<id>: type a code at the door or find a name), promo codes, sponsors, the waitlist, partners and
+ * earnings (the last two are shared with Courses through Aira.xp, see views-academy.js).
+ * Everything runs through /api/events/* (aira/suite/events/events_routes.py). Times are shown, and typed, in the
+ * business's time zone (Business hub > Business profile), so the organiser sees the same time as the customers
+ * whatever the time zone of the computer they use; with no time zone set (UTC), the computer's own is used.
+ *
+ * In the Aira frame the page is named after the open folder (or the open event), "+ New event" asks with
+ * ?new=event and a search result with ?open=order:<id> (see views-academy.js, which plugs the whole app into the
+ * frame); ?tab=search&q= shows the app's search results here too.
  */
 "use strict";
 (() => {
@@ -14,13 +20,15 @@
   const call = (path, opts) => S.api("events", path, opts);
 
   const TABS = [
-    { id: "overview", label: "Overview" },
-    { id: "events", label: "Events" },
-    { id: "orders", label: "Orders" },
-    { id: "checkin", label: "Check-in" },
-    { id: "promos", label: "Promo codes" },
-    { id: "sponsors", label: "Sponsors" },
-    { id: "waitlist", label: "Waitlist" },
+    { id: "overview", label: "Overview", icon: "dashboard", title: "Events overview", about: "What is selling, what is waiting for payment and what to set up next." },
+    { id: "events", label: "Events", icon: "events", about: "Every event: open one for its tickets, its page, its orders and messages to ticket holders." },
+    { id: "orders", label: "Orders", icon: "shop", about: "Every ticket order: mark payments received, resend tickets, refund." },
+    { id: "checkin", label: "Check-in", icon: "xpCheck", about: "Run the door: type a ticket code or find a name on the guest list." },
+    { id: "promos", label: "Promo codes", icon: "xpTag", about: "Codes buyers type on the event page: reward early birds, partners and your community." },
+    { id: "sponsors", label: "Sponsors", icon: "xpRibbon", about: "Businesses that pay to reach your audience, from pitch to paid." },
+    { id: "waitlist", label: "Waitlist", icon: "xpClock", about: "People waiting for seats at a sold-out event." },
+    { id: "partners", label: "Partners", icon: "xpPartner", about: "People who share your courses and events with their own link and earn a commission." },
+    { id: "earnings", label: "Earnings", icon: "xpMoney", about: "What every course and event earned, from the top earner to the lowest." },
   ];
   const CATEGORIES = ["concert", "comedy", "theatre", "party", "festival", "conference", "workshop", "meetup", "sports", "screening", "exhibition", "other"];
   const PHASE_TONES = { published: "good", draft: "", cancelled: "bad", ended: "" };
@@ -29,22 +37,45 @@
   const zone = () => (S._business && S._business.timezone && S._business.timezone !== "UTC" ? S._business.timezone : undefined);
   const when = (iso) => (iso ? Aira.fmt.datetime(iso, zone()) : "");
   const go = (query) => Aira.router.go(["events"], query);
-  // datetime-local inputs speak the browser's local time; the server stores UTC.
+  const toolbar = (...children) => h("div", { class: "btn-row xp-toolbar" }, ...children.filter(Boolean));
+  const pad = (n) => String(n).padStart(2, "0");
+  // Minutes the time zone is ahead of UTC at this moment (summer time included).
+  const zoneOffset = (date, timeZone) => {
+    try {
+      const parts = Object.fromEntries(new Intl.DateTimeFormat("en-US", { timeZone, hourCycle: "h23", year: "numeric", month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" }).formatToParts(date).filter((part) => part.type !== "literal").map((part) => [part.type, Number(part.value)]));
+      const asUtc = Date.UTC(parts.year, parts.month - 1, parts.day, parts.hour % 24, parts.minute);
+      return Math.round((asUtc - Math.floor(date.getTime() / 60000) * 60000) / 60000);
+    } catch { return -date.getTimezoneOffset(); }
+  };
+  // datetime-local inputs hold a wall-clock time: the business's own (or the computer's when none is set); the
+  // server stores UTC.
   const toInput = (iso) => {
     if (!iso) return "";
     const d = new Date(iso);
     if (Number.isNaN(d.getTime())) return "";
-    const pad = (n) => String(n).padStart(2, "0");
-    return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    const tz = zone();
+    if (!tz) return `${d.getFullYear()}-${pad(d.getMonth() + 1)}-${pad(d.getDate())}T${pad(d.getHours())}:${pad(d.getMinutes())}`;
+    const shifted = new Date(d.getTime() + zoneOffset(d, tz) * 60000);
+    return `${shifted.getUTCFullYear()}-${pad(shifted.getUTCMonth() + 1)}-${pad(shifted.getUTCDate())}T${pad(shifted.getUTCHours())}:${pad(shifted.getUTCMinutes())}`;
   };
-  const fromInput = (value) => (value ? new Date(value).toISOString() : "");
+  const fromInput = (value) => {
+    if (!value) return "";
+    const tz = zone();
+    const match = /^(\d{4})-(\d{2})-(\d{2})T(\d{2}):(\d{2})/.exec(value);
+    if (!tz || !match) return new Date(value).toISOString();
+    const wall = Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4]), Number(match[5]));
+    let utc = wall - zoneOffset(new Date(wall), tz) * 60000;
+    utc = wall - zoneOffset(new Date(utc), tz) * 60000; // a second pass settles the days summer time starts or ends
+    return new Date(utc).toISOString();
+  };
+  const zoneHint = () => (zone() ? `In ${zone()} time (your business time zone).` : "In this computer's time zone. Set your business time zone in Business hub > Business profile.");
   const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
 
   // ---------------------------------------------------------------- editors
-  const EVENT_FIELDS = [
+  const EVENT_FIELDS = () => [
     { name: "title", label: "Title", required: true, placeholder: "Friday Jazz Night" },
     { name: "category", label: "Category", type: "select", options: S.statusOptions(CATEGORIES) },
-    { name: "starts_at", label: "Starts", type: "datetime-local", required: true },
+    { name: "starts_at", label: "Starts", type: "datetime-local", required: true, hint: zoneHint() },
     { name: "ends_at", label: "Ends", type: "datetime-local", hint: "Leave empty for two hours after the start." },
     { name: "venue_name", label: "Venue", placeholder: "The Blue Room" },
     { name: "venue_address", label: "Address", type: "textarea", rows: 2 },
@@ -61,7 +92,7 @@
     return S.edit({
       title: event ? "Edit event" : "New event",
       wide: true,
-      fields: event ? EVENT_FIELDS : [...EVENT_FIELDS, { type: "heading", label: "First ticket type" }, { name: "first_ticket", label: "Ticket name", placeholder: "General admission" }, { name: "first_price", label: "Price", type: "money", hint: "0 for free" }, { name: "first_quantity", label: "Quantity", type: "number", min: 1 }],
+      fields: event ? EVENT_FIELDS() : [...EVENT_FIELDS(), { type: "heading", label: "First ticket type" }, { name: "first_ticket", label: "Ticket name", placeholder: "General admission" }, { name: "first_price", label: "Price", type: "money", hint: "0 for free" }, { name: "first_quantity", label: "Quantity", type: "number", min: 1 }],
       values: event ? eventValues(event) : { category: "other", first_ticket: "General admission", first_quantity: 100 },
       submitLabel: event ? "Save" : "Create event",
       onSave: async (values) => {
@@ -79,7 +110,7 @@
     { name: "price_cents", label: "Price", type: "money", hint: "0 for free" },
     { name: "quantity", label: "Quantity", type: "number", min: 1, required: true },
     { name: "max_per_order", label: "Most per order", type: "number", min: 1, max: 50 },
-    { name: "sales_start", label: "Sales start", type: "datetime-local", hint: "Empty = on sale as soon as the event is published." },
+    { name: "sales_start", label: "Sales start", type: "datetime-local", hint: "Empty = on sale as soon as the event is published. Times are your business time zone's." },
     { name: "sales_end", label: "Sales end", type: "datetime-local", hint: "Empty = until the event ends." },
     { name: "description", label: "What is included", type: "textarea", rows: 2 },
     { name: "active", label: "On sale", type: "checkbox" },
@@ -105,6 +136,7 @@
       { name: "email", label: "Email", type: "email", hint: "Tickets are emailed here (through the outbox)." },
       { name: "phone", label: "Phone", type: "tel" },
       { name: "promo_code", label: "Promo code" },
+      { name: "ref", label: "Partner code", hint: "Optional. The partner who sent this buyer earns their commission once it is paid." },
       { name: "comp", label: "Complimentary (free, for guests and press)", type: "checkbox" },
       { name: "paid", label: "Already paid (cash or card at the door)", type: "checkbox" },
       { name: "notes", label: "Notes", type: "textarea", rows: 2 },
@@ -116,7 +148,7 @@
       submitLabel: "Create order",
       onSave: async (values) => {
         const items = types.map((t) => ({ ticket_type_id: t.id, quantity: Number(values[`qty_${t.id}`] || 0) })).filter((i) => i.quantity > 0);
-        return call("/orders", { method: "POST", body: { event_id: event.id, items, name: values.name, email: values.email, phone: values.phone, promo_code: values.promo_code, comp: values.comp, paid: values.paid, notes: values.notes } });
+        return call("/orders", { method: "POST", body: { event_id: event.id, items, name: values.name, email: values.email, phone: values.phone, promo_code: values.promo_code, ref: values.comp ? "" : values.ref, comp: values.comp, paid: values.paid, notes: values.notes } });
       },
     });
     if (done) { Aira.toast(`Order ${done.order.reference} created.`, "success"); rerender(); }
@@ -135,17 +167,18 @@
 
   // ---------------------------------------------------------------- overview
   async function overview(body) {
-    const data = await call("/overview");
+    const [data, catalog] = await Promise.all([call("/overview"), Aira.xp && Aira.xp.catalogCard ? Aira.xp.catalogCard() : null]);
     const parts = [S.kpis(data.cards)];
+    if (catalog) parts.push(catalog);
     if (data.claimed_orders) parts.push(h("div", { class: "cloud-banner info", role: "status" }, h("strong", { text: `${plural(data.claimed_orders, "buyer")} say they paid` }), h("span", { class: "muted", text: "Check your payments, then mark the orders paid to send their tickets." }), h("a", { class: "btn secondary sm", href: "#/events?tab=orders&status=pending_payment", text: "Review" })));
-    parts.push(S.section("Upcoming events", S.table({
+    parts.push(S.section("Upcoming events", Aira.xp.table({
       columns: [
-        { key: "title", label: "Event" },
-        { key: "starts_at", label: "When", render: (e) => when(e.starts_at) },
+        { key: "title", label: "Event", render: (e) => h("div", {}, h("span", { text: e.title }), Aira.xp.phoneMeta(when(e.starts_at), S.money(e.counts.revenue_cents))) },
+        { key: "starts_at", label: "When", wide: true, render: (e) => when(e.starts_at) },
         { key: "sold", label: "Sold", num: true, render: (e) => `${e.counts.sold} / ${e.available || "-"}` },
-        { key: "sell_through", label: "Sell-through", num: true, render: (e) => `${e.sell_through}%` },
-        { key: "revenue", label: "Revenue", num: true, render: (e) => S.money(e.counts.revenue_cents) },
-        { key: "phase", label: "Status", render: (e) => S.pill(e.phase, PHASE_TONES) },
+        { key: "sell_through", label: "Sell-through", num: true, wide: true, render: (e) => `${e.sell_through}%` },
+        { key: "revenue", label: "Revenue", num: true, wide: true, render: (e) => S.money(e.counts.revenue_cents) },
+        { key: "phase", label: "Status", wide: true, render: (e) => S.pill(e.phase, PHASE_TONES) },
       ],
       rows: data.upcoming,
       onRow: (e) => go({ tab: "events", event: e.id }),
@@ -160,22 +193,23 @@
     const scope = route.query.scope || "upcoming";
     const q = route.query.q || "";
     const data = await call(`/events?scope=${encodeURIComponent(scope === "all" ? "" : scope)}&q=${encodeURIComponent(q)}`);
-    const search = h("input", { type: "search", placeholder: "Search events", value: q, "data-search": "1", onkeydown: (event) => { if (event.key === "Enter") go({ tab: "events", scope, q: search.value.trim() }); } });
-    const scopeSelect = Aira.ui.select([["upcoming", "Upcoming"], ["past", "Past"], ["all", "All"]], scope, { onchange: () => go({ tab: "events", scope: scopeSelect.value, q }) });
+    const search = h("input", { type: "search", placeholder: "Search events", value: q, "aria-label": "Search events", "data-search": "1", onkeydown: (event) => { if (event.key === "Enter") go({ tab: "events", scope, q: search.value.trim() }); } });
+    const scopeSelect = Aira.ui.select([["upcoming", "Upcoming"], ["past", "Past"], ["all", "All"]], scope, { "aria-label": "Which events", onchange: () => go({ tab: "events", scope: scopeSelect.value, q }) });
     body.append(
-      h("div", { class: "btn-row" }, search, scopeSelect, S.button("New event", async () => { const e = await editEvent(); if (e) go({ tab: "events", event: e.id }); })),
-      S.table({
+      toolbar(search, scopeSelect, S.button("New event", async () => { const e = await editEvent(); if (e) go({ tab: "events", event: e.id }); })),
+      Aira.xp.table({
         columns: [
-          { key: "title", label: "Event" },
-          { key: "starts_at", label: "When", render: (e) => when(e.starts_at) },
-          { key: "venue_name", label: "Venue", render: (e) => e.venue_name || (e.online_url ? "Online" : "") },
+          { key: "title", label: "Event", render: (e) => h("div", {}, h("strong", { text: e.title }), Aira.xp.phoneMeta(when(e.starts_at), e.venue_name || (e.online_url ? "Online" : ""))) },
+          { key: "starts_at", label: "When", wide: true, render: (e) => when(e.starts_at) },
+          { key: "venue_name", label: "Venue", wide: true, render: (e) => e.venue_name || (e.online_url ? "Online" : "") },
           { key: "sold", label: "Sold", num: true, render: (e) => `${e.counts.sold} / ${e.available || "-"}` },
-          { key: "revenue", label: "Revenue", num: true, render: (e) => S.money(e.counts.revenue_cents) },
+          { key: "revenue", label: "Revenue", num: true, wide: true, render: (e) => S.money(e.counts.revenue_cents) },
           { key: "phase", label: "Status", render: (e) => S.pill(e.phase, PHASE_TONES) },
         ],
         rows: data.events,
         onRow: (e) => go({ tab: "events", event: e.id }),
-        empty: Aira.ui.empty(scope === "past" ? "No past events" : "No events yet", "An event has a time, a place and ticket types. Publish it to get a page you can share."),
+        empty: q ? Aira.ui.empty("No event matches", scope === "all" ? "Try another word." : "Try another word, or look in All.", scope === "all" ? null : h("a", { class: "btn secondary sm", href: `#/events?${new URLSearchParams({ tab: "events", scope: "all", q })}`, text: "Look in All" }))
+          : Aira.ui.empty(scope === "past" ? "No past events" : "No events yet", "An event has a time, a place and ticket types. Publish it to get a page you can share.", scope === "past" || !Aira.xp.canManage() ? null : S.button("Create an event", async () => { const e = await editEvent(); if (e) go({ tab: "events", event: e.id }); })),
       }),
     );
   }
@@ -200,9 +234,9 @@
       !event.counts.orders ? S.button("Delete", async () => { if (await S.confirmDelete("this event")) { await call(`/events/${event.id}`, { method: "DELETE" }); go({ tab: "events" }); } }, { kind: "ghost sm" }) : null,
     ];
     const orders = await call(`/orders?event_id=${event.id}`);
+    if (currentMain) Aira.xp.setTitle(currentMain, event.title, `${when(event.starts_at)} · ${event.venue_name || (event.online_url ? "Online" : "No venue yet")}`);
     body.append(
-      h("div", { class: "btn-row" }, h("a", { class: "btn ghost sm", href: "#/events?tab=events", text: "← All events" })),
-      h("div", {}, h("h2", { class: "suite-h2", text: event.title }), h("p", { class: "muted", text: `${when(event.starts_at)} · ${event.venue_name || (event.online_url ? "Online" : "No venue yet")}` }), S.pill(phase, PHASE_TONES)),
+      h("div", { class: "xp-detail-meta" }, h("a", { class: "btn ghost sm", href: "#/events?tab=events", text: "← All events" }), S.pill(phase, PHASE_TONES), event.category && event.category !== "other" ? h("span", { class: "muted", text: event.category.replace(/^./, (c) => c.toUpperCase()) }) : null),
       h("div", { class: "btn-row" }, ...actions.filter(Boolean)),
       S.kpis([
         { label: "Tickets sold", value: `${event.counts.sold} / ${event.available || "-"}`, hint: `${event.sell_through}% sold` },
@@ -220,12 +254,12 @@
       }) : h("p", { class: "muted", text: "Publish the event to get a page customers can buy tickets on." }),
       S.section("Ticket types",
         h("div", { class: "btn-row" }, S.button("Add ticket type", async () => { if (await editType(event)) rerender(); }, { kind: "secondary sm" })),
-        S.table({
+        Aira.xp.table({
           columns: [
             { key: "name", label: "Ticket" },
             { key: "price_cents", label: "Price", num: true, render: (t) => (t.price_cents ? S.money(t.price_cents) : "Free") },
             { key: "sold", label: "Sold", num: true, render: (t) => `${t.sold} / ${t.quantity}` },
-            { key: "window", label: "On sale", render: (t) => (t.active ? [t.sales_start ? `from ${when(t.sales_start)}` : "", t.sales_end ? `until ${when(t.sales_end)}` : ""].filter(Boolean).join(" ") || "Yes" : "Off") },
+            { key: "window", label: "On sale", wide: true, render: (t) => (t.active ? [t.sales_start ? `from ${when(t.sales_start)}` : "", t.sales_end ? `until ${when(t.sales_end)}` : ""].filter(Boolean).join(" ") || "Yes" : "Off") },
             { key: "actions", label: "", render: (t) => h("div", { class: "btn-row" }, S.button("Edit", async () => { if (await editType(event, t)) rerender(); }, { kind: "ghost sm" }), S.button(t.sold ? "Stop selling" : "Delete", async () => { if (await Aira.confirm({ title: t.sold ? "Stop selling" : "Delete ticket type", message: t.sold ? "Tickets already sold stay valid." : "Delete this ticket type?", confirmLabel: t.sold ? "Stop selling" : "Delete", danger: true })) { await call(`/ticket-types/${t.id}`, { method: "DELETE" }); rerender(); } }, { kind: "ghost sm" })) },
           ],
           rows: event.ticket_types,
@@ -244,19 +278,19 @@
 
   // ---------------------------------------------------------------- orders
   function ordersTable(rows, rerender) {
-    return S.table({
+    return Aira.xp.table({
       columns: [
-        { key: "reference", label: "Order" },
-        { key: "event_title", label: "Event" },
-        { key: "buyer_name", label: "Buyer", render: (o) => h("span", {}, o.buyer_name, o.buyer_email ? h("div", { class: "muted small", text: o.buyer_email }) : null) },
-        { key: "tickets", label: "Tickets", num: true },
+        { key: "reference", label: "Order", wide: true },
+        { key: "event_title", label: "Event", wide: true },
+        { key: "buyer_name", label: "Buyer", render: (o) => h("span", {}, o.buyer_name, o.buyer_email ? h("div", { class: "muted small", text: o.buyer_email }) : null, Aira.xp.phoneMeta(o.reference, o.event_title, plural(o.tickets, "ticket"))) },
+        { key: "tickets", label: "Tickets", num: true, wide: true },
         { key: "total_cents", label: "Total", num: true, render: (o) => S.money(o.total_cents) },
         { key: "status", label: "Status", render: (o) => h("span", {}, S.pill(o.status, ORDER_TONES), o.status === "pending_payment" && o.payment_claimed_at ? h("span", { class: "muted small", text: " says paid" }) : null) },
-        { key: "created_at", label: "Ordered", render: (o) => Aira.fmt.ago(o.created_at) },
+        { key: "created_at", label: "Ordered", wide: true, render: (o) => Aira.fmt.ago(o.created_at) },
       ],
       rows,
       onRow: (o) => openOrder(o.id, rerender),
-      empty: "No orders yet",
+      empty: Aira.ui.empty("No orders yet", "Orders appear here when someone buys on the event page, or when you use Sell tickets."),
     });
   }
 
@@ -283,12 +317,12 @@
 
   async function ordersTab(body, route, rerender) {
     const [events, data] = await Promise.all([call("/events"), call(`/orders?event_id=${encodeURIComponent(route.query.event || "")}&status=${encodeURIComponent(route.query.status || "")}&q=${encodeURIComponent(route.query.q || "")}`)]);
-    const eventSelect = Aira.ui.select([["", "All events"], ...events.events.map((e) => [e.id, e.title])], route.query.event || "", { onchange: () => go({ tab: "orders", event: eventSelect.value, status: statusSelect.value, q: search.value.trim() }) });
-    const statusSelect = Aira.ui.select([["", "Any status"], ...S.statusOptions(data.statuses)], route.query.status || "", { onchange: () => go({ tab: "orders", event: eventSelect.value, status: statusSelect.value, q: search.value.trim() }) });
-    const search = h("input", { type: "search", placeholder: "Name, email or reference", value: route.query.q || "", "data-search": "1", onkeydown: (e) => { if (e.key === "Enter") go({ tab: "orders", event: eventSelect.value, status: statusSelect.value, q: search.value.trim() }); } });
+    const eventSelect = Aira.ui.select([["", "All events"], ...events.events.map((e) => [e.id, e.title])], route.query.event || "", { "aria-label": "Event", onchange: () => go({ tab: "orders", event: eventSelect.value, status: statusSelect.value, q: search.value.trim() }) });
+    const statusSelect = Aira.ui.select([["", "Any status"], ...S.statusOptions(data.statuses)], route.query.status || "", { "aria-label": "Status", onchange: () => go({ tab: "orders", event: eventSelect.value, status: statusSelect.value, q: search.value.trim() }) });
+    const search = h("input", { type: "search", placeholder: "Name, email or reference", value: route.query.q || "", "aria-label": "Search orders", "data-search": "1", onkeydown: (e) => { if (e.key === "Enter") go({ tab: "orders", event: eventSelect.value, status: statusSelect.value, q: search.value.trim() }); } });
     const pending = data.orders.filter((o) => o.status === "pending_payment");
     body.append(
-      h("div", { class: "btn-row" }, eventSelect, statusSelect, search),
+      toolbar(search, eventSelect, statusSelect),
       S.kpis([
         { label: "Orders", value: data.orders.length },
         { label: "Awaiting payment", value: pending.length, hint: pending.length ? S.money(pending.reduce((sum, o) => sum + o.total_cents, 0)) : "", tone: pending.length ? "warn" : "" },
@@ -303,13 +337,13 @@
     const events = (await call("/events?scope=upcoming")).events.concat((await call("/events?scope=past")).events.slice(0, 5));
     if (!events.length) { body.append(Aira.ui.empty("No events to check in", "Create and publish an event first.")); return; }
     const eventId = route.query.event || events[0].id;
-    const picker = Aira.ui.select(events.map((e) => [e.id, `${e.title} · ${when(e.starts_at)}`]), eventId, { onchange: () => go({ tab: "checkin", event: picker.value }) });
+    const picker = Aira.ui.select(events.map((e) => [e.id, `${e.title} · ${when(e.starts_at)}`]), eventId, { "aria-label": "Event", onchange: () => go({ tab: "checkin", event: picker.value }) });
     const data = await call(`/events/${eventId}/checkin`);
     const counts = h("div");
     const showCounts = (c) => counts.replaceChildren(S.kpis([{ label: "Checked in", value: c.checked_in, tone: "good" }, { label: "Sold", value: c.sold }, { label: "Still to arrive", value: Math.max(0, c.sold - c.checked_in) }, { label: "Capacity", value: data.event.capacity || "-" }]));
     showCounts(data.counts);
     const result = h("div", { "aria-live": "assertive" });
-    const code = h("input", { type: "text", placeholder: "ABCD-2345", autocomplete: "off", autocapitalize: "characters", style: { fontSize: "22px", letterSpacing: "0.1em", maxWidth: "260px" } });
+    const code = h("input", { type: "text", placeholder: "ABCD-2345", "aria-label": "Ticket code", autocomplete: "off", autocapitalize: "characters", style: { fontSize: "22px", letterSpacing: "0.1em", maxWidth: "260px" } });
     const tone = { checked_in: "good", already: "warn", unpaid: "warn", cancelled: "bad", invalid: "bad" };
     const doCheckIn = async (value) => {
       const outcome = await call(`/events/${eventId}/checkin`, { method: "POST", body: { code: value } });
@@ -321,17 +355,17 @@
       return outcome;
     };
     const form = h("form", { class: "btn-row", onsubmit: async (event) => { event.preventDefault(); if (code.value.trim()) await doCheckIn(code.value.trim()); } }, code, h("button", { type: "submit", class: "btn", text: "Check in" }));
-    const search = h("input", { type: "search", placeholder: "Find by name, email or order", value: route.query.q || "", onkeydown: (e) => { if (e.key === "Enter") go({ tab: "checkin", event: eventId, q: search.value.trim() }); } });
+    const search = h("input", { type: "search", placeholder: "Find by name, email or order", value: route.query.q || "", "aria-label": "Find a guest", onkeydown: (e) => { if (e.key === "Enter") go({ tab: "checkin", event: eventId, q: search.value.trim() }); } });
     const list = route.query.q ? (await call(`/events/${eventId}/checkin?q=${encodeURIComponent(route.query.q)}`)).attendees : data.attendees;
     body.append(
-      h("div", { class: "btn-row" }, picker),
+      toolbar(picker),
       counts,
       S.section("At the door", h("p", { class: "muted", text: "Type the code from the ticket. A ticket works once; a second try says when it was used." }), form, result),
-      S.section("Guest list", search, S.table({
+      S.section("Guest list", search, Aira.xp.table({
         columns: [
-          { key: "holder_name", label: "Name", render: (a) => h("span", {}, a.holder_name || a.buyer_name, a.holder_name && a.holder_name !== a.buyer_name ? h("div", { class: "muted small", text: `Bought by ${a.buyer_name}` }) : null) },
-          { key: "type_name", label: "Ticket" },
-          { key: "code", label: "Code" },
+          { key: "holder_name", label: "Name", render: (a) => h("span", {}, a.holder_name || a.buyer_name, a.holder_name && a.holder_name !== a.buyer_name ? h("div", { class: "muted small", text: `Bought by ${a.buyer_name}` }) : null, Aira.xp.phoneMeta(a.type_name, a.code)) },
+          { key: "type_name", label: "Ticket", wide: true },
+          { key: "code", label: "Code", wide: true },
           { key: "status", label: "Status", render: (a) => (a.order_status === "pending_payment" ? S.pill("unpaid", { unpaid: "warn" }) : S.pill(a.status, { valid: "info", checked_in: "good" })) },
           { key: "act", label: "", render: (a) => (a.status === "checked_in" ? S.button("Undo", async () => { await call(`/tickets/${a.id}/undo-checkin`, { method: "POST", body: {} }); rerender(); }, { kind: "ghost sm" }) : a.order_status === "confirmed" ? S.button("Check in", async () => { await doCheckIn(a.code); rerender(); }, { kind: "secondary sm" }) : "") },
         ],
@@ -367,19 +401,19 @@
     body.append(
       h("p", { class: "muted", text: "Codes buyers type on the event page: reward early birds, partners and your community." }),
       h("div", { class: "btn-row" }, S.button("New promo code", async () => { if (await editPromo()) rerender(); })),
-      S.table({
+      Aira.xp.table({
         columns: [
-          { key: "code", label: "Code" },
+          { key: "code", label: "Code", render: (p) => h("div", {}, h("strong", { text: p.code }), Aira.xp.phoneMeta(p.event_title || "All events", p.max_uses ? `${p.used} / ${p.max_uses} used` : `${p.used} used`)) },
           { key: "value", label: "Discount", render: (p) => (p.kind === "percent" ? `${p.value}% off` : `${S.money(p.value)} off`) },
-          { key: "event_title", label: "Event", render: (p) => p.event_title || "All events" },
-          { key: "used", label: "Used", num: true, render: (p) => (p.max_uses ? `${p.used} / ${p.max_uses}` : String(p.used)) },
-          { key: "expires_at", label: "Expires", render: (p) => when(p.expires_at) || "Never" },
+          { key: "event_title", label: "Event", wide: true, render: (p) => p.event_title || "All events" },
+          { key: "used", label: "Used", num: true, wide: true, render: (p) => (p.max_uses ? `${p.used} / ${p.max_uses}` : String(p.used)) },
+          { key: "expires_at", label: "Expires", wide: true, render: (p) => when(p.expires_at) || "Never" },
           { key: "active", label: "Status", render: (p) => S.pill(p.active ? "active" : "off", { off: "" }) },
           { key: "act", label: "", render: (p) => S.button(p.used ? "Turn off" : "Delete", async () => { await call(`/promos/${p.id}`, { method: "DELETE" }); rerender(); }, { kind: "ghost sm" }) },
         ],
         rows: data.promos,
         onRow: async (p) => { if (await editPromo(p)) rerender(); },
-        empty: "No promo codes yet",
+        empty: Aira.ui.empty("No promo codes yet", "Reward early birds, students and partners with a code they type on the event page."),
       }),
     );
   }
@@ -409,11 +443,11 @@
         { label: "Paid", value: S.money(data.pipeline.paid || 0), tone: "good" },
       ]),
       h("div", { class: "btn-row" }, S.button("New sponsor", async () => { if (await editSponsor()) rerender(); })),
-      S.table({
+      Aira.xp.table({
         columns: [
-          { key: "name", label: "Sponsor" },
-          { key: "tier", label: "Package" },
-          { key: "event_title", label: "Event", render: (s) => s.event_title || "All events" },
+          { key: "name", label: "Sponsor", render: (s) => h("div", {}, h("strong", { text: s.name }), Aira.xp.phoneMeta(s.tier, s.event_title || "All events")) },
+          { key: "tier", label: "Package", wide: true },
+          { key: "event_title", label: "Event", wide: true, render: (s) => s.event_title || "All events" },
           { key: "amount_cents", label: "Amount", num: true, render: (s) => S.money(s.amount_cents) },
           { key: "status", label: "Status", render: (s) => S.pill(s.status, { pitched: "", agreed: "warn", paid: "good", declined: "bad" }) },
           { key: "act", label: "", render: (s) => S.button("Delete", async () => { if (await S.confirmDelete(s.name)) { await call(`/sponsors/${s.id}`, { method: "DELETE" }); rerender(); } }, { kind: "ghost sm" }) },
@@ -428,34 +462,47 @@
   // ---------------------------------------------------------------- waitlist
   async function waitlistTab(body, route, rerender) {
     const [data, events] = await Promise.all([call(`/waitlist?event_id=${encodeURIComponent(route.query.event || "")}`), call("/events")]);
-    const picker = Aira.ui.select([["", "All events"], ...events.events.map((e) => [e.id, e.title])], route.query.event || "", { onchange: () => go({ tab: "waitlist", event: picker.value }) });
+    const picker = Aira.ui.select([["", "All events"], ...events.events.map((e) => [e.id, e.title])], route.query.event || "", { "aria-label": "Event", onchange: () => go({ tab: "waitlist", event: picker.value }) });
     body.append(
       h("p", { class: "muted", text: "People who asked for tickets after an event sold out. When seats free up (a cancellation, more tickets), offer them: they get an email with the event page." }),
-      h("div", { class: "btn-row" }, picker),
-      S.table({
+      toolbar(picker),
+      Aira.xp.table({
         columns: [
-          { key: "name", label: "Name", render: (w) => h("span", {}, w.name, h("div", { class: "muted small", text: w.email })) },
-          { key: "event_title", label: "Event" },
-          { key: "quantity", label: "Tickets", num: true },
-          { key: "created_at", label: "Joined", render: (w) => Aira.fmt.ago(w.created_at) },
+          { key: "name", label: "Name", render: (w) => h("span", {}, w.name, h("div", { class: "muted small", text: w.email }), Aira.xp.phoneMeta(w.event_title, plural(w.quantity, "ticket"))) },
+          { key: "event_title", label: "Event", wide: true },
+          { key: "quantity", label: "Tickets", num: true, wide: true },
+          { key: "created_at", label: "Joined", wide: true, render: (w) => Aira.fmt.ago(w.created_at) },
           { key: "status", label: "Status", render: (w) => S.pill(w.status, { waiting: "warn", offered: "info" }) },
           { key: "act", label: "", render: (w) => h("div", { class: "btn-row" }, S.button(w.status === "offered" ? "Offer again" : "Offer seats", async () => { await call(`/waitlist/${w.id}/offer`, { method: "POST", body: {} }); Aira.toast("Offer waiting in the outbox.", "success"); rerender(); }, { kind: "secondary sm" }), S.button("Remove", async () => { await call(`/waitlist/${w.id}/status`, { method: "POST", body: { status: "removed" } }); rerender(); }, { kind: "ghost sm" })) },
         ],
         rows: data.waitlist,
-        empty: "Nobody is waiting",
+        empty: Aira.ui.empty("Nobody is waiting", "When an event sells out, its page offers a waitlist instead."),
       }),
     );
   }
 
   // ---------------------------------------------------------------- the view
+  let currentMain = null;
+  // The tab an ask from "+ New" or the search box opens on.
+  const ASK_TAB = { event: "events", order: "orders", partner: "partners" };
+
   Aira.views.events = async (main, route) => {
+    const xp = Aira.xp;
+    if (xp.take("events", route, (ask) => ASK_TAB[ask.new || ask.open])) return;
     await S.business();
-    const body = S.page(main, {
-      title: "Events",
-      subtitle: "Sell tickets, fill the room and run the door.",
-      actions: [S.button("New event", async () => { const e = await editEvent(); if (e) go({ tab: "events", event: e.id }); })],
+    currentMain = main;
+    const query = String(route.query.q || "").trim();
+    const tabId = route.query.tab === "search" || TABS.some((t) => t.id === route.query.tab) ? route.query.tab : "overview";
+    const meta = TABS.find((t) => t.id === tabId);
+    const title = tabId === "search" ? (query ? `Results for “${query}”` : "Search") : meta.title || meta.label;
+    const createEvent = async () => { const e = await editEvent(); if (e) go({ tab: "events", event: e.id }); };
+    const body = xp.head(main, {
+      title,
+      about: tabId === "search" ? "Courses, events, students, ticket orders and partners that match." : meta.about,
+      phoneNew: tabId === "events" ? null : S.button("New event", createEvent, { icon: "plus" }),
     });
-    const tab = S.tabs(body, route, "events", TABS);
+    document.title = `${title} · Courses & Events · Aira`;
+    const tab = S.tabs(body, route, "events", TABS, tabId);
     const panel = h("div", { class: "suite-body" });
     body.append(panel);
     const render = async () => {
@@ -469,10 +516,23 @@
         else if (tab === "promos") await promosTab(holder, render);
         else if (tab === "sponsors") await sponsorsTab(holder, render);
         else if (tab === "waitlist") await waitlistTab(holder, route, render);
+        else if (tab === "partners") await xp.partnersTab(holder, route, go);
+        else if (tab === "earnings") await xp.earningsTab(holder, route, go);
+        else if (tab === "search") await xp.searchTab(holder, query);
         else await overview(holder);
         panel.replaceChildren(holder);
       } catch (error) { panel.replaceChildren(Aira.ui.error(error, render)); }
     };
     await render();
+    xp.answer("events", {
+      new: {
+        event: createEvent,
+        partner: async () => { if (!xp.newPartner) return; const created = await xp.newPartner(); if (created) go({ tab: "partners", open: `partner:${created.id}` }); },
+      },
+      open: {
+        order: (id) => openOrder(id, render),
+        partner: (id) => xp.openPartner(id, () => go({ ...route.query, tab: "partners", t: Date.now() })),
+      },
+    });
   };
 })();

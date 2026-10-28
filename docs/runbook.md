@@ -48,6 +48,15 @@ The LinkedIn MCP server is started per account by Aira itself (Settings → Inte
 | `AIRA_ACCOUNT_URL` | unset | The Aira account (the hosted build, for example `http://127.0.0.1:8780`) that can sign people in here. With `AIRA_ACCOUNT_SECRET` set, the sign-in page offers "Sign in with your Aira account". See [apps.md](apps.md). |
 | `AIRA_ACCOUNT_SECRET` | unset | Shared with the account as its `AIRA_CLOUD_LAUNCH_SECRET` (32+ random characters). Signs the launch-token validation call. |
 | `AIRA_ACCOUNT_ALLOW_LOCAL` | `0` | `1` lets `AIRA_ACCOUNT_URL` point at a private (non-loopback, non-public) address you trust. |
+| `AIRA_SMTP_HOST` / `AIRA_SMTP_PORT` / `AIRA_SMTP_SECURITY` | unset / `587` / `starttls` | Mail server that emails password reset codes, used when none is saved in Settings → Integrations → Password reset email. For Gmail: `smtp.gmail.com`, `587`, `starttls`. |
+| `AIRA_SMTP_USERNAME` / `AIRA_SMTP_PASSWORD` | unset | Sign-in for that server. For Gmail, the Gmail address and a 16-letter [app password](https://myaccount.google.com/apppasswords) (needs 2-Step Verification; the normal Gmail password is refused). |
+| `AIRA_SMTP_FROM` / `AIRA_SMTP_FROM_NAME` | the username / `Aira` | Sender of the reset emails. |
+
+## Forgotten passwords
+
+- **Sign-in → Forgot your password?** asks for the account email and issues a one-time code (8 characters, `ABCD-EFGH`), valid for 15 minutes and for 5 tries. It is always written to the console Aira runs in (`Reset code for ...`) and, when a mail server is set, emailed to the account. The answer is the same whether or not the email has an account. Using the code sets the new password, signs out every other session and signs in.
+- **Mail server**: Settings → Integrations → Password reset email, set by the first account on this computer. Choose Gmail (fixed `smtp.gmail.com:587` STARTTLS; enter the Gmail address and an app password) or another SMTP server, then **Send a test email**. The password is stored Fernet-encrypted (`airaapi.key` / `AIRA_SECRET_KEY`) in `accounts.sqlite3` and never returned. Without saved settings the `AIRA_SMTP_*` variables are used.
+- **Signed in**: Settings → Data → Password changes the password with the current one; other sessions are signed out, this one stays.
 
 In-app settings (Settings → Automation / Data): daily application limit (0 = unlimited), email action threshold and auto-apply toggle, time zone, default model, document retention days.
 

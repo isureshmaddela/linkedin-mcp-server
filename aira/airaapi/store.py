@@ -183,6 +183,116 @@ def ensure_schema(connection: sqlite3.Connection) -> None:
             connection.execute(
                 "CREATE TABLE airaapi_search_text (id TEXT PRIMARY KEY, body TEXT NOT NULL)"
             )
+    _extras(connection)
+
+
+# Tables and columns added after migration 15. Databases already past that
+# migration get them lazily: every function that reads them calls
+# ``ensure_extras`` first (one sqlite_master lookup when they exist).
+EXTRA_TABLES = (
+    "airaapi_key_usage",
+    "airaapi_prefs",
+    "airaapi_rank_projects",
+    "airaapi_rank_keywords",
+    "airaapi_rank_checks",
+    "airaapi_rank_usage",
+)
+
+
+def _extras(connection: sqlite3.Connection) -> None:
+    # Reselling: what a key's holder (a client) pays, how much it may use, which engines.
+    _add_column(
+        connection, "airaapi_api_keys", "client_name", "TEXT NOT NULL DEFAULT ''"
+    )
+    _add_column(
+        connection, "airaapi_api_keys", "price_per_1000", "REAL NOT NULL DEFAULT 0"
+    )
+    _add_column(
+        connection, "airaapi_api_keys", "monthly_quota", "INTEGER NOT NULL DEFAULT 0"
+    )
+    _add_column(
+        connection, "airaapi_api_keys", "allowed_engines", "TEXT NOT NULL DEFAULT '[]'"
+    )
+    # Per-key usage by day and engine. Unlike stored searches it is never pruned,
+    # so a month's statement survives the history retention window.
+    connection.execute(
+        """CREATE TABLE IF NOT EXISTS airaapi_key_usage (
+            day TEXT NOT NULL, key_id TEXT NOT NULL, engine TEXT NOT NULL,
+            calls INTEGER NOT NULL DEFAULT 0, cached INTEGER NOT NULL DEFAULT 0,
+            errors INTEGER NOT NULL DEFAULT 0, credits INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (day, key_id, engine)
+        )"""
+    )
+    connection.execute(
+        """CREATE TABLE IF NOT EXISTS airaapi_prefs (
+            name TEXT PRIMARY KEY, value TEXT NOT NULL
+        )"""
+    )
+    # Rank tracker: a website, the keywords it should rank for, and every check.
+    connection.execute(
+        """CREATE TABLE IF NOT EXISTS airaapi_rank_projects (
+            id TEXT PRIMARY KEY, name TEXT NOT NULL, domain TEXT NOT NULL,
+            client_name TEXT NOT NULL DEFAULT '', location TEXT NOT NULL DEFAULT '',
+            gl TEXT NOT NULL DEFAULT '', hl TEXT NOT NULL DEFAULT '',
+            device TEXT NOT NULL DEFAULT '', interval_minutes INTEGER NOT NULL DEFAULT 0,
+            monthly_fee REAL NOT NULL DEFAULT 0, notify INTEGER NOT NULL DEFAULT 1,
+            created_at TEXT NOT NULL
+        )"""
+    )
+    connection.execute(
+        """CREATE TABLE IF NOT EXISTS airaapi_rank_keywords (
+            id TEXT PRIMARY KEY, project_id TEXT NOT NULL, keyword TEXT NOT NULL,
+            saved_id TEXT NOT NULL, monitor_id TEXT NOT NULL, created_at TEXT NOT NULL,
+            UNIQUE (project_id, keyword)
+        )"""
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_airaapi_rank_keywords_saved "
+        "ON airaapi_rank_keywords(saved_id)"
+    )
+    connection.execute(
+        """CREATE TABLE IF NOT EXISTS airaapi_rank_checks (
+            id TEXT PRIMARY KEY, project_id TEXT NOT NULL, keyword_id TEXT NOT NULL,
+            checked_at TEXT NOT NULL, position INTEGER, url TEXT NOT NULL DEFAULT '',
+            title TEXT NOT NULL DEFAULT '', depth INTEGER NOT NULL DEFAULT 0,
+            search_id TEXT NOT NULL DEFAULT '', competitors TEXT NOT NULL DEFAULT '[]'
+        )"""
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_airaapi_rank_checks_keyword "
+        "ON airaapi_rank_checks(keyword_id, checked_at)"
+    )
+    # A deleted project is kept (hidden) so the months it was billed still add up on the Earnings tab.
+    _add_column(connection, "airaapi_rank_projects", "deleted_at", "TEXT")
+    # Checks a project ran per month. Never pruned and kept when keywords or the project go, like key usage.
+    created = not _table_exists(connection, "airaapi_rank_usage")
+    connection.execute(
+        """CREATE TABLE IF NOT EXISTS airaapi_rank_usage (
+            project_id TEXT NOT NULL, month TEXT NOT NULL,
+            checks INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (project_id, month)
+        )"""
+    )
+    if created:
+        connection.execute(
+            "INSERT INTO airaapi_rank_usage (project_id, month, checks) "
+            "SELECT project_id, substr(checked_at, 1, 7), COUNT(*) FROM airaapi_rank_checks "
+            "GROUP BY project_id, substr(checked_at, 1, 7) "
+            "ON CONFLICT(project_id, month) DO NOTHING"
+        )
+
+
+def ensure_extras(connection: sqlite3.Connection) -> None:
+    """Add the post-migration tables and columns when this database lacks them."""
+    marks = ", ".join("?" for _ in EXTRA_TABLES)
+    row = connection.execute(
+        f"SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ({marks})",
+        EXTRA_TABLES,
+    ).fetchone()
+    if row and int(row[0]) == len(EXTRA_TABLES):
+        return
+    _extras(connection)
+    connection.commit()
 
 
 def _table_exists(connection: sqlite3.Connection, table: str) -> bool:
@@ -378,16 +488,22 @@ def get_search_row(
 
 
 def get_search_row_by_serpapi(
-    connection: sqlite3.Connection, serpapi_id: str
+    connection: sqlite3.Connection, serpapi_id: str, api_key_id: str | None = None
 ) -> sqlite3.Row | None:
-    """The newest record for a SerpApi search id (cache-hit copies share the id)."""
+    """The newest record for a SerpApi search id (cache-hit copies share the id).
+
+    With ``api_key_id`` only that key's own records count."""
     if not serpapi_id:
         return None
+    scope = " AND api_key_id = ?" if api_key_id is not None else ""
+    args: tuple[Any, ...] = (
+        (serpapi_id, api_key_id) if api_key_id is not None else (serpapi_id,)
+    )
     return _one(
         connection,
-        f"SELECT {_SUMMARY_SQL} FROM airaapi_searches WHERE serpapi_id = ? "
+        f"SELECT {_SUMMARY_SQL} FROM airaapi_searches WHERE serpapi_id = ?{scope} "
         "ORDER BY cache_hit ASC, created_at DESC, rowid DESC LIMIT 1",
-        (serpapi_id,),
+        args,
     )
 
 
@@ -453,10 +569,16 @@ def list_searches(
     in_results: bool = False,
     limit: int = 25,
     offset: int = 0,
+    api_key_id: str | None = None,
 ) -> tuple[list[sqlite3.Row], int]:
-    """A page of searches, newest first. ``in_results`` also matches ``text`` inside stored results."""
+    """A page of searches, newest first. ``in_results`` also matches ``text`` inside stored results.
+
+    ``api_key_id`` keeps only the searches made with that API key (what a client's key may see)."""
     clauses: list[str] = []
     args: list[Any] = []
+    if api_key_id is not None:
+        clauses.append("api_key_id = ?")
+        args.append(api_key_id)
     if engine:
         clauses.append("engine = ?")
         args.append(engine)
@@ -1064,8 +1186,9 @@ def delete_monitor(connection: sqlite3.Connection, monitor_id: str) -> bool:
 
 def insert_api_key(connection: sqlite3.Connection, row: Mapping[str, Any]) -> None:
     connection.execute(
-        "INSERT INTO airaapi_api_keys (id, name, prefix, key_hash, created_at, hourly_limit) "
-        "VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO airaapi_api_keys (id, name, prefix, key_hash, created_at, hourly_limit, "
+        "client_name, price_per_1000, monthly_quota, allowed_engines) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             row["id"],
             row["name"],
@@ -1073,14 +1196,147 @@ def insert_api_key(connection: sqlite3.Connection, row: Mapping[str, Any]) -> No
             row["key_hash"],
             row["created_at"],
             row["hourly_limit"],
+            row.get("client_name", ""),
+            row.get("price_per_1000", 0),
+            row.get("monthly_quota", 0),
+            row.get("allowed_engines", "[]"),
         ),
     )
 
 
-_KEY_COLUMNS = "id, name, prefix, created_at, last_used_at, revoked_at, hourly_limit"
+KEY_TERMS = frozenset(
+    {
+        "name",
+        "hourly_limit",
+        "client_name",
+        "price_per_1000",
+        "monthly_quota",
+        "allowed_engines",
+    }
+)
+
+
+def update_api_key(
+    connection: sqlite3.Connection, key_id: str, fields: Mapping[str, Any]
+) -> bool:
+    ensure_extras(connection)
+    bad = set(fields) - KEY_TERMS
+    if bad:
+        raise ValueError(f"Cannot update key columns: {sorted(bad)}")
+    if not fields:
+        return False
+    assignments = ", ".join(f"{name} = ?" for name in fields)
+    return (
+        connection.execute(
+            f"UPDATE airaapi_api_keys SET {assignments} WHERE id = ?",
+            (*fields.values(), key_id),
+        ).rowcount
+        > 0
+    )
+
+
+def bump_key_usage(
+    connection: sqlite3.Connection,
+    day: str,
+    key_id: str,
+    engine: str,
+    *,
+    calls: int = 0,
+    cached: int = 0,
+    errors: int = 0,
+    credits: int = 0,
+) -> None:
+    ensure_extras(connection)
+    connection.execute(
+        "INSERT INTO airaapi_key_usage (day, key_id, engine, calls, cached, errors, credits) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?) ON CONFLICT(day, key_id, engine) DO UPDATE SET "
+        "calls = calls + excluded.calls, cached = cached + excluded.cached, "
+        "errors = errors + excluded.errors, credits = credits + excluded.credits",
+        (day, key_id, engine, calls, cached, errors, credits),
+    )
+
+
+def key_usage_between(
+    connection: sqlite3.Connection, day_from: str, day_to: str, key_id: str = ""
+) -> list[sqlite3.Row]:
+    """Usage rows for ``day_from`` <= day <= ``day_to`` (inclusive, ``YYYY-MM-DD``)."""
+    ensure_extras(connection)
+    sql = "SELECT * FROM airaapi_key_usage WHERE day >= ? AND day <= ?"
+    params: list[Any] = [day_from, day_to]
+    if key_id:
+        sql += " AND key_id = ?"
+        params.append(key_id)
+    return _query(connection, sql + " ORDER BY day, key_id, engine", params)
+
+
+def key_usage_months(connection: sqlite3.Connection) -> list[str]:
+    ensure_extras(connection)
+    rows = _query(
+        connection,
+        "SELECT DISTINCT substr(day, 1, 7) AS month FROM airaapi_key_usage "
+        "ORDER BY month DESC LIMIT 36",
+    )
+    return [str(row["month"]) for row in rows]
+
+
+def bump_rank_usage(
+    connection: sqlite3.Connection, project_id: str, month: str, checks: int = 1
+) -> None:
+    ensure_extras(connection)
+    connection.execute(
+        "INSERT INTO airaapi_rank_usage (project_id, month, checks) VALUES (?, ?, ?) "
+        "ON CONFLICT(project_id, month) DO UPDATE SET checks = checks + excluded.checks",
+        (project_id, month, checks),
+    )
+
+
+def rank_usage(connection: sqlite3.Connection, project_id: str, month: str) -> int:
+    ensure_extras(connection)
+    row = _one(
+        connection,
+        "SELECT checks FROM airaapi_rank_usage WHERE project_id = ? AND month = ?",
+        (project_id, month),
+    )
+    return int(row["checks"]) if row else 0
+
+
+def rank_usage_months(connection: sqlite3.Connection) -> list[str]:
+    ensure_extras(connection)
+    rows = _query(
+        connection,
+        "SELECT DISTINCT month FROM airaapi_rank_usage ORDER BY month DESC LIMIT 36",
+    )
+    return [str(row["month"]) for row in rows]
+
+
+def get_pref(connection: sqlite3.Connection, name: str) -> Any:
+    ensure_extras(connection)
+    row = _one(connection, "SELECT value FROM airaapi_prefs WHERE name = ?", (name,))
+    if row is None:
+        return None
+    try:
+        return json.loads(row["value"])
+    except json.JSONDecodeError:
+        return None
+
+
+def set_pref(connection: sqlite3.Connection, name: str, value: Any) -> None:
+    ensure_extras(connection)
+    connection.execute(
+        "INSERT INTO airaapi_prefs (name, value) VALUES (?, ?) "
+        "ON CONFLICT(name) DO UPDATE SET value = excluded.value",
+        (name, json.dumps(value)),
+    )
+
+
+_KEY_COLUMNS = (
+    "id, name, prefix, created_at, last_used_at, revoked_at, hourly_limit, "
+    "client_name, price_per_1000, monthly_quota, allowed_engines"
+)
 
 
 def list_api_keys(connection: sqlite3.Connection) -> list[sqlite3.Row]:
+    ensure_extras(connection)
     return _query(
         connection,
         f"SELECT {_KEY_COLUMNS} FROM airaapi_api_keys ORDER BY created_at DESC, rowid DESC",
@@ -1088,6 +1344,7 @@ def list_api_keys(connection: sqlite3.Connection) -> list[sqlite3.Row]:
 
 
 def get_api_key(connection: sqlite3.Connection, key_id: str) -> sqlite3.Row | None:
+    ensure_extras(connection)
     return _one(
         connection,
         f"SELECT {_KEY_COLUMNS}, key_hash FROM airaapi_api_keys WHERE id = ?",
@@ -1098,6 +1355,7 @@ def get_api_key(connection: sqlite3.Connection, key_id: str) -> sqlite3.Row | No
 def get_api_key_by_hash(
     connection: sqlite3.Connection, key_hash: str
 ) -> sqlite3.Row | None:
+    ensure_extras(connection)
     return _one(
         connection,
         f"SELECT {_KEY_COLUMNS}, key_hash FROM airaapi_api_keys WHERE key_hash = ?",

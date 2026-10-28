@@ -416,7 +416,8 @@ def test_a_household_learns_together_on_the_local_build(env, api, local_index):
     status, refused = mia.call(
         "POST", "/api/learn/study/answer", {"card_id": card["id"], "grade": "good"}
     )
-    assert status == 200  # a review of a card already seen is still allowed
+    # Answering a card again before it is due is allowed, but it is practice: it earns nothing more today.
+    assert status == 200 and refused["practice"] and refused["xp_gained"] == 0
     quiz = mia.post("/api/learn/maths", {"level": "times", "count": 3}, expect=201)[
         "quiz"
     ]
@@ -426,7 +427,7 @@ def test_a_household_learns_together_on_the_local_build(env, api, local_index):
     assert result["total"] == 3 and "message" in result
     # The parent sees the family leaderboard: names and numbers, nothing else.
     board = parent.get("/api/learn/leaderboard")["people"]
-    assert board[0]["name"] == "Mia" and board[0]["cards_week"] >= 9
+    assert board[0]["name"] == "Mia" and board[0]["cards_week"] == 8
     assert set(board[0]) == {
         "profile_id",
         "name",

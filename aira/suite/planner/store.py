@@ -155,9 +155,143 @@ SCHEMA = (
 )
 
 
+# Meals, selling things the household no longer needs, and pocket money paid out for chore points.
+SCHEMA_V2 = (
+    """CREATE TABLE IF NOT EXISTS pn_recipes (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        ingredients TEXT NOT NULL DEFAULT '[]',
+        notes TEXT NOT NULL DEFAULT '',
+        minutes INTEGER NOT NULL DEFAULT 0,
+        created_by TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        deleted_at TEXT
+    )""",
+    """CREATE TABLE IF NOT EXISTS pn_meals (
+        id TEXT PRIMARY KEY,
+        day TEXT NOT NULL,
+        slot TEXT NOT NULL,
+        title TEXT NOT NULL,
+        recipe_id TEXT NOT NULL DEFAULT '',
+        cook TEXT NOT NULL DEFAULT '',
+        notes TEXT NOT NULL DEFAULT '',
+        created_by TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        deleted_at TEXT
+    )""",
+    "CREATE UNIQUE INDEX IF NOT EXISTS pn_meals_slot ON pn_meals (day, slot) WHERE deleted_at IS NULL",
+    """CREATE TABLE IF NOT EXISTS pn_sale_items (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        condition TEXT NOT NULL DEFAULT 'good',
+        price_cents INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'available',
+        buyer TEXT NOT NULL DEFAULT '',
+        sold_cents INTEGER NOT NULL DEFAULT 0,
+        sold_at TEXT,
+        entry_id TEXT NOT NULL DEFAULT '',
+        created_by TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        deleted_at TEXT
+    )""",
+    """CREATE TABLE IF NOT EXISTS pn_sale_requests (
+        id TEXT PRIMARY KEY,
+        item_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        contact TEXT NOT NULL,
+        message TEXT NOT NULL DEFAULT '',
+        offer_cents INTEGER NOT NULL DEFAULT 0,
+        status TEXT NOT NULL DEFAULT 'new',
+        created_at TEXT NOT NULL,
+        decided_at TEXT
+    )""",
+    "CREATE INDEX IF NOT EXISTS pn_sale_requests_item ON pn_sale_requests (item_id, status)",
+    """CREATE TABLE IF NOT EXISTS pn_payouts (
+        id TEXT PRIMARY KEY,
+        profile_id TEXT NOT NULL,
+        points INTEGER NOT NULL,
+        amount_cents INTEGER NOT NULL,
+        entry_id TEXT NOT NULL DEFAULT '',
+        paid_by TEXT NOT NULL DEFAULT '',
+        at TEXT NOT NULL
+    )""",
+)
+
+
+# Side jobs the household does for neighbours (each job done and paid is money in), and savings goals.
+SCHEMA_V3 = (
+    """CREATE TABLE IF NOT EXISTS pn_jobs (
+        id TEXT PRIMARY KEY,
+        item_id TEXT NOT NULL,
+        request_id TEXT NOT NULL DEFAULT '',
+        customer TEXT NOT NULL DEFAULT '',
+        hours REAL NOT NULL DEFAULT 0,
+        amount_cents INTEGER NOT NULL,
+        day TEXT NOT NULL,
+        note TEXT NOT NULL DEFAULT '',
+        entry_id TEXT NOT NULL DEFAULT '',
+        done_by TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS pn_jobs_item ON pn_jobs (item_id, day)",
+    """CREATE TABLE IF NOT EXISTS pn_goals (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        target_cents INTEGER NOT NULL,
+        target_day TEXT NOT NULL DEFAULT '',
+        created_by TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        deleted_at TEXT
+    )""",
+    """CREATE TABLE IF NOT EXISTS pn_goal_moves (
+        id TEXT PRIMARY KEY,
+        goal_id TEXT NOT NULL,
+        amount_cents INTEGER NOT NULL,
+        note TEXT NOT NULL DEFAULT '',
+        source_type TEXT NOT NULL DEFAULT '',
+        source_id TEXT NOT NULL DEFAULT '',
+        profile_id TEXT NOT NULL DEFAULT '',
+        at TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS pn_goal_moves_goal ON pn_goal_moves (goal_id, at)",
+)
+
+# Columns added after a table first shipped: (table, column, declaration). Added when missing, so an existing
+# household's database gains them on the next start.
+COLUMNS = (
+    # Take turns: the people a repeating chore rotates between, in order ("id1,id2,id3").
+    ("pn_tasks", "rotation", "TEXT NOT NULL DEFAULT ''"),
+    # A thing to sell, or a side job offered to neighbours (priced per job or per hour).
+    ("pn_sale_items", "kind", "TEXT NOT NULL DEFAULT 'thing'"),
+    ("pn_sale_items", "price_unit", "TEXT NOT NULL DEFAULT ''"),
+)
+
+
+def _add_columns(connection: sqlite3.Connection) -> None:
+    added = False
+    for table in {t for t, _, _ in COLUMNS}:
+        have = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}  # noqa: S608 - fixed names
+        for name, declaration in ((c, d) for t, c, d in COLUMNS if t == table):
+            if name not in have:
+                connection.execute(
+                    f"ALTER TABLE {table} ADD COLUMN {name} {declaration}"  # noqa: S608 - fixed names
+                )
+                added = True
+    if added:
+        connection.commit()
+
+
 def ensure(connection: sqlite3.Connection) -> None:
     life.ensure(connection)
     kit.ensure(connection, "planner.v1", SCHEMA)
+    kit.ensure(connection, "planner.v2", SCHEMA_V2)
+    kit.ensure(connection, "planner.v3", SCHEMA_V3)
+    _add_columns(connection)
 
 
 def one(

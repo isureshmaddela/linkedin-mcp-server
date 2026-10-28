@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import functools
 import hashlib
 import hmac
 import html
@@ -128,8 +129,12 @@ from aira.email_intel import (
 )
 from aira import inbox_store
 from aira.airaapi import careers as airaapi_careers
+from aira.airaapi import careers_tracker
+from aira.leads import mail as leads_mail
 from aira.leads import service as leads_service
 from aira import suite as aira_suite
+from aira.suite import kit as suite_kit
+from aira.suite import life as suite_life
 from aira.suite import public as suite_public
 from aira.suite.social import db as social_db
 from aira.suite.videos import db as videos_db
@@ -369,6 +374,14 @@ def _auth_connect() -> sqlite3.Connection:
             FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE
         )"""
     )
+    # One outstanding password reset code per account (stored hashed; see _request_password_reset).
+    connection.execute(
+        """CREATE TABLE IF NOT EXISTS password_resets (
+            user_id TEXT PRIMARY KEY, code_hash TEXT NOT NULL,
+            expires_at INTEGER NOT NULL, attempts INTEGER NOT NULL DEFAULT 0,
+            FOREIGN KEY(user_id) REFERENCES users(user_id) ON DELETE CASCADE
+        )"""
+    )
     # An account that signs in through the Aira account (hosted) has no password here.
     present = {row[1] for row in connection.execute("PRAGMA table_info(users)")}
     for column, definition in (
@@ -402,8 +415,7 @@ def _create_account(email: str, password: str) -> tuple[dict[str, Any], str]:
     email = email.strip().lower()
     if len(email) > 254 or not EMAIL_RE.fullmatch(email):
         raise ValueError("Enter a valid email address.")
-    if len(password) < 12 or len(password) > 1024:
-        raise ValueError("App password must be between 12 and 1,024 characters.")
+    _check_new_password(password)
     with _auth_connect() as connection:
         existing = connection.execute(
             "SELECT 1 FROM users WHERE email = ?", (email,)
@@ -458,6 +470,334 @@ def _authenticate(email: str, password: str) -> tuple[dict[str, Any], str]:
         raise ValueError("Email or password is incorrect.")
     user = dict(row)
     return user, _issue_session(user["user_id"])
+
+
+def _check_new_password(password: str) -> None:
+    if len(password) < 12 or len(password) > 1024:
+        raise ValueError("App password must be between 12 and 1,024 characters.")
+
+
+# --- password reset ---------------------------------------------------------------------------
+# There is no mail server here, so the one-time code goes to the console Aira runs in: only the
+# person running this computer's Aira can read it. The code is stored hashed and works once.
+
+RESET_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # no 0/O or 1/I/L to misread
+RESET_CODE_TTL_SECONDS = 15 * 60
+RESET_CODE_MAX_ATTEMPTS = 5
+RESET_CODE_REQUESTED = "If that email has an Aira account here, a reset code is now shown in the window where Aira is running. It works once, for 15 minutes."
+RESET_CODE_EMAILED = "If that email has an Aira account here, we emailed it a reset code (it is also shown in the window where Aira is running). It works once, for 15 minutes."
+RESET_CODE_WRONG = "That reset code is wrong or has expired. Ask for a new one."
+
+
+def _reset_code_hash(user_id: str, code: str) -> str:
+    normalized = re.sub(r"[\s-]", "", code).upper()
+    return hashlib.sha256(f"{user_id}:{normalized}".encode()).hexdigest()
+
+
+def _request_password_reset(email: str) -> str | None:
+    """A new one-time code for this email's password account (replacing an earlier one), or None."""
+    email = email.strip().lower()
+    with _auth_connect() as connection:
+        row = connection.execute(
+            "SELECT * FROM users WHERE email = ?", (email,)
+        ).fetchone()
+        if row is None or _account_linked(dict(row)):
+            return None
+        raw = "".join(secrets.choice(RESET_CODE_ALPHABET) for _ in range(8))
+        code = f"{raw[:4]}-{raw[4:]}"
+        connection.execute(
+            "INSERT OR REPLACE INTO password_resets (user_id, code_hash, expires_at, attempts) VALUES (?, ?, ?, 0)",
+            (
+                row["user_id"],
+                _reset_code_hash(row["user_id"], code),
+                int(time.time()) + RESET_CODE_TTL_SECONDS,
+            ),
+        )
+    return code
+
+
+def _reset_password(email: str, code: str, password: str) -> tuple[dict[str, Any], str]:
+    """Set a new password with a reset code; every other session of the account is signed out."""
+    _check_new_password(password)
+    now = int(time.time())
+    user: dict[str, Any] | None = None
+    # The connection commits on a clean exit and rolls back on an exception, so a wrong code is
+    # counted (and an expired one removed) before the error is raised outside the block.
+    with _auth_connect() as connection:
+        row = connection.execute(
+            """SELECT users.user_id, password_resets.code_hash, password_resets.expires_at,
+            password_resets.attempts FROM users JOIN password_resets USING (user_id) WHERE users.email = ?""",
+            (email.strip().lower(),),
+        ).fetchone()
+        if row is not None:
+            user_id = row["user_id"]
+            if row["expires_at"] <= now or row["attempts"] >= RESET_CODE_MAX_ATTEMPTS:
+                connection.execute(
+                    "DELETE FROM password_resets WHERE user_id = ?", (user_id,)
+                )
+            elif not hmac.compare_digest(
+                row["code_hash"], _reset_code_hash(user_id, code)
+            ):
+                connection.execute(
+                    "UPDATE password_resets SET attempts = attempts + 1 WHERE user_id = ?",
+                    (user_id,),
+                )
+            else:
+                connection.execute(
+                    "DELETE FROM password_resets WHERE user_id = ?", (user_id,)
+                )
+                connection.execute(
+                    "UPDATE users SET password_hash = ? WHERE user_id = ?",
+                    (_password_hash(password), user_id),
+                )
+                connection.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+                user = dict(
+                    connection.execute(
+                        "SELECT * FROM users WHERE user_id = ?", (user_id,)
+                    ).fetchone()
+                )
+    if user is None:
+        raise ValueError(RESET_CODE_WRONG)
+    return user, _issue_session(user["user_id"])
+
+
+def _change_password(
+    user: dict[str, Any], current: str, new: str, keep_token_hash: str
+) -> None:
+    """A signed-in password change; other sessions of the account are signed out, this one stays."""
+    if _account_linked(user):
+        raise ValueError(
+            "This account signs in with your Aira account and has no password here."
+        )
+    if not _password_matches(current, user["password_hash"]):
+        raise ValueError("Your current Aira password is incorrect.")
+    _check_new_password(new)
+    with _auth_connect() as connection:
+        connection.execute(
+            "UPDATE users SET password_hash = ? WHERE user_id = ?",
+            (_password_hash(new), user["user_id"]),
+        )
+        connection.execute(
+            "DELETE FROM sessions WHERE user_id = ? AND token_hash != ?",
+            (user["user_id"], keep_token_hash),
+        )
+        connection.execute(
+            "DELETE FROM password_resets WHERE user_id = ?", (user["user_id"],)
+        )
+
+
+# --- the mail server that sends password reset codes ------------------------------------------
+# One for the whole installation (a signed-out person has no account settings to read). The computer
+# owner (the first account) sets it in Settings > Integrations; without saved settings the AIRA_SMTP_*
+# variables in .env are used. The password is kept encrypted with the installation's secret key.
+
+GMAIL_SMTP = {
+    "smtp_host": "smtp.gmail.com",
+    "smtp_port": 587,
+    "smtp_security": "starttls",
+}
+RESET_MAIL_PROVIDERS = ("gmail", "custom")
+
+
+def _reset_mail_table(connection: sqlite3.Connection) -> None:
+    connection.execute(
+        """CREATE TABLE IF NOT EXISTS reset_mail (
+            id INTEGER PRIMARY KEY CHECK (id = 1), provider TEXT NOT NULL,
+            smtp_host TEXT NOT NULL, smtp_port INTEGER NOT NULL, smtp_security TEXT NOT NULL,
+            smtp_username TEXT NOT NULL, from_email TEXT NOT NULL, from_name TEXT NOT NULL,
+            password_cipher BLOB, updated_at INTEGER NOT NULL
+        )"""
+    )
+
+
+def _reset_mail_env() -> dict[str, Any] | None:
+    host = os.getenv("AIRA_SMTP_HOST", "").strip()
+    if not host:
+        return None
+    username = os.getenv("AIRA_SMTP_USERNAME", "").strip()
+    try:
+        port = int(os.getenv("AIRA_SMTP_PORT", "587") or 587)
+    except ValueError:
+        port = 587
+    return {
+        "provider": "gmail" if host.lower() == GMAIL_SMTP["smtp_host"] else "custom",
+        "smtp_host": host,
+        "smtp_port": port,
+        "smtp_security": os.getenv("AIRA_SMTP_SECURITY", "starttls").strip().lower()
+        or "starttls",
+        "smtp_username": username,
+        "from_email": os.getenv("AIRA_SMTP_FROM", "").strip() or username,
+        "from_name": os.getenv("AIRA_SMTP_FROM_NAME", "Aira").strip() or "Aira",
+        "password": os.getenv("AIRA_SMTP_PASSWORD", ""),
+        "source": "env",
+    }
+
+
+def _reset_mail_settings() -> dict[str, Any] | None:
+    """The mail server for reset codes with its password, or None when none is set up."""
+    with _auth_connect() as connection:
+        _reset_mail_table(connection)
+        row = connection.execute("SELECT * FROM reset_mail WHERE id = 1").fetchone()
+    if row is None:
+        return _reset_mail_env()
+    settings = dict(row)
+    cipher = settings.pop("password_cipher", None)
+    try:
+        settings["password"] = _airaapi_secret_store().decrypt(cipher) if cipher else ""
+    except airaapi_store.SecretError:
+        # the key file changed: the server refuses the sign-in and the code is still in the console
+        logger.warning(
+            "The saved mail password cannot be decrypted; enter it again in Settings"
+        )
+        settings["password"] = ""
+    settings["source"] = "saved"
+    return settings
+
+
+def _reset_mail_summary(user: dict[str, Any]) -> dict[str, Any]:
+    """What Settings shows: never the password, only whether there is one."""
+    settings = _reset_mail_settings()
+    can_edit = str(user.get("data_path") or "") == str(DB_PATH)
+    if settings is None:
+        return {"configured": False, "source": "none", "can_edit": can_edit, **GMAIL_SMTP, "provider": "gmail",
+                "smtp_username": "", "from_email": "", "from_name": "Aira", "has_password": False}  # fmt: skip
+    password = settings.pop("password", "")
+    settings.pop("id", None)
+    settings.pop("updated_at", None)
+    return {
+        **settings,
+        "configured": True,
+        "can_edit": can_edit,
+        "has_password": bool(password),
+    }
+
+
+def _save_reset_mail(user: dict[str, Any], payload: Mapping[str, Any]) -> None:
+    if str(user.get("data_path") or "") != str(DB_PATH):
+        raise PermissionError(
+            "Only the first account on this computer can set the mail server for password resets."
+        )
+    provider = str(payload.get("provider") or "gmail").strip().lower()
+    if provider not in RESET_MAIL_PROVIDERS:
+        raise ValueError("Choose Gmail or another mail server.")
+    username = str(payload.get("smtp_username") or "").strip()
+    if provider == "gmail":
+        host, port, security = (
+            GMAIL_SMTP["smtp_host"],
+            int(GMAIL_SMTP["smtp_port"]),
+            str(GMAIL_SMTP["smtp_security"]),
+        )
+        if not EMAIL_RE.fullmatch(username.lower()):
+            raise ValueError("Enter the Gmail address that sends the codes.")
+    else:
+        host = str(payload.get("smtp_host") or "").strip()
+        security = str(payload.get("smtp_security") or "starttls").strip().lower()
+        try:
+            port = int(payload.get("smtp_port") or 587)
+        except (TypeError, ValueError):
+            raise ValueError("The port must be a number.") from None
+        if not host or len(host) > 253 or not re.fullmatch(r"[A-Za-z0-9.-]+", host):
+            raise ValueError(
+                "Enter the mail server's host name, such as smtp.example.com."
+            )
+        if not 1 <= port <= 65535:
+            raise ValueError("The port must be between 1 and 65535.")
+        if security not in leads_mail.SECURITY:
+            raise ValueError("Security must be STARTTLS, SSL or none.")
+    from_email = str(payload.get("from_email") or "").strip() or username
+    if not EMAIL_RE.fullmatch(from_email.lower()):
+        raise ValueError("Enter the address the codes are sent from.")
+    from_name = (
+        re.sub(r"[\r\n]", " ", str(payload.get("from_name") or "Aira")).strip()[:100]
+        or "Aira"
+    )
+    password = str(payload.get("password") or "")
+    if len(password) > 1024:
+        raise ValueError("The mail password is too long.")
+    if provider == "gmail":
+        password = password.replace(
+            " ", ""
+        )  # Google shows app passwords in groups of four
+    with _auth_connect() as connection:
+        _reset_mail_table(connection)
+        existing = connection.execute(
+            "SELECT password_cipher FROM reset_mail WHERE id = 1"
+        ).fetchone()
+        if password:
+            cipher: bytes | None = _airaapi_secret_store().encrypt(password)
+        else:
+            cipher = existing["password_cipher"] if existing else None
+        if provider == "gmail" and not cipher:
+            raise ValueError(
+                "Enter the Gmail app password (16 letters from your Google account)."
+            )
+        connection.execute(
+            """INSERT OR REPLACE INTO reset_mail (id, provider, smtp_host, smtp_port, smtp_security,
+            smtp_username, from_email, from_name, password_cipher, updated_at) VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                provider,
+                host,
+                port,
+                security,
+                username,
+                from_email,
+                from_name,
+                cipher,
+                int(time.time()),
+            ),
+        )
+
+
+def _clear_reset_mail(user: dict[str, Any]) -> None:
+    if str(user.get("data_path") or "") != str(DB_PATH):
+        raise PermissionError(
+            "Only the first account on this computer can set the mail server for password resets."
+        )
+    with _auth_connect() as connection:
+        _reset_mail_table(connection)
+        connection.execute("DELETE FROM reset_mail WHERE id = 1")
+
+
+def _send_reset_mail(
+    to: str, subject: str, body: str, settings: Mapping[str, Any] | None = None
+) -> None:
+    """Send one plain email through the reset mail server; raises leads_mail.SendError."""
+    settings = settings if settings is not None else _reset_mail_settings()
+    if settings is None:
+        raise leads_mail.SendError("No mail server is set up for password resets.")
+    from email.message import EmailMessage
+    from email.utils import formataddr, formatdate, make_msgid
+
+    message = EmailMessage()
+    message["From"] = formataddr(
+        (str(settings["from_name"]), str(settings["from_email"]))
+    )
+    message["To"] = to
+    message["Subject"] = subject
+    message["Date"] = formatdate(localtime=False)
+    message["Message-ID"] = make_msgid(
+        domain=str(settings["from_email"]).split("@")[-1]
+    )
+    message["X-Mailer"] = "Aira"
+    message.set_content(body)
+    leads_mail.smtp_send(settings, str(settings.get("password") or ""), message)
+
+
+def _email_reset_code(email: str, code: str) -> None:
+    """Runs in the background so the answer to "forgot" takes as long for any email."""
+    try:
+        _send_reset_mail(
+            email,
+            "Your Aira password reset code",
+            f"Your Aira password reset code is {code}\n\n"
+            f"It works once, for {RESET_CODE_TTL_SECONDS // 60} minutes. Enter it on the Aira sign-in screen with a new password.\n\n"
+            "If you did not ask to reset your password, ignore this email. Your password stays the same.\n",
+        )
+        logger.info("Reset code emailed to %s", email)
+    except leads_mail.SendError as error:
+        logger.warning("Could not email the reset code to %s: %s", email, error)
+    except Exception:  # noqa: BLE001 - a broken key file or server must not end the thread silently
+        logger.exception("Could not email the reset code to %s", email)
 
 
 # --- the Aira account (the hosted build) as the sign-in for this installation -------------------
@@ -1202,6 +1542,8 @@ def _append_application_event(
     previous_status: str | None,
     new_status: str,
     reason: str,
+    *,
+    occurred_at: int | None = None,
 ) -> None:
     connection.execute(
         """INSERT INTO application_events
@@ -1212,7 +1554,7 @@ def _append_application_event(
             job_id,
             previous_status,
             new_status,
-            int(time.time()),
+            int(time.time()) if occurred_at is None else int(occurred_at),
             str(getattr(_request_context, "source", "user")),
             str(getattr(_request_context, "user_id", "local-user")),
             reason[:300],
@@ -1538,9 +1880,29 @@ def _message_draft(thread_id: str) -> dict[str, str] | None:
     return dict(row) if row else None
 
 
+APPLICATION_OPEN_STAGES = frozenset(
+    {"discovered", "saved", "ready_to_apply", "needs_review", "applying"}
+)
+
+
 def _set_stage(
-    job_id: str, stage: str, reason: str = "Application status changed"
+    job_id: str,
+    stage: str,
+    reason: str = "Application status changed",
+    *,
+    via_submission: bool = False,
+    occurred_at: datetime | None = None,
+    reopen_offer: bool = False,
 ) -> dict[str, Any]:
+    """Move a job to ``stage`` through an allowed transition.
+
+    ``via_submission``: a recorded submission (the person applied, here or another way) moves any job that
+    has not been applied to yet straight to Applied, in one history entry.
+    ``occurred_at``: when it happened, if earlier than now (an application sent on 1 September and recorded
+    later counts as applied on 1 September in Analytics).
+    ``reopen_offer``: an offer recorded as declined or expired moved the job to Withdrawn; changing the offer
+    back to open moves it back to Offer (or Accepted).
+    """
     stage = STAGE_ALIASES.get(stage, stage)
     if stage not in STAGES:
         raise ValueError("Unknown application stage.")
@@ -1554,8 +1916,23 @@ def _set_stage(
         previous = STAGE_ALIASES.get(row["stage"], row["stage"])
         if stage == previous:
             return _job_row(job_id) or {}
-        if stage not in APPLICATION_TRANSITIONS[previous]:
+        submitted = (
+            via_submission
+            and stage == "applied"
+            and previous in APPLICATION_OPEN_STAGES
+        )
+        reopened = (
+            reopen_offer and previous == "withdrawn" and stage in {"offer", "accepted"}
+        )
+        if (
+            not submitted
+            and not reopened
+            and stage not in APPLICATION_TRANSITIONS[previous]
+        ):
             raise ValueError(f"Invalid application transition: {previous} to {stage}.")
+        moment = datetime.now(timezone.utc)
+        if occurred_at is not None and occurred_at.astimezone(timezone.utc) < moment:
+            moment = occurred_at.astimezone(timezone.utc)
         if stage == "ready_to_apply" and not (
             row["resume_draft"] and row["cover_letter"]
         ):
@@ -1581,7 +1958,7 @@ def _set_stage(
         if stage == "applied":
             connection.execute(
                 "UPDATE jobs SET applied_at = COALESCE(applied_at, ?) WHERE job_id = ?",
-                (datetime.now(timezone.utc).isoformat(timespec="seconds"), job_id),
+                (moment.isoformat(timespec="seconds"), job_id),
             )
         _append_application_event(
             connection,
@@ -1589,6 +1966,7 @@ def _set_stage(
             previous,
             stage,
             reason[:300] or "Application status changed",
+            occurred_at=int(moment.timestamp()),
         )
         record_audit(
             connection,
@@ -4141,6 +4519,8 @@ JOB_VIEWS = (
     "portals",
     "recommended",
     "saved",
+    "pipeline",  # every job past discovered and saved: the Applications board
+    "offers",  # jobs with an offer recorded, or in the Offer or Accepted status
 )
 JOB_SORTS = {
     "updated": "jobs.updated_at DESC, jobs.job_id DESC",
@@ -4181,6 +4561,8 @@ STATIC_TYPES = {
 _document_key_cache: dict[str, bytes] = {}
 _login_limiter = RateLimiter(limit=8, window_seconds=600, lockout_seconds=900)
 _api_limiter = RateLimiter(limit=600, window_seconds=60)
+# Routes that serve the web page and its static files (not rate limited).
+PAGE_ROUTES = frozenset({"ui_index", "ui_app_page", "ui_static", "ui_i18n"})
 
 
 def canonical_fields_as_dicts() -> list[dict[str, Any]]:
@@ -4466,6 +4848,12 @@ def _query_jobs(
             sort = "score"
     elif view == "saved":
         clauses.append("(jobs.saved = 1 OR jobs.stage = 'saved')")
+    elif view == "pipeline":
+        clauses.append("jobs.stage NOT IN ('discovered', 'saved')")
+    elif view == "offers":
+        clauses.append(
+            "(jobs.stage IN ('offer', 'accepted') OR EXISTS (SELECT 1 FROM job_offers o WHERE o.job_id = jobs.job_id))"
+        )
     if source:
         if not SOURCE_NAME_RE.fullmatch(source):
             raise ValueError("Unknown source filter.")
@@ -4501,6 +4889,7 @@ def _query_jobs(
         params.extend([like, like, like])
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     with _connect() as connection:
+        careers_tracker.ensure(connection)
         total = connection.execute(
             f"SELECT COUNT(*) FROM jobs {where}", params
         ).fetchone()[0]
@@ -4556,6 +4945,43 @@ def _query_jobs(
     }
 
 
+def _negotiation_draft(job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """A counter-offer email for the job's recorded offer (the person sends it themselves)."""
+    job = _job_row(job_id)
+    if job is None:
+        raise LookupError("Job not found.")
+    with _connect() as connection:
+        offer = careers_tracker.get_offer(connection, job_id)
+        if offer is None:
+            raise ValueError(
+                "Record the offer first, then ask for a negotiation email."
+            )
+        settings = _salary_settings(connection)
+        others = careers_tracker.compare(connection, settings)["offers"]
+    draft = careers_tracker.negotiation_draft(
+        job,
+        offer,
+        name=settings.get("application_full_name", ""),
+        wanted=careers_tracker.expectation(settings),
+        others=others,
+        ask=payload.get("ask"),
+        mention_other_offer=bool(payload.get("mention_other_offer")),
+        writer=suite_kit.draft if payload.get("polish", True) else None,
+    )
+    _audit("job.negotiation_draft", "job", job_id, {"source": draft["source"]})
+    return draft
+
+
+def _salary_settings(connection: sqlite3.Connection) -> dict[str, str]:
+    """The profile's salary expectation (what offers are compared with)."""
+    return {
+        row["key"]: row["value"]
+        for row in connection.execute(
+            "SELECT key, value FROM settings WHERE key LIKE 'application_salary%' OR key = 'application_full_name'"
+        ).fetchall()
+    }
+
+
 def _job_detail(job_id: str) -> dict[str, Any]:
     job = _job_row(job_id)
     if job is None:
@@ -4593,6 +5019,10 @@ def _job_detail(job_id: str) -> dict[str, Any]:
         ]
         job["preparation"] = latest_preparation(connection, job_id)
         job["submission"] = get_submission(connection, job_id)
+        job["offer"] = careers_tracker.get_offer(connection, job_id)
+        job["has_posting"] = careers_tracker.has_posting(
+            job.get("application_url") or job.get("job_url")
+        )
         job["auto_runs"] = autopilot.list_runs(connection, job_id=job_id, limit=10)
         job["recruiters"] = [
             dict(row)
@@ -4779,7 +5209,81 @@ def _update_job_notes(
                     job_id=job_id,
                     source="job",
                 )
+            else:
+                # The reminder was cleared: its task must not stay on the dashboard.
+                connection.execute(
+                    "UPDATE tasks SET status = 'dismissed', completed_at = ? WHERE job_id = ? AND kind = 'follow_up' AND source = 'job' AND status = 'open'",
+                    (datetime.now(timezone.utc).isoformat(timespec="minutes"), job_id),
+                )
     return _decode_job(_job_row(job_id) or {})
+
+
+def _set_offer(job_id: str, offer: Any) -> dict[str, Any] | None:
+    """Record, change or remove (``None``) the offer for a job."""
+    job = _job_row(job_id)
+    if job is None:
+        raise LookupError("Job not found.")
+    with _connect() as connection:
+        before = careers_tracker.get_offer(connection, job_id)
+        if offer is None:
+            removed = careers_tracker.delete_offer(connection, job_id)
+            saved = None
+        else:
+            saved = careers_tracker.save_offer(connection, job_id, offer)
+            removed = False
+    if saved is not None:
+        _audit(
+            "job.offer",
+            "job",
+            job_id,
+            {"status": saved["status"], "currency": saved["currency"]},
+        )
+        _offer_stage(job_id, job, saved["status"], before)
+    elif removed:
+        _audit("job.offer_remove", "job", job_id)
+    return saved
+
+
+def _offer_stage(
+    job_id: str,
+    job: Mapping[str, Any],
+    status: str,
+    before: Mapping[str, Any] | None,
+) -> None:
+    """Move the application to match its offer.
+
+    An open offer (thinking about it, negotiating) moves it to Offer; an accepted one to Accepted. A declined
+    or expired offer was still an offer received (Analytics counts it), so the job passes through Offer and is
+    then closed as Withdrawn. Opening that offer again moves the job back.
+    """
+    current = STAGE_ALIASES.get(job["stage"], job["stage"])
+    closed = status in careers_tracker.CLOSED_OFFER_STATUSES
+    if current == "withdrawn" and not closed:
+        was_closed = (
+            before is not None
+            and before.get("status") in careers_tracker.CLOSED_OFFER_STATUSES
+        )
+        if was_closed:
+            _set_stage(
+                job_id,
+                "accepted" if status == "accepted" else "offer",
+                reason="Offer opened again",
+                reopen_offer=True,
+            )
+        return
+    if current == "accepted" and closed:
+        return  # the person already took this job; the record is kept as it is
+    if current != "offer" and "offer" in APPLICATION_TRANSITIONS.get(current, set()):
+        _set_stage(job_id, "offer", reason="Offer recorded")
+        current = "offer"
+    if status == "accepted" and current == "offer":
+        _set_stage(job_id, "accepted", reason="Offer accepted")
+    if closed and current == "offer":
+        _set_stage(
+            job_id,
+            "withdrawn",
+            reason="Offer declined" if status == "declined" else "Offer expired",
+        )
 
 
 def _record_sync_run(
@@ -5012,6 +5516,104 @@ def _import_job_from_url(url: str) -> dict[str, Any]:
     }
 
 
+def _add_manual_job(payload: dict[str, Any]) -> dict[str, Any]:
+    """A job typed in by hand (a referral, a sign in a window, a phone call): no posting needed."""
+    fields = careers_tracker.manual_job(payload)
+    external_id = fields.pop("external_id")
+    if careers_tracker.has_posting(fields["source_url"]):
+        existing = _job_at_link(fields["source_url"])
+        if existing is not None:
+            # The link is already tracked: say so and open that job, rather than drop what was typed in silence.
+            return {
+                "job": _decode_job(existing),
+                "source": existing.get("source") or careers_tracker.MANUAL_SOURCE,
+                "needs_details": False,
+                "existing": True,
+            }
+    job = _upsert_job(external_id, **fields)
+    if job.get("description"):
+        try:
+            _score_job_record(job["job_id"])
+        except Exception:  # noqa: BLE001 - a job without enough facts is simply not scored
+            logger.debug("Scoring skipped for %s", job["job_id"], exc_info=True)
+    _audit("job.add_manual", "job", job["job_id"])
+    _record_activity(
+        "add_job", job.get("title") or job["job_id"], "ok", "Added by hand"
+    )
+    return {
+        "job": _decode_job(_job_row(job["job_id"]) or job),
+        "source": careers_tracker.MANUAL_SOURCE,
+        "needs_details": False,
+    }
+
+
+def _job_at_link(url: str, *, other_than: str = "") -> dict[str, Any] | None:
+    """The tracked job (not archived) whose posting is at this address, if any."""
+    with _connect() as connection:
+        row = connection.execute(
+            """SELECT r.job_id FROM job_source_records r JOIN jobs ON jobs.job_id = r.job_id
+            WHERE r.canonical_url = ? AND r.job_id != ? AND jobs.archived_at IS NULL
+            ORDER BY r.first_seen_at LIMIT 1""",
+            (canonicalize_job_url(url), other_than),
+        ).fetchone()
+    return _job_row(row["job_id"]) if row else None
+
+
+def _edit_manual_job(job_id: str, changes: Any) -> None:
+    """Correct a job added by hand: its title, employer, link, pay, workplace or description."""
+    job = _job_row(job_id)
+    if job is None:
+        raise LookupError("Job not found.")
+    if job.get("source") != careers_tracker.MANUAL_SOURCE:
+        raise ValueError(
+            "Only a job you added yourself can be edited; this one comes from its posting."
+        )
+    values = careers_tracker.manual_edit(changes, job)
+    url = values.pop("url")
+    if careers_tracker.has_posting(url) and _job_at_link(url, other_than=job_id):
+        raise ValueError(
+            "Aira already tracks another job at this link. Open that one, or use a different link."
+        )
+    with _connect() as connection:
+        connection.execute(
+            """UPDATE jobs SET title = ?, company = ?, location = ?, description = ?, workplace_type = ?,
+                employment_type = ?, salary_min = ?, salary_max = ?, currency = ?, job_url = ?, application_url = ?,
+                updated_at = CURRENT_TIMESTAMP
+            WHERE job_id = ?""",
+            (
+                values["title"],
+                values["company"],
+                values["location"],
+                values["description"],
+                values["workplace_type"] or "",
+                values["employment_type"] or "",
+                values["salary_min"],
+                values["salary_max"],
+                values["currency"] or "",
+                url,
+                url,
+                job_id,
+            ),
+        )
+        connection.execute(
+            """UPDATE job_source_records SET source_url = ?, application_url = ?, canonical_url = ?
+            WHERE job_id = ? AND source = ?""",
+            (
+                url,
+                url,
+                canonicalize_job_url(url),
+                job_id,
+                careers_tracker.MANUAL_SOURCE,
+            ),
+        )
+    _audit("job.edit_manual", "job", job_id)
+    if values["description"] and values["description"] != job.get("description"):
+        try:
+            _score_job_record(job_id, force=True)
+        except Exception:  # noqa: BLE001 - a job without enough facts is simply not scored
+            logger.debug("Scoring skipped for %s", job_id, exc_info=True)
+
+
 def _portal_questions(job: dict[str, Any]) -> tuple[list[dict[str, Any]] | None, str]:
     with _connect() as connection:
         record = connection.execute(
@@ -5201,10 +5803,32 @@ def _start_application(job_id: str) -> dict[str, Any]:
     }
 
 
+APPLY_CHANNELS = {
+    "website": "on the employer's website",
+    "job_board": "through a job board",
+    "email": "by email",
+    "in_person": "in person",
+    "phone": "by phone",
+    "referral": "through a referral",
+    "agency": "through a recruiter or agency",
+    "other": "another way",
+}
+
+
 def _submit_application(job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """Record that the application was sent: after Aira's prepared packet, or (``outside``) any other way."""
     job = _job_row(job_id)
     if job is None:
         raise LookupError("Job not found.")
+    outside = bool(payload.get("outside"))
+    confirmation_text = str(payload.get("confirmation_text", "")).strip()
+    if outside:
+        channel = str(payload.get("channel") or "other")
+        if channel not in APPLY_CHANNELS:
+            raise ValueError("Choose how you applied from the list.")
+        confirmation_text = f"Applied {APPLY_CHANNELS[channel]}." + (
+            f" {confirmation_text}" if confirmation_text else ""
+        )
     evidence_id = None
     content = str(payload.get("evidence_base64", ""))
     if content:
@@ -5229,7 +5853,8 @@ def _submit_application(job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
         evidence_id = record["document_id"]
     with _connect() as connection:
         preparation = latest_preparation(connection, job_id)
-        if not get_submission(connection, job_id):
+        # The daily limit paces applications made through Aira, not ones the person already sent elsewhere.
+        if not outside and not get_submission(connection, job_id):
             check_daily_limit(
                 connection, daily_limit=int(_setting("daily_application_limit"))
             )
@@ -5237,21 +5862,32 @@ def _submit_application(job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
             connection,
             job_id=job_id,
             prep_id=preparation["prep_id"] if preparation else None,
-            confirmation_text=str(payload.get("confirmation_text", "")),
+            confirmation_text=confirmation_text,
             confirmation_number=str(payload.get("confirmation_number", "")),
             evidence_document_id=evidence_id,
-            method="manual",
+            # An application sent another way is kept apart: the daily limit paces only Aira's own.
+            method="outside" if outside else "manual",
             actor=_actor(),
             correlation_id=_correlation_id(),
             idempotency_key=str(payload.get("idempotency_key") or "") or None,
             submitted_at=str(payload.get("submitted_at") or "") or None,
         )
-    if not submission.get("duplicate") and job["stage"] in {
-        "ready_to_apply",
-        "applying",
-        "needs_review",
-    }:
-        _set_stage(job_id, "applied", reason="Submission confirmed by you")
+    try:
+        sent_at = datetime.fromisoformat(str(submission["submitted_at"]))
+    except ValueError:
+        sent_at = datetime.now(timezone.utc)
+    if sent_at.tzinfo is None:
+        sent_at = sent_at.replace(tzinfo=timezone.utc)
+    if not submission.get("duplicate") and job["stage"] in APPLICATION_OPEN_STAGES:
+        _set_stage(
+            job_id,
+            "applied",
+            reason=confirmation_text[:200]
+            if outside
+            else "Submission confirmed by you",
+            via_submission=True,
+            occurred_at=sent_at,
+        )
     if not submission.get("duplicate"):
         _record_activity(
             "submit_application",
@@ -5267,13 +5903,14 @@ def _submit_application(job_id: str, payload: dict[str, Any]) -> dict[str, Any]:
                 level="success",
                 link=f"#/applications/{job_id}",
             )
+            # A week after the day it was sent; an older application is followed up now.
             create_task(
                 connection,
                 title=f"Follow up on {job.get('title') or 'application'}{' at ' + job['company'] if job.get('company') else ''}",
                 kind="follow_up",
-                due_at=(datetime.now(timezone.utc) + timedelta(days=7)).isoformat(
-                    timespec="minutes"
-                ),
+                due_at=max(
+                    sent_at + timedelta(days=7), datetime.now(timezone.utc)
+                ).isoformat(timespec="minutes"),
                 job_id=job_id,
                 source="submission",
             )
@@ -6793,8 +7430,8 @@ def _dashboard() -> dict[str, Any]:
             "tracked": sum(counts.values()),
             "recommended": recommended,
             "saved": counts.get("saved", 0),
-            "needs_review": counts.get("needs_review", 0)
-            + len(queue_data["needs_review"]),
+            # The review queue already holds every job in Needs review (plus unapproved packets).
+            "needs_review": len(queue_data["needs_review"]),
             "ready": len(queue_data["ready"]),
             "applied": applied,
             "interviewing": interviewing,
@@ -6876,6 +7513,7 @@ def _export_account() -> dict[str, Any]:
         "standard_answers",
         "application_preparations",
         "application_submissions",
+        "job_offers",
         "recruiters",
         "recruiter_interactions",
         "interviews",
@@ -6951,6 +7589,7 @@ def _delete_account(user: dict[str, Any], password: str) -> None:
                 process.terminate()
     with _auth_connect() as connection:
         connection.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
+        connection.execute("DELETE FROM password_resets WHERE user_id = ?", (user_id,))
         connection.execute("DELETE FROM users WHERE user_id = ?", (user_id,))
         airaapi_store.unindex_user(connection, user_id)
     data_path = Path(user["data_path"])
@@ -7204,6 +7843,15 @@ class RequestHandler(BaseHTTPRequestHandler):
         on Windows closing it then resets the connection while the client is
         still sending, so the client sees an error instead of this response.
         """
+        self._discard_body()
+        self._send_json(status, {"error": message})
+
+    def _discard_body(self) -> None:
+        """Read and drop a body nobody will use (a DELETE or GET that sent one).
+
+        Left on a kept-alive connection, those bytes would be read as the start
+        of the next request ("{}GET /api/..." -> 501).
+        """
         headers = getattr(self, "headers", None)
         rfile = getattr(self, "rfile", None)
         try:
@@ -7219,7 +7867,6 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self.close_connection = True
         elif length:
             self.close_connection = True
-        self._send_json(status, {"error": message})
 
     def _dispatch(self, method: str) -> None:
         self._begin_request()
@@ -7244,13 +7891,16 @@ class RequestHandler(BaseHTTPRequestHandler):
                 if not match:
                     continue
                 route_name = name
-                allowed, retry_after = _api_limiter.check(self._client_key())
-                if not allowed:
-                    self._reject(
-                        429, f"Too many requests. Try again in {retry_after} seconds."
-                    )
-                    return
-                _api_limiter.hit(self._client_key())
+                # The page and its files are not counted: one page is about 90 files, and each app has its own
+                # address (/stocks) that a person may open in several tabs at once.
+                if name not in PAGE_ROUTES:
+                    allowed, retry_after = _api_limiter.check(self._client_key())
+                    if not allowed:
+                        self._reject(
+                            429, f"Too many requests. Try again in {retry_after} seconds."
+                        )
+                        return
+                    _api_limiter.hit(self._client_key())
                 if (
                     method in {"POST", "PATCH", "DELETE", "PUT"}
                     and not self._origin_is_local()
@@ -7263,9 +7913,11 @@ class RequestHandler(BaseHTTPRequestHandler):
                     if user is None:
                         self._reject(401, "Sign in to continue.")
                         return
-                payload = (
-                    self._read_json() if method in {"POST", "PATCH", "PUT"} else {}
-                )
+                if method in {"POST", "PATCH", "PUT"}:
+                    payload = self._read_json()
+                else:
+                    self._discard_body()
+                    payload = {}
                 query = parse_qs(urlsplit(self.path).query)
                 getattr(self, name)(match, payload, query, user)
                 return
@@ -7333,6 +7985,17 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_error(500, "Dashboard assets are missing.")
             return
         self._send_bytes(200, body, "text/html; charset=utf-8")
+
+    @route("GET", aira_apps.PAGE_PATH_PATTERN, auth=False)
+    def ui_app_page(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        """An app's own address (/stocks, /home): the same page, which opens that app."""
+        self.ui_index(match, payload, query, user)
 
     @route("GET", r"/p/([A-Za-z0-9_-]{40,64})", auth=False)
     def ui_public(
@@ -7593,6 +8256,195 @@ class RequestHandler(BaseHTTPRequestHandler):
                         "DELETE FROM sessions WHERE token_hash = ?", (token_hash,)
                     )
         self._send_auth_json(200, {"ok": True}, clear=True)
+
+    @route("POST", r"/api/auth/password/forgot", auth=False)
+    def api_auth_password_forgot(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        """A one-time reset code, shown in the console Aira runs in; the answer is the same for any email."""
+        key = f"forgot:{self._client_key()}"
+        allowed, retry_after = _login_limiter.check(key)
+        if not allowed:
+            self._send_json(
+                429,
+                {
+                    "error": f"Too many attempts. Try again in {retry_after // 60 + 1} minutes."
+                },
+            )
+            return
+        _login_limiter.hit(key)
+        email = str(payload.get("email", "")).strip().lower()
+        if len(email) > 254 or not EMAIL_RE.fullmatch(email):
+            raise ValueError("Enter a valid email address.")
+        code = _request_password_reset(email)
+        mail_ready = _reset_mail_settings() is not None
+        if code:
+            logger.warning(
+                "Reset code for %s: %s (works once, for %d minutes)",
+                email,
+                code,
+                RESET_CODE_TTL_SECONDS // 60,
+            )
+            if mail_ready:
+                threading.Thread(
+                    target=_email_reset_code,
+                    args=(email, code),
+                    daemon=True,
+                    name="reset-mail",
+                ).start()
+        self._send_json(
+            200,
+            {
+                "ok": True,
+                "emailed": mail_ready,
+                "message": RESET_CODE_EMAILED if mail_ready else RESET_CODE_REQUESTED,
+            },
+        )
+
+    @route("POST", r"/api/auth/password/reset", auth=False)
+    def api_auth_password_reset(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        key = f"reset:{self._client_key()}"
+        allowed, retry_after = _login_limiter.check(key)
+        if not allowed:
+            self._send_json(
+                429,
+                {
+                    "error": f"Too many attempts. Try again in {retry_after // 60 + 1} minutes."
+                },
+            )
+            return
+        try:
+            account, token = _reset_password(
+                str(payload.get("email", "")),
+                str(payload.get("code", "")),
+                str(payload.get("password", "")),
+            )
+        except ValueError:
+            _login_limiter.hit(key)
+            raise
+        _login_limiter.reset(key)
+        _request_context.data_path = account["data_path"]
+        _request_context.user_id = account["user_id"]
+        _request_context.actor = account["email"]
+        _audit("account.password_reset", "account", account["user_id"])
+        self._send_auth_json(200, {"email": account["email"]}, token)
+
+    @route("POST", r"/api/account/password")
+    def api_account_password(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        assert user is not None
+        key = f"password:{user['user_id']}"
+        allowed, retry_after = _login_limiter.check(key)
+        if not allowed:
+            self._send_json(
+                429,
+                {
+                    "error": f"Too many attempts. Try again in {retry_after // 60 + 1} minutes."
+                },
+            )
+            return
+        cookie = SimpleCookie()
+        cookie.load(self.headers.get("Cookie", ""))
+        morsel = cookie.get(SESSION_COOKIE)
+        token_hash = hashlib.sha256(
+            (morsel.value if morsel else "").encode("ascii", errors="ignore")
+        ).hexdigest()
+        try:
+            _change_password(
+                user,
+                str(payload.get("current_password", "")),
+                str(payload.get("new_password", "")),
+                token_hash,
+            )
+        except ValueError:
+            _login_limiter.hit(key)
+            raise
+        _login_limiter.reset(key)
+        _audit("account.password_change", "account", user["user_id"])
+        self._send_json(200, {"ok": True})
+
+    @route("GET", r"/api/settings/reset-mail")
+    def api_settings_reset_mail(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        assert user is not None
+        self._send_json(200, _reset_mail_summary(user))
+
+    @route("POST", r"/api/settings/reset-mail")
+    def api_settings_reset_mail_save(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        assert user is not None
+        _save_reset_mail(user, payload)
+        _audit("settings.reset_mail", "settings", "reset_mail")
+        self._send_json(200, _reset_mail_summary(user))
+
+    @route("DELETE", r"/api/settings/reset-mail")
+    def api_settings_reset_mail_clear(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        assert user is not None
+        _clear_reset_mail(user)
+        _audit("settings.reset_mail_clear", "settings", "reset_mail")
+        self._send_json(200, _reset_mail_summary(user))
+
+    @route("POST", r"/api/settings/reset-mail/test")
+    def api_settings_reset_mail_test(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        """A test email to the signed-in account, so a wrong app password shows up before someone needs a code."""
+        assert user is not None
+        key = f"mailtest:{user['user_id']}"
+        allowed, retry_after = _login_limiter.check(key)
+        if not allowed:
+            self._send_json(
+                429,
+                {
+                    "error": f"Too many attempts. Try again in {retry_after // 60 + 1} minutes."
+                },
+            )
+            return
+        _login_limiter.hit(key)
+        try:
+            _send_reset_mail(
+                user["email"],
+                "Aira test email",
+                "This is a test from Aira. Password reset codes will be sent from this address.\n",
+            )
+        except leads_mail.SendError as error:
+            raise ValueError(str(error)) from None
+        self._send_json(200, {"ok": True, "to": user["email"]})
 
     @route("POST", r"/api/account/delete")
     def api_account_delete(
@@ -7948,6 +8800,19 @@ class RequestHandler(BaseHTTPRequestHandler):
         if not query:
             self._send_json(200, {"jobs": _list_jobs()})
             return
+        if _query_str(query, "format") == "csv":
+            # The job search log: every application as a spreadsheet (proof of work search, or a backup).
+            scope = _query_str(query, "scope", "applications")
+            with _connect() as connection:
+                text = careers_tracker.job_search_log(connection, scope=scope)
+            _audit("jobs.export", "job", scope)
+            self._send_bytes(
+                200,
+                text.encode("utf-8"),
+                "text/csv; charset=utf-8",
+                filename=f"aira-job-search-log-{datetime.now(timezone.utc).date().isoformat()}.csv",
+            )
+            return
         min_score_raw = _query_str(query, "min_score")
         result = _query_jobs(
             view=_query_str(query, "view", "all"),
@@ -7962,6 +8827,11 @@ class RequestHandler(BaseHTTPRequestHandler):
             workplace_type=_query_str(query, "workplace_type"),
             include_archived=_query_str(query, "archived") == "1",
         )
+        if _query_str(query, "view") == "offers":
+            with _connect() as connection:
+                result["comparison"] = careers_tracker.compare(
+                    connection, _salary_settings(connection)
+                )
         self._send_json(200, result)
 
     @route("POST", r"/api/jobs/search")
@@ -7982,6 +8852,10 @@ class RequestHandler(BaseHTTPRequestHandler):
         query: dict[str, list[str]],
         user: dict[str, Any] | None,
     ) -> None:
+        if isinstance(payload.get("manual"), dict):
+            added = _add_manual_job(payload["manual"])
+            self._send_json(200 if added.get("existing") else 201, added)
+            return
         self._send_json(201, _import_job_from_url(str(payload.get("url", ""))))
 
     @route("POST", r"/api/jobs/rescore")
@@ -8134,6 +9008,9 @@ class RequestHandler(BaseHTTPRequestHandler):
         query: dict[str, list[str]],
         user: dict[str, Any] | None,
     ) -> None:
+        if payload.get("kind") == "negotiation":
+            self._send_json(200, {"draft": _negotiation_draft(match.group(1), payload)})
+            return
         job = _draft_documents(
             match.group(1), str(payload.get("model", _setting("default_model")))
         )
@@ -8205,18 +9082,25 @@ class RequestHandler(BaseHTTPRequestHandler):
         user: dict[str, Any] | None,
     ) -> None:
         notes = str(payload["notes"]) if "notes" in payload else None
-        self._send_json(
-            200,
-            {
-                "job": _update_job_notes(
-                    match.group(1),
-                    notes=notes,
-                    follow_up_at=payload.get("follow_up_at")
-                    if "follow_up_at" in payload
-                    else None,
-                )
-            },
+        if "job" in payload:
+            # A job added by hand keeps its facts here too: {"job": {"title": ..., "description": ...}}.
+            _edit_manual_job(match.group(1), payload["job"])
+        if "offer" in payload:
+            # The job's private details also hold its offer: {"offer": {...}} records it, {"offer": null} removes it.
+            offer = payload["offer"]
+            if offer is not None and not isinstance(offer, dict):
+                raise ValueError("Send the offer as an object, or null to remove it.")
+            _set_offer(match.group(1), offer)
+        job = _update_job_notes(
+            match.group(1),
+            notes=notes,
+            follow_up_at=payload.get("follow_up_at")
+            if "follow_up_at" in payload
+            else None,
         )
+        with _connect() as connection:
+            job["offer"] = careers_tracker.get_offer(connection, match.group(1))
+        self._send_json(200, {"job": job})
 
     # -- applications ----------------------------------------------------------------
 
@@ -8863,6 +9747,23 @@ class RequestHandler(BaseHTTPRequestHandler):
                 limit=_query_int(query, "limit", 200, 1, 500),
                 offset=_query_int(query, "offset", 0, 0, 100000),
             )
+            # Show the job a document belongs to by its title, not its internal id.
+            job_ids = sorted({item["job_id"] for item in items if item.get("job_id")})
+            titles = (
+                {
+                    row["job_id"]: " · ".join(
+                        filter(None, (row["title"], row["company"]))
+                    )
+                    for row in connection.execute(
+                        f"SELECT job_id, title, company FROM jobs WHERE job_id IN ({','.join('?' for _ in job_ids)})",
+                        job_ids,
+                    ).fetchall()
+                }
+                if job_ids
+                else {}
+            )
+            for item in items:
+                item["job_title"] = titles.get(item.get("job_id") or "", "")
             usage = store.usage(connection, owner_id=_owner_id())
         self._send_json(
             200,
@@ -9676,6 +10577,104 @@ def _install_airaapi_routes() -> None:
 
 
 _install_airaapi_routes()
+
+
+# ---------------------------------------------------------------------------
+# Careers is the account owner's job search (household profiles, single-user build)
+# ---------------------------------------------------------------------------
+# One account can be a household: a child or another adult has their own profile for the everyday apps
+# (aira/suite/life.py). Careers holds one person's job search (applications, offers and pay, recruiter
+# messages, the resume), so only the account owner's profile opens it, and with the owner's PIN when they set
+# one. The hosted build has no household profiles: there the organization's roles decide (aira_cloud/policy.py).
+CAREERS_ROUTE_RE = re.compile(
+    r"/api/(?:jobs|applications|interviews|recruiters|interactions|documents|analytics|dashboard|autopilot"
+    r"|email|inbox|conversations|messages|preparations|tasks|profile|resume|search|schedules|careers"
+    r"|notifications|activity|automation)(?![A-Za-z0-9_-])"
+)
+# Asked by the shell before it knows who is using the browser (app.js loadWorkspace runs before life.js
+# restores the profile), so a request without a profile is answered for it.
+_CAREERS_BEFORE_PROFILE = frozenset({"api_profile"})
+
+
+class CareersOwnerOnly(PermissionError):
+    """Another person's profile asked for the owner's job search."""
+
+    code = "careers_owner_only"
+
+
+def _careers_person_check(handler: Any, route_name: str) -> None:
+    """Refuse a Careers request made for anyone but the account owner (403 with a code the page explains)."""
+    if getattr(handler, "_captured", None) is not None or aira_suite.actor():
+        return  # the hosted build: the signed-in member and their role decide
+    with _connect() as connection:
+        if (
+            connection.execute(
+                "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'life_profiles'"
+            ).fetchone()
+            is None
+        ):
+            return  # no household yet: the account is one person
+        people = [
+            dict(row)
+            for row in connection.execute(
+                "SELECT id, name, owner, pin_hash FROM life_profiles WHERE archived_at IS NULL"
+            ).fetchall()
+        ]
+    owner = next((person for person in people if person["owner"]), None)
+    if owner is None or (len(people) == 1 and not owner["pin_hash"]):
+        return
+    headers = getattr(handler, "headers", None)
+    header = str(headers.get("X-Aira-Profile", "") if headers is not None else "")
+    header = header.strip()
+    if not header:
+        if not owner["pin_hash"] or route_name in _CAREERS_BEFORE_PROFILE:
+            return  # without a PIN anyone may pick the owner's profile anyway
+        raise suite_life.ProfileRequired("Choose who is using Aira.")
+    profile_id, _, token = header.partition(".")
+    chosen = next((person for person in people if person["id"] == profile_id), None)
+    if chosen is None:
+        raise suite_life.ProfileRequired("Choose who is using Aira.")
+    if chosen["pin_hash"] and not hmac.compare_digest(
+        token, suite_life.unlock_token(chosen)
+    ):
+        raise suite_life.ProfileLocked(f"Enter {chosen['name']}'s PIN.")
+    if not chosen["owner"]:
+        raise CareersOwnerOnly(
+            f"Careers is {owner['name']}'s job search: their applications, offers and messages. "
+            f"Switch to {owner['name']} to open it."
+        )
+
+
+_CAREERS_GUARDED: set[str] = set()
+
+
+def _guard_careers_routes() -> None:
+    """Wrap every signed-in Careers route with the household check above."""
+    for _method, pattern, name, auth in ROUTES:
+        if not auth or not CAREERS_ROUTE_RE.match(pattern.pattern):
+            continue
+        if name in _CAREERS_GUARDED:
+            continue
+        original = getattr(RequestHandler, name)
+
+        @functools.wraps(original)
+        def guarded(
+            self: RequestHandler,
+            match: re.Match[str],
+            payload: dict[str, Any],
+            query: dict[str, list[str]],
+            user: dict[str, Any] | None,
+            _original: Callable[..., None] = original,
+            _name: str = name,
+        ) -> None:
+            _careers_person_check(self, _name)
+            _original(self, match, payload, query, user)
+
+        setattr(RequestHandler, name, guarded)
+        _CAREERS_GUARDED.add(name)
+
+
+_guard_careers_routes()
 
 
 class _CareersGateway:

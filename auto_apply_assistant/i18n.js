@@ -292,7 +292,7 @@
       corner.className = "lang-corner";
       corner.setAttribute("translate", "no");
       corner.innerHTML = '<button type="button" id="langCornerBtn" class="lang-btn"><svg viewBox="0 0 24 24" aria-hidden="true"><circle cx="12" cy="12" r="9"/><path d="M3 12h18M12 3c2.5 2.6 3.8 5.6 3.8 9s-1.3 6.4-3.8 9c-2.5-2.6-3.8-5.6-3.8-9S9.5 5.6 12 3z"/></svg><span class="lang-name"></span></button>';
-      document.body.append(corner);
+      document.body.prepend(corner); // first in the page: on a phone it sits at the top in the flow (public.css)
     }
     for (const id of ["langBtn", "langCornerBtn"]) {
       const button = document.getElementById(id);

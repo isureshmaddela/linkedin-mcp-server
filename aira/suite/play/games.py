@@ -1346,6 +1346,22 @@ def _maths_question(rng: random.Random, level: str) -> tuple[str, int]:
     return f"{a} + {b}", a + b
 
 
+def suggested_level(game: str, age_group: str = "") -> str:
+    """The level a game opens on: children's levels for children, the easy one for seniors, the middle one for
+    everyone else (never the children's level for a grown-up)."""
+    levels = list(GAMES[game]["levels"])
+    if game == "word":
+        return "daily"
+    if age_group == "child":
+        return "kids" if "kids" in levels else levels[0]
+    if age_group == "senior":
+        return "easy" if "easy" in levels else levels[0]
+    for level in ("medium", "easy"):
+        if level in levels:
+            return level
+    return levels[0]
+
+
 def check_level(game: str, level: str) -> str:
     if game not in GAMES:
         raise ValueError(f"Choose a game: {', '.join(GAME_IDS)}.")
@@ -1414,6 +1430,138 @@ def make(game: str, level: str, seed: int) -> tuple[dict[str, Any], dict[str, An
         answer = rng.choice(WORDS)
         return {"length": 5, "tries": WORD_TRIES}, {"answer": answer, "guesses": []}
     raise ValueError("Unknown game.")
+
+
+# ---------------------------------------------------------------------------
+# quizzes people write themselves
+# ---------------------------------------------------------------------------
+
+QUIZ_MIN_QUESTIONS = 3
+QUIZ_MAX_QUESTIONS = 30
+
+
+def _tidy(value: Any, limit: int) -> str:
+    return " ".join(str(value or "").split())[:limit]
+
+
+def clean_quiz_questions(raw: Any) -> list[dict[str, Any]]:
+    """Questions a person wrote: 3 to 30, each with a question, 2 to 4 different answers and the right one.
+
+    ``answer`` is the index of the right answer among the answers as they were sent (blank answers are dropped,
+    so the index is moved along with them). Completely empty rows are skipped."""
+    if not isinstance(raw, list):
+        raise ValueError("Add some questions.")
+    out: list[dict[str, Any]] = []
+    number = 0
+    for item in raw:
+        if not isinstance(item, dict):
+            raise ValueError("Each question needs a question and its answers.")
+        text = _tidy(item.get("text"), 200)
+        sent = item.get("choices") if isinstance(item.get("choices"), list) else []
+        filled = [(i, _tidy(c, 80)) for i, c in enumerate(sent) if _tidy(c, 80)]
+        if not text and not filled:
+            continue  # an empty row left in the form
+        number += 1
+        choices = [c for _i, c in filled]
+        if not text:
+            raise ValueError(f"Question {number} needs a question.")
+        if len(choices) < 2:
+            raise ValueError(f"Question {number} needs at least two answers.")
+        if len(choices) > 4:
+            raise ValueError(f"Question {number} can have at most four answers.")
+        if len({c.lower() for c in choices}) != len(choices):
+            raise ValueError(f"Question {number} has the same answer twice.")
+        picked = item.get("answer")
+        if isinstance(picked, bool):
+            picked = None
+        try:
+            picked_index = int(str(picked))
+        except ValueError:
+            picked_index = -1
+        positions = [i for i, _c in filled]
+        if picked_index not in positions:
+            raise ValueError(f"Choose the right answer for question {number}.")
+        out.append(
+            {"text": text, "choices": choices, "answer": positions.index(picked_index)}
+        )
+    if len(out) < QUIZ_MIN_QUESTIONS:
+        raise ValueError(f"A quiz needs at least {QUIZ_MIN_QUESTIONS} questions.")
+    if len(out) > QUIZ_MAX_QUESTIONS:
+        raise ValueError(f"A quiz can have at most {QUIZ_MAX_QUESTIONS} questions.")
+    return out
+
+
+def quiz_round(
+    rng: random.Random, questions: list[dict[str, Any]], title: str
+) -> list[dict[str, Any]]:
+    """A person's quiz in the shape of :func:`trivia_questions` (answers shuffled, the questions in order)."""
+    out = []
+    for index, question in enumerate(questions):
+        right = question["choices"][question["answer"]]
+        choices = list(question["choices"])
+        rng.shuffle(choices)
+        out.append(
+            {
+                "id": index,
+                "category": "",
+                "category_label": "",  # the room already carries the quiz's name
+                "difficulty": "",
+                "text": question["text"],
+                "choices": choices,
+                "answer": choices.index(right),
+            }
+        )
+    return out
+
+
+def make_quiz(
+    questions: list[dict[str, Any]], title: str, seed: int
+) -> tuple[dict[str, Any], dict[str, Any]]:
+    """A game of a person's quiz: the browser sees the questions and the answers to choose from, never the right one."""
+    round_ = quiz_round(random.Random(seed), questions, title)
+    return (
+        {
+            "title": title,
+            "questions": [
+                {"text": q["text"], "choices": q["choices"], "category": title}
+                for q in round_
+            ],
+        },
+        {"answers": [q["answer"] for q in round_]},
+    )
+
+
+def template_questions(topic: str, count: int) -> list[dict[str, Any]]:
+    """Questions from the built-in quiz book that fit a topic ("Suggest questions" when no writing model runs).
+    The right answer is listed first; the person can change anything."""
+    words = {
+        w
+        for w in "".join(c if c.isalnum() else " " for c in topic.lower()).split()
+        if len(w) > 2
+    }
+    category = ""
+    for key, label in TRIVIA_CATEGORIES.items():
+        label_words = set(label.lower().replace(",", " ").split()) - {"and", "for"}
+        if key in words or words & label_words:
+            category = key
+            break
+    ranked = []
+    for index, (cat, _difficulty, text, right, _wrong) in enumerate(TRIVIA):
+        hits = sum(1 for w in words if w in text.lower() or w in right.lower())
+        if hits or (category and cat == category):
+            ranked.append((-hits, 0 if cat == category else 1, index))
+    ranked.sort()
+    picked = [index for *_rest, index in ranked[:count]]
+    if len(picked) < count:
+        extra = [i for i in trivia_pool("medium") if i not in picked]
+        picked += random.Random(topic).sample(
+            extra, min(count - len(picked), len(extra))
+        )
+    out = []
+    for index in picked[:count]:
+        _cat, _difficulty, text, right, wrong = TRIVIA[index]
+        out.append({"text": text, "choices": [right, *wrong], "answer": 0})
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -1529,7 +1677,7 @@ def score(
             "pairs": pairs,
             "perfect": moves == pairs,
         }
-    if game in ("scramble", "maths", "trivia"):
+    if game in ("scramble", "maths", "trivia", "quiz"):
         answers = payload.get("answers")
         expected: list[Any] = (
             secret["words"] if game == "scramble" else secret["answers"]
@@ -1537,7 +1685,18 @@ def score(
         if not isinstance(answers, list) or len(answers) != len(expected):
             raise ValueError(f"Send {len(expected)} answers, one for each question.")
         marks = []
+        shown: list[
+            Any
+        ] = []  # what the player answered, shown next to the right answer
         for given, right in zip(answers, expected, strict=True):
+            if game in ("trivia", "quiz"):
+                shown.append(
+                    given
+                    if isinstance(given, int) and not isinstance(given, bool)
+                    else None
+                )
+            else:
+                shown.append(str(given if given is not None else "").strip()[:30])
             if game == "scramble":
                 marks.append(str(given or "").strip().lower() == right)
             elif game == "maths":
@@ -1545,7 +1704,7 @@ def score(
                     marks.append(int(str(given).strip()) == right)
                 except (TypeError, ValueError):
                     marks.append(False)
-            else:
+            else:  # trivia and quizzes: the index of the chosen answer
                 marks.append(
                     isinstance(given, int)
                     and not isinstance(given, bool)
@@ -1561,6 +1720,7 @@ def score(
             "correct": correct,
             "total": len(expected),
             "marks": marks,
+            "given": shown,
         }
         if game == "scramble":
             result["words"] = expected

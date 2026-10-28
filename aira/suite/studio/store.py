@@ -139,6 +139,69 @@ SCHEMA = (
 
 JSON_COLUMNS = ("tags", "items", "customer_notices")
 
+# Columns added after the first release: (table, column, definition). Added once, when a database lacks them.
+ADDED_COLUMNS = (
+    # a proposal can ask for a deposit (hundredths of a percent of the total before tax) when it is accepted
+    ("st_proposals", "deposit_bp", "INTEGER NOT NULL DEFAULT 0"),
+    ("st_proposals", "deposit_invoice_id", "TEXT NOT NULL DEFAULT ''"),
+    ("st_proposals", "followed_up_at", "TEXT"),
+    # an invoice can take off what was already invoiced as a deposit; deposits are marked as such
+    ("st_invoices", "credit_cents", "INTEGER NOT NULL DEFAULT 0"),
+    ("st_invoices", "credit_label", "TEXT NOT NULL DEFAULT ''"),
+    ("st_invoices", "kind", "TEXT NOT NULL DEFAULT ''"),
+    ("st_invoices", "reminder_count", "INTEGER NOT NULL DEFAULT 0"),
+    # the deposit invoice a final invoice's credit came from, so voiding that deposit gives the credit back
+    ("st_invoices", "credit_invoice_id", "TEXT NOT NULL DEFAULT ''"),
+)
+
+# One-time repairs of rows an older Studio wrote (each is safe to run again: it only touches rows still unfixed).
+REPAIRS = (
+    # a final invoice remembers which deposit it took off
+    """UPDATE st_invoices SET credit_invoice_id = COALESCE((SELECT p.deposit_invoice_id FROM st_proposals p
+        WHERE p.id = st_invoices.proposal_id), '')
+        WHERE kind = '' AND credit_cents > 0 AND credit_invoice_id = '' AND proposal_id != ''""",
+    # a deposit belongs to the project its proposal became, so the project's earnings include it
+    """UPDATE st_invoices SET project_id = (SELECT p.project_id FROM st_proposals p
+        WHERE p.deposit_invoice_id = st_invoices.id)
+        WHERE kind = 'deposit' AND project_id = '' AND EXISTS (SELECT 1 FROM st_proposals p
+        JOIN st_projects j ON j.id = p.project_id WHERE p.deposit_invoice_id = st_invoices.id)""",
+    # a proposal whose final invoice was voided can be started again
+    """UPDATE st_proposals SET invoice_id = '' WHERE invoice_id != ''
+        AND invoice_id IN (SELECT id FROM st_invoices WHERE state = 'void' AND kind = '')""",
+)
+
+# Numbers are never given twice, even when two requests make an invoice at the same moment. A database that already
+# has a repeated number (made before this) keeps working without the index.
+UNIQUE_NUMBERS = (
+    "CREATE UNIQUE INDEX IF NOT EXISTS st_invoices_seq ON st_invoices (seq)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS st_proposals_seq ON st_proposals (seq)",
+)
+
+
+def _add_columns(connection: sqlite3.Connection) -> None:
+    """Add the newer columns to a database made by an older Studio (safe to run any number of times)."""
+    marker = (kit._db_file(connection), "studio.columns.v3")  # noqa: SLF001 - kit.ensure's own marker,
+    if marker in kit._ensured:  # noqa: SLF001 - so kit.forget_schema() resets it too
+        return
+    tables: dict[str, set[str]] = {}
+    for table, column, definition in ADDED_COLUMNS:
+        if table not in tables:
+            tables[table] = {
+                row[1] for row in connection.execute(f"PRAGMA table_info({table})")
+            }
+        if column not in tables[table]:
+            connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+            tables[table].add(column)
+    for repair in REPAIRS:
+        connection.execute(repair)
+    for index in UNIQUE_NUMBERS:
+        try:
+            connection.execute(index)
+        except sqlite3.IntegrityError:
+            pass  # an older run gave a number twice; new numbers still skip ahead (see insert_numbered)
+    connection.commit()
+    kit._ensured.add(marker)  # noqa: SLF001
+
 
 def ensure(connection: sqlite3.Connection) -> None:
     from aira.suite.studio import (
@@ -147,6 +210,7 @@ def ensure(connection: sqlite3.Connection) -> None:
 
     kit.ensure_core(connection)
     kit.ensure(connection, "studio.v1", SCHEMA)
+    _add_columns(connection)
     sales.ensure(connection)
 
 
@@ -190,3 +254,22 @@ def insert(connection: sqlite3.Connection, table: str, values: dict[str, Any]) -
         f"INSERT INTO {table} ({', '.join(columns)}) VALUES ({', '.join('?' for _ in columns)})",  # noqa: S608
         tuple(values[column] for column in columns),
     )
+
+
+def insert_numbered(
+    connection: sqlite3.Connection,
+    table: str,
+    values: dict[str, Any],
+    number: Any,
+) -> None:
+    """Insert an invoice or proposal with the next free ``seq`` and its ``number`` (``number(seq)``). When another
+    request took that number a moment ago, the unique index refuses it and the next one is tried."""
+    for attempt in range(8):
+        seq = next_seq(connection, table)
+        values["seq"], values["number"] = seq, number(seq)
+        try:
+            insert(connection, table, values)
+            return
+        except sqlite3.IntegrityError as error:
+            if f"{table}.seq" not in str(error) or attempt == 7:
+                raise

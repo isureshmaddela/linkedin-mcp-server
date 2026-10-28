@@ -54,21 +54,22 @@ def test_studio_tabs_and_an_invoice_paid_through_its_public_page(browser, env):
         "/api/suite/business",
         {"name": "Northlight Studio", "payment_link": "https://pay.example/northlight"},
     )
-    for tab in (
-        "overview",
-        "deals",
-        "clients",
-        "activities",
-        "proposals",
-        "projects",
-        "invoices",
-        "retainers",
-        "settings",
+    for tab, heading in (
+        ("overview", "Overview"),
+        ("deals", "Deals"),
+        ("clients", "Clients"),
+        ("activities", "Activities"),
+        ("proposals", "Proposals"),
+        ("projects", "Projects"),
+        ("invoices", "Invoices"),
+        ("retainers", "Retainers"),
+        ("settings", "Settings"),
     ):
         go(page, env, f"studio?tab={tab}")
         page.wait_for_selector(".page-head h1")
-        assert page.locator(".page-head h1").inner_text() == "Sales"
-        page.wait_for_selector(".tabs [aria-selected='true']")
+        # the logo says Sales; the page names the folder it shows (a folder in the left menu on a wide screen)
+        assert page.locator(".page-head h1").inner_text() == heading
+        page.wait_for_selector(".shell-sublink[aria-current='page']")
     assert not problems, problems
 
     # A client through the form.

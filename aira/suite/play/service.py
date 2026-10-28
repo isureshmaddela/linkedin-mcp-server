@@ -12,7 +12,7 @@ from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
 from aira.suite import kit, life
-from aira.suite.play import games, store
+from aira.suite.play import games, quizzes, store
 from aira.suite.play.store import APP
 
 MODES = ("relaxed", "timed")
@@ -28,10 +28,18 @@ DAILY_ROTATION = (
 )
 ROOM_HOURS = 3
 REVEAL_SECONDS = 6
-MAX_PLAYERS = 30
+MAX_GUESTS = 24  # guests from the public link; household members always get a place
+GUESTS_PER_VISITOR = 4  # a family sharing one phone can join a few names, not a crowd
 CODE_LETTERS = "ABCDEFGHJKLMNPQRSTUVWXYZ"  # no I or O: easy to read aloud
 WATCH_KINDS = ("film", "show", "book", "podcast", "game")
 WATCH_STATUSES = ("want", "doing", "done")
+CHALLENGE_MAX_PEOPLE = 12
+PLAN_GRACE_MINUTES = (
+    2  # a time of "now" typed into a form is a minute or so old by the time it is saved
+)
+MAX_ENTRY_CENTS = (
+    100_000  # an entry fee for a quiz night: at most 1,000 in the business currency
+)
 
 
 # ---------------------------------------------------------------------------
@@ -90,6 +98,7 @@ def catalog(
                 "levels": [
                     {"id": key, "label": label} for key, label in spec["levels"].items()
                 ],
+                "suggested": games.suggested_level(game_id, me.get("age_group") or ""),
             }
             for game_id, spec in games.GAMES.items()
         ],
@@ -110,6 +119,21 @@ def catalog(
             for key, label in games.TRIVIA_CATEGORIES.items()
         ],
     }
+
+
+def game_name(game: str, level: str = "", titles: dict[str, str] | None = None) -> str:
+    """The name to show for a game; a person's quiz shows its title."""
+    if game == "quiz":
+        return (titles or {}).get(level) or "A family quiz"
+    spec = games.GAMES.get(game)
+    return spec["name"] if spec else game
+
+
+def level_label(game: str, level: str) -> str:
+    if game == "quiz":
+        return "Family quiz"
+    spec = games.GAMES.get(game)
+    return spec["levels"].get(level, level) if spec else level
 
 
 def _progress(row: dict[str, Any], secret: dict[str, Any]) -> dict[str, Any]:
@@ -138,14 +162,16 @@ def _progress(row: dict[str, Any], secret: dict[str, Any]) -> dict[str, Any]:
 
 def public_session(row: dict[str, Any]) -> dict[str, Any]:
     secret = kit.loads(row["secret"], {}) or {}
+    puzzle = kit.loads(row["puzzle"], {}) or {}
     return {
         "id": row["id"],
         "game": row["game"],
-        "name": games.GAMES[row["game"]]["name"],
+        "name": puzzle.get("title") or game_name(row["game"], row["level"]),
         "level": row["level"],
+        "level_label": level_label(row["game"], row["level"]),
         "mode": row["mode"],
         "daily_date": row["daily_date"],
-        "puzzle": kit.loads(row["puzzle"], {}),
+        "puzzle": puzzle,
         "progress": _progress(row, secret),
         "status": row["status"],
         "score": int(row["score"] or 0),
@@ -196,6 +222,20 @@ def start(
             raise ValueError(
                 "You have played today's challenge. Come back tomorrow for a new one!"
             )
+    elif payload.get("quiz"):
+        quiz = quizzes.visible(connection, me, str(payload.get("quiz")))
+        mode = kit.choice(
+            payload.get("mode"), "the mode", MODES, default=default_mode(me)
+        )
+        return create_session(
+            connection,
+            me,
+            "quiz",
+            quiz["id"],
+            mode,
+            secrets.randbits(48),
+            moment=moment,
+        )
     else:
         game = str(payload.get("game") or "")
         level = games.check_level(game, str(payload.get("level") or ""))
@@ -218,8 +258,41 @@ def start(
                 )
         else:
             seed = secrets.randbits(48)
-    games.check_level(game, level)
-    puzzle, secret = games.make(game, level, seed)
+    return create_session(
+        connection,
+        me,
+        game,
+        level,
+        mode,
+        seed,
+        daily_date=day.isoformat() if daily else "",
+        moment=moment,
+    )
+
+
+def create_session(
+    connection: sqlite3.Connection,
+    me: dict[str, Any],
+    game: str,
+    level: str,
+    mode: str,
+    seed: int,
+    *,
+    daily_date: str = "",
+    moment: datetime | None = None,
+) -> dict[str, Any]:
+    """Make the puzzle from the seed and keep its secret on the server. The same game, level and seed always make
+    the same puzzle (the daily challenge, a challenge between two people)."""
+    moment = _now(moment)
+    day = local_day(connection, moment)
+    if game == "quiz":
+        quiz = quizzes.visible(connection, me, level)
+        puzzle, secret = games.make_quiz(
+            quizzes.questions_of(quiz), quiz["title"], seed
+        )
+    else:
+        games.check_level(game, level)
+        puzzle, secret = games.make(game, level, seed)
     session_id = kit.new_id()
     connection.execute(
         """INSERT INTO pl_sessions (id, profile_id, game, level, mode, seed, daily_date, puzzle, secret, started_at, local_date)
@@ -231,7 +304,7 @@ def start(
             level,
             mode,
             seed,
-            day.isoformat() if daily else "",
+            daily_date,
             kit.dumps(puzzle),
             kit.dumps(secret),
             kit.iso(moment),
@@ -246,7 +319,7 @@ def get_session(
     connection: sqlite3.Connection, me: dict[str, Any], session_id: str
 ) -> dict[str, Any]:
     store.ensure(connection)
-    return public_session(_mine(connection, me, session_id))
+    return with_challenge(connection, public_session(_mine(connection, me, session_id)))
 
 
 def move(
@@ -272,6 +345,19 @@ def move(
     if row["game"] == "word" and result.get("complete"):
         result["session"] = finish(connection, me, session_id, {}, now=now)
     return result
+
+
+def promotable(
+    connection: sqlite3.Connection, profile_id: str, game: str, level: str
+) -> bool:
+    """Whether a score may be shown to the rest of the family (Today, the activity feed). A quiz written by the
+    player does not count (they know the answers), and a private quiz is seen by its writer only."""
+    if game != "quiz":
+        return True
+    row = connection.execute(
+        "SELECT owner_id, shared FROM pl_quizzes WHERE id = ?", (level,)
+    ).fetchone()
+    return bool(row) and bool(row[1]) and row[0] != profile_id
 
 
 def _best_before(
@@ -327,7 +413,8 @@ def finish(
             session_id,
         ),
     )
-    name = games.GAMES[row["game"]]["name"]
+    name = (kit.loads(row["puzzle"], {}) or {}).get("title") or game_name(row["game"])
+    _settle_challenge(connection, me, row, points, moment)
     if row["daily_date"]:
         kit.log(
             connection,
@@ -336,7 +423,11 @@ def finish(
             f"{me['name']} played today's challenge: {points} points",
             actor=me["name"],
         )
-    elif best and before >= 0:
+    elif (
+        best
+        and before >= 0
+        and promotable(connection, me["id"], row["game"], row["level"])
+    ):
         kit.log(
             connection,
             APP,
@@ -345,7 +436,15 @@ def finish(
             actor=me["name"],
         )
     connection.commit()
-    return public_session(_mine(connection, me, session_id))
+    return with_challenge(connection, public_session(_mine(connection, me, session_id)))
+
+
+def with_challenge(
+    connection: sqlite3.Connection, session: dict[str, Any]
+) -> dict[str, Any]:
+    """A session with the challenge it answers, if any (the score to beat and whose it is)."""
+    found = challenge_of_session(connection, session["id"])
+    return {**session, "challenge": found} if found else session
 
 
 # ---------------------------------------------------------------------------
@@ -377,8 +476,13 @@ def _names(connection: sqlite3.Connection) -> dict[str, dict[str, Any]]:
 def leaderboard(
     connection: sqlite3.Connection, *, game: str = "", level: str = ""
 ) -> list[dict[str, Any]]:
-    """Each person's best score (names and numbers only), best first."""
-    clauses, params = ["status = 'finished'"], []
+    """Each person's best score (names and numbers only), best first. Games of a quiz the player wrote do not
+    count: they know the answers."""
+    clauses: list[str] = [
+        "status = 'finished'",
+        "NOT (game = 'quiz' AND level IN (SELECT q.id FROM pl_quizzes q WHERE q.owner_id = pl_sessions.profile_id))",
+    ]
+    params: list[Any] = []
     if game:
         clauses.append("game = ?")
         params.append(game)
@@ -438,9 +542,10 @@ def scores(
     now: datetime | None = None,
 ) -> dict[str, Any]:
     store.ensure(connection)
-    if game and game not in games.GAMES:
+    if game and game not in games.GAMES and game != "quiz":
         raise ValueError("Unknown game.")
     today = local_day(connection, now)
+    titles = quizzes.titles(connection)
     bests = kit.fetch_all(
         connection,
         """SELECT game, level, MAX(score) AS best, COUNT(*) AS plays, MAX(finished_at) AS last
@@ -455,15 +560,22 @@ def scores(
     return {
         "streak": streak(connection, me["id"], today),
         "bests": [
-            {**b, "name": games.GAMES[b["game"]]["name"], "best": int(b["best"] or 0)}
+            {
+                **b,
+                "name": game_name(b["game"], b["level"], titles),
+                "level_label": level_label(b["game"], b["level"]),
+                "best": int(b["best"] or 0),
+            }
             for b in bests
         ],
         "recent": [
             {
                 "id": r["id"],
                 "game": r["game"],
-                "name": games.GAMES[r["game"]]["name"],
+                "name": game_name(r["game"], r["level"], titles),
                 "level": r["level"],
+                "level_label": level_label(r["game"], r["level"]),
+                "mode": r["mode"],
                 "score": int(r["score"]),
                 "best": bool(r["best"]),
                 "finished_at": r["finished_at"],
@@ -538,7 +650,7 @@ def create_room(
         "the number of questions",
         default=8,
         minimum=3,
-        maximum=15,
+        maximum=games.QUIZ_MAX_QUESTIONS if payload.get("quiz") else 15,
     )
     seconds = kit.integer(
         payload.get("seconds"),
@@ -550,6 +662,19 @@ def create_room(
     category = str(payload.get("category") or "").strip()
     if category and category not in games.TRIVIA_CATEGORIES:
         raise ValueError("Choose a category from the list.")
+    quiz = (
+        quizzes.visible(connection, me, str(payload.get("quiz")))
+        if payload.get("quiz")
+        else None
+    )
+    entry_cents = kit.cents_value(
+        payload.get("entry_cents"), "the entry fee", default=0, minimum=0
+    )
+    if entry_cents > MAX_ENTRY_CENTS:
+        raise ValueError("The entry fee is too large for a quiz night.")
+    if entry_cents and not life.is_adult(me):
+        raise PermissionError("Only a grown-up can charge an entry fee.")
+    prize = kit.text(payload.get("prize"), "the prize", max_len=120)
     level = kit.choice(
         payload.get("level"),
         "the level",
@@ -558,13 +683,17 @@ def create_room(
     )
     if category == "kids":
         level = "kids"
-    questions = games.trivia_questions(
-        random.Random(secrets.randbits(48)), count, level, category
-    )
+    rng = random.Random(secrets.randbits(48))
+    if quiz:
+        questions = games.quiz_round(rng, quizzes.questions_of(quiz), quiz["title"])
+        if payload.get("questions") not in (None, ""):  # empty: the whole quiz
+            questions = questions[:count]
+        category = ""
+    else:
+        questions = games.trivia_questions(rng, count, level, category)
     room_id = kit.new_id()
-    title = (
-        kit.text(payload.get("title"), "a title", max_len=60)
-        or f"{me['name']}'s trivia"
+    title = kit.text(payload.get("title"), "a title", max_len=60) or (
+        quiz["title"] if quiz else f"{me['name']}'s trivia"
     )
     connection.execute(
         """INSERT INTO pl_rooms (id, code, host_id, title, category, level, seconds, auto_advance, questions, status, created_at, updated_at, expires_at)
@@ -587,12 +716,30 @@ def create_room(
             kit.iso(moment + timedelta(hours=ROOM_HOURS)),
         ),
     )
+    if quiz or entry_cents or prize:
+        connection.execute(
+            "INSERT INTO pl_room_extras (room_id, quiz_id, entry_cents, currency, prize) VALUES (?, ?, ?, ?, ?)",
+            (
+                room_id,
+                quiz["id"] if quiz else "",
+                entry_cents,
+                kit.business(connection)["currency"],
+                prize,
+            ),
+        )
+    if quiz:
+        connection.execute(
+            "INSERT INTO pl_room_writers (room_id, writer_id) VALUES (?, ?)",
+            (room_id, quiz["owner_id"]),
+        )
     _add_player(connection, room_id, profile_id=me["id"], moment=moment)
     kit.log(
         connection,
         APP,
         "room",
-        f"{me['name']} started live trivia",
+        f"{me['name']} opened a quiz night: {title}"
+        if entry_cents
+        else f"{me['name']} started live trivia",
         ref_type="room",
         ref_id=room_id,
         actor=me["name"],
@@ -612,11 +759,16 @@ def _add_player(
     token_hash: str = "",
     moment: datetime,
 ) -> str:
-    players = connection.execute(
-        "SELECT COUNT(*) FROM pl_room_players WHERE room_id = ?", (room_id,)
-    ).fetchone()[0]
-    if players >= MAX_PLAYERS:
-        raise ValueError(f"This room is full ({MAX_PLAYERS} players).")
+    """Household members always get a place; guests from the link are capped so they cannot fill the room."""
+    if not profile_id:
+        guests = connection.execute(
+            "SELECT COUNT(*) FROM pl_room_players WHERE room_id = ? AND profile_id IS NULL",
+            (room_id,),
+        ).fetchone()[0]
+        if guests >= MAX_GUESTS:
+            raise ValueError(
+                f"This game is full: {MAX_GUESTS} guests have joined. Ask the host about the next one."
+            )
     player_id = kit.new_id()
     connection.execute(
         "INSERT INTO pl_room_players (id, room_id, profile_id, guest_name, guest_token_hash, joined_at) VALUES (?, ?, ?, ?, ?, ?)",
@@ -734,6 +886,10 @@ def room_state(
             (room["id"], state["index"]),
         )
     }
+    extras = room_extras(connection, room["id"])
+    paid = paid_players(connection, room["id"]) if extras["entry_cents"] else {}
+    writer = room_writer(connection, room["id"])
+    is_host = bool(viewer_profile and viewer_profile == room["host_id"])
     me = None
     if viewer_profile:
         me = next((p for p in players if p["profile_id"] == viewer_profile), None)
@@ -754,6 +910,14 @@ def room_state(
                 "score": int(p["score"]),
                 "answered": p["id"] in answered,
                 "guest": not p["profile_id"],
+                "quizmaster": bool(writer) and p["profile_id"] == writer,
+                # who has paid is for the host (and each guest about themselves)
+                **(
+                    {"paid": _has_paid(p, paid)}
+                    if extras["entry_cents"]
+                    and (is_host or (me and me["id"] == p["id"]))
+                    else {}
+                ),
             }
             for p in players
         ),
@@ -764,7 +928,11 @@ def room_state(
         "code": room["code"],
         "title": room["title"],
         "host": people.get(room["host_id"], {}).get("name", "Someone"),
-        "is_host": bool(viewer_profile and viewer_profile == room["host_id"]),
+        "is_host": is_host,
+        "entry_cents": extras["entry_cents"],
+        "currency": extras["currency"],
+        "prize": extras["prize"],
+        "from_quiz": bool(extras["quiz_id"]),
         "phase": state["phase"],
         "index": state["index"],
         "total": state["total"],
@@ -782,7 +950,8 @@ def room_state(
         out["question"] = {
             "text": question["text"],
             "choices": question["choices"],
-            "category": games.TRIVIA_CATEGORIES.get(question["category"], ""),
+            "category": question.get("category_label")
+            or games.TRIVIA_CATEGORIES.get(question["category"], ""),
         }
         if state["phase"] == "reveal":
             out["answer"] = question["answer"]
@@ -795,9 +964,16 @@ def room_state(
             "correct": bool(mine["correct"])
             if mine and state["phase"] == "reveal"
             else None,
+            "paid": _has_paid(me, paid) if extras["entry_cents"] else True,
+            # whoever wrote the quiz runs it but does not answer
+            "can_answer": not (writer and me["profile_id"] == writer),
+            "reference": f"{room['code']}-{me['id'][:6].upper()}",
         }
+    if is_host and extras["entry_cents"]:
+        out["takings_cents"] = sum(paid.values())
+        out["paid_count"] = len(paid)
     out["version"] = (
-        f"{out['phase']}:{out['index']}:{len(answered)}:{len(players)}:{sum(p['score'] for p in board)}"
+        f"{out['phase']}:{out['index']}:{len(answered)}:{len(players)}:{sum(p['score'] for p in board)}:{len(paid)}"
     )
     return out
 
@@ -853,14 +1029,27 @@ def join_guest(
     room_id: str,
     name: str,
     *,
+    client: str = "",
     now: datetime | None = None,
 ) -> tuple[str, dict[str, Any]]:
-    """A relative joins through the public link with just a name; the token they get lets them answer."""
+    """A relative joins through the public link with just a name; the token they get lets them answer.
+    ``client`` is the visitor's rate-limit key: one visitor can add only a few names to a room."""
+    store.ensure(connection)
     moment = _now(now)
     room = _room(connection, room_id)
     if phase(room, moment)["phase"] in ("finished", "expired"):
         raise ValueError("That game has finished.")
     clean = kit.text(name, "your name", max_len=30, required=True)
+    client_hash = hash_token(f"{room_id}:{client}") if client else ""
+    if client_hash:
+        joined = connection.execute(
+            "SELECT COUNT(*) FROM pl_room_guest_clients WHERE room_id = ? AND client_hash = ?",
+            (room_id, client_hash),
+        ).fetchone()[0]
+        if joined >= GUESTS_PER_VISITOR:
+            raise ValueError(
+                f"You have already joined {GUESTS_PER_VISITOR} names to this game from here."
+            )
     token = secrets.token_urlsafe(18)
     player_id = _add_player(
         connection,
@@ -869,6 +1058,11 @@ def join_guest(
         token_hash=hash_token(token),
         moment=moment,
     )
+    if client_hash:
+        connection.execute(
+            "INSERT INTO pl_room_guest_clients (player_id, room_id, client_hash) VALUES (?, ?, ?)",
+            (player_id, room_id, client_hash),
+        )
     kit.log(
         connection,
         APP,
@@ -1009,6 +1203,19 @@ def answer(
     state = phase(room, moment)
     if state["phase"] != "question":
         raise ValueError("Time is up for this question.")
+    if player["profile_id"] and player["profile_id"] == room_writer(
+        connection, room_id
+    ):
+        raise PermissionError(QUIZMASTER_NOTE)
+    extras = room_extras(connection, room_id)
+    if (
+        extras["entry_cents"]
+        and not player["profile_id"]
+        and not _has_paid(player, paid_players(connection, room_id))
+    ):
+        raise ValueError(
+            "The host has not marked your entry as paid yet. Pay the entry fee, then you can answer."
+        )
     questions = kit.loads(room["questions"], [])
     question = questions[state["index"]]
     try:
@@ -1064,6 +1271,203 @@ def answer_as(
     return room_state(
         connection, _room(connection, room_id), viewer_profile=me["id"], now=now
     )
+
+
+QUIZMASTER_NOTE = "You wrote this quiz, so you know the answers. You are the quizmaster: the others answer."
+
+
+def room_writer(connection: sqlite3.Connection, room_id: str) -> str:
+    """The profile that wrote the quiz this room plays ('' for the quiz book)."""
+    row = connection.execute(
+        "SELECT writer_id FROM pl_room_writers WHERE room_id = ?", (room_id,)
+    ).fetchone()
+    return row[0] if row else ""
+
+
+def room_extras(connection: sqlite3.Connection, room_id: str) -> dict[str, Any]:
+    row = kit.fetch_one(
+        connection, "SELECT * FROM pl_room_extras WHERE room_id = ?", (room_id,)
+    )
+    return {
+        "quiz_id": (row or {}).get("quiz_id", ""),
+        "entry_cents": int((row or {}).get("entry_cents") or 0),
+        "currency": (row or {}).get("currency") or "",
+        "prize": (row or {}).get("prize", ""),
+    }
+
+
+def paid_players(connection: sqlite3.Connection, room_id: str) -> dict[str, int]:
+    return {
+        r["player_id"]: int(r["amount_cents"])
+        for r in kit.fetch_all(
+            connection,
+            "SELECT player_id, amount_cents FROM pl_room_entries WHERE room_id = ?",
+            (room_id,),
+        )
+    }
+
+
+def _has_paid(player: dict[str, Any], paid: dict[str, int]) -> bool:
+    """Household members play free; a guest has paid once the host marked it."""
+    return bool(player["profile_id"]) or player["id"] in paid
+
+
+def mark_paid(
+    connection: sqlite3.Connection,
+    me: dict[str, Any],
+    room_id: str,
+    player_id: str,
+    paid: bool,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """The host received (or did not receive) a guest's entry fee. It is recorded as money the business received,
+    once per guest; unmarking takes it back out."""
+    moment = _now(now)
+    room = _host_room(connection, me, room_id)
+    extras = room_extras(connection, room_id)
+    if not extras["entry_cents"]:
+        raise ValueError("This game has no entry fee.")
+    player = kit.fetch_one(
+        connection,
+        "SELECT * FROM pl_room_players WHERE id = ? AND room_id = ?",
+        (player_id, room_id),
+    )
+    if not player:
+        raise LookupError("That player is not in this game.")
+    if player["profile_id"]:
+        raise ValueError("People in the household play for free.")
+    if paid:
+        inserted = connection.execute(
+            "INSERT OR IGNORE INTO pl_room_entries (player_id, room_id, amount_cents, paid_at) VALUES (?, ?, ?, ?)",
+            (player_id, room_id, extras["entry_cents"], kit.iso(moment)),
+        ).rowcount
+        if inserted:
+            kit.record_revenue(
+                connection,
+                APP,
+                source_type="quiz_entry",
+                source_id=player_id,
+                amount_cents=extras["entry_cents"],
+                currency_code=extras["currency"],
+                label=f"Entry: {room['title']}",
+                customer=player["guest_name"],
+                at=kit.iso(moment),
+            )
+            kit.log(
+                connection,
+                APP,
+                "entry_paid",
+                f"{player['guest_name']} paid to play {room['title']}",
+                ref_type="room",
+                ref_id=room_id,
+                amount_cents=extras["entry_cents"],
+                actor=me["name"],
+            )
+    else:
+        removed = connection.execute(
+            "DELETE FROM pl_room_entries WHERE player_id = ? AND room_id = ?",
+            (player_id, room_id),
+        ).rowcount
+        if removed:
+            kit.void_revenue(connection, APP, "quiz_entry", player_id)
+            # unpaid guests' answers do not count: what they scored while marked paid goes too
+            connection.execute(
+                "DELETE FROM pl_room_answers WHERE room_id = ? AND player_id = ?",
+                (room_id, player_id),
+            )
+            connection.execute(
+                "UPDATE pl_room_players SET score = 0 WHERE id = ?", (player_id,)
+            )
+    kit.update_row(connection, "pl_rooms", room_id, {"updated_at": kit.iso(moment)})
+    connection.commit()
+    return room_state(
+        connection, _room(connection, room_id), viewer_profile=me["id"], now=moment
+    )
+
+
+def nights(
+    connection: sqlite3.Connection, me: dict[str, Any], *, now: datetime | None = None
+) -> dict[str, Any]:
+    """The quiz nights this person hosted with an entry fee, and what they took."""
+    store.ensure(connection)
+    rows = kit.fetch_all(
+        connection,
+        """SELECT r.*, x.entry_cents, x.currency, x.prize FROM pl_rooms r JOIN pl_room_extras x ON x.room_id = r.id
+        WHERE r.host_id = ? AND x.entry_cents > 0 ORDER BY r.created_at DESC LIMIT 100""",
+        (me["id"],),
+    )
+    moment = _now(now)
+    out = []
+    for row in rows:
+        players = kit.count(
+            connection,
+            "SELECT COUNT(*) FROM pl_room_players WHERE room_id = ? AND profile_id IS NULL",
+            (row["id"],),
+        )
+        paid = paid_players(connection, row["id"])
+        out.append(
+            {
+                "id": row["id"],
+                "title": row["title"],
+                "code": row["code"],
+                "created_at": row["created_at"],
+                "phase": phase(row, moment)["phase"],
+                "entry_cents": int(row["entry_cents"]),
+                "currency": row["currency"],
+                "prize": row["prize"],
+                "guests": players,
+                "paid": len(paid),
+                "takings_cents": sum(paid.values()),
+            }
+        )
+    return {
+        "nights": out,
+        "total_cents": sum(n["takings_cents"] for n in out),
+        "currency": kit.business(connection)["currency"],
+        "can_charge": life.is_adult(me),
+        "payment_ready": bool(
+            kit.business(connection).get("payment_link")
+            or kit.business(connection).get("payment_instructions")
+        ),
+    }
+
+
+ENTRY_COLUMNS = ("name", "guest", "joined_at", "paid", "amount", "score")
+
+
+def entry_rows(
+    connection: sqlite3.Connection, me: dict[str, Any], room_id: str
+) -> list[dict[str, Any]]:
+    """Everyone who played a game, for the host's spreadsheet."""
+    room = _host_room(connection, me, room_id)
+    extras = room_extras(connection, room["id"])
+    paid = paid_players(connection, room["id"])
+    people = _names(connection)
+    out = []
+    for p in kit.fetch_all(
+        connection,
+        "SELECT * FROM pl_room_players WHERE room_id = ? ORDER BY joined_at",
+        (room["id"],),
+    ):
+        guest = not p["profile_id"]
+        out.append(
+            {
+                "name": p["guest_name"]
+                if guest
+                else people.get(p["profile_id"], {}).get("name", "Someone"),
+                "guest": "yes" if guest else "",
+                "joined_at": p["joined_at"],
+                "paid": "yes" if p["id"] in paid else ("free" if not guest else "no"),
+                "amount": kit.fmt_money(
+                    paid.get(p["id"], 0), extras["currency"] or "USD"
+                )
+                if p["id"] in paid
+                else "",
+                "score": int(p["score"]),
+            }
+        )
+    return out
 
 
 def rooms(
@@ -1281,6 +1685,7 @@ def item_view(
         "recommended_by": people.get(row["recommended_by"], {}).get("name", "")
         if row["recommended_by"]
         else "",
+        "recommended_by_id": row["recommended_by"],
         "added_by": people.get(row["added_by"], {}).get("name", "Someone"),
         "can_change": _can_change(me, row),
         "mine": {
@@ -1339,8 +1744,9 @@ def watch_list(
         clauses.append("kind = ?")
         params.append(kit.choice(kind, "the kind", WATCH_KINDS))
     if query:
-        clauses.append("(title LIKE ? OR creator LIKE ?)")
-        params.extend([f"%{query}%", f"%{query}%"])
+        clauses.append("(title LIKE ? ESCAPE '!' OR creator LIKE ? ESCAPE '!')")
+        pattern = query.replace("!", "!!").replace("%", "!%").replace("_", "!_")
+        params.extend([f"%{pattern}%", f"%{pattern}%"])
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     rows = kit.fetch_all(
         connection,
@@ -1359,6 +1765,134 @@ def watch_list(
     return items
 
 
+def search(
+    connection: sqlite3.Connection,
+    me: dict[str, Any],
+    query: str,
+    *,
+    limit: int = 8,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """What matches ``query`` in Play, for the search box across the top: games (name, tagline), the quizzes this
+    person may play (title, about, who wrote it; a private quiz is never shown to anyone else), the watch list (title,
+    maker) and the open live games (title, room code, host). Up to ``limit`` of each kind; case does not matter."""
+    store.ensure(connection)
+    text = " ".join(str(query or "").split())[:80]
+    needle = text.casefold()
+    out: dict[str, Any] = {
+        "query": text,
+        "games": [],
+        "quizzes": [],
+        "watch": [],
+        "rooms": [],
+    }
+    if not needle:
+        return out
+    hit = lambda *parts: any(needle in str(p or "").casefold() for p in parts)  # noqa: E731
+    out["games"] = [
+        {"id": game_id, "name": spec["name"], "tagline": spec["tagline"]}
+        for game_id, spec in games.GAMES.items()
+        if hit(spec["name"], spec["tagline"])
+    ][:limit]
+    people = _names(connection)
+    rows = kit.fetch_all(
+        connection,
+        "SELECT * FROM pl_quizzes WHERE owner_id = ? OR shared = 1 ORDER BY updated_at DESC LIMIT 200",
+        (me["id"],),
+    )
+    out["quizzes"] = [
+        quizzes.view(connection, me, row, people=people)
+        for row in rows
+        if hit(
+            row["title"],
+            row["about"],
+            people.get(row["owner_id"], {}).get("name", ""),
+        )
+    ][:limit]
+    pattern = text.replace("!", "!!").replace("%", "!%").replace("_", "!_")
+    out["watch"] = [
+        {
+            "id": row["id"],
+            "kind": row["kind"],
+            "title": row["title"],
+            "creator": row["creator"],
+            "year": row["year"],
+        }
+        for row in kit.fetch_all(
+            connection,
+            "SELECT id, kind, title, creator, year FROM pl_watch WHERE title LIKE ? ESCAPE '!' OR creator LIKE ? ESCAPE '!' "
+            "ORDER BY created_at DESC LIMIT ?",
+            (f"%{pattern}%", f"%{pattern}%", limit),
+        )
+    ]
+    out["rooms"] = [
+        {
+            key: room[key]
+            for key in ("id", "code", "title", "host", "phase", "players", "joined")
+        }
+        for room in rooms(connection, me, now=now)
+        if hit(room["title"], room["code"], room["host"])
+    ][:limit]
+    return out
+
+
+WATCH_COLUMNS = (
+    "kind",
+    "title",
+    "by",
+    "year",
+    "link",
+    "recommended_by",
+    "added_by",
+    "my_status",
+    "my_rating",
+    "family_rating",
+    "my_notes",
+)
+
+
+def watch_rows(items: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    labels = {"want": "Want to", "doing": "In progress", "done": "Finished"}
+    return [
+        {
+            "kind": item["kind"],
+            "title": item["title"],
+            "by": item["creator"],
+            "year": item["year"] or "",
+            "link": item["link"],
+            "recommended_by": item["recommended_by"],
+            "added_by": item["added_by"],
+            "my_status": labels.get((item["mine"] or {}).get("status", ""), ""),
+            "my_rating": (item["mine"] or {}).get("rating") or "",
+            "family_rating": item["average_rating"] or "",
+            "my_notes": (item["mine"] or {}).get("notes", ""),
+        }
+        for item in items
+    ]
+
+
+def pick(
+    connection: sqlite3.Connection,
+    me: dict[str, Any],
+    *,
+    kind: str = "",
+    together: bool = False,
+) -> dict[str, Any] | None:
+    """Something for tonight: a random item I want to enjoy (with ``together``, one nobody has finished yet),
+    preferring what the family rates highly."""
+    items = watch_list(connection, me, kind=kind)
+    candidates = [
+        i
+        for i in items
+        if (i["mine"] or {}).get("status", "want") != "done"
+        and not (together and any(o["status"] == "done" for o in i["others"]))
+    ]
+    if not candidates:
+        return None
+    weights = [1 + (i["average_rating"] or 0) for i in candidates]
+    return random.choices(candidates, weights=weights, k=1)[0]
+
+
 def add_plan(
     connection: sqlite3.Connection,
     me: dict[str, Any],
@@ -1368,6 +1902,8 @@ def add_plan(
     store.ensure(connection)
     _item(connection, item_id)
     when = kit.moment(payload.get("planned_for"), "the date and time", required=True)
+    if kit.parse_time(when) < kit.utcnow() - timedelta(minutes=PLAN_GRACE_MINUTES):
+        raise ValueError("Choose a time that has not passed yet.")
     who = [str(w) for w in (payload.get("who") or []) if w]
     for person in who:
         life.get(connection, person)
@@ -1444,14 +1980,367 @@ def recent_best(
     since = kit.iso(_now(now) - timedelta(days=2))
     row = kit.fetch_one(
         connection,
-        """SELECT * FROM pl_sessions WHERE best = 1 AND status = 'finished' AND profile_id != ? AND finished_at >= ?
-        ORDER BY finished_at DESC LIMIT 1""",
+        """SELECT s.* FROM pl_sessions s WHERE s.best = 1 AND s.status = 'finished' AND s.profile_id != ?
+        AND s.finished_at >= ? AND (s.game != 'quiz' OR EXISTS (SELECT 1 FROM pl_quizzes q
+        WHERE q.id = s.level AND q.shared = 1 AND q.owner_id != s.profile_id))
+        ORDER BY s.finished_at DESC LIMIT 1""",
         (me["id"], since),
     )
     if not row:
         return None
     return {
         "name": life.name_of(connection, row["profile_id"]),
-        "game": games.GAMES[row["game"]]["name"],
+        "game": game_name(row["game"], row["level"], quizzes.titles(connection)),
         "score": int(row["score"]),
     }
+
+
+def history_rows(
+    connection: sqlite3.Connection, me: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """Every game this person finished, newest first (for the spreadsheet download)."""
+    store.ensure(connection)
+    titles = quizzes.titles(connection)
+    rows = kit.fetch_all(
+        connection,
+        "SELECT * FROM pl_sessions WHERE profile_id = ? AND status = 'finished' ORDER BY finished_at DESC LIMIT 5000",
+        (me["id"],),
+    )
+    out = []
+    for r in rows:
+        result = kit.loads(r["result"], {}) or {}
+        out.append(
+            {
+                "date": r["local_date"],
+                "finished_at": r["finished_at"],
+                "game": game_name(r["game"], r["level"], titles),
+                "level": level_label(r["game"], r["level"]),
+                "mode": r["mode"],
+                "daily": "yes" if r["daily_date"] else "",
+                "score": int(r["score"]),
+                "personal_best": "yes" if r["best"] else "",
+                "right": f"{result['correct']} of {result['total']}"
+                if "total" in result
+                else "",
+                "seconds": result.get("seconds", ""),
+            }
+        )
+    return out
+
+
+HISTORY_COLUMNS = (
+    "date",
+    "finished_at",
+    "game",
+    "level",
+    "mode",
+    "daily",
+    "score",
+    "personal_best",
+    "right",
+    "seconds",
+)
+
+
+# ---------------------------------------------------------------------------
+# challenges: "beat my score" on the very same puzzle
+# ---------------------------------------------------------------------------
+
+
+def challenge(
+    connection: sqlite3.Connection,
+    me: dict[str, Any],
+    payload: dict[str, Any],
+    *,
+    now: datetime | None = None,
+) -> list[dict[str, Any]]:
+    """Challenge people in the household to beat my score on the puzzle I just played (same seed, same puzzle)."""
+    store.ensure(connection)
+    moment = _now(now)
+    row = _mine(connection, me, str(payload.get("session_id") or ""))
+    if row["status"] != "finished":
+        raise ValueError("Finish the game first, then challenge someone.")
+    if row["daily_date"] or (row["game"] == "word" and row["level"] == "daily"):
+        raise ValueError(
+            "Everyone already gets today's puzzle. Challenge someone with another game."
+        )
+    raw = payload.get("to")
+    people = [str(p) for p in (raw if isinstance(raw, list) else [raw]) if p]
+    people = list(dict.fromkeys(people))
+    if not people:
+        raise ValueError("Choose who to challenge.")
+    if len(people) > CHALLENGE_MAX_PEOPLE:
+        raise ValueError(f"Challenge at most {CHALLENGE_MAX_PEOPLE} people at once.")
+    made = []
+    if (
+        row["game"] == "quiz"
+        and not quizzes.visible(connection, me, row["level"])["shared"]
+    ):
+        raise ValueError(
+            "Share this quiz with the family first, then challenge someone."
+        )
+    if me["id"] in people:
+        raise ValueError("You cannot challenge yourself. Choose someone else.")
+    for person in people:
+        other = life.get(connection, person)
+        challenge_id = kit.new_id()
+        inserted = connection.execute(
+            """INSERT OR IGNORE INTO pl_challenges (id, from_id, to_id, game, level, mode, seed, from_session, from_score, created_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                challenge_id,
+                me["id"],
+                other["id"],
+                row["game"],
+                row["level"],
+                row["mode"],
+                int(row["seed"]),
+                row["id"],
+                int(row["score"]),
+                kit.iso(moment),
+            ),
+        ).rowcount
+        if inserted:
+            made.append(challenge_id)
+    if made:
+        name = (kit.loads(row["puzzle"], {}) or {}).get("title") or game_name(
+            row["game"]
+        )
+        kit.log(
+            connection,
+            APP,
+            "challenge",
+            f"{me['name']} challenged the family to beat {int(row['score'])} in {name}",
+            ref_type="challenge",
+            ref_id=made[0],
+            actor=me["name"],
+        )
+    connection.commit()
+    return challenges(connection, me, now=moment)["outgoing"]
+
+
+def _challenge_view(
+    row: dict[str, Any],
+    me: dict[str, Any],
+    people: dict[str, dict[str, Any]],
+    titles: dict[str, str],
+) -> dict[str, Any]:
+    incoming = row["to_id"] == me["id"]
+    other = people.get(row["from_id"] if incoming else row["to_id"], {})
+    done = row["status"] == "done"
+    mine = row["to_score"] if incoming else row["from_score"]
+    theirs = row["from_score"] if incoming else row["to_score"]
+    outcome = ""
+    if done:
+        outcome = "won" if mine > theirs else "lost" if mine < theirs else "draw"
+    return {
+        "id": row["id"],
+        "incoming": incoming,
+        "who": other.get("name", "Someone"),
+        "who_emoji": other.get("emoji", ""),
+        "game": row["game"],
+        "name": game_name(row["game"], row["level"], titles),
+        "level_label": level_label(row["game"], row["level"]),
+        "mode": row["mode"],
+        "target": int(row["from_score"]),
+        "score": None if row["to_score"] is None else int(row["to_score"]),
+        "status": row["status"],
+        "started": bool(row["to_session"]),
+        "outcome": outcome,
+        "created_at": row["created_at"],
+        "done_at": row["done_at"],
+    }
+
+
+def challenges(
+    connection: sqlite3.Connection, me: dict[str, Any], *, now: datetime | None = None
+) -> dict[str, Any]:
+    store.ensure(connection)
+    people = _names(connection)
+    titles = quizzes.titles(connection)
+    open_rows = kit.fetch_all(
+        connection,
+        "SELECT * FROM pl_challenges WHERE to_id = ? AND status = 'open' ORDER BY created_at DESC LIMIT 30",
+        (me["id"],),
+    )
+    done_rows = kit.fetch_all(
+        connection,
+        """SELECT * FROM pl_challenges WHERE (to_id = ? OR from_id = ?) AND status = 'done'
+        ORDER BY done_at DESC LIMIT 10""",
+        (me["id"], me["id"]),
+    )
+    sent = kit.fetch_all(
+        connection,
+        "SELECT * FROM pl_challenges WHERE from_id = ? AND status = 'open' ORDER BY created_at DESC LIMIT 30",
+        (me["id"],),
+    )
+    return {
+        "incoming": [_challenge_view(r, me, people, titles) for r in open_rows],
+        "outgoing": [_challenge_view(r, me, people, titles) for r in sent],
+        "results": [_challenge_view(r, me, people, titles) for r in done_rows],
+    }
+
+
+def play_challenge(
+    connection: sqlite3.Connection,
+    me: dict[str, Any],
+    challenge_id: str,
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """Start (or carry on) the challenged game: the same puzzle the challenger played."""
+    store.ensure(connection)
+    row = kit.fetch_one(
+        connection,
+        "SELECT * FROM pl_challenges WHERE id = ? AND to_id = ?",
+        (challenge_id, me["id"]),
+    )
+    if not row:
+        raise LookupError("That challenge was not found.")
+    if row["status"] != "open":
+        raise ValueError("You have already taken this challenge.")
+    if row["to_session"]:
+        existing = kit.fetch_one(
+            connection,
+            "SELECT * FROM pl_sessions WHERE id = ? AND profile_id = ?",
+            (row["to_session"], me["id"]),
+        )
+        if existing and existing["status"] == "playing":
+            return public_session(existing)
+    session = create_session(
+        connection,
+        me,
+        row["game"],
+        row["level"],
+        row["mode"],
+        int(row["seed"]),
+        moment=now,
+    )
+    kit.update_row(
+        connection, "pl_challenges", row["id"], {"to_session": session["id"]}
+    )
+    connection.commit()
+    return {**session, "challenge": {"id": row["id"], "target": int(row["from_score"])}}
+
+
+def decline_challenge(
+    connection: sqlite3.Connection, me: dict[str, Any], challenge_id: str
+) -> None:
+    store.ensure(connection)
+    found = connection.execute(
+        "DELETE FROM pl_challenges WHERE id = ? AND (to_id = ? OR from_id = ?) AND status = 'open'",
+        (challenge_id, me["id"], me["id"]),
+    ).rowcount
+    if not found:
+        raise LookupError("That challenge was not found.")
+    connection.commit()
+
+
+def _settle_challenge(
+    connection: sqlite3.Connection,
+    me: dict[str, Any],
+    session: dict[str, Any],
+    points: int,
+    moment: datetime,
+) -> None:
+    row = kit.fetch_one(
+        connection,
+        "SELECT * FROM pl_challenges WHERE to_session = ? AND to_id = ? AND status = 'open'",
+        (session["id"], me["id"]),
+    )
+    if not row:
+        return
+    kit.update_row(
+        connection,
+        "pl_challenges",
+        row["id"],
+        {"status": "done", "to_score": points, "done_at": kit.iso(moment)},
+    )
+    challenger = life.name_of(connection, row["from_id"])
+    target = int(row["from_score"])
+    name = (kit.loads(session["puzzle"], {}) or {}).get("title") or game_name(
+        session["game"]
+    )
+    verdict = (
+        f"{me['name']} beat {challenger}"
+        if points > target
+        else f"{challenger} held on against {me['name']}"
+        if points < target
+        else f"{me['name']} drew with {challenger}"
+    )
+    kit.log(
+        connection,
+        APP,
+        "challenge_done",
+        f"{verdict} in {name}: {points} to {target}",
+        ref_type="challenge",
+        ref_id=row["id"],
+        actor=me["name"],
+    )
+
+
+def challenge_of_session(
+    connection: sqlite3.Connection, session_id: str
+) -> dict[str, Any] | None:
+    row = kit.fetch_one(
+        connection,
+        "SELECT * FROM pl_challenges WHERE to_session = ?",
+        (session_id,),
+    )
+    if not row:
+        return None
+    return {
+        "id": row["id"],
+        "target": int(row["from_score"]),
+        "who": life.name_of(connection, row["from_id"]),
+        "status": row["status"],
+    }
+
+
+def challenges_pulse(
+    connection: sqlite3.Connection, me: dict[str, Any], *, now: datetime | None = None
+) -> tuple[int, list[dict[str, Any]]]:
+    """Open challenges for the badge, and the new ones (and fresh results of mine) as alerts."""
+    fresh = kit.iso(_now(now) - timedelta(minutes=30))
+    incoming = kit.fetch_all(
+        connection,
+        "SELECT * FROM pl_challenges WHERE to_id = ? AND status = 'open' ORDER BY created_at DESC LIMIT 30",
+        (me["id"],),
+    )
+    titles = quizzes.titles(connection) if incoming else {}
+    alerts = [
+        {
+            "id": f"play-challenge:{row['id']}",
+            "title": f"{life.name_of(connection, row['from_id'])} challenged you",
+            "body": f"Beat {row['from_score']} points in {game_name(row['game'], row['level'], titles)}. "
+            "Open Play to take it on.",
+            "tone": "good",
+            "speak": True,
+        }
+        for row in incoming
+        if row["created_at"] >= fresh and not row["to_session"]
+    ]
+    answered = kit.fetch_all(
+        connection,
+        "SELECT * FROM pl_challenges WHERE from_id = ? AND status = 'done' AND done_at >= ? ORDER BY done_at DESC LIMIT 5",
+        (me["id"], fresh),
+    )
+    for row in answered:
+        theirs, mine = int(row["to_score"] or 0), int(row["from_score"])
+        who = life.name_of(connection, row["to_id"])
+        alerts.append(
+            {
+                "id": f"play-challenge-done:{row['id']}",
+                "title": f"{who} took your challenge",
+                "body": f"{who} scored {theirs}; you scored {mine}. "
+                + (
+                    "They won this time!"
+                    if theirs > mine
+                    else "You are still the champion!"
+                    if theirs < mine
+                    else "It's a draw!"
+                ),
+                "tone": "good",
+            }
+        )
+    return len(incoming), alerts

@@ -73,6 +73,8 @@
   function notice(message, tone = "") {
     const node = h("div", { class: `pub-notice ${tone}`, role: tone === "bad" ? "alert" : "status", text: message });
     const main = $("pubMain");
+    // One message at a time at the top: a new one replaces the last (an old error never stays after a success).
+    for (const old of main.querySelectorAll(":scope > .pub-notice")) old.remove();
     main.prepend(node);
     node.scrollIntoView({ behavior: "smooth", block: "nearest" });
     return node;
@@ -82,13 +84,18 @@
     const id = input.id || (input.id = `p${Math.random().toString(36).slice(2, 8)}`);
     return h("div", { class: "pub-field" }, h("label", { for: id, text: label }), input, hint ? h("span", { class: "pub-muted pub-hint", text: hint }) : null);
   };
-  const button = (label, onClick, kind = "") => {
-    const node = h("button", { type: "button", class: `pub-btn ${kind}`.trim(), text: label });
+  // { submit: true } makes it the form's main button, so Enter in the form presses it.
+  const button = (label, onClick, kind = "", { submit = false } = {}) => {
+    const node = h("button", { type: submit ? "submit" : "button", class: `pub-btn ${kind}`.trim(), text: label });
+    if (submit) node.addEventListener("click", (event) => event.preventDefault(), { capture: true });
     node.addEventListener("click", async (event) => {
       if (node.disabled) return;
       node.disabled = true;
       node.setAttribute("aria-busy", "true");
-      try { await onClick(event); } catch (error) { notice(error.message, "bad"); } finally { node.disabled = false; node.removeAttribute("aria-busy"); }
+      try {
+        await onClick(event);
+        for (const old of $("pubMain").querySelectorAll(":scope > .pub-notice.bad")) old.remove();
+      } catch (error) { notice(error.message, "bad"); } finally { node.disabled = false; node.removeAttribute("aria-busy"); }
     });
     return node;
   };

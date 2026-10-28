@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from aira.apps import PAGE_PATH_PATTERN
 from aira_cloud import __version__
 from aira_cloud.db import loads, one
 from aira_cloud.webio import Reply, Req, cloud_route
@@ -41,6 +42,12 @@ def ui_index(req: Req):  # noqa: ANN201
         text.replace(CLOUD_MARKER, CLOUD_SCRIPTS).encode("utf-8"),
         content_type="text/html; charset=utf-8",
     )
+
+
+@cloud_route("GET", PAGE_PATH_PATTERN, auth="public")
+def ui_app_page(req: Req):  # noqa: ANN201
+    """An app's own address (/stocks, /home): the same page, which opens that app."""
+    return ui_index(req)
 
 
 @cloud_route("GET", r"/static/([A-Za-z0-9_.-]+)", auth="public")

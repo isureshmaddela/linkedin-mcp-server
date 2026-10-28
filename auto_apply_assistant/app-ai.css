@@ -1,0 +1,111 @@
+/* Styles for the ai app only. Loaded on every page: scope every selector to the app's own class names. */
+
+/* Conversations: a folding list (open on a computer, folded on a phone), with search. */
+details.ai-side { display: block; }
+details.ai-side > summary.ai-side-head { cursor: pointer; list-style: none; display: flex; align-items: center; gap: 6px; min-height: 32px; }
+details.ai-side > summary.ai-side-head::-webkit-details-marker { display: none; }
+details.ai-side > summary.ai-side-head::after { content: "▾"; margin-left: auto; color: var(--muted); }
+details.ai-side:not([open]) > summary.ai-side-head::after { content: "▸"; }
+.ai-side-tools { display: flex; gap: 6px; align-items: center; margin: 8px 0; }
+.ai-session-search { flex: 1; min-width: 0; min-height: 36px; padding: 6px 10px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--ink); font: inherit; font-size: 14px; }
+.ai-sessions-empty { padding: 8px; }
+.ai-head h2 { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.ai-head-actions { flex-wrap: nowrap; }
+.ai-head-actions[hidden] { display: none; }
+
+/* Routines and ideas */
+.ai-routines, .ai-ideas, .ai-ways, .ai-goals { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 10px; }
+.ai-routine, .ai-idea { display: grid; grid-template-columns: 96px minmax(0, 1fr) auto; gap: 12px 14px; align-items: center; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.ai-idea { grid-template-columns: minmax(0, 1fr) auto; }
+.ai-routine.off { opacity: .7; }
+.ai-routine-when { display: grid; gap: 2px; font-variant-numeric: tabular-nums; }
+.ai-routine-when strong { font-size: 20px; }
+.ai-routine-main { display: grid; gap: 2px; min-width: 0; }
+.ai-routine-main > * { overflow-wrap: anywhere; }
+.ai-routine-answer { margin: 6px 0 0; padding: 8px 10px; border-radius: var(--radius-sm); background: var(--surface-2); white-space: pre-wrap; max-height: 7.5em; overflow: hidden; }
+.ai-routine-actions { grid-column: 1 / -1; }
+
+/* Earn */
+.ai-ways { grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); }
+.ai-way { display: grid; gap: 6px; align-content: start; justify-items: start; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.ai-goal { display: grid; gap: 6px; padding: 12px 14px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); justify-items: start; }
+.ai-goal-head { display: grid; gap: 2px; }
+.ai-progress { width: 100%; height: 10px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+.ai-progress > span { display: block; height: 100%; background: var(--brand); border-radius: 999px; }
+.ai-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.ai-step { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); }
+
+/* Answers marked helpful or not (inside the answer's footer line). */
+.ai-rate { display: inline-flex; gap: 4px; margin-left: auto; }
+.ai-rate .ai-rate-btn { min-height: 28px; padding: 2px 8px; font-size: 12px; }
+.ai-rate .ai-rate-btn.on { background: var(--brand-soft); color: var(--brand-ink); border-color: var(--brand); }
+
+/* Agents: the consent level and the daily limit side by side. */
+.ai-agent-pills { display: flex; flex-wrap: wrap; gap: 6px; justify-content: flex-end; }
+
+/* Memory */
+.ai-memory-add { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: start; }
+.ai-memory-input { width: 100%; min-height: 44px; padding: 10px 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--ink); font: inherit; resize: vertical; box-sizing: border-box; }
+.ai-memories { list-style: none; margin: 12px 0 0; padding: 0; display: grid; gap: 8px; }
+.ai-memory { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 10px; align-items: center; padding: 10px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface); }
+.ai-memory-text { overflow-wrap: anywhere; }
+
+/* Earn: an earning goal's pace */
+.ai-pace { display: flex; flex-wrap: wrap; gap: 6px 8px; align-items: center; }
+
+/* Activity: a table on a computer, a list on a phone. */
+.ai-filters input[type="search"] { min-height: 44px; padding: 8px 12px; border: 1px solid var(--line-strong); border-radius: var(--radius-sm); background: var(--surface); color: var(--ink); font: inherit; }
+.ai-activity-cards { display: none; }
+.ai-activity-list li { align-items: center; }
+.ai-activity-text { flex: 1; min-width: 0; overflow-wrap: anywhere; }
+
+@media (max-width: 760px) {
+  .ai-activity-table { display: none; }
+  .ai-activity-cards { display: block; }
+  .ai-routine { grid-template-columns: minmax(0, 1fr) auto; }
+  .ai-routine-when { grid-column: 1 / -1; display: flex; gap: 8px; align-items: baseline; }
+  .ai-head { flex-wrap: wrap; }
+  .ai-head h2 { flex: 1 1 60%; }
+  .ai-filters input[type="search"] { flex: 1 1 100%; }
+  .ai-memory-add, .ai-memory { grid-template-columns: minmax(0, 1fr); }
+  .ai-agent-pills { justify-content: flex-start; }
+  .ai-rate { margin-left: 0; }
+}
+
+/* In the Aira frame: the left menu lists the tabs as folders and "+ New" starts a conversation, so on a wide screen
+   the bar under the title and the head's New conversation would say it twice; phones and tablets, where the menu is
+   a sheet, keep both. */
+@media (min-width: 901px) {
+  .ai-page > .tabs { display: none; }
+  .ai-new-chat { display: none; }
+}
+
+/* The conversation's numbers: one slim line under its name. */
+.ai-stats { display: flex; flex-wrap: wrap; gap: 4px 16px; padding: 8px 18px; border-bottom: 1px solid var(--line); font-size: 13px; background: var(--surface-2); }
+.ai-stat { white-space: nowrap; }
+a.ai-agents-on { text-decoration: none; }
+a.ai-agents-on:hover { text-decoration: underline; }
+
+/* A record the search across the top opened: marked until the page is drawn again. */
+.ai-picked { border-color: var(--brand); box-shadow: 0 0 0 2px var(--brand-soft); }
+
+/* Search results */
+.ai-results-head { display: flex; flex-wrap: wrap; gap: 10px 16px; align-items: center; justify-content: space-between; }
+.ai-results-for { margin: 0; font-weight: 600; }
+.ai-hits { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.ai-hit { display: flex; gap: 12px; align-items: center; min-height: 44px; padding: 8px 10px; border-radius: var(--radius-sm); color: var(--ink); text-decoration: none; }
+.ai-hit:hover, .ai-hit:focus-visible { background: var(--surface-2); }
+.ai-hit-icon { display: inline-grid; place-items: center; flex: 0 0 auto; width: 36px; height: 36px; border-radius: 10px; background: var(--brand-soft); color: var(--brand-ink); }
+.ai-hit-icon svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.ai-hit-text { display: grid; gap: 2px; min-width: 0; }
+.ai-hit-text > * { overflow-wrap: anywhere; }
+
+/* Agents on a tablet or phone: name, numbers and consent each on their own line beside the icon, then the switch and
+   Configure (the pills used to squeeze into the icon's column and run under the switch). */
+@media (max-width: 860px) {
+  .ai-agent { grid-template-columns: 44px minmax(0, 1fr) auto; gap: 8px 12px; }
+  .ai-agent-name, .ai-agent-stats, .ai-agent-pills { grid-column: 2 / -1; }
+  .ai-agent-pills { justify-content: flex-start; }
+  .ai-agent > .ai-switch { grid-column: 2; }
+  .ai-stats { padding: 8px 12px; }
+}

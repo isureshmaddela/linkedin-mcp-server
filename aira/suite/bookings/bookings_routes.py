@@ -13,13 +13,16 @@ from aira.airaapi.http import Raw, Request, aira_route
 from aira.suite import kit, public
 from aira.suite.bookings import service, store
 from aira.suite.bookings.store import APP
+from aira.suite.shop import access
 
 BASE = "/api/bookings"
 ID = "([0-9a-f]{32})"
 
 
 def _open(request: Request) -> Any:
-    connection = request.connect()
+    connection = access.connect(
+        request
+    )  # a child's or a teen's household profile is refused
     store.ensure(connection)
     return connection
 
@@ -110,7 +113,10 @@ def page_link_revoke(request: Request) -> tuple[int, dict[str, Any]]:
 @aira_route("GET", f"{BASE}/services")
 def services_list(request: Request) -> tuple[int, dict[str, Any]]:
     with _open(request) as connection:
-        return 200, {"services": store.list_services(connection)}
+        return 200, {
+            "services": store.list_services(connection),
+            "today": service.local_today(connection),
+        }
 
 
 @aira_route("POST", f"{BASE}/services")
@@ -160,6 +166,9 @@ def staff_list(request: Request) -> tuple[int, dict[str, Any]]:
         return 200, {
             "staff": store.list_staff(connection),
             "weekdays": list(store.WEEKDAYS),
+            "today": service.local_today(
+                connection
+            ),  # the business's day, for forms that start on today
         }
 
 
@@ -233,7 +242,7 @@ def slots(request: Request) -> tuple[int, dict[str, Any]]:
         days = service.slots_for_days(
             connection,
             request.q("service_id"),
-            request.q("day") or kit.today(),
+            request.q("day") or service.local_today(connection),
             request.qint("days", 1, 1, 14),
             staff_id=request.q("staff_id"),
             customer_rules=request.q("customer_rules") == "1",
@@ -336,7 +345,10 @@ def bookings_update(request: Request) -> tuple[int, dict[str, Any]]:
         if payload.get("status"):
             if payload["status"] == "cancelled":
                 booking = service.cancel(
-                    connection, booking_id, reason=str(payload.get("reason") or "")
+                    connection,
+                    booking_id,
+                    reason=str(payload.get("reason") or ""),
+                    origin=request,
                 )
             else:
                 booking = service.set_status(
@@ -358,6 +370,7 @@ def bookings_cancel(request: Request) -> tuple[int, dict[str, Any]]:
             connection,
             request.match.group(1),
             reason=str(request.payload.get("reason") or ""),
+            origin=request,
         )
     request.audit("bookings.cancel", "booking", booking["id"])
     return 200, {"booking": booking}
@@ -425,10 +438,63 @@ def agenda(request: Request) -> tuple[int, dict[str, Any]]:
     with _open(request) as connection:
         return 200, service.agenda(
             connection,
-            request.q("start") or kit.today(),
+            request.q("start") or service.local_today(connection),
             request.qint("days", 7, 1, 31),
             staff_id=request.q("staff_id"),
         )
+
+
+# ---------------------------------------------------------------------------
+# the waiting list, team pay
+# ---------------------------------------------------------------------------
+
+
+@aira_route("GET", f"{BASE}/waitlist")
+def waitlist_list(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as connection:
+        return 200, {
+            "waitlist": service.list_waitlist(
+                connection,
+                status=request.q("status"),
+                upcoming=request.q("when") != "all",
+            )
+        }
+
+
+@aira_route("PATCH", f"{BASE}/waitlist/{ID}")
+def waitlist_update(request: Request) -> tuple[int, dict[str, Any]]:
+    entry_id = request.match.group(1)
+    with _open(request) as connection:
+        entry = service.set_waitlist_status(
+            connection, entry_id, str(request.payload.get("status") or "")
+        )
+    request.audit(
+        "bookings.waitlist", "waitlist", entry_id, {"status": entry["status"]}
+    )
+    return 200, {"entry": entry}
+
+
+@aira_route("DELETE", f"{BASE}/waitlist/{ID}")
+def waitlist_delete(request: Request) -> tuple[int, dict[str, Any]]:
+    entry_id = request.match.group(1)
+    with _open(request) as connection:
+        service.set_waitlist_status(connection, entry_id, "removed")
+    request.audit("bookings.waitlist_remove", "waitlist", entry_id)
+    return 200, {"removed": True}
+
+
+@aira_route("GET", f"{BASE}/earnings")
+def earnings_report(request: Request) -> tuple[int, dict[str, Any]] | Raw:
+    """Team pay: completed appointments, takings and commission per person between two days."""
+    with _open(request) as connection:
+        if request.q("format") == "csv":
+            return Raw(
+                200,
+                service.earnings_csv(connection, request.q("from"), request.q("to")),
+                "text/csv; charset=utf-8",
+                filename="team-pay.csv",
+            )
+        return 200, service.earnings(connection, request.q("from"), request.q("to"))
 
 
 # ---------------------------------------------------------------------------
@@ -447,6 +513,30 @@ def customers_list(request: Request) -> tuple[int, dict[str, Any]] | Raw:
                 filename="customers.csv",
             )
         return 200, {"customers": service.list_customers(connection, q=request.q("q"))}
+
+
+@aira_route("GET", f"{BASE}/search")
+def search(request: Request) -> tuple[int, dict[str, Any]]:
+    """The search box across the top of Commerce: a few bookings (customer, reference or service; latest first),
+    customers and services matching the words. Nothing for an empty query."""
+    with _open(request) as connection:
+        q = request.q("q")[:100]
+        limit = request.qint("limit", 6, 1, 50)
+        if not q:
+            return 200, {"q": "", "bookings": [], "customers": [], "services": []}
+        needle = q.lower()
+        services = [
+            row
+            for row in store.list_services(connection)
+            if needle in f"{row['name']} {row.get('category') or ''}".lower()
+        ]
+        return 200, {
+            "q": q,
+            "bookings": service.list_bookings(connection, when="all", q=q, limit=limit),
+            "customers": service.list_customers(connection, q=q, limit=limit),
+            "services": services[:limit],
+            "timezone": store.zone_name(connection),
+        }
 
 
 @aira_route("GET", f"{BASE}/customers/{ID}")
@@ -559,10 +649,10 @@ def booking_page_slots(
         item["id"] == service_id for item in service.public_page(connection)["services"]
     ):
         raise LookupError("That service is not available to book.")
-    days = service.slots_for_days(
+    days = service.day_states(
         connection,
         service_id,
-        str(payload.get("day") or kit.today()),
+        str(payload.get("day") or service.local_today(connection)),
         kit.integer(
             payload.get("days"), "the number of days", default=7, minimum=1, maximum=14
         ),
@@ -575,10 +665,43 @@ def booking_page_slots(
                 "slots": [
                     {"start": s["start"], "local": s["local"]} for s in d["slots"]
                 ],
+                # full: every time is booked, so the customer may join the waiting list; closed, past or
+                # not_yet: there is nothing to wait for
+                "state": d["state"],
+                "open": d["state"] in ("open", "full"),
             }
             for d in days
         ]
     }
+
+
+@public.action(APP, service.PAGE_KIND, "join_waitlist")
+def booking_page_waitlist(
+    connection: Any,
+    link: dict[str, Any],
+    payload: dict[str, Any],
+    visitor: dict[str, Any],
+) -> tuple[int, dict[str, Any]]:
+    """A full day: the customer asks to be told when a time opens."""
+    store.ensure(connection)
+    service_id = str(payload.get("service_id") or "")
+    if not any(
+        item["id"] == service_id for item in service.public_page(connection)["services"]
+    ):
+        raise LookupError("That service is not available to book.")
+    entry = service.join_waitlist(
+        connection,
+        service_id=service_id,
+        day=str(payload.get("day") or ""),
+        staff_id=str(payload.get("staff_id") or ""),
+        customer={
+            "name": payload.get("name"),
+            "email": payload.get("email"),
+            "phone": payload.get("phone"),
+        },
+        note=str(payload.get("note") or ""),
+    )
+    return 201, {"waiting": True, "day": entry["day"]}
 
 
 @public.action(APP, service.PAGE_KIND, "book")
@@ -630,7 +753,7 @@ def booking_view(connection: Any, link: dict[str, Any]) -> dict[str, Any]:
         "booking": service.public_booking(connection, booking),
         "timezone": store.zone_name(connection),
         "cancel_notice_hours": int(rules["cancel_notice_hours"]),
-        "today": kit.today(),
+        "today": service.local_today(connection),
     }
 
 
@@ -646,10 +769,10 @@ def booking_slots(
         raise ValueError(
             "This booking can no longer be changed online. Please contact the business."
         )
-    days = service.slots_for_days(
+    days = service.day_states(
         connection,
         booking["service_id"],
-        str(payload.get("day") or kit.today()),
+        str(payload.get("day") or service.local_today(connection)),
         kit.integer(
             payload.get("days"), "the number of days", default=7, minimum=1, maximum=14
         ),
@@ -662,6 +785,10 @@ def booking_slots(
                 "slots": [
                     {"start": s["start"], "local": s["local"]} for s in d["slots"]
                 ],
+                # full: every time is booked, so the customer may join the waiting list; closed, past or
+                # not_yet: there is nothing to wait for
+                "state": d["state"],
+                "open": d["state"] in ("open", "full"),
             }
             for d in days
         ]
@@ -681,6 +808,7 @@ def booking_cancel(
         booking["id"],
         by="customer",
         reason=str(payload.get("reason") or ""),
+        origin=visitor,
     )
     return 200, {"booking": service.public_booking(connection, updated)}
 

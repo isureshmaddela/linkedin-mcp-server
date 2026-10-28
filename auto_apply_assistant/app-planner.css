@@ -1,0 +1,53 @@
+/* Styles for the planner app only. Loaded on every page: scope every selector to the app's own class names. */
+
+/* A text box and its button share a row and shrink together on a phone instead of pushing the page sideways. */
+.planner .planner-quick,
+.planner .planner-filters { flex-wrap: nowrap; }
+.planner .planner-quick input,
+.planner .planner-filters input,
+.planner .planner-filters select { min-width: 0; }
+.planner .planner-filters select { flex: 0 1 auto; max-width: 45%; }
+@media (max-width: 520px) {
+  .planner .planner-filters { flex-wrap: wrap; }
+  .planner .planner-filters input { flex: 1 1 100%; }
+  .planner .planner-filters select { max-width: none; flex: 1 1 auto; }
+}
+
+/* Meals: a week of day cards, today stands out (with a word as well as a colour: the "today" pill). */
+.planner .planner-week-nav { justify-content: space-between; flex-wrap: wrap; }
+/* With very large text a button's words wrap rather than push the page sideways. */
+.planner .btn { white-space: normal; max-width: 100%; }
+.planner .planner-week-label { flex: 1; text-align: center; min-width: 0; }
+.planner .planner-week { grid-template-columns: repeat(auto-fit, minmax(min(100%, 280px), 1fr)); }
+.planner .planner-day .life-lines { margin: 0; }
+.planner .planner-today { border-color: var(--accent, currentColor); box-shadow: 0 0 0 1px var(--accent, currentColor) inset; }
+
+/* Long words (a wifi password, a pasted link) wrap inside a card instead of widening it. */
+.planner .life-card,
+.planner .life-line-text,
+.planner .life-line-sub { overflow-wrap: anywhere; }
+
+/* Savings goals: how much is put aside, as a bar (the words above it say the same, so colour is not the only cue). */
+.planner .planner-progress { height: 12px; border-radius: 999px; background: var(--surface-3, #e5e7eb); overflow: hidden; margin: 4px 0; }
+.planner .planner-progress span { display: block; height: 100%; border-radius: inherit; background: var(--brand, currentColor); transition: width 0.3s ease; }
+@media (prefers-reduced-motion: reduce) { .planner .planner-progress span { transition: none; } }
+
+/* In the Aira frame: the left menu lists the tabs as folders, so on a wide screen the bar under the title would say it
+   twice; phones and tablets, where the menu is a sheet, keep the bar. */
+@media (min-width: 901px) {
+  .planner > .tabs { display: none; }
+}
+
+/* The record the search box opened: outlined until the person moves on (views-planner.js answer()). */
+.planner .planner-found { outline: 2px solid var(--brand, currentColor); outline-offset: 3px; border-radius: 10px; }
+
+/* Search results: each row is one link, with the kind's icon. */
+.planner .planner-hit { display: flex; align-items: center; gap: 12px; flex: 1; min-width: 0; color: inherit; text-decoration: none; border-radius: 10px; }
+.planner .planner-hit:hover .life-line-text { text-decoration: underline; }
+.planner .planner-hit:focus-visible { outline: 2px solid var(--brand, currentColor); outline-offset: 2px; }
+.planner .planner-hit-icon { display: grid; place-items: center; flex: none; width: 34px; height: 34px; border-radius: 50%; background: var(--brand-soft, var(--surface-2)); color: var(--brand-ink, currentColor); }
+.planner .planner-hit-icon svg { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.planner .planner-hit-text { display: grid; gap: 2px; min-width: 0; }
+
+/* An empty list's next step sits under its words, centred like them. */
+.planner .empty .btn-row { justify-content: center; margin-top: 8px; }

@@ -114,6 +114,15 @@ Last updated: 2026-10-23.
   - Browser walk on live boards with no key: 16 of 16 checks (Jobs tab, job drawer credit, Careers search and switch,
     engine card, History at 0 credits, Auto-apply editor).
 
+### Password reset, mail server, show/hide passwords (2026-10-26)
+- Sign-in → **Forgot your password?** issues a one-time code (`ABCD-EFGH`, 15 minutes, 5 tries, stored hashed in `accounts.sqlite3` `password_resets`). It is always written to the console (`Reset code for ...`) and emailed when a mail server is set. The answer is the same for any email. Resetting signs out every session and signs in. Routes: `POST /api/auth/password/forgot`, `POST /api/auth/password/reset`.
+- Settings → Data → **Password** changes it with the current one (`POST /api/account/password`); other sessions end.
+- Settings → Integrations → **Password reset email**: Gmail (`smtp.gmail.com:587` STARTTLS + app password) or any SMTP server, with a test send. One for the installation, set by the first account; password Fernet-encrypted (`reset_mail` table). `AIRA_SMTP_*` in `.env` is the fallback. Routes `GET/POST/DELETE /api/settings/reset-mail`, `POST /api/settings/reset-mail/test`; all new routes DENY in `aira_cloud/policy.py`.
+- Every password input gets a show/hide button (`enhancePasswordInputs` in `app.js`, also for inputs added later).
+- The local sign-in page no longer offers "Sign in with your Aira account"; opening the installation from the account's app launcher (`#/launch?token=`) still works.
+- Note: the log redactor masks the word after "password", so log lines say "Reset code", not "Password reset code".
+- Validation: `tests/test_password_reset.py` 17 (SMTP stub), account-link and i18n tests pass; browser walkthroughs 12/12 (real server) and owner settings on a scratch server.
+
 ## Current Work
 
 None in progress. All slices above are implemented and validated.
@@ -306,3 +315,73 @@ advertising manager so businesses pay to advertise and creators earn from those 
 - New `tests/test_e2e_walk.py`: every page of every app for every hosted role (owner, admin, coach, candidate, billing, auditor, every app on), every platform-console page, every local page, failing on script/console errors, failed requests or error boxes; plus a hosted upload through the real upload screen watched by a member of another organization.
 - Fixed from the walk: staff opening a candidate-workspace page (Careers sections, Settings) without a workspace got a raw "send the X-Aira-Candidate header" error: now an "Open a workspace first" page (own workspace / choose a candidate; billing: not part of the role) via `Aira.sectionGate`; the local Developers page no longer asks the hosted-only API (404) first. Earlier the same day: closed-app page, Business hub for candidates, hosted Leads without Sales Navigator, sidebar redraw that could swallow a click, `test_suite_life` date taken in the account's time zone (failed every evening).
 - Full suite: 2517 passed, 28 skipped, 8 failed: the 2 Linux-only container tests, and 6 that failed with "malloc failure" / browser start failures because the machine ran out of memory (C: full, page file cannot grow); all 6 pass when rerun.
+
+## Life and AI apps, from MONOSAGE /ai and /life (2026-10-26)
+Request: implement the applications listed at http://localhost:3000/ai and /life (the MONOSAGE Next.js app in
+`D:\monosage-omnilife\monosage\apps\web\app\(dashboard)`: AI Chat, the Agent Control Panel; Life dashboard, Goals,
+Life Timeline, Document Vault) in Aira. Built as two everyday apps (catalog `LIFE_APPS`, packages, hosted gating,
+pricing and policy rules all derived): docs `docs/apps/journey.md`, `docs/apps/ai.md`.
+- **Life** (`journey`; `/api/life` is the life core): `aira/suite/journey/` (`jr_goals`, `jr_steps`, `jr_checkins`,
+  `jr_events`, `jr_documents`), `views-journey.js`. Goals with steps (progress follows the steps) or check-ins, states
+  on track / behind / overdue, completing adds "Reached a goal" to the timeline once, CSV; timeline by year, private or
+  shared with the household (read-only to others); vault with document number and scan (PDF/photo/text by magic bytes,
+  10 MB) Fernet-encrypted via `request.secret_store`, expiry states, download, image preview; overview with life score
+  and coming up; Today card and pulse reminders (30/7/1/0 days). Owner-only everywhere.
+- **AI** (`ai`): `aira/suite/ai/` (`agents.py` registry, `service.py` chat + consent gate, `ai_routes.py`),
+  `views-ai.js`. Agents per app: LifeAgent and PlannerAgent read and act (goal, progress, timeline event, task,
+  shopping items, note); Health, Family, Social, Learn, Play, News, Videos read their Today cards; BusinessAgent reads
+  revenue and hub summaries (adults locally; owner/admin/coach/auditor hosted; only with a business app). Consent levels
+  read_only / auto_minor / auto_major / manual_approval per person and agent, approvals (also on Today, badge),
+  activity log + CSV, sessions with history. Chat: plain commands parsed without the model (instant); otherwise the
+  writing model (`kit.draft`, JSON `{reply, actions}`) over the agents' facts, built-in answers without a model;
+  voice input via the browser's speech recognition.
+- Fixed on the way: `Aira.fmt.date` showed a calendar day ("2026-11-20") as the day before west of UTC (now parsed as
+  a local date); the local server left the body of a DELETE/GET unread, so the next request on the kept-alive
+  connection failed ("{}GET" -> 501); now drained (`_discard_body`).
+- i18n: 361 new strings in Telugu and Hindi (prompt/log fragments kept in English); `i18n_check` te/hi OK.
+- Tests: `tests/test_suite_journey.py` 11, `tests/test_suite_ai.py` 12 (unit, local server, hosted 402/roles/isolation);
+  app-list tests updated. Browser walk (real server, Ollama answering): 30/30, desktop and phone, no console errors.
+- Not built: removing a member (hosted) leaves their Life/AI rows in the organization database, like Planner and
+  Health; Health actions (mark a dose taken) are not agent actions yet; agent replies are in English (the UI is
+  translated); token counts are estimates (the gateway returns only the JSON).
+
+## Stocks, and one agent per app (2026-10-27)
+Request: a Stocks app (each stock's log of highs and lows, top gainers/losers, predictions, a way to earn), every
+app working end to end with one account, tests per app, more features where they help, one agent per app.
+- **Stocks** (`stocks`, `aira/suite/stocks/`, `stk_` tables, `views-stocks.js`, `public-stocks.js`,
+  `docs/apps/stocks.md`): Yahoo Finance chart provider (no key, cached) and a seeded offline provider
+  (`AIRA_MARKET_PROVIDER=stub`, forced in tests by `tests/conftest.py`); US and NSE universes plus indices; markets
+  (gainers, losers, most traded, 52-week highs/lows); each stock's chart and daily log with best/worst days and CSV;
+  indicators, 5/20-day forecasts with an 80% band and a walk-forward track record against a no-change baseline,
+  personal predictions scored later; practice portfolios (children too) and real holdings (adults) with P&L;
+  watchlists, alerts (background + pulse + Today); earning: ideas with an automatic track record, a public analyst
+  page with paid subscriptions (payments the analyst confirms, access codes, revenue ledger), a practice league;
+  StocksAgent registered with AI via `agents.register` (new hook). Never executes trades; not financial advice.
+- **Workflow (54 agents):** per app, an engineer (fix + 2-5 features, often an earning feature), an independent
+  tester, and a fixer. Every app's feature list is in its `docs/apps/<id>.md`; per-app test files `tests/test_suite_<id>*`.
+  Each app also has `auto_apply_assistant/app-<id>.css` (loaded on the app and public pages).
+- **Shared fixes applied from the agents' requests:** `public.set_default_index` no longer replaces the hosted
+  organization index (every hosted public link answered 404 on `aira_cloud serve`); `kit.cents` refuses Infinity/NaN/
+  huge values (were 500s); `kit.record_revenue` moves a re-recorded or un-voided payment to its date; `kit.draft`
+  says "model" only when the model gave every key; Business hub routes refuse a child's/teen's profile
+  (`life.require_grown_up`, `GrownUpsOnly` code `adult_only`) and list everyday apps that earn (News, Learn, Stocks);
+  personal public pages can drop the business block (`"brand": False`, `"business_payment": False`: Social profile/
+  listing, Family board, Life goal, Stocks analyst, Learn deck payment); `public.html` loads `public-journey.js`;
+  public notices replace each other, `ctx.button(..., {submit: true})`, language button in the flow on phones;
+  `S.edit` submits on Enter, `S.table` opens a row only on the row's own Enter, `S.bars` scales small values, money
+  typos are refused in `S.form`; `S.live` stops when the page redraws (`Router.renders`) or its node leaves;
+  `aira:life-action` event after an alert action; tabs keep the open tab in sight on phones; a link to the current
+  address redraws; `.suite-body` children can shrink (no sideways page scroll); toasts never cover dialog buttons;
+  hub shows 4 summary cards; Videos uploader stops retrying explained 400s; `Aira.fmt.date` reads calendar days as
+  local dates (earlier); local server drains unread request bodies (earlier).
+- **Not applied (noted):** hosted policy giving `life.manage` to auditors/billing on Planner money routes (apps can
+  read `suite.actor()["role"]`); a schema migration for the Developers rank/earning tables (store.ensure_extras
+  covers it); first-request "database schema has changed" retry in the shared connect (Social/Family retry
+  themselves); skipping a hosted organization's app task when it lost the app; hiding business apps in a child's
+  switcher (their routes and the hub refuse); Careers' profile header before GET /api/profile; Today cards for Careers.
+- **i18n:** 4,002 new strings translated (12 translator agents) + merge; te/hi 16,236 strings OK.
+- **Validation:** full suite 3,247 passed, 21 skipped; the 2 Linux-only container tests fail as always; 2 browser
+  tests that my shared changes affected were fixed (Learn money message, Sales phone table). Real server walk with one
+  account (`tester@aira.test`): 18 apps, 30 sections, 155 tabs, 0 script errors, 0 failed requests, 0 error boxes;
+  the AI app lists 13 agents including StocksAgent; "Add Apple to my watchlist" through the model now resolves
+  "Apple Inc." (fixed, regression test).

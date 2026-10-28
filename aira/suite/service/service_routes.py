@@ -9,8 +9,9 @@ from __future__ import annotations
 
 from typing import Any
 
+from aira import suite
 from aira.airaapi.http import Raw, Request, aira_route
-from aira.suite import background, kit, public
+from aira.suite import background, kit, life, public
 from aira.suite.service import desk, store
 from aira.suite.service.store import APP
 
@@ -22,8 +23,30 @@ CHAT_REF = "chat"
 HOSTED_RULES = {"cases_suggest": "read"}
 
 
+def _grown_up(request: Request, connection: Any) -> None:
+    """Service holds customers' names, emails and phone numbers and the business's money: in the single-user build
+    a child or teen household profile is refused (403), as the hosted build refuses a member without a business
+    role. The profile header is checked like every life app does (it must exist and be unlocked); with no header
+    the request is the account itself. The hosted build's roles are checked by the gateway."""
+    member = suite.actor()
+    if member and member.get("member_id"):
+        return
+    header = str(request.header("X-Aira-Profile") or "").strip()
+    if not header:
+        return
+    if not life.is_adult(life.current(request, connection)):
+        raise PermissionError(
+            "Service holds your customers' details and payments. Ask a grown-up in your household to open it."
+        )
+
+
 def _connect(request: Request) -> Any:
     connection = request.connect()
+    try:
+        _grown_up(request, connection)
+    except Exception:
+        connection.close()
+        raise
     store.ensure(connection)
     return connection
 
@@ -95,6 +118,7 @@ def cases_list(request: Request) -> tuple[int, dict[str, Any]] | Raw:
         return 200, {
             "cases": cases,
             "views": desk.view_counts(connection, me=_actor(request)),
+            "me": _actor(request),
         }
 
 
@@ -133,6 +157,74 @@ def cases_update(request: Request) -> tuple[int, dict[str, Any]]:
     return 200, detail
 
 
+@aira_route("DELETE", f"{BASE}/cases/{ID}")
+def cases_delete(request: Request) -> tuple[int, dict[str, Any]]:
+    case_id = request.match.group(1)
+    with _connect(request) as connection:
+        removed = desk.delete_case(connection, case_id, actor=_actor(request))
+    request.audit("service.case_delete", "case", case_id)
+    return 200, {"deleted": True, "cases": removed}
+
+
+@aira_route("POST", f"{BASE}/cases/bulk")
+def cases_bulk(request: Request) -> tuple[int, dict[str, Any]]:
+    payload = request.payload
+    with _connect(request) as connection:
+        result = desk.bulk(
+            connection,
+            payload.get("ids"),
+            str(payload.get("action") or ""),
+            actor=_actor(request),
+            assignee=kit.text(payload.get("assignee"), "the assignee", max_len=120),
+            origin=request,
+        )
+    request.audit(
+        "service.case_bulk",
+        "case",
+        "",
+        {"action": payload.get("action"), "done": result["done"]},
+    )
+    return 200, result
+
+
+@aira_route("POST", f"{BASE}/cases/{ID}/charges")
+def cases_charge(request: Request) -> tuple[int, dict[str, Any]]:
+    case_id = request.match.group(1)
+    with _connect(request) as connection:
+        charge = desk.add_charge(
+            connection, case_id, request.payload, actor=_actor(request), origin=request
+        )
+        detail = desk.case_detail(connection, case_id)
+    request.audit("service.charge_add", "charge", charge["id"])
+    return 201, {**detail, "charge": charge}
+
+
+@aira_route("POST", f"{BASE}/charges/{ID}/paid")
+def charges_paid(request: Request) -> tuple[int, dict[str, Any]]:
+    charge_id = request.match.group(1)
+    paid = kit.flag(request.payload.get("paid", True))
+    with _connect(request) as connection:
+        charge = desk.set_charge_paid(
+            connection, charge_id, paid, actor=_actor(request)
+        )
+        detail = desk.case_detail(connection, charge["case_id"])
+    request.audit(
+        "service.charge_paid" if paid else "service.charge_unpaid", "charge", charge_id
+    )
+    return 200, {**detail, "charge": charge}
+
+
+@aira_route("DELETE", f"{BASE}/charges/{ID}")
+def charges_delete(request: Request) -> tuple[int, dict[str, Any]]:
+    charge_id = request.match.group(1)
+    with _connect(request) as connection:
+        case_id = store.get_charge(connection, charge_id)["case_id"]
+        desk.delete_charge(connection, charge_id, actor=_actor(request))
+        detail = desk.case_detail(connection, case_id)
+    request.audit("service.charge_delete", "charge", charge_id)
+    return 200, detail
+
+
 @aira_route("POST", f"{BASE}/cases/{ID}/reply")
 def cases_reply(request: Request) -> tuple[int, dict[str, Any]]:
     case_id = request.match.group(1)
@@ -167,6 +259,86 @@ def cases_link(request: Request) -> tuple[int, dict[str, Any]]:
         case = store.get_case(connection, request.match.group(1))
         link = desk.case_link(connection, case)
     return 200, {"link": link, "url": kit.public_url(link["path"], request)}
+
+
+# ---------------------------------------------------------------------------
+# customers, reports, paid services
+# ---------------------------------------------------------------------------
+
+
+@aira_route("GET", f"{BASE}/customers")
+def customers_list(request: Request) -> tuple[int, dict[str, Any]] | Raw:
+    with _connect(request) as connection:
+        people = desk.customers(connection, q=request.q("q"))
+        if request.q("format") == "csv":
+            currency = kit.business(connection)["currency"]
+            rows = [
+                {
+                    **person,
+                    "paid": kit.fmt_money(person["paid_cents"], currency),
+                    "due": kit.fmt_money(person["due_cents"], currency),
+                }
+                for person in people
+            ]
+            return Raw(
+                200,
+                kit.csv_bytes(rows, desk.CUSTOMER_CSV_COLUMNS),
+                "text/csv; charset=utf-8",
+                filename="customers.csv",
+            )
+        return 200, {"customers": people}
+
+
+@aira_route("GET", f"{BASE}/customers/cases")
+def customers_cases(request: Request) -> tuple[int, dict[str, Any]]:
+    with _connect(request) as connection:
+        return 200, {"cases": desk.customer_cases(connection, request.q("key"))}
+
+
+@aira_route("GET", f"{BASE}/reports")
+def reports(request: Request) -> tuple[int, dict[str, Any]]:
+    with _connect(request) as connection:
+        return 200, {
+            "stats": desk.stats(connection),
+            "reports": desk.reports(connection),
+            "checklist": desk.checklist(connection),
+        }
+
+
+@aira_route("GET", f"{BASE}/offers")
+def offers_list(request: Request) -> tuple[int, dict[str, Any]]:
+    with _connect(request) as connection:
+        return 200, {
+            "offers": desk.list_offers(connection),
+            **desk.charge_lists(connection),
+            "earned": desk.reports(connection)["money"],
+            "help_link": public.link_for(connection, APP, "help_center", HELP_REF),
+            "payment_link": kit.business(connection).get("payment_link") or "",
+        }
+
+
+@aira_route("POST", f"{BASE}/offers")
+def offers_create(request: Request) -> tuple[int, dict[str, Any]]:
+    with _connect(request) as connection:
+        offer = desk.save_offer(connection, request.payload)
+    request.audit("service.offer_create", "offer", offer["id"])
+    return 201, {"offer": offer}
+
+
+@aira_route("PATCH", f"{BASE}/offers/{ID}")
+def offers_update(request: Request) -> tuple[int, dict[str, Any]]:
+    with _connect(request) as connection:
+        offer = desk.save_offer(connection, request.payload, request.match.group(1))
+    request.audit("service.offer_update", "offer", offer["id"])
+    return 200, {"offer": offer}
+
+
+@aira_route("DELETE", f"{BASE}/offers/{ID}")
+def offers_delete(request: Request) -> tuple[int, dict[str, Any]]:
+    with _connect(request) as connection:
+        desk.delete_offer(connection, request.match.group(1))
+    request.audit("service.offer_delete", "offer", request.match.group(1))
+    return 200, {"deleted": True}
 
 
 # ---------------------------------------------------------------------------
@@ -392,6 +564,15 @@ def _help_page(connection: Any) -> dict[str, Any]:
             for a in desk.list_articles(connection, published_only=True)
         ],
         "chat_path": chat["path"] if chat and desk.chat_online(connection) else "",
+        "offers": [
+            {
+                "id": o["id"],
+                "title": o["title"],
+                "description": o["description"],
+                "price_cents": o["price_cents"],
+            }
+            for o in desk.list_offers(connection, active_only=True)
+        ],
     }
 
 
@@ -463,6 +644,43 @@ def _contact(
     case = desk.create_case(connection, raw, channel=channel, origin=visitor)
     link = public.link_for(connection, APP, "case", case["id"]) or {}
     return 201, {"reference": case["reference"], "path": link.get("path", "")}
+
+
+@public.query(APP, "help_center", "answers")
+def help_answers(
+    connection: Any, link: dict[str, Any], params: dict[str, Any]
+) -> tuple[int, dict[str, Any]]:
+    # Asked while a visitor writes to the business: answers that might already help (read only).
+    store.ensure(connection)
+    return 200, {
+        "articles": desk.suggest_articles(connection, str(params.get("q") or "")[:2000])
+    }
+
+
+@public.action(APP, "help_center", "request")
+def help_request(
+    connection: Any,
+    link: dict[str, Any],
+    payload: dict[str, Any],
+    visitor: dict[str, Any],
+) -> tuple[int, dict[str, Any]]:
+    """A visitor asks for one of the business's paid services."""
+    store.ensure(connection)
+    if str(payload.get("website") or ""):
+        return 201, {"reference": "", "path": ""}  # a bot filled the hidden field
+    case = desk.request_offer(
+        connection,
+        {
+            "offer_id": payload.get("offer_id"),
+            "name": payload.get("name"),
+            "email": payload.get("email"),
+            "phone": payload.get("phone"),
+            "message": payload.get("message"),
+        },
+        origin=visitor,
+    )
+    found = public.link_for(connection, APP, "case", case["id"]) or {}
+    return 201, {"reference": case["reference"], "path": found.get("path", "")}
 
 
 @public.action(APP, "help_center", "contact")
@@ -542,9 +760,24 @@ def chat_contact(
 
 
 def _case_page(connection: Any, case_id: str) -> dict[str, Any]:
-    case = store.get_case(connection, case_id)
-    if case["merged_into"]:
-        case = store.get_case(connection, case["merged_into"])
+    own = store.get_case(connection, case_id)
+    case = desk.kept_case(connection, own)
+    if case["id"] != own["id"] and not desk.same_customer(own, case):
+        # Merged into another customer's case (before merges checked the customer, or the kept case's details
+        # were changed later): never show this customer someone else's conversation or charges.
+        return {
+            "reference": own["reference"],
+            "subject": own["subject"],
+            "status": "closed",
+            "created_at": own["created_at"],
+            "thread": [],
+            "can_reply": False,
+            "can_rate": False,
+            "rated": None,
+            "note": desk.COMBINED,
+            "charges": [],
+            "due_cents": 0,
+        }
     thread = [
         {
             "from": "you" if m["author_kind"] == "customer" else "us",
@@ -568,6 +801,7 @@ def _case_page(connection: Any, case_id: str) -> dict[str, Any]:
         "can_rate": case["status"] in ("solved", "closed")
         and case["csat_score"] is None,
         "rated": case["csat_score"],
+        **desk.public_charges(connection, case["id"]),
     }
 
 

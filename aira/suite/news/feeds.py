@@ -215,6 +215,9 @@ def _open(url: str) -> tuple[http.client.HTTPConnection, str, str]:
     host = parts.hostname
     port = parts.port or (443 if scheme == "https" else 80)
     address = _check_addresses(host, port)
+    if scheme == "http" and not ipaddress.ip_address(address).is_loopback:
+        # The test switch allows plain http to this computer only, never to a site on the internet.
+        raise FeedError("A news feed address starts with https://.")
     sock = socket.create_connection(
         (address, port), timeout=TIMEOUT
     )  # the address that was checked

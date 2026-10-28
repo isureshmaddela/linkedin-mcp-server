@@ -68,9 +68,12 @@ def extract_key(headers: Headers, query: Mapping[str, list[str]]) -> str | None:
 
 
 def key_view(
-    row: sqlite3.Row | Mapping[str, Any], used_this_hour: int = 0
+    row: sqlite3.Row | Mapping[str, Any],
+    used_this_hour: int = 0,
+    used_this_month: int = 0,
 ) -> dict[str, Any]:
     data = dict(row)
+    quota = int(data.get("monthly_quota") or 0)
     return {
         "id": data["id"],
         "name": data["name"],
@@ -80,7 +83,158 @@ def key_view(
         "revoked_at": data.get("revoked_at"),
         "hourly_limit": data.get("hourly_limit") or 0,
         "used_this_hour": used_this_hour,
+        "client_name": data.get("client_name") or "",
+        "price_per_1000": float(data.get("price_per_1000") or 0),
+        "monthly_quota": quota,
+        "allowed_engines": allowed_engines(data),
+        "used_this_month": used_this_month,
+        "quota_left": max(quota - used_this_month, 0) if quota else None,
     }
+
+
+# ---------------------------------------------------------------------------
+# Reselling: a key handed to a client, with a price, a monthly quota and engines
+# ---------------------------------------------------------------------------
+
+MAX_PRICE_PER_1000 = 100_000
+MAX_MONTHLY_QUOTA = 10_000_000
+MAX_ALLOWED_ENGINES = 60
+
+
+def is_client_key(data: Mapping[str, Any]) -> bool:
+    """A key with terms (a client, a price, an allowance or an engine list) is handed to someone else.
+
+    It sees only the searches made with it, and ``/account.json`` describes its own allowance instead
+    of your SerpApi account. A key without terms is your own and reaches the whole account."""
+    return bool(
+        str(data.get("client_name") or "").strip()
+        or float(data.get("price_per_1000") or 0)
+        or int(data.get("monthly_quota") or 0)
+        or allowed_engines(data)
+    )
+
+
+def search_scope(key: Mapping[str, Any]) -> str | None:
+    """The ``api_key_id`` a key's reads are limited to, or None for your own key (the whole account)."""
+    return str(key["id"]) if is_client_key(key) else None
+
+
+def allowed_engines(data: Mapping[str, Any]) -> list[str]:
+    try:
+        value = json.loads(data.get("allowed_engines") or "[]")
+    except (TypeError, json.JSONDecodeError):
+        return []
+    return [str(item) for item in value] if isinstance(value, list) else []
+
+
+def _hourly(raw: Any) -> int:
+    try:
+        limit = int(str(raw if raw not in (None, "") else 0).strip())
+    except ValueError:
+        raise ValueError(
+            "The hourly limit must be a whole number (0 means unlimited)."
+        ) from None
+    if not 0 <= limit <= 1_000_000:
+        raise ValueError("The hourly limit must be between 0 and 1,000,000.")
+    return limit
+
+
+def key_terms(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Validated reseller fields present in ``payload`` (column name -> stored value)."""
+    out: dict[str, Any] = {}
+    if "client_name" in payload:
+        client = " ".join(str(payload.get("client_name") or "").split())
+        if len(client) > 120:
+            raise ValueError("The client name must be 120 characters or fewer.")
+        out["client_name"] = client
+    if "price_per_1000" in payload:
+        raw = payload.get("price_per_1000")
+        try:
+            price = round(float(raw if raw not in (None, "") else 0), 4)
+        except (TypeError, ValueError):
+            raise ValueError(
+                "The price must be a number, for example 5 for 5 per 1,000 searches."
+            ) from None
+        if not 0 <= price <= MAX_PRICE_PER_1000 or price != price:
+            raise ValueError(
+                "The price per 1,000 searches must be between 0 and 100,000."
+            )
+        out["price_per_1000"] = price
+    if "monthly_quota" in payload:
+        raw = payload.get("monthly_quota")
+        try:
+            quota = int(str(raw if raw not in (None, "") else 0).strip())
+        except ValueError:
+            raise ValueError(
+                "The monthly allowance must be a whole number (0 means unlimited)."
+            ) from None
+        if not 0 <= quota <= MAX_MONTHLY_QUOTA:
+            raise ValueError("The monthly allowance must be between 0 and 10,000,000.")
+        out["monthly_quota"] = quota
+    if "allowed_engines" in payload:
+        raw = payload.get("allowed_engines")
+        items = raw.split(",") if isinstance(raw, str) else list(raw or [])
+        engines: list[str] = []
+        for item in items:
+            name = str(item or "").strip().lower()
+            if not name:
+                continue
+            try:
+                found = catalog.engine(name).id
+            except LookupError:
+                raise ValueError(f"There is no engine called {name!r}.") from None
+            if found not in engines:
+                engines.append(found)
+        if len(engines) > MAX_ALLOWED_ENGINES:
+            raise ValueError(
+                f"Allow up to {MAX_ALLOWED_ENGINES} engines, or none for all."
+            )
+        out["allowed_engines"] = json.dumps(engines)
+    return out
+
+
+def month_start(now: datetime) -> str:
+    return now.strftime("%Y-%m-01")
+
+
+def calls_this_month(connection: sqlite3.Connection, key_id: str, now: datetime) -> int:
+    rows = store.key_usage_between(
+        connection, month_start(now), now.strftime("%Y-%m-%d"), key_id
+    )
+    return sum(int(row["calls"]) for row in rows)
+
+
+def update_key(
+    connection: sqlite3.Connection,
+    key_id: str,
+    payload: Mapping[str, Any],
+    now: datetime,
+) -> dict[str, Any]:
+    row = store.get_api_key(connection, key_id)
+    if row is None:
+        raise LookupError("Key not found.")
+    fields = key_terms(payload)
+    if "name" in payload:
+        name = str(payload.get("name") or "").strip()
+        if not name or len(name) > 80:
+            raise ValueError("Give the key a name of up to 80 characters.")
+        fields["name"] = name
+    if "hourly_limit" in payload:
+        fields["hourly_limit"] = _hourly(payload.get("hourly_limit"))
+    if not fields:
+        raise ValueError(
+            "Send name, hourly_limit, client_name, price_per_1000, monthly_quota or allowed_engines."
+        )
+    store.update_api_key(connection, key_id, fields)
+    connection.commit()
+    updated = store.get_api_key(connection, key_id)
+    assert updated is not None
+    since = store.to_iso(now - timedelta(hours=1))
+    return key_view(
+        updated,
+        store.count_live_since(connection, since, api_key_id=key_id),
+        calls_this_month(connection, key_id, now),
+    )
 
 
 def create_key(
@@ -89,18 +243,13 @@ def create_key(
     name: str,
     hourly_limit: Any,
     now: datetime,
+    terms: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     clean = str(name or "").strip()
     if not clean or len(clean) > 80:
         raise ValueError("Give the key a name of up to 80 characters.")
-    try:
-        limit = int(str(hourly_limit if hourly_limit not in (None, "") else 0).strip())
-    except ValueError:
-        raise ValueError(
-            "The hourly limit must be a whole number (0 means unlimited)."
-        ) from None
-    if not 0 <= limit <= 1_000_000:
-        raise ValueError("The hourly limit must be between 0 and 1,000,000.")
+    limit = _hourly(hourly_limit)
+    extra = key_terms(terms or {})
     active = [row for row in store.list_api_keys(connection) if not row["revoked_at"]]
     if len(active) >= MAX_KEYS:
         raise ValueError(
@@ -117,6 +266,7 @@ def create_key(
             "key_hash": digest,
             "created_at": store.to_iso(now),
             "hourly_limit": limit,
+            **extra,
         },
     )
     connection.commit()
@@ -142,8 +292,17 @@ def revoke_key(
 
 def list_keys(connection: sqlite3.Connection, now: datetime) -> list[dict[str, Any]]:
     since = store.to_iso(now - timedelta(hours=1))
+    month: dict[str, int] = {}
+    for usage in store.key_usage_between(
+        connection, month_start(now), now.strftime("%Y-%m-%d")
+    ):
+        month[usage["key_id"]] = month.get(usage["key_id"], 0) + int(usage["calls"])
     return [
-        key_view(row, store.count_live_since(connection, since, api_key_id=row["id"]))
+        key_view(
+            row,
+            store.count_live_since(connection, since, api_key_id=row["id"]),
+            month.get(row["id"], 0),
+        )
         for row in store.list_api_keys(connection)
     ]
 
@@ -308,19 +467,52 @@ def v1_search(
     # SerpApi ignores parameters it does not know, and its SDKs add some of
     # their own (source=python, ...). Stay as lenient unless the caller opts out.
     options.setdefault("allow_unknown", "true")
-    with hourly_slot(connection, key, now):
-        record = service.run_search(
-            connection,
-            client,
-            engine,
-            params,
-            options=options,
-            source="api",
-            label=f"API key: {key['name']}",
-            now=now,
-            limits=limits,
-            api_key_id=str(key["id"]),
+    key_id = str(key["id"])
+    allowed = allowed_engines(key)
+    if allowed and engine not in allowed:
+        raise SerpApiError(
+            "engine_not_allowed",
+            f"This API key cannot use the {engine} engine. "
+            f"It can use: {', '.join(allowed)}.",
+            403,
         )
+    quota = int(key.get("monthly_quota") or 0)
+    if quota and calls_this_month(connection, key_id, now) >= quota:
+        raise SerpApiError(
+            "quota_exceeded",
+            f"This API key has used its {quota:,} searches for this month. "
+            "It starts again on the 1st.",
+            429,
+        )
+    day = now.strftime("%Y-%m-%d")
+    with hourly_slot(connection, key, now):
+        try:
+            record = service.run_search(
+                connection,
+                client,
+                engine,
+                params,
+                options=options,
+                source="api",
+                label=f"API key: {key['name']}",
+                now=now,
+                limits=limits,
+                api_key_id=key_id,
+            )
+        except (SerpApiError, ValueError, LookupError):
+            store.bump_key_usage(connection, day, key_id, engine, errors=1)
+            connection.commit()
+            raise
+    store.bump_key_usage(
+        connection,
+        day,
+        key_id,
+        str(record.get("engine") or engine),
+        calls=1,
+        cached=1 if record.get("cache_hit") else 0,
+        credits=int(record.get("credits") or 0),
+    )
+    connection.commit()
     if record["output"] != "json":
         kind = (
             "text/markdown; charset=utf-8"
@@ -342,12 +534,16 @@ def v1_search_by_id(
     fmt: str,
     now: datetime,
     base_url: str = "",
+    *,
+    api_key_id: str | None = None,
 ) -> tuple[int, dict[str, Any]] | Raw:
-    row = store.get_search_row(
-        connection, search_id
-    ) or store.get_search_row_by_serpapi(connection, search_id)
+    """A stored search by Aira or SerpApi id. With ``api_key_id`` (a client's key) only that key's own."""
+    row = store.get_search_row(connection, search_id)
+    if row is not None and api_key_id is not None and row["api_key_id"] != api_key_id:
+        row = None
+    row = row or store.get_search_row_by_serpapi(connection, search_id, api_key_id)
     if row is None:
-        if store.is_gone(connection, search_id):
+        if api_key_id is None and store.is_gone(connection, search_id):
             raise SerpApiError("gone", "This search has expired from the archive.", 410)
         raise LookupError("Search not found.")
     record = service.get_search(
@@ -367,6 +563,35 @@ def v1_account(account: Mapping[str, Any]) -> dict[str, Any]:
     body = {name: value for name, value in account.items() if name != "fetched_at"}
     body["account_rate_limit_per_hour"] = body.get("hourly_rate_limit")
     return body
+
+
+def v1_client_account(
+    connection: sqlite3.Connection, key: Mapping[str, Any], now: datetime
+) -> dict[str, Any]:
+    """What a client's key may use, in the shape of SerpApi's Account API.
+
+    Nothing about the account behind it (email, plan, price, renewal, searches left) is shown."""
+    key_id = str(key["id"])
+    quota = int(key.get("monthly_quota") or 0)
+    used = calls_this_month(connection, key_id, now)
+    hourly = int(key.get("hourly_limit") or 0)
+    left = max(quota - used, 0) if quota else None
+    client = str(key.get("client_name") or "").strip()
+    return {
+        "account_id": key_id,
+        "account_status": "Active",
+        "plan_name": f"API access for {client}" if client else "API access",
+        "searches_per_month": quota or None,
+        "plan_searches_left": left,
+        "extra_credits": 0,
+        "total_searches_left": left,
+        "this_month_usage": used,
+        "this_hour_searches": store.count_live_since(
+            connection, store.to_iso(now - timedelta(hours=1)), api_key_id=key_id
+        ),
+        "account_rate_limit_per_hour": hourly or None,
+        "allowed_engines": allowed_engines(key),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -611,7 +836,7 @@ _V1_ENDPOINTS = (
         "method": "GET",
         "path": "/account.json",
         "alias": "/v1/account.json",
-        "description": "Plan, usage and hourly rate limit of the SerpApi account behind Aira. Never includes the SerpApi key.",
+        "description": "Plan, usage and hourly rate limit of the SerpApi account behind Aira. Never includes the SerpApi key. A client's key (one with a client, price, allowance or engine list) gets its own allowance and usage instead.",
         "returns": "SerpApi account fields.",
     },
     {
@@ -624,14 +849,14 @@ _V1_ENDPOINTS = (
     {
         "method": "GET",
         "path": "/v1/searches.json?engine=&status=&limit=25&offset=0",
-        "description": "List searches stored in Aira (newest first).",
+        "description": "List searches stored in Aira (newest first). A client's key lists only the searches made with it.",
         "returns": "{items, total, limit, offset} without result bodies.",
     },
     {
         "method": "GET",
         "path": "/searches/{id}.json",
         "alias": "/searches/{id}.html, /v1/searches/{id}.json",
-        "description": "Fetch a stored search by Aira id or SerpApi search id, as JSON or as the raw HTML page.",
+        "description": "Fetch a stored search by Aira id or SerpApi search id, as JSON or as the raw HTML page. A client's key reaches only its own searches.",
         "returns": "The stored SerpApi JSON, or the page.",
     },
     {
@@ -699,7 +924,7 @@ def docs_payload(base_url: str) -> dict[str, Any]:
         "auth": {
             "summary": "Send an API key as the api_key query parameter or as 'Authorization: Bearer aira_...'.",
             "key_format": "aira_ followed by 40 URL-safe characters. Only a SHA-256 hash is stored; the secret is shown once.",
-            "scope": "A key reaches only the account that created it and only the /v1 endpoints. It never exposes the SerpApi key.",
+            "scope": "A key reaches only the account that created it and only the /v1 endpoints. It never exposes the SerpApi key. A key with client terms sees only its own searches and its own allowance.",
         },
         "endpoints": [dict(item) for item in _V1_ENDPOINTS],
         "parameters": catalog.common_parameters(),

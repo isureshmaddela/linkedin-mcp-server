@@ -569,10 +569,11 @@ def list_searches(
     in_results: bool = False,
     limit: int = 25,
     offset: int = 0,
+    api_key_id: str | None = None,
 ) -> dict[str, Any]:
     """A page of history. With ``in_results``, ``text`` also matches inside stored
     results and each such record carries ``match_excerpt`` (matched words wrapped in
-    ``store.SNIPPET_OPEN``/``store.SNIPPET_CLOSE``)."""
+    ``store.SNIPPET_OPEN``/``store.SNIPPET_CLOSE``). ``api_key_id`` keeps one key's searches."""
     rows, total = store.list_searches(
         connection,
         engine=engine,
@@ -586,6 +587,7 @@ def list_searches(
         in_results=in_results,
         limit=limit,
         offset=offset,
+        api_key_id=api_key_id,
     )
     items = [record_from_row(row) for row in rows]
     if in_results and text.strip():
@@ -1788,7 +1790,11 @@ def _clean_name(value: Any) -> str:
 
 
 def list_saved(connection: sqlite3.Connection) -> list[dict[str, Any]]:
-    return [_saved_view(row) for row in store.list_saved(connection)]
+    owned = _rank_saved_ids(connection)
+    return [
+        {**_saved_view(row), "rank_tracker": row["id"] in owned}
+        for row in store.list_saved(connection)
+    ]
 
 
 def create_saved(
@@ -1817,6 +1823,18 @@ def create_saved(
         "pinned": 1 if payload.get("pinned") else 0,
     }
     store.insert_saved(connection, row)
+    # Saving the result you are looking at: that run is the saved search's last run, not "never run".
+    source = str(payload.get("from_search_id") or "")
+    record = store.get_search_row(connection, source) if source else None
+    if record is not None and record["engine"] == found.id and record["status"] == "ok":
+        try:
+            same = json.loads(record["params_json"] or "{}") == clean
+        except json.JSONDecodeError:
+            same = False
+        if same:
+            ran = {"last_run_at": record["created_at"], "last_search_id": record["id"]}
+            store.update_saved(connection, row["id"], ran)
+            row.update(ran)
     connection.commit()
     return _saved_view(row)
 
@@ -1827,6 +1845,8 @@ def update_saved(
     existing = store.get_saved(connection, saved_id)
     if existing is None:
         raise LookupError("Saved search not found.")
+    if saved_id in _rank_saved_ids(connection):
+        raise ValueError(RANK_EDIT_MESSAGE)
     fields: dict[str, Any] = {}
     if "name" in payload:
         fields["name"] = _clean_name(payload["name"])
@@ -1850,7 +1870,13 @@ def update_saved(
     return _saved_view(row)
 
 
+RANK_OWNED_MESSAGE = "This search belongs to a rank-tracker project. Remove the keyword from the project instead."
+RANK_EDIT_MESSAGE = "This search belongs to a rank-tracker project. Change it from the project on the Rank tracker tab."
+
+
 def delete_saved(connection: sqlite3.Connection, saved_id: str) -> None:
+    if saved_id in _rank_saved_ids(connection):
+        raise ValueError(RANK_OWNED_MESSAGE)
     if not store.delete_saved(connection, saved_id):
         raise LookupError("Saved search not found.")
     connection.commit()
@@ -1979,10 +2005,23 @@ def _interval(value: Any) -> int:
     return minutes
 
 
+def _rank_saved_ids(connection: sqlite3.Connection) -> set[str]:
+    """Saved searches (and so monitors) that a rank-tracker project owns."""
+    store.ensure_extras(connection)
+    return {
+        str(row[0])
+        for row in connection.execute("SELECT saved_id FROM airaapi_rank_keywords")
+    }
+
+
 def list_monitors(
     connection: sqlite3.Connection, now: datetime | None = None
 ) -> list[dict[str, Any]]:
-    return [_monitor_view(row, now) for row in store.list_monitors(connection)]
+    owned = _rank_saved_ids(connection)
+    return [
+        {**_monitor_view(row, now), "rank_tracker": row["saved_id"] in owned}
+        for row in store.list_monitors(connection)
+    ]
 
 
 def create_monitor(
@@ -1996,7 +2035,14 @@ def create_monitor(
     if saved is None:
         raise LookupError("Saved search not found.")
     minutes = _interval(payload.get("interval_minutes", 60))
-    if len(store.list_monitors(connection)) >= MAX_MONITORS:
+    # rank-tracker keywords have their own limit (aira.airaapi.rank) and do not use up this one
+    owned = _rank_saved_ids(connection)
+    if owned and saved["id"] in owned:
+        raise ValueError(
+            "That saved search belongs to the rank tracker; schedule it there."
+        )
+    mine = [m for m in store.list_monitors(connection) if m["saved_id"] not in owned]
+    if len(mine) >= MAX_MONITORS:
         raise ValueError(
             f"You can run up to {MAX_MONITORS} monitors; delete one first."
         )
@@ -2035,6 +2081,8 @@ def update_monitor(
     existing = store.get_monitor(connection, monitor_id)
     if existing is None:
         raise LookupError("Monitor not found.")
+    if existing["saved_id"] in _rank_saved_ids(connection):
+        raise ValueError(RANK_EDIT_MESSAGE)
     fields: dict[str, Any] = {}
     if "interval_minutes" in payload:
         minutes = _interval(payload["interval_minutes"])
@@ -2081,6 +2129,9 @@ def update_monitor(
 
 
 def delete_monitor(connection: sqlite3.Connection, monitor_id: str) -> None:
+    found = store.get_monitor(connection, monitor_id)
+    if found is not None and found["saved_id"] in _rank_saved_ids(connection):
+        raise ValueError(RANK_OWNED_MESSAGE)
     if not store.delete_monitor(connection, monitor_id):
         raise LookupError("Monitor not found.")
     connection.commit()

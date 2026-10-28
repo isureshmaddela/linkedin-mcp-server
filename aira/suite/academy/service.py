@@ -11,7 +11,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from aira.suite import kit, public
-from aira.suite.academy import store
+from aira.suite.academy import partners, store
 from aira.suite.academy.store import APP
 
 MAX_OPTIONS = 6
@@ -149,6 +149,9 @@ def set_status(
         ref_id=course_id,
     )
     connection.commit()
+    if status == "published":
+        # The page exists as soon as the course is on sale, so the link can be shared at once.
+        public.create_link(connection, APP, "course", course_id, title=course["title"])
     return store.course(connection, course_id)
 
 
@@ -169,6 +172,7 @@ def delete_course(connection: sqlite3.Connection, course_id: str) -> None:
     connection.execute("DELETE FROM ac_lessons WHERE course_id = ?", (course_id,))
     connection.execute("DELETE FROM ac_modules WHERE course_id = ?", (course_id,))
     connection.execute("DELETE FROM ac_cohorts WHERE course_id = ?", (course_id,))
+    connection.execute("DELETE FROM ac_reviews WHERE course_id = ?", (course_id,))
     connection.execute("DELETE FROM ac_courses WHERE id = ?", (course_id,))
     public.revoke(connection, APP, "course", course_id)
     kit.log(
@@ -221,6 +225,7 @@ def course_detail(connection: sqlite3.Connection, course_id: str) -> dict[str, A
         },
         "cohorts": store.cohorts(connection, course_id),
         "link": course_link(connection, course_id),
+        "rating": store.rating(connection, course_id),
     }
 
 
@@ -762,7 +767,9 @@ def enrol(
     via: Any = None,
 ) -> dict[str, Any]:
     """Enrol a student. A public enrolment needs a published course, the right code and a free seat. Free
-    courses start at once; paid ones wait for payment. Returns the enrolment and the student's link."""
+    courses start at once; paid ones wait for payment. The seat check and the insert happen in one write
+    transaction, so two students can never take the same last seat. ``ref`` is a partner's code (the student
+    came through their link). Returns the enrolment and the student's link."""
     store.ensure(connection)
     course = store.course(connection, course_id)
     if course["status"] == "archived" or (
@@ -782,32 +789,21 @@ def enrol(
         cohort = store.cohort(connection, cohort_id)
         if cohort["course_id"] != course_id:
             raise ValueError("That cohort belongs to another course.")
-    existing = kit.fetch_one(
-        connection,
-        "SELECT * FROM ac_enrolments WHERE course_id = ? AND email = ? AND status != 'refunded'",
-        (course_id, email),
-    )
-    if existing:
-        if source == "public":
-            _enrolment_email(
-                connection,
-                existing,
-                course,
-                absolute(student_link(connection, existing)["path"], via),
+        if (
+            source == "public"
+            and cohort["starts_on"]
+            and cohort["starts_on"] < kit.today()
+        ):
+            raise ValueError(
+                f"The {cohort['name']} cohort has already started. Choose another one."
             )
-            connection.commit()
-            raise AlreadyEnrolled(existing)
-        raise ValueError(f"{email} is already enrolled in this course.")
-    if course["capacity"] and store.seats_taken(connection, course_id) >= int(
-        course["capacity"]
-    ):
-        raise ValueError("This course is full.")
-    if cohort_id:
-        cohort = store.cohort(connection, cohort_id)
-        if cohort["capacity"] and store.seats_taken(
-            connection, course_id, cohort_id
-        ) >= int(cohort["capacity"]):
-            raise ValueError(f"The {cohort['name']} cohort is full.")
+    notes = (
+        kit.text(raw.get("notes"), "notes", max_len=2000, multiline=True)
+        if source == "manual"
+        else ""
+    )
+    if source == "manual":
+        partners.check_code(connection, raw.get("ref"), email)
     free = int(course["price_cents"]) == 0
     now = kit.now()
     enrolment = {
@@ -820,18 +816,50 @@ def enrol(
         "reference": _code("AC"),
         "price_cents": int(course["price_cents"]),
         "source": "manual" if source == "manual" else "public",
-        "notes": kit.text(raw.get("notes"), "notes", max_len=2000, multiline=True)
-        if source == "manual"
-        else "",
+        "notes": notes,
         "created_at": now,
         "activated_at": now if free else None,
         "last_activity_at": now,
     }
-    connection.execute(
-        """INSERT INTO ac_enrolments (id, course_id, cohort_id, name, email, status, reference, price_cents, source, notes, created_at, activated_at, last_activity_at)
-        VALUES (:id, :course_id, :cohort_id, :name, :email, :status, :reference, :price_cents, :source, :notes, :created_at, :activated_at, :last_activity_at)""",
-        enrolment,
-    )
+    connection.commit()
+    connection.execute("BEGIN IMMEDIATE")
+    try:
+        existing = kit.fetch_one(
+            connection,
+            "SELECT * FROM ac_enrolments WHERE course_id = ? AND email = ? AND status != 'refunded'",
+            (course_id, email),
+        )
+        if not existing:
+            if course["capacity"] and store.seats_taken(connection, course_id) >= int(
+                course["capacity"]
+            ):
+                raise ValueError("This course is full.")
+            if cohort_id:
+                cohort = store.cohort(connection, cohort_id)
+                if cohort["capacity"] and store.seats_taken(
+                    connection, course_id, cohort_id
+                ) >= int(cohort["capacity"]):
+                    raise ValueError(f"The {cohort['name']} cohort is full.")
+            connection.execute(
+                """INSERT INTO ac_enrolments (id, course_id, cohort_id, name, email, status, reference, price_cents, source, notes, created_at, activated_at, last_activity_at)
+                VALUES (:id, :course_id, :cohort_id, :name, :email, :status, :reference, :price_cents, :source, :notes, :created_at, :activated_at, :last_activity_at)""",
+                enrolment,
+            )
+        connection.commit()
+    except BaseException:
+        connection.rollback()
+        raise
+    if existing:
+        if source == "public":
+            _enrolment_email(
+                connection,
+                existing,
+                course,
+                absolute(student_link(connection, existing)["path"], via),
+            )
+            connection.commit()
+            raise AlreadyEnrolled(existing)
+        raise ValueError(f"{email} is already enrolled in this course.")
     kit.log(
         connection,
         APP,
@@ -841,6 +869,18 @@ def enrol(
         ref_type="enrolment",
         ref_id=enrolment["id"],
         public=source == "public",
+    )
+    partners.record(
+        connection,
+        raw.get("ref"),
+        source_type="enrolment",
+        source_id=enrolment["id"],
+        item_type="course",
+        item_id=course_id,
+        label=course["title"],
+        customer=name,
+        customer_email=email,
+        amount_cents=enrolment["price_cents"],
     )
     link = student_link(connection, enrolment)
     _enrolment_email(connection, enrolment, course, absolute(link["path"], via))
@@ -892,6 +932,7 @@ def mark_paid(
         label=course["title"],
         customer=enrolment["name"],
     )
+    partners.earn(connection, "enrolment", enrolment_id, amount)
     if not already:
         kit.log(
             connection,
@@ -939,6 +980,12 @@ def refund(connection: sqlite3.Connection, enrolment_id: str) -> dict[str, Any]:
         {"status": "refunded", "refunded_at": kit.now()},
     )
     kit.void_revenue(connection, APP, "enrolment", enrolment_id)
+    partners.void(connection, "enrolment", enrolment_id)
+    # A refunded student's rating no longer counts on the course page (the business can show it again).
+    connection.execute(
+        "UPDATE ac_reviews SET status = 'hidden', updated_at = ? WHERE enrolment_id = ? AND status = 'published'",
+        (kit.now(), enrolment_id),
+    )
     kit.log(
         connection,
         APP,
@@ -1286,12 +1333,19 @@ def student_view(connection: sqlite3.Connection, enrolment_id: str) -> dict[str,
         if enrolment["cohort_id"]
         else None
     )
+    review = kit.fetch_one(
+        connection,
+        "SELECT rating, comment, status FROM ac_reviews WHERE enrolment_id = ?",
+        (enrolment_id,),
+    )
     return {
         "student": {
             "name": enrolment["name"],
             "status": enrolment["status"],
             "reference": enrolment["reference"],
         },
+        "review": review,
+        "can_review": can_review(connection, enrolment),
         "course": {
             "title": course["title"],
             "subtitle": course["subtitle"],
@@ -1374,7 +1428,136 @@ def course_page(connection: sqlite3.Connection, course_id: str) -> dict[str, Any
         "seats_left": seats_left,
         "requires_code": bool(course["enrol_code"]),
         "cohorts": cohorts,
+        "rating": store.rating(connection, course_id),
+        "reviews": public_reviews(connection, course_id),
     }
+
+
+# ---------------------------------------------------------------------------
+# reviews: students rate the course; the business may hide one
+# ---------------------------------------------------------------------------
+
+
+def _short_name(name: str) -> str:
+    """ "Ana Maria Lopez" -> "Ana L.": enough to be real, not enough to find the person."""
+    parts = str(name or "").split()
+    if not parts:
+        return "A student"
+    return parts[0] if len(parts) == 1 else f"{parts[0]} {parts[-1][0].upper()}."
+
+
+def can_review(connection: sqlite3.Connection, enrolment: Mapping[str, Any]) -> bool:
+    """A student may rate a course once they have learned something: a lesson done, or the course completed."""
+    if enrolment["status"] == "completed":
+        return True
+    return enrolment["status"] == "active" and bool(
+        store.completed_lessons(connection, enrolment["id"])
+    )
+
+
+def submit_review(
+    connection: sqlite3.Connection, enrolment_id: str, raw: Mapping[str, Any]
+) -> dict[str, Any]:
+    """A student's rating (1 to 5) and comment; sending again updates it (one review per student)."""
+    enrolment = store.enrolment(connection, enrolment_id)
+    if enrolment["status"] in ("refunded", "pending_payment"):
+        raise PermissionError("Only students who are learning can review the course.")
+    if not can_review(connection, enrolment):
+        raise ValueError("Finish a lesson first, then tell others what you think.")
+    rating = kit.integer(
+        raw.get("rating"), "a rating from 1 to 5", minimum=1, maximum=5
+    )
+    comment = kit.text(raw.get("comment"), "your review", max_len=1500, multiline=True)
+    now = kit.now()
+    existing = kit.fetch_one(
+        connection, "SELECT * FROM ac_reviews WHERE enrolment_id = ?", (enrolment_id,)
+    )
+    if existing:
+        kit.update_row(
+            connection,
+            "ac_reviews",
+            existing["id"],
+            {"rating": rating, "comment": comment, "updated_at": now},
+        )
+        review_id = existing["id"]
+    else:
+        review_id = kit.new_id()
+        connection.execute(
+            """INSERT INTO ac_reviews (id, course_id, enrolment_id, name, rating, comment, status, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, 'published', ?, ?)""",
+            (
+                review_id,
+                enrolment["course_id"],
+                enrolment_id,
+                _short_name(enrolment["name"]),
+                rating,
+                comment,
+                now,
+                now,
+            ),
+        )
+        course = store.course(connection, enrolment["course_id"])
+        kit.log(
+            connection,
+            APP,
+            "review",
+            f"{enrolment['name']} rated {course['title']} {rating} out of 5",
+            detail=comment[:140],
+            ref_type="review",
+            ref_id=review_id,
+            public=True,
+        )
+    _touch(connection, enrolment_id)
+    connection.commit()
+    return kit.require_row(connection, "ac_reviews", review_id, "review")
+
+
+def public_reviews(
+    connection: sqlite3.Connection, course_id: str, limit: int = 12
+) -> list[dict[str, Any]]:
+    return kit.fetch_all(
+        connection,
+        """SELECT name, rating, comment, created_at FROM ac_reviews WHERE course_id = ? AND status = 'published'
+        ORDER BY (comment != '') DESC, created_at DESC LIMIT ?""",
+        (course_id, limit),
+    )
+
+
+def reviews(
+    connection: sqlite3.Connection, *, course_id: str = "", status: str = ""
+) -> list[dict[str, Any]]:
+    clauses, params = [], []
+    if course_id:
+        clauses.append("r.course_id = ?")
+        params.append(course_id)
+    if status:
+        clauses.append("r.status = ?")
+        params.append(kit.choice(status, "the status", store.REVIEW_STATUSES))
+    where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
+    return kit.fetch_all(
+        connection,
+        f"""SELECT r.*, c.title AS course_title, e.name AS student_name, e.email AS student_email
+        FROM ac_reviews r JOIN ac_courses c ON c.id = r.course_id LEFT JOIN ac_enrolments e ON e.id = r.enrolment_id
+        {where} ORDER BY r.created_at DESC LIMIT 1000""",  # noqa: S608 - fixed clauses
+        params,
+    )
+
+
+def set_review_status(
+    connection: sqlite3.Connection, review_id: str, status: Any
+) -> dict[str, Any]:
+    kit.require_row(connection, "ac_reviews", review_id, "review")
+    kit.update_row(
+        connection,
+        "ac_reviews",
+        review_id,
+        {
+            "status": kit.choice(status, "the status", store.REVIEW_STATUSES),
+            "updated_at": kit.now(),
+        },
+    )
+    connection.commit()
+    return kit.require_row(connection, "ac_reviews", review_id, "review")
 
 
 # ---------------------------------------------------------------------------
@@ -1570,6 +1753,14 @@ def student_detail(connection: sqlite3.Connection, enrolment_id: str) -> dict[st
     }
 
 
+def _overall_rating(connection: sqlite3.Connection) -> dict[str, Any]:
+    row = connection.execute(
+        "SELECT AVG(rating), COUNT(*) FROM ac_reviews WHERE status = 'published'"
+    ).fetchone()
+    count = int(row[1] or 0)
+    return {"average": round(float(row[0]), 1) if count else None, "count": count}
+
+
 def overview(
     connection: sqlite3.Connection, *, now: datetime | None = None
 ) -> dict[str, Any]:
@@ -1611,6 +1802,7 @@ def overview(
             connection, "SELECT COUNT(*) FROM ac_courses WHERE status = 'published'"
         ),
         "inactive": len(inactive(connection, now=now)),
+        "rating": _overall_rating(connection),
         "top_courses": top,
         "currency": kit.business(connection)["currency"],
     }

@@ -1,0 +1,59 @@
+/* Styles for the social app only. Loaded on every page: scope every selector to the app's own class names. */
+
+/* Chats on a wide screen: the list and the conversation side by side. */
+.so-chat-grid { display: grid; grid-template-columns: minmax(240px, 1fr) minmax(0, 2.2fr); gap: 16px; align-items: start; }
+
+/* Marketplace: a grid of listing cards that fits a phone. */
+.so-market-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(min(100%, 210px), 1fr)); gap: 12px; }
+.so-listing { display: grid; gap: 6px; padding: 10px; text-decoration: none; color: inherit; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); min-width: 0; }
+.so-listing:hover, .so-listing:focus-visible { border-color: var(--brand); }
+.so-listing-photo { width: 100%; aspect-ratio: 4 / 3; object-fit: cover; border-radius: 10px; background: var(--surface-2); display: grid; place-items: center; font-size: 40px; }
+.so-listing-price { font-size: 18px; font-weight: 700; }
+.so-listing-title { font-weight: 600; overflow-wrap: anywhere; }
+.so-filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; }
+.so-filters > * { flex: 1 1 160px; min-width: 0; }
+.so-filters > .btn { flex: 0 0 auto; }
+.so-sold { opacity: 0.7; }
+
+/* In the Aira frame: on a wide screen the left menu's folders are the tabs, so the page's own tab bar steps aside
+   (a phone keeps it: there the menu is a sheet). Only the open section's folders show, so Social and Family do not
+   make one long menu. */
+@media (min-width: 901px) {
+  .so-page > .tabs, .fa-page > .tabs { display: none; }
+}
+body[data-app="social"] #primaryNav a.shell-has-subnav:not([aria-current="page"]) + .shell-subnav { display: none; }
+
+/* A reading column for the feed and lists, like a social app's middle column. */
+.so-column { max-width: 760px; width: 100%; }
+
+/* Stories: round faces in a row; "Add a story" is your face with a plus. */
+.so-stories { display: flex; gap: 12px; overflow-x: auto; padding: 4px 2px; align-items: flex-start; }
+.so-story { appearance: none; background: none; border: 0; color: inherit; font: inherit; cursor: pointer; display: grid; justify-items: center; gap: 6px; width: 80px; padding: 4px; border-radius: 12px; }
+.so-story:hover { background: var(--surface-2); }
+.so-story:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+.so-story .small { max-width: 72px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.so-story-ring { position: relative; display: inline-grid; border-radius: 50%; padding: 2px; border: 3px solid var(--line); }
+.so-story-ring.so-unseen { border-color: var(--brand); }
+.so-story-add .so-story-ring { border-style: dashed; }
+.so-story-plus { position: absolute; right: -6px; bottom: -6px; width: 24px; height: 24px; border-radius: 50%; display: grid; place-items: center; background: var(--brand); color: var(--on-brand); border: 2px solid var(--surface); }
+.so-story-plus svg, .so-hit-icon svg { width: 14px; height: 14px; stroke: currentColor; fill: none; stroke-width: 2.4; stroke-linecap: round; stroke-linejoin: round; }
+.so-stories-hint { align-self: center; margin: 0; max-width: 34ch; }
+
+/* The composer: your face beside the box; photos, who sees it and Post on one line under it. */
+.so-composer-row { display: flex; gap: 12px; align-items: flex-start; }
+.so-composer-text { flex: 1; min-width: 0; }
+.so-composer-actions { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; }
+.so-grow { flex: 1; }
+.so-audience { display: inline-flex; gap: 8px; align-items: center; margin: 0; }
+.so-audience select { width: auto; min-width: 130px; }
+
+/* Search results: an icon per kind, and a record that opens by a button looks like the links beside it. */
+.so-hit-icon { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; background: var(--surface-2); color: var(--brand); flex: none; }
+.so-hit-icon svg { width: 18px; height: 18px; stroke-width: 2; }
+.so-linkish { appearance: none; background: none; border: 0; padding: 0; font: inherit; color: var(--brand); text-decoration: underline; cursor: pointer; text-align: left; }
+.so-linkish:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+
+/* Family: the event chosen in the search box stands out. */
+.fa-picked { border-color: var(--brand); box-shadow: 0 0 0 2px var(--brand); }
+.fa-picked:focus { outline: none; }
+.so-chat-pick { min-height: 240px; display: grid; place-items: center; }

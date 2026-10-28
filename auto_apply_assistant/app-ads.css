@@ -1,0 +1,143 @@
+/* Styles for the ads app only. Loaded on every page: scope every selector to the app's own class names. */
+
+/* the forecast in the campaign form and on a campaign's page */
+.ads-estimate {
+  border: 1px solid var(--line, #d9dfd6);
+  border-radius: var(--radius, 12px);
+  padding: 12px 16px;
+  background: var(--surface-2, #f4f6f2);
+}
+.ads-estimate p {
+  margin: 0 0 6px;
+}
+.ads-estimate .ads-suggest {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin: 8px 0 4px;
+  font-weight: 600;
+}
+.ads-note {
+  margin: 8px 0;
+  padding: 8px 12px;
+  border-left: 4px solid var(--warning, #b7791f);
+  background: var(--warning-soft, rgba(183, 121, 31, 0.08));
+  border-radius: 6px;
+}
+
+/* search, status and period pickers above lists: wrap on a phone, natural width on a wide screen */
+.ads-filters {
+  flex-wrap: wrap;
+  align-items: center;
+}
+.ads-filters > select,
+.ads-filters > .ads-search {
+  width: auto;
+  min-width: 0;
+  flex: 1 1 180px;
+  max-width: 320px;
+}
+.ads-head {
+  flex-wrap: wrap;
+  gap: 8px;
+}
+@media (max-width: 520px) {
+  .ads-filters > select,
+  .ads-filters > .ads-search {
+    max-width: none;
+    flex-basis: 100%;
+  }
+}
+
+/* the panel is a grid: keep its one column within the screen so wide tables scroll inside their own box */
+.ads-app {
+  grid-template-columns: minmax(0, 1fr);
+}
+.ads-app > * {
+  min-width: 0;
+}
+
+/* In the Aira frame: "+ New" sits above the menu on a wide screen, so the page's own New campaign shows only on a
+   phone or a narrow window, where the menu is folded away. */
+.btn.ads-phone-new {
+  display: none;
+}
+@media (max-width: 900px) {
+  .btn.ads-phone-new {
+    display: inline-flex;
+  }
+  /* the overview's own button would then repeat the one at the top of the page */
+  .ads-todo-new {
+    display: none;
+  }
+}
+
+/* a campaign's page: the way back, its status and why it paused, on one line under the name */
+.ads-head .ads-back {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding-left: 6px;
+}
+.ads-head .ads-back svg {
+  width: 18px;
+  height: 18px;
+}
+.ads-actions {
+  flex-wrap: wrap;
+}
+
+/* the ad the search box opened */
+.ads-creative:focus {
+  outline: none;
+}
+.ads-creative.ads-found {
+  box-shadow: 0 0 0 2px var(--brand, #176b4a);
+}
+.ads-creative.ads-found:focus-visible {
+  box-shadow: 0 0 0 3px var(--brand, #176b4a);
+}
+
+/* search results line and the actions inside empty states */
+.ads-results {
+  margin: 0;
+  color: var(--muted, #5b6b62);
+}
+.ads-results[hidden] {
+  display: none;
+}
+.ads-empty-actions {
+  justify-content: center;
+  margin-top: 12px;
+}
+
+/* the Admin tab's two small settings stay a readable width */
+.ads-narrow-form {
+  max-width: 420px;
+}
+
+/* lists of campaigns and ads: on a wide screen the meta line under the name is hidden (the columns say it); on a
+   phone only the name column shows, with status, spending and impressions (or campaign and review) under it */
+.ads-row-name {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  min-width: 0;
+}
+.ads-row-name .ads-row-meta {
+  display: none;
+}
+@media (max-width: 640px) {
+  .ads-campaigns .suite-table th:nth-child(n + 2),
+  .ads-campaigns .suite-table td:nth-child(n + 2) {
+    display: none;
+  }
+  .ads-campaigns .ads-row-name .ads-row-meta {
+    display: block;
+  }
+  .ads-campaigns .suite-table {
+    min-width: 0;
+    width: 100%;
+  }
+}

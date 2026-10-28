@@ -194,9 +194,9 @@
     L.ready = true;
     startPulse();
   };
-  // Where an empty address goes: the person's own start page, or Today in easy mode.
+  // Where an empty address goes: the person's own start page, else Today (every app's cards and tiles in one place).
   Aira.startPage = (initial) => {
-    const page = L.prefs.start_page || (L.prefs.easy_mode && lifeAvailable() ? "today" : "");
+    const page = L.prefs.start_page || (lifeAvailable() ? "today" : "");
     if (page && Aira.views[page]) return page;
     return initial ? null : "dashboard";
   };
@@ -248,7 +248,14 @@
     showing = true;
     const done = (snoozeMinutes) => { seen.set(alert.id, Date.now() + (snoozeMinutes || 24 * 60) * 60000); remember(); showing = false; nextAlert(); };
     const actions = (alert.actions || []).map((action) => ({ label: action.label, kind: "primary", onClick: async () => {
-      try { await Aira.api(action.path, { method: action.method || "POST", body: action.body || {} }); Aira.toast("Done.", "success"); done(); refreshToday(); } catch (error) { Aira.reportError(error); return false; }
+      try {
+        await Aira.api(action.path, { method: action.method || "POST", body: action.body || {} });
+        Aira.toast("Done.", "success");
+        done();
+        refreshToday();
+        // The open app screen may show what just changed: it can listen and draw itself again.
+        window.dispatchEvent(new CustomEvent("aira:life-action", { detail: { app: alert.app, path: action.path } }));
+      } catch (error) { Aira.reportError(error); return false; }
       return true;
     } }));
     Aira.modal({
@@ -281,12 +288,14 @@
   L.tick = tick;
 
   // A page polls its own data while it stays open and visible: const stop = Aira.suite.live(refresh, 4000).
-  S.live = (fn, ms = 5000) => {
+  // It stops when the page is drawn again (another tab, another item) or when `node` (optional) leaves the page.
+  S.live = (fn, ms = 5000, node = null) => {
     const here = location.hash.split("?")[0];
+    const draw = Aira.router.renders;
     let timer = 0;
     const stop = () => { if (timer) clearInterval(timer); timer = 0; };
     timer = setInterval(async () => {
-      if (location.hash.split("?")[0] !== here) { stop(); return; }
+      if (location.hash.split("?")[0] !== here || Aira.router.renders !== draw || (node && !node.isConnected)) { stop(); return; }
       if (document.hidden) return;
       try { await fn(); } catch { /* the next round tries again */ }
     }, Math.max(1500, ms));
@@ -322,7 +331,12 @@
       let data;
       try { data = await Aira.api("/api/life/today"); } catch (error) { main.replaceChildren(Aira.ui.error(error, render)); return; }
       const me = data.profile;
-      const tiles = LIFE_APPS.filter((app) => data.apps.includes(app.id)).map((app) => h("a", { class: "life-tile", href: `#/${app.id}` }, h("span", { class: "life-tile-icon", "aria-hidden": "true" }, Aira.icon(app.icon)), h("strong", { text: app.name }), h("span", { class: "muted", text: app.tagline })));
+      const tile = (app, href) => h("a", { class: "life-tile", href }, h("span", { class: "life-tile-icon", "aria-hidden": "true" }, Aira.icon(app.icon)), h("strong", { text: app.name }), h("span", { class: "muted", text: app.tagline }));
+      const tiles = LIFE_APPS.filter((app) => data.apps.includes(app.id)).map((app) => tile(app, `#/${app.id}`));
+      // The work apps too, for grown-ups (they refuse a child's or teen's profile): every app is one click from Today.
+      const grownUp = ["adult", "senior"].includes(me.age_group);
+      const work = grownUp ? Aira.apps.available().filter((app) => app.kind === "product" && app.category !== "life" && app.present && app.enabled !== false) : [];
+      const workTiles = work.map((app) => tile(app, `#/${Aira.apps.homeOf(app.id)}`));
       const birthdays = (data.birthdays || []).map((b) => h("div", { class: "life-birthday", role: "status" }, h("span", { "aria-hidden": "true", text: "🎂" }), h("span", { text: b.in_days === 0 ? `Today is ${b.name}'s birthday${b.age ? ` (${b.age})` : ""}!` : `${b.name}'s birthday is in ${b.in_days} day${b.in_days === 1 ? "" : "s"}${b.age ? ` (turning ${b.age})` : ""}.` })));
       const remindersOff = "Notification" in window && Notification.permission === "default";
       main.replaceChildren(...[
@@ -339,7 +353,7 @@
         data.cards.length ? h("div", { class: "life-cards" }, ...data.cards.map((card) => cardNode(card, render))) : null,
         !data.apps.length ? Aira.ui.empty("No everyday apps yet", hosted() ? "Ask your organization's owner to turn on Family, Health, Learn, Play or Planner." : "The everyday apps appear here when they are installed.") : null,
         tiles.length ? h("section", { class: "life-tiles-wrap" }, h("h2", { class: "suite-h2", text: "Your apps" }), h("div", { class: "life-tiles" }, ...tiles)) : null,
-        !L.prefs.start_page && !L.prefs.easy_mode ? h("p", { class: "muted small" }, h("button", { type: "button", class: "btn ghost sm", text: "Open Aira on this page", onclick: async () => { await L.savePrefs({ start_page: "today" }); Aira.toast("Aira now opens on Today.", "success"); render(); } })) : null,
+        workTiles.length ? h("section", { class: "life-tiles-wrap" }, h("h2", { class: "suite-h2", text: "Work and business apps" }), h("div", { class: "life-tiles" }, ...workTiles)) : null,
       ].filter(Boolean));
     };
     todayRefresh = render;
@@ -359,7 +373,7 @@
   Aira.views.display = async (main) => {
     if (!L.me) await loadMe();
     const render = () => {
-      const pages = [["", "Usual (the first app)"], ["today", "Today"], ...LIFE_APPS.map((app) => [app.id, app.name]), ["dashboard", "Careers"]];
+      const pages = [["", "Usual (Today)"], ...LIFE_APPS.map((app) => [app.id, app.name]), ["dashboard", "Careers"]];
       const start = Aira.ui.select(pages, L.prefs.start_page || "", { "aria-label": "Start page" });
       start.addEventListener("change", () => L.savePrefs({ start_page: start.value }));
       const sizes = h("div", { class: "life-sizes", role: "radiogroup", "aria-label": "Text size" }, ...[["normal", "A", "Normal"], ["large", "A", "Large"], ["xlarge", "A", "Extra large"]].map(([value, letter, label], index) => h("button", { type: "button", role: "radio", "aria-checked": String(L.prefs.text_size === value), class: `life-size size-${index}`, onclick: async () => { await L.savePrefs({ text_size: value }); render(); } }, h("span", { "aria-hidden": "true", text: letter }), h("span", { text: label }))));

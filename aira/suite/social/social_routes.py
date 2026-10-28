@@ -11,19 +11,37 @@ from collections.abc import Iterator
 from contextlib import closing, contextmanager
 from typing import Any
 
-from aira.airaapi.http import Request, aira_route
-from aira.suite import life, public
-from aira.suite.social import db, service, store
+import json
+import sqlite3
+import time
+
+from aira.airaapi.http import Raw, Request, aira_route
+from aira.suite import kit, life, public
+from aira.suite.social import db, market, service, store
 from aira.suite.social.store import APP
 
 BASE = "/api/social"
 ID = "([0-9a-f]{32})"
 
 
+def _account_db(request: Request) -> sqlite3.Connection:
+    """The account's database. A brand-new account is migrated by the first request that connects: another
+    request starting at that moment can see "database schema has changed" while it checks the version (the
+    first Social screen asks several things at once), so that one waits a moment and connects again."""
+    for attempt in range(4):
+        try:
+            return request.connect()
+        except sqlite3.OperationalError as error:
+            if "schema has changed" not in str(error) or attempt == 3:
+                raise
+            time.sleep(0.05 * (attempt + 1))
+    raise AssertionError("unreachable")
+
+
 @contextmanager
 def _identity(request: Request) -> Iterator[tuple[Any, dict[str, Any]]]:
     """(social connection, who is asking): the person comes from the account's database."""
-    connection = request.connect()
+    connection = _account_db(request)
     try:
         ident = service.identity(request, connection)
     finally:
@@ -93,7 +111,7 @@ def me_update(request: Request) -> tuple[int, dict[str, Any]]:
 @aira_route("GET", f"{BASE}/me/share")
 def me_share_get(request: Request) -> tuple[int, dict[str, Any]]:
     with _open(request) as (_sc, me):
-        with closing(request.connect()) as connection:
+        with closing(_account_db(request)) as connection:
             return 200, {"link": public.link_for(connection, APP, "profile", me["id"])}
 
 
@@ -106,7 +124,7 @@ def me_share(request: Request) -> tuple[int, dict[str, Any]]:
             )
         if me["visibility"] != "public":
             raise PermissionError("Make your profile public first.")
-        with closing(request.connect()) as connection:
+        with closing(_account_db(request)) as connection:
             link = public.create_link(
                 connection, APP, "profile", me["id"], title=me["display_name"]
             )
@@ -117,9 +135,23 @@ def me_share(request: Request) -> tuple[int, dict[str, Any]]:
 @aira_route("DELETE", f"{BASE}/me/share")
 def me_unshare(request: Request) -> tuple[int, dict[str, Any]]:
     with _open(request) as (_sc, me):
-        with closing(request.connect()) as connection:
+        with closing(_account_db(request)) as connection:
             public.revoke(connection, APP, "profile", me["id"])
     return 200, {"link": None}
+
+
+@aira_route("GET", f"{BASE}/me/export")
+def me_export(request: Request) -> Raw:
+    """Everything this person wrote or set on Social, as a file they keep (never other people's words)."""
+    with _open(request) as (sc, me):
+        data = service.export_account(sc, me["id"])
+    request.audit("social.export", "account", me["id"])
+    return Raw(
+        200,
+        json.dumps(data, indent=2, ensure_ascii=False, default=str).encode("utf-8"),
+        "application/json; charset=utf-8",
+        filename=f"social-{me['handle']}.json",
+    )
 
 
 @aira_route("GET", f"{BASE}/badge")
@@ -208,6 +240,28 @@ def friend_request(request: Request) -> tuple[int, dict[str, Any]]:
 def friend_remove(request: Request) -> tuple[int, dict[str, Any]]:
     with _open(request) as (sc, me):
         return 200, service.remove_friend(sc, me, _id(request))
+
+
+@aira_route("GET", f"{BASE}/guardian")
+def guardian_list(request: Request) -> tuple[int, dict[str, Any]]:
+    """The household's children's new friends waiting for a grown-up's yes."""
+    with _open(request) as (sc, me):
+        return 200, {"requests": service.guardian_requests(sc, me)}
+
+
+@aira_route("POST", f"{BASE}/guardian/{ID}/{ID}")
+def guardian_answer(request: Request) -> tuple[int, dict[str, Any]]:
+    """``{"approve": true}`` sends (or accepts) the child's friend request; false says no. Today's "Say yes"."""
+    with _open(request) as (sc, me):
+        result = service.answer_guardian(
+            sc,
+            me,
+            _id(request),
+            _id(request, 2),
+            kit.flag(request.payload.get("approve", True)),
+        )
+    request.audit("social.guardian", "account", _id(request))
+    return 200, result
 
 
 # ---------------------------------------------------------------------------
@@ -434,6 +488,22 @@ def group_get(request: Request) -> tuple[int, dict[str, Any]]:
         }
 
 
+@aira_route("PATCH", f"{BASE}/groups/{ID}")
+def group_update(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        return 200, {
+            "group": service.update_group(sc, me, _id(request), request.payload)
+        }
+
+
+@aira_route("DELETE", f"{BASE}/groups/{ID}")
+def group_delete(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        service.delete_group(sc, me, _id(request))
+    request.audit("social.group_delete", "group", _id(request))
+    return 200, {"deleted": True}
+
+
 @aira_route("POST", f"{BASE}/groups/{ID}/join")
 def group_join(request: Request) -> tuple[int, dict[str, Any]]:
     with _open(request) as (sc, me):
@@ -479,6 +549,20 @@ def page_get(request: Request) -> tuple[int, dict[str, Any]]:
         }
 
 
+@aira_route("PATCH", f"{BASE}/pages/{ID}")
+def page_update(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        return 200, {"page": service.update_page(sc, me, _id(request), request.payload)}
+
+
+@aira_route("DELETE", f"{BASE}/pages/{ID}")
+def page_delete(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        service.delete_page(sc, me, _id(request))
+    request.audit("social.page_delete", "page", _id(request))
+    return 200, {"deleted": True}
+
+
 @aira_route("POST", f"{BASE}/pages/{ID}/follow")
 def page_follow(request: Request) -> tuple[int, dict[str, Any]]:
     with _open(request) as (sc, me):
@@ -489,6 +573,224 @@ def page_follow(request: Request) -> tuple[int, dict[str, Any]]:
 def page_unfollow(request: Request) -> tuple[int, dict[str, Any]]:
     with _open(request) as (sc, me):
         return 200, service.follow(sc, me, "page", _id(request), False)
+
+
+# ---------------------------------------------------------------------------
+# marketplace (market.py): selling records the sale in the seller's own revenue ledger
+# ---------------------------------------------------------------------------
+
+
+@aira_route("GET", f"{BASE}/market")
+def market_browse(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        return 200, market.browse(
+            sc,
+            me,
+            q=request.q("q"),
+            category=request.q("category"),
+            max_price=request.q("max_price"),
+            sort=request.q("sort") or "newest",
+        )
+
+
+@aira_route("GET", f"{BASE}/market/mine")
+def market_mine(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        return 200, market.selling(sc, me)
+
+
+@aira_route("GET", f"{BASE}/market/saved")
+def market_saved(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        return 200, {"listings": market.saved(sc, me)}
+
+
+def _selling_as(
+    request: Request,
+) -> tuple[str, dict[str, Any] | None]:
+    """(the account's currency, the business this person may sell for or None): see market.may_sell_for_business."""
+    with closing(_account_db(request)) as connection:
+        profile = life.current(request, connection)
+        business = kit.business(connection)
+    return str(business["currency"]), market.business_for(profile, business)
+
+
+@aira_route("GET", f"{BASE}/market/setup")
+def market_setup(request: Request) -> tuple[int, dict[str, Any]]:
+    """What the "Sell something" form offers: currencies, and the business only to someone who runs it."""
+    currency, business = _selling_as(request)
+    with _open(request) as (sc, me):
+        market._seller_only(me)
+    return 200, {
+        "currency": currency,
+        "currencies": list(kit.CURRENCIES),
+        "business": None
+        if business is None
+        else {
+            "name": business["name"] or "the business",
+            "has_payment_link": bool(business["payment_link"]),
+        },
+    }
+
+
+@aira_route("POST", f"{BASE}/market")
+def market_create(request: Request) -> tuple[int, dict[str, Any]]:
+    """A new listing: the seller's own, or (``for_business``) the business's when they run it."""
+    currency, business = _selling_as(request)
+    with _open(request) as (sc, me):
+        listing = market.create(
+            sc, me, request.payload, currency=currency, business=business
+        )
+    request.audit("social.listing_create", "listing", listing["id"])
+    return 201, {"listing": listing}
+
+
+@aira_route("GET", f"{BASE}/market/{ID}")
+def market_get(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        listing = market.visible(sc, me, _id(request))
+        market.seen(sc, me, listing)
+        return 200, {"listing": market.view(sc, me, listing)}
+
+
+@aira_route("PATCH", f"{BASE}/market/{ID}")
+def market_update(request: Request) -> tuple[int, dict[str, Any]]:
+    _, business = _selling_as(request)
+    with _open(request) as (sc, me):
+        listing = market.update(
+            sc, me, _id(request), request.payload, business=business
+        )
+    _book_sale(request, listing)
+    return 200, {"listing": listing}
+
+
+def _book_sale(request: Request, listing: dict[str, Any]) -> None:
+    """A sale for the business goes in its revenue ledger and activity feed (Business hub); anything else
+    (available again, a personal sale, a giveaway, no longer for the business) takes the line back out."""
+    with closing(_account_db(request)) as connection:
+        if (
+            listing["status"] == "sold"
+            and listing["for_business"]
+            and listing["sold_cents"] > 0
+        ):
+            kit.record_revenue(
+                connection,
+                APP,
+                source_type="listing",
+                source_id=listing["id"],
+                amount_cents=listing["sold_cents"],
+                currency_code=listing["currency"],
+                label=f"Sold: {listing['title']}",
+                customer=listing.get("buyer") or "",
+            )
+            kit.log(
+                connection,
+                APP,
+                "sale",
+                f"Sold {listing['title']} on the Marketplace",
+                ref_type="listing",
+                ref_id=listing["id"],
+                amount_cents=listing["sold_cents"],
+            )
+        else:
+            kit.void_revenue(connection, APP, "listing", listing["id"])
+        connection.commit()
+
+
+@aira_route("POST", f"{BASE}/market/{ID}/status")
+def market_status(request: Request) -> tuple[int, dict[str, Any]]:
+    """``{"status": "available" | "reserved" | "sold", "buyer"?, "sold_cents" | "sold_price"?}``."""
+    with _open(request) as (sc, me):
+        listing = market.set_status(sc, me, _id(request), request.payload)
+    _book_sale(request, listing)
+    request.audit(f"social.listing_{listing['status']}", "listing", listing["id"])
+    return 200, {"listing": listing}
+
+
+@aira_route("DELETE", f"{BASE}/market/{ID}")
+def market_delete(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        listing = market.delete(sc, me, _id(request))
+    with closing(_account_db(request)) as connection:
+        public.revoke(connection, APP, "listing", listing["id"])
+        if listing["status"] != "sold":
+            kit.void_revenue(connection, APP, "listing", listing["id"])
+        connection.commit()
+    return 200, {"deleted": True}
+
+
+@aira_route("POST", f"{BASE}/market/{ID}/save")
+def market_save(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        return 200, market.save(sc, me, _id(request), True)
+
+
+@aira_route("DELETE", f"{BASE}/market/{ID}/save")
+def market_unsave(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        return 200, market.save(sc, me, _id(request), False)
+
+
+@aira_route("POST", f"{BASE}/market/{ID}/ask")
+def market_ask(request: Request) -> tuple[int, dict[str, Any]]:
+    """Message the seller about this listing (``{"text"?}``); answers the chat to open."""
+    with _open(request) as (sc, me):
+        return 201, {"chat": market.ask_seller(sc, me, _id(request), request.payload)}
+
+
+@aira_route("GET", f"{BASE}/market/{ID}/share")
+def market_share_get(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        listing = market.mine(sc, me, _id(request))
+    with closing(_account_db(request)) as connection:
+        return 200, {"link": public.link_for(connection, APP, "listing", listing["id"])}
+
+
+@aira_route("POST", f"{BASE}/market/{ID}/share")
+def market_share(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        listing = market.mine(sc, me, _id(request))
+        if listing["audience"] != "public":
+            raise PermissionError(
+                "Only a listing for everyone can be shared outside Aira."
+            )
+    with closing(_account_db(request)) as connection:
+        link = public.create_link(
+            connection, APP, "listing", listing["id"], title=listing["title"]
+        )
+    request.audit("social.listing_share", "listing", listing["id"])
+    return 201, {"link": link}
+
+
+@aira_route("DELETE", f"{BASE}/market/{ID}/share")
+def market_unshare(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        listing = market.mine(sc, me, _id(request))
+    with closing(_account_db(request)) as connection:
+        public.revoke(connection, APP, "listing", listing["id"])
+    return 200, {"link": None}
+
+
+@public.page(APP, "listing")
+def listing_page(connection: Any, link: dict[str, Any]) -> dict[str, Any]:
+    with closing(db.connect()) as sc:
+        page = market.public_page(sc, str(link.get("ref_id") or ""))
+    if not (page.get("listing") or {}).get("for_business"):
+        page["brand"] = (
+            False  # a person's own listing: not the business's name, contacts or payment link
+        )
+    return page
+
+
+@public.action(APP, "listing", "interested")
+def listing_interested(
+    connection: Any,
+    link: dict[str, Any],
+    payload: dict[str, Any],
+    visitor: dict[str, Any],
+) -> tuple[int, dict[str, Any]]:
+    with closing(db.connect()) as sc:
+        return 201, market.interested(sc, str(link.get("ref_id") or ""), payload)
 
 
 # ---------------------------------------------------------------------------
@@ -575,7 +877,10 @@ def moderation_words(request: Request) -> tuple[int, dict[str, Any]]:
 @public.page(APP, "profile")
 def profile_page(connection: Any, link: dict[str, Any]) -> dict[str, Any]:
     with closing(db.connect()) as sc:
-        return service.public_profile(sc, str(link.get("ref_id") or ""))
+        return {
+            **service.public_profile(sc, str(link.get("ref_id") or "")),
+            "brand": False,
+        }
 
 
 # ---------------------------------------------------------------------------

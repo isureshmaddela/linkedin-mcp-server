@@ -29,16 +29,17 @@ def shot(page, name):
         page.screenshot(path=str(SHOTS / f"{name}.png"), full_page=True)
 
 
-TABS = (
-    "overview",
-    "calendar",
-    "campaigns",
-    "links",
-    "forms",
-    "bio",
-    "subscribers",
-    "newsletters",
-)
+# Each tab and the page title it shows (the app's own name is in the bar above the page).
+TABS = {
+    "overview": "Overview",
+    "calendar": "Calendar",
+    "campaigns": "Campaigns",
+    "links": "Links",
+    "forms": "Forms and leads",
+    "bio": "Bio page",
+    "subscribers": "Subscribers",
+    "newsletters": "Newsletters",
+}
 
 
 class _NoModel:
@@ -89,7 +90,7 @@ def test_every_tab_renders_and_the_calendar_shows_a_post(browser, env):
             "scheduled_at": when,
         },
     )
-    for tab in TABS:
+    for tab, title in TABS.items():
         go(page, env, f"marketing?tab={tab}")
         page.wait_for_selector(".page-head h1")
         until(
@@ -97,7 +98,7 @@ def test_every_tab_renders_and_the_calendar_shows_a_post(browser, env):
             lambda: page.locator("#main .skeleton-list").count() == 0,
             what=f"the {tab} tab to load",
         )
-        assert page.locator(".page-head h1").inner_text() == "Marketing"
+        assert page.locator(".page-head h1").inner_text() == title
         assert page.locator("#main .error-box").count() == 0, tab
         shot(page, f"tab-{tab}")
     go(page, env, "marketing?tab=forms")

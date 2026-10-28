@@ -1,18 +1,21 @@
-"""Health routes (``/api/care/*``), the ``emergency_card`` public page, and Health's Today cards and pulse.
+"""Health routes (``/api/care/*``), the public pages (``emergency_card``, ``health_report`` for a doctor and
+``care_statement`` for a care client), and Health's Today cards and pulse.
 
 Every route works for one person (aira.suite.life.current). ``?person=<profile id>`` reads someone who made
-the caller their caregiver (read-only); everything else is the caller's own. Loaded by aira.suite.load_apps.
+the caller their caregiver (read-only); everything else is the caller's own. Care work (``/api/care/work/*``) is
+always the caller's own. Loaded by aira.suite.load_apps.
 """
 
 from __future__ import annotations
 
 from collections.abc import Iterator
 from contextlib import contextmanager
+from datetime import timedelta
 from typing import Any
 
 from aira.airaapi.http import Raw, Request, aira_route
 from aira.suite import background, kit, life, public
-from aira.suite.care import service, store
+from aira.suite.care import links, report, search, service, store, work
 from aira.suite.care.store import APP
 
 BASE = "/api/care"
@@ -44,7 +47,38 @@ def overview(request: Request) -> tuple[int, dict[str, Any]]:
     with _session(request) as (connection, me):
         person, can_edit = _viewing(request, connection, me)
         service.notify_missed(connection, origin=request)
-        return 200, service.overview(connection, me, person, can_edit)
+        return 200, {
+            **service.overview(connection, me, person, can_edit),
+            "timezone": _zone(connection, me),
+            "me_adult": life.is_adult(me),
+        }
+
+
+@aira_route("GET", f"{BASE}/search")
+def search_records(request: Request) -> tuple[int, dict[str, Any]]:
+    """The search box across the top: the matching medicines, appointments, readings, diary days, clients and
+    people (aira.suite.care.search), ``?q=`` and an optional ``?person=``."""
+    with _session(request) as (connection, me):
+        person, can_edit = _viewing(request, connection, me)
+        return 200, {
+            "query": request.q("q"),
+            "results": search.search(
+                connection,
+                me,
+                person,
+                can_edit,
+                request.q("q"),
+                request.qint("limit", 6, 1, 25),
+            ),
+        }
+
+
+def _zone(connection: Any, me: dict[str, Any]) -> dict[str, Any]:
+    """The zone medicine times are read in, and whether this person may change it."""
+    return {
+        **service.timezone_info(connection),
+        "can_change": service.can_set_timezone(me),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -52,15 +86,43 @@ def overview(request: Request) -> tuple[int, dict[str, Any]]:
 # ---------------------------------------------------------------------------
 
 
+@aira_route("POST", f"{BASE}/settings")
+def settings_save(request: Request) -> tuple[int, dict[str, Any]]:
+    """The time zone medicine times are read in (used when the Business hub names none). It is shared by everyone
+    in the household or organization, so only the people ``service.can_set_timezone`` names may change it once
+    it is set."""
+    with _session(request) as (connection, me):
+        service.set_timezone(connection, me, request.payload.get("timezone"))
+        return 200, {"timezone": _zone(connection, me)}
+
+
 @aira_route("GET", f"{BASE}/medicines")
 def medicines_list(request: Request) -> tuple[int, dict[str, Any]]:
     with _session(request) as (connection, me):
         person, can_edit = _viewing(request, connection, me)
+        per_medicine = service.medicine_adherence(connection, person["id"], 30)
         return 200, {
-            "medicines": store.medicines(connection, person["id"]),
+            "medicines": [
+                {
+                    **service.medicine_view(connection, medicine),
+                    "adherence_30": per_medicine.get(medicine["id"]),
+                }
+                for medicine in store.medicines(connection, person["id"])
+            ],
             "forms": list(store.FORMS),
+            "timezone": _zone(connection, me),
             "can_edit": can_edit,
         }
+
+
+@aira_route("POST", f"{BASE}/medicines/{ID}/refill")
+def medicines_refill(request: Request) -> tuple[int, dict[str, Any]]:
+    with _session(request) as (connection, me):
+        medicine = service.refill(
+            connection, me, request.match.group(1), request.payload
+        )
+    request.audit("care.medicine_refill", "medicine", medicine["id"])
+    return 200, {"medicine": medicine}
 
 
 @aira_route("POST", f"{BASE}/medicines")
@@ -113,12 +175,40 @@ def doses_as_needed(request: Request) -> tuple[int, dict[str, Any]]:
 
 
 @aira_route("GET", f"{BASE}/doses")
-def doses_history(request: Request) -> tuple[int, dict[str, Any]]:
+def doses_history(request: Request) -> tuple[int, dict[str, Any]] | Raw:
+    """What was marked (taken, skipped, snoozed), newest first; ``medicine`` and ``status`` filter it and
+    ``format=csv`` downloads it."""
     with _session(request) as (connection, me):
         person, _ = _viewing(request, connection, me)
         days = request.qint("days", 30, 1, 365)
+        rows = service.history(connection, person["id"], days)
+        medicine = request.q("medicine")
+        status = request.q("status")
+        if medicine:
+            rows = [row for row in rows if row["medicine_id"] == medicine]
+        if status:
+            kit.choice(status, "the status", ("taken", "skipped", "snoozed"))
+            rows = [row for row in rows if row["status"] == status]
+        if request.q("format") == "csv":
+            return Raw(
+                200,
+                kit.csv_bytes(
+                    rows,
+                    (
+                        "slot_date",
+                        "slot_time",
+                        "medicine",
+                        "strength",
+                        "status",
+                        "at",
+                        "reason",
+                    ),
+                ),
+                "text/csv; charset=utf-8",
+                filename="doses.csv",
+            )
         return 200, {
-            "doses": service.history(connection, person["id"], days),
+            "doses": rows,
             "adherence": service.adherence(connection, person["id"], min(days, 90)),
         }
 
@@ -191,6 +281,22 @@ def appointments_update(request: Request) -> tuple[int, dict[str, Any]]:
                 connection, me, request.payload, request.match.group(1)
             )
         }
+
+
+@aira_route("GET", f"{BASE}/appointments/{ID}/calendar")
+def appointments_calendar(request: Request) -> Raw:
+    """The appointment as a calendar file, to add it to a phone's or computer's calendar."""
+    with _session(request) as (connection, me):
+        person, _ = _viewing(request, connection, me)
+        appointment = service.get_appointment(
+            connection, person["id"], request.match.group(1)
+        )
+        return Raw(
+            200,
+            service.calendar_file(appointment),
+            "text/calendar; charset=utf-8",
+            filename="appointment.ics",
+        )
 
 
 @aira_route("DELETE", f"{BASE}/appointments/{ID}")
@@ -274,6 +380,245 @@ def diary_delete(request: Request) -> tuple[int, dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
+# the report for a doctor
+# ---------------------------------------------------------------------------
+
+
+@aira_route("GET", f"{BASE}/report")
+def report_get(request: Request) -> tuple[int, dict[str, Any]] | Raw:
+    with _session(request) as (connection, me):
+        person, can_edit = _viewing(request, connection, me)
+        built = report.build(
+            connection,
+            person,
+            request.q("days") or 30,
+            include_diary=can_edit and request.q("diary") in ("1", "true"),
+        )
+        if request.q("format") == "csv":
+            return Raw(
+                200,
+                kit.csv_bytes(
+                    report.csv_rows(built),
+                    (
+                        "section",
+                        "name",
+                        "detail",
+                        "taken",
+                        "skipped",
+                        "missed",
+                        "percent",
+                    ),
+                ),
+                "text/csv; charset=utf-8",
+                filename="health-report.csv",
+            )
+        return 200, {
+            "report": built,
+            "can_edit": can_edit,
+            "can_share": can_edit and life.is_adult(me),
+            "link": report.link_state(connection, person["id"]) if can_edit else None,
+            "periods": list(report.PERIODS),
+            "link_days": report.LINK_DAYS,
+        }
+
+
+@aira_route("POST", f"{BASE}/report/link")
+def report_link(request: Request) -> tuple[int, dict[str, Any]]:
+    with _session(request) as (connection, me):
+        made = report.share(connection, me, request.payload)
+    request.audit("care.report_link", "report", me["id"])
+    return 200, {"link": made}
+
+
+@aira_route("DELETE", f"{BASE}/report/link")
+def report_unlink(request: Request) -> tuple[int, dict[str, Any]]:
+    with _session(request) as (connection, me):
+        report.revoke(connection, me["id"])
+    return 200, {"link": None}
+
+
+@public.page(APP, report.KIND)
+def health_report_page(connection: Any, link: dict[str, Any]) -> dict[str, Any]:
+    """The report as its owner chose it (diary or not), until the link's date."""
+    store.ensure(connection)
+    return report.public_page(connection, link)
+
+
+# ---------------------------------------------------------------------------
+# care work: earning by looking after people
+# ---------------------------------------------------------------------------
+
+
+@aira_route("GET", f"{BASE}/work")
+def work_overview(request: Request) -> tuple[int, dict[str, Any]]:
+    with _session(request) as (connection, me):
+        work.require_adult(me)
+        since = (service.local_today(connection) - timedelta(days=90)).isoformat()
+        return 200, {
+            "summary": work.summary(connection, me["id"]),
+            "clients": work.clients(connection, me["id"]),
+            "visits": work.visits(
+                connection, me["id"], client_id=request.q("client"), since=since
+            ),
+            "statements": work.statements(
+                connection, me["id"], status=request.q("status")
+            ),
+        }
+
+
+@aira_route("GET", f"{BASE}/work/visits")
+def work_visits(request: Request) -> tuple[int, dict[str, Any]] | Raw:
+    with _session(request) as (connection, me):
+        work.require_adult(me)
+        rows = work.visits(
+            connection,
+            me["id"],
+            client_id=request.q("client"),
+            unbilled=request.q("unbilled") in ("1", "true"),
+            since=kit.day(request.q("since"), "the first day"),
+            limit=2000,
+        )
+        if request.q("format") == "csv":
+            return Raw(
+                200,
+                kit.csv_bytes(
+                    work.visits_csv_rows(rows),
+                    (
+                        "day",
+                        "start",
+                        "client",
+                        "minutes",
+                        "rate",
+                        "amount",
+                        "tasks",
+                        "billed",
+                        "notes",
+                    ),
+                ),
+                "text/csv; charset=utf-8",
+                filename="care-visits.csv",
+            )
+        return 200, {"visits": rows}
+
+
+@aira_route("POST", f"{BASE}/work/clients")
+def work_client_create(request: Request) -> tuple[int, dict[str, Any]]:
+    with _session(request) as (connection, me):
+        client = work.save_client(connection, me, request.payload)
+    request.audit("care.client_create", "client", client["id"])
+    return 201, {"client": client}
+
+
+@aira_route("PATCH", f"{BASE}/work/clients/{ID}")
+def work_client_update(request: Request) -> tuple[int, dict[str, Any]]:
+    with _session(request) as (connection, me):
+        return 200, {
+            "client": work.save_client(
+                connection, me, request.payload, request.match.group(1)
+            )
+        }
+
+
+@aira_route("DELETE", f"{BASE}/work/clients/{ID}")
+def work_client_delete(request: Request) -> tuple[int, dict[str, Any]]:
+    with _session(request) as (connection, me):
+        outcome = work.delete_client(connection, me, request.match.group(1))
+    return 200, {"outcome": outcome}
+
+
+@aira_route("POST", f"{BASE}/work/visits")
+def work_visit_create(request: Request) -> tuple[int, dict[str, Any]]:
+    with _session(request) as (connection, me):
+        return 201, {"visit": work.save_visit(connection, me, request.payload)}
+
+
+@aira_route("PATCH", f"{BASE}/work/visits/{ID}")
+def work_visit_update(request: Request) -> tuple[int, dict[str, Any]]:
+    with _session(request) as (connection, me):
+        return 200, {
+            "visit": work.save_visit(
+                connection, me, request.payload, request.match.group(1)
+            )
+        }
+
+
+@aira_route("DELETE", f"{BASE}/work/visits/{ID}")
+def work_visit_delete(request: Request) -> tuple[int, dict[str, Any]]:
+    with _session(request) as (connection, me):
+        work.delete_visit(connection, me, request.match.group(1))
+    return 200, {"removed": True}
+
+
+@aira_route("POST", f"{BASE}/work/statements")
+def work_statement_create(request: Request) -> tuple[int, dict[str, Any]]:
+    with _session(request) as (connection, me):
+        statement = work.create_statement(connection, me, request.payload)
+    request.audit("care.statement_create", "statement", statement["id"])
+    return 201, {"statement": statement}
+
+
+@aira_route("GET", f"{BASE}/work/statements/{ID}")
+def work_statement_get(request: Request) -> tuple[int, dict[str, Any]]:
+    with _session(request) as (connection, me):
+        work.require_adult(me)
+        return 200, {
+            "statement": work.get_statement(
+                connection, me["id"], request.match.group(1)
+            )
+        }
+
+
+@aira_route("DELETE", f"{BASE}/work/statements/{ID}")
+def work_statement_delete(request: Request) -> tuple[int, dict[str, Any]]:
+    with _session(request) as (connection, me):
+        work.delete_statement(connection, me, request.match.group(1))
+    request.audit("care.statement_delete", "statement", request.match.group(1))
+    return 200, {"removed": True}
+
+
+@aira_route("POST", f"{BASE}/work/statements/{ID}/link")
+def work_statement_link(request: Request) -> tuple[int, dict[str, Any]]:
+    with _session(request) as (connection, me):
+        return 200, {"link": work.link(connection, me, request.match.group(1))}
+
+
+@aira_route("POST", f"{BASE}/work/statements/{ID}/send")
+def work_statement_send(request: Request) -> tuple[int, dict[str, Any]]:
+    with _session(request) as (connection, me):
+        sent = work.send(connection, me, request.match.group(1), origin=request)
+    request.audit("care.statement_send", "statement", request.match.group(1))
+    return 200, sent
+
+
+@aira_route("POST", f"{BASE}/work/statements/{ID}/paid")
+def work_statement_paid(request: Request) -> tuple[int, dict[str, Any]]:
+    with _session(request) as (connection, me):
+        statement = work.set_paid(
+            connection,
+            me,
+            request.match.group(1),
+            kit.flag(request.payload.get("paid", True)),
+        )
+    request.audit("care.statement_paid", "statement", statement["id"])
+    return 200, {"statement": statement}
+
+
+@public.page(APP, work.KIND)
+def care_statement_page(connection: Any, link: dict[str, Any]) -> dict[str, Any]:
+    store.ensure(connection)
+    return work.public_page(connection, link)
+
+
+@public.action(APP, work.KIND, "paid")
+def care_statement_paid(
+    connection: Any, link: dict[str, Any], payload: dict[str, Any], visitor: Any
+) -> tuple[int, dict[str, Any]]:
+    """The client says they paid; the carer checks and marks it."""
+    store.ensure(connection)
+    return 200, work.client_says_paid(connection, link, payload)
+
+
+# ---------------------------------------------------------------------------
 # the emergency card
 # ---------------------------------------------------------------------------
 
@@ -287,7 +632,7 @@ def card_get(request: Request) -> tuple[int, dict[str, Any]]:
             "person": life.public(person),
             "can_edit": can_edit,
             "can_share": can_edit and me.get("age_group") != "child",
-            "link": public.link_for(connection, APP, "emergency_card", person["id"]),
+            "link": links.current(connection, "emergency_card", person["id"]),
             "blood_types": list(store.BLOOD_TYPES),
             "children": [
                 life.public(p)
@@ -316,9 +661,8 @@ def card_link(request: Request) -> tuple[int, dict[str, Any]]:
         service.require_own(can_edit)
         if me.get("age_group") == "child":
             raise PermissionError("Ask an adult to share your emergency card.")
-        link = public.create_link(
+        link = links.create(
             connection,
-            APP,
             "emergency_card",
             person["id"],
             title=f"Emergency card: {person['name']}",
@@ -332,7 +676,7 @@ def card_unlink(request: Request) -> tuple[int, dict[str, Any]]:
     with _session(request) as (connection, me):
         person, can_edit = service.card_person(connection, me, request.q("person"))
         service.require_own(can_edit)
-        public.revoke(connection, APP, "emergency_card", person["id"])
+        links.revoke(connection, "emergency_card", person["id"])
     return 200, {"link": None}
 
 
@@ -420,7 +764,18 @@ def _today(connection: Any, me: dict[str, Any]) -> list[dict[str, Any]]:
             life.card(
                 APP,
                 "Time to refill",
-                lines=[{"text": m["name"], "sub": f"{m['stock']} left"} for m in low],
+                lines=[
+                    {
+                        "text": m["name"],
+                        "sub": f"{m['stock']} left"
+                        + (
+                            f" · about {m['days_left']} days"
+                            if m["days_left"] is not None
+                            else ""
+                        ),
+                    }
+                    for m in low
+                ],
                 tone="warn",
                 link="#/care?tab=medicines",
             )
@@ -449,6 +804,44 @@ def _today(connection: Any, me: dict[str, Any]) -> list[dict[str, Any]]:
                 link="#/care?tab=caregivers",
             )
         )
+    if life.is_adult(me) and kit.count(
+        connection,
+        "SELECT COUNT(*) FROM cr_clients WHERE owner_id = ? AND active = 1",
+        (me["id"],),
+    ):
+        money = work.summary(connection, me["id"])
+        currency = money["currency"]
+        lines = [
+            {
+                "text": "Visits not billed yet",
+                "sub": kit.fmt_money(money["unbilled_cents"], currency),
+            },
+            {
+                "text": "Waiting to be paid",
+                "sub": kit.fmt_money(money["waiting_cents"], currency),
+            },
+            {
+                "text": "Paid this month",
+                "sub": kit.fmt_money(money["paid_this_month_cents"], currency),
+            },
+        ]
+        lines += [
+            {
+                "text": f"{row['client']} says they paid",
+                "sub": row["number"]
+                + (f": {row['client_paid_note']}" if row["client_paid_note"] else ""),
+            }
+            for row in money["to_check"]
+        ]
+        cards.append(
+            life.card(
+                APP,
+                "Care work",
+                lines=lines,
+                tone="good" if money["to_check"] else "",
+                link="#/care?tab=work",
+            )
+        )
     return cards
 
 
@@ -456,7 +849,7 @@ def _today(connection: Any, me: dict[str, Any]) -> list[dict[str, Any]]:
 def _pulse(connection: Any, me: dict[str, Any], since: str) -> dict[str, Any]:
     store.ensure(connection)
     service.notify_missed(connection)
-    alerts = service.alerts(connection, me)
+    alerts = service.alerts(connection, me) + work.alerts(connection, me)
     slots = service.day_slots(connection, me["id"], service.local_today(connection))
     badge = sum(1 for slot in slots if slot["status"] in ("due", "missed"))
     return {"badge": badge, "alerts": alerts}

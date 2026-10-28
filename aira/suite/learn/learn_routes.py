@@ -9,9 +9,9 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import Any
 
-from aira.airaapi.http import Request, aira_route
+from aira.airaapi.http import Raw, Request, aira_route
 from aira.suite import kit, life, public
-from aira.suite.learn import service, store
+from aira.suite.learn import cards_io, progress, sales, service, store
 
 APP = store.APP
 BASE = "/api/learn"
@@ -57,7 +57,12 @@ def _deck_view(
                 "updated_at",
             )
         },
+        "price_cents": int(deck.get("price_cents") or 0),
+        "preview_count": int(deck.get("preview_count") or 5),
         "mine": owner == me["id"],
+        # A copy of someone else's deck is studied, not sold.
+        "copy_of_other": deck.get("source") == "copy"
+        and deck.get("copied_from") != me["id"],
         "owner_name": me["name"]
         if owner == me["id"]
         else life.name_of(connection, owner),
@@ -116,6 +121,15 @@ def decks_list(request: Request) -> tuple[int, dict[str, Any]]:
             for d in store.decks_for(connection, me)
         ]
         return 200, {"decks": decks, "starters": service.starter_list(me)}
+
+
+@aira_route("GET", f"{BASE}/search")
+def search(request: Request) -> tuple[int, dict[str, Any]]:
+    """The search box across the top: decks, cards and books holding every word of ``q`` (``limit`` of each)."""
+    with _Session(request) as (connection, me):
+        return 200, store.search(
+            connection, me, request.q("q"), request.qint("limit", 20, 1, 50)
+        )
 
 
 @aira_route("POST", f"{BASE}/decks")
@@ -181,6 +195,20 @@ def decks_get(request: Request) -> tuple[int, dict[str, Any]]:
         )
         view["link"] = link
         view["can_share_publicly"] = deck["owner_id"] == me["id"] and life.is_adult(me)
+        view["can_sell"] = view["can_share_publicly"] and (
+            not view["copy_of_other"] or sales.for_sale(deck)
+        )
+        # Someone else's deck on sale is theirs to sell: studied here, not copied.
+        view["can_copy"] = deck["owner_id"] != me["id"] and not sales.for_sale(deck)
+        if view["can_share_publicly"]:
+            view["payment"] = sales.payment_view(connection, me)
+        if view["can_sell"]:
+            view["sold"] = kit.count(
+                connection,
+                "SELECT COUNT(*) FROM ln_sales WHERE deck_id = ? AND status = 'paid'",
+                (deck["id"],),
+            )
+            view["currency"] = kit.business(connection)["currency"]
         return 200, {"deck": view}
 
 
@@ -208,7 +236,61 @@ def decks_delete(request: Request) -> tuple[int, dict[str, Any]]:
     with _Session(request) as (connection, me):
         service.delete_deck(connection, me, request.match.group(1))
         public.revoke(connection, APP, "deck", request.match.group(1))
+        # Requests to buy a deleted deck can no longer be met; paid sales stay in the seller's records.
+        connection.execute(
+            "UPDATE ln_sales SET status = 'cancelled', cancelled_at = ? WHERE deck_id = ? AND status = 'pending'",
+            (kit.now(), request.match.group(1)),
+        )
+        connection.commit()
         return 200, {"deleted": True}
+
+
+@aira_route("POST", f"{BASE}/decks/{ID}/copy")
+def decks_copy(request: Request) -> tuple[int, dict[str, Any]]:
+    """Your own copy of a deck you may study (for example one shared by the household), to change freely."""
+    with _Session(request) as (connection, me):
+        deck = service.copy_deck(connection, me, request.match.group(1))
+        return 201, {
+            "deck": _deck_view(connection, me, deck, service.today_of(connection))
+        }
+
+
+@aira_route("POST", f"{BASE}/decks/{ID}/import")
+def decks_import(request: Request) -> tuple[int, dict[str, Any]]:
+    """Add many cards at once from pasted text or a CSV file's contents (``{"text"}``)."""
+    with _Session(request) as (connection, me):
+        result = cards_io.import_cards(
+            connection,
+            me,
+            request.match.group(1),
+            str(request.payload.get("text") or ""),
+        )
+    request.audit("learn.cards_import", "deck", request.match.group(1))
+    return 200, result
+
+
+@aira_route("GET", f"{BASE}/decks/{ID}/export")
+def decks_export(request: Request) -> Raw:
+    with _Session(request) as (connection, me):
+        filename, body = cards_io.export_csv(connection, me, request.match.group(1))
+    return Raw(200, body, "text/csv; charset=utf-8", filename=filename)
+
+
+@aira_route("POST", f"{BASE}/decks/{ID}/price")
+def decks_price(request: Request) -> tuple[int, dict[str, Any]]:
+    """Sell a deck (``{"price_cents", "preview_count"}``; a price of 0 makes its page free again)."""
+    with _Session(request) as (connection, me):
+        deck = sales.set_price(connection, me, request.match.group(1), request.payload)
+        link = public.link_for(connection, APP, "deck", deck["id"])
+        if sales.for_sale(deck) and not link:
+            link = public.create_link(
+                connection, APP, "deck", deck["id"], title=deck["title"]
+            )
+            connection.commit()
+        view = _deck_view(connection, me, deck, service.today_of(connection))
+        view["link"] = link
+    request.audit("learn.deck_price", "deck", deck["id"])
+    return 200, {"deck": view}
 
 
 @aira_route("POST", f"{BASE}/decks/{ID}/cards")
@@ -237,7 +319,7 @@ def cards_update(request: Request) -> tuple[int, dict[str, Any]]:
 def cards_delete(request: Request) -> tuple[int, dict[str, Any]]:
     with _Session(request) as (connection, me):
         card = store.card(connection, request.match.group(1))
-        store.own_deck(connection, me, card["deck_id"])
+        sales.can_drop_card(connection, store.own_deck(connection, me, card["deck_id"]))
         connection.execute("DELETE FROM ln_cards WHERE id = ?", (card["id"],))
         connection.execute("DELETE FROM ln_progress WHERE card_id = ?", (card["id"],))
         connection.commit()
@@ -271,6 +353,7 @@ def decks_link(request: Request) -> tuple[int, dict[str, Any]]:
 def decks_unlink(request: Request) -> tuple[int, dict[str, Any]]:
     with _Session(request) as (connection, me):
         deck = store.own_deck(connection, me, request.match.group(1))
+        sales.can_turn_off_link(deck)
         public.revoke(connection, APP, "deck", deck["id"])
         return 200, {"link": None}
 
@@ -282,7 +365,21 @@ def decks_unlink(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("GET", f"{BASE}/study")
 def study(request: Request) -> tuple[int, dict[str, Any]]:
+    """The next cards to study; ``mode=weak`` gives the cards this person keeps missing, due or not."""
     with _Session(request) as (connection, me):
+        if request.q("mode") == "weak":
+            today = service.today_of(connection)
+            return 200, {
+                **progress.weak_queue(
+                    connection,
+                    me,
+                    deck_id=request.q("deck_id"),
+                    limit=request.qint("limit", 20, 1, 50),
+                ),
+                "counts": service.counts(connection, me, today),
+                "goal": service.goal_state(connection, me, today),
+                "mode": "weak",
+            }
         return 200, service.study_queue(
             connection,
             me,
@@ -390,11 +487,11 @@ def books_add(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("PATCH", f"{BASE}/books/{ID}")
 def books_update(request: Request) -> tuple[int, dict[str, Any]]:
+    """``{"title"?, "author"?, "finished"?}``."""
     with _Session(request) as (connection, me):
-        finished = kit.flag(request.payload.get("finished"))
         return 200, {
-            "book": service.finish_book(
-                connection, me, request.match.group(1), finished
+            "book": service.update_book(
+                connection, me, request.match.group(1), request.payload
             )
         }
 
@@ -410,6 +507,74 @@ def books_delete(request: Request) -> tuple[int, dict[str, Any]]:
 def reading_log(request: Request) -> tuple[int, dict[str, Any]]:
     with _Session(request) as (connection, me):
         return 200, service.log_reading(connection, me, request.payload)
+
+
+@aira_route("GET", f"{BASE}/stats")
+def stats(request: Request) -> Any:
+    """The person's progress (calendar, retention, forecast, hardest cards); ``format=csv`` is the daily log."""
+    with _Session(request) as (connection, me):
+        if request.q("format") == "csv":
+            return Raw(
+                200,
+                progress.daily_log(connection, me),
+                "text/csv; charset=utf-8",
+                filename="learning-log.csv",
+            )
+        return 200, progress.stats(connection, me)
+
+
+# ---------------------------------------------------------------------------
+# earning: selling decks
+# ---------------------------------------------------------------------------
+
+
+@aira_route("GET", f"{BASE}/sales")
+def sales_list(request: Request) -> Any:
+    """The seller's requests and sales (``status``, ``q``), headline numbers; ``format=csv`` downloads them."""
+    with _Session(request) as (connection, me):
+        rows = sales.sales(connection, me, status=request.q("status"), q=request.q("q"))
+        if request.q("format") == "csv":
+            return Raw(
+                200,
+                kit.csv_bytes(sales.csv_rows(rows), sales.SALE_COLUMNS),
+                "text/csv; charset=utf-8",
+                filename="deck-sales.csv",
+            )
+        return 200, {"summary": sales.summary(connection, me), "sales": rows}
+
+
+@aira_route("POST", f"{BASE}/seller")
+def seller_save(request: Request) -> tuple[int, dict[str, Any]]:
+    """How buyers pay you: ``{"payment_link", "payment_instructions"}`` (your own, not the organization's)."""
+    with _Session(request) as (connection, me):
+        payment = sales.save_payment(connection, me, request.payload)
+    request.audit("learn.seller_payment", "profile", me["id"])
+    return 200, {"payment": payment}
+
+
+@aira_route("POST", f"{BASE}/sales/{ID}/paid")
+def sales_paid(request: Request) -> tuple[int, dict[str, Any]]:
+    """The payment arrived (or resend a lost code): revenue recorded, a new access code emailed to the buyer."""
+    with _Session(request) as (connection, me):
+        result = sales.mark_paid(connection, me, request.match.group(1), source=request)
+    request.audit("learn.sale_paid", "sale", request.match.group(1))
+    return 200, result
+
+
+@aira_route("POST", f"{BASE}/sales/{ID}/unpaid")
+def sales_unpaid(request: Request) -> tuple[int, dict[str, Any]]:
+    with _Session(request) as (connection, me):
+        sale = sales.mark_unpaid(connection, me, request.match.group(1))
+    request.audit("learn.sale_unpaid", "sale", request.match.group(1))
+    return 200, {"sale": sale}
+
+
+@aira_route("POST", f"{BASE}/sales/{ID}/cancel")
+def sales_cancel(request: Request) -> tuple[int, dict[str, Any]]:
+    with _Session(request) as (connection, me):
+        sale = sales.cancel(connection, me, request.match.group(1))
+    request.audit("learn.sale_cancel", "sale", request.match.group(1))
+    return 200, {"sale": sale}
 
 
 @aira_route("GET", f"{BASE}/leaderboard")
@@ -466,11 +631,13 @@ def _today(connection: Any, me: dict[str, Any]) -> list[dict[str, Any]]:
         },
     ]
     if days:
+        # A streak is never "done": crossing it out on a good day would read as a lost streak.
         lines.append(
             {
                 "text": f"🔥 {days}-day streak",
-                "sub": "" if goal["done"] else "Practise today to keep it going",
-                "done": goal["done"],
+                "sub": "Kept for today"
+                if goal["done"]
+                else "Practise today to keep it going",
             }
         )
     tone = (
@@ -478,11 +645,29 @@ def _today(connection: Any, me: dict[str, Any]) -> list[dict[str, Any]]:
         if goal["done"]
         else ("warn" if days and service.streak_at_risk(connection, me) else "")
     )
-    return [
+    cards = [
         life.card(
             APP, "Practise today", lines=lines, tone=tone, link="#/learn?tab=study"
         )
     ]
+    waiting_sales = sales.waiting_for(connection, me)
+    if waiting_sales:
+        # Its own card, so it opens Earn (where payments are confirmed), not Study.
+        cards.append(
+            life.card(
+                APP,
+                "Deck sales",
+                lines=[
+                    {
+                        "text": f"{waiting_sales} {'person wants' if waiting_sales == 1 else 'people want'} to buy your decks",
+                        "sub": "Check the payment arrived, then press Payment received",
+                    }
+                ],
+                tone="warn",
+                link="#/learn?tab=earn",
+            )
+        )
+    return cards
 
 
 @life.pulse(APP)
@@ -544,13 +729,37 @@ def _checklist(connection: Any) -> list[dict[str, Any]]:
 @kit.summary(APP)
 def _summary(connection: Any) -> dict[str, Any]:
     store.ensure(connection)
+    today = service.today_of(connection)
     week = kit.count(
         connection,
-        "SELECT COALESCE(SUM(cards), 0) FROM ln_days WHERE day >= date('now', '-6 days')",
+        "SELECT COALESCE(SUM(cards), 0) FROM ln_days WHERE day >= ?",
+        ((today - timedelta(days=6)).isoformat(),),
     )
+    money: list[dict[str, Any]] = []
+    if not sales.hosted():
+        # Hosted, members' deck income is their own, so it is not the organization's to sum up.
+        month = kit.count(
+            connection,
+            "SELECT COALESCE(SUM(amount_cents), 0) FROM ln_sales WHERE status = 'paid' AND substr(paid_at, 1, 7) = ?",
+            (kit.now()[:7],),
+        )
+        waiting = kit.count(
+            connection, "SELECT COUNT(*) FROM ln_sales WHERE status = 'pending'"
+        )
+        money.append(
+            {
+                "label": "Earned from decks this month",
+                "value": kit.fmt_money(month, kit.business(connection)["currency"]),
+            }
+        )
+        if waiting:
+            money.append(
+                {"label": "Deck sales to confirm", "value": waiting, "tone": "warn"}
+            )
     return {
         "cards": [
             {"label": "Cards studied this week", "value": week},
+            *money,
             {
                 "label": "Decks",
                 "value": kit.count(
@@ -567,19 +776,42 @@ def _summary(connection: Any) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-@public.page(APP, "deck")
-def _deck_page(connection: Any, link: dict[str, Any]) -> dict[str, Any]:
+def _public_deck(connection: Any, link: dict[str, Any]) -> dict[str, Any]:
     store.ensure(connection)
     try:
-        deck = store.deck(connection, link["ref_id"])
+        return store.deck(connection, link["ref_id"])
     except LookupError:
         raise LookupError("This link is no longer available.") from None
+
+
+@public.page(APP, "deck")
+def _deck_page(connection: Any, link: dict[str, Any]) -> dict[str, Any]:
+    """A free deck shows every card; a deck on sale shows a preview, the price and the buy form."""
+    # The seller's own way to pay (page.payment), never the business's payment link.
     return {
-        "title": deck["title"],
-        "description": deck["description"],
-        "emoji": deck["emoji"],
-        "cards": [
-            {"front": c["front"], "back": c["back"], "hint": c["hint"]}
-            for c in store.cards(connection, deck["id"])
-        ],
+        **sales.page_data(connection, _public_deck(connection, link)),
+        "business_payment": False,
+    }
+
+
+@public.action(APP, "deck", "buy")
+def _deck_buy(
+    connection: Any,
+    link: dict[str, Any],
+    payload: dict[str, Any],
+    visitor: dict[str, Any],
+) -> tuple[int, dict[str, Any]]:
+    """``{"name", "email"}``: ask to buy the deck; answers the amount and the reference to pay with."""
+    deck = _public_deck(connection, link)
+    return 201, {"request": sales.request_purchase(connection, deck, payload)}
+
+
+@public.query(APP, "deck", "cards")
+def _deck_cards(
+    connection: Any, link: dict[str, Any], params: dict[str, Any]
+) -> tuple[int, dict[str, Any]]:
+    """Every card, for a buyer's access code (sent in the Aira-Secret header)."""
+    deck = _public_deck(connection, link)
+    return 200, {
+        "cards": sales.unlock(connection, deck, str(params.get("secret") or ""))
     }

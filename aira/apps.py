@@ -3,7 +3,7 @@
 An *account* is the organization in the hosted build, or the local sign-in in the single-user build. An *app*
 is a product the account can use: Careers (the job-search workspace), Developers (the search console, ``/v1``
 and connected apps), the business apps (Sales, Marketing with Leads, Service, Commerce, Courses & Events) and the
-everyday apps (Social, Health, Learn, Play, Planner, News, Videos), with Ads among the business apps. Like the clouds of a CRM suite, one app holds several
+everyday apps (Social, Health, Learn, Play, Planner, News, Videos, Life, AI, Stocks), with Ads among the business apps. Like the clouds of a CRM suite, one app holds several
 sections: Commerce is Shop and Bookings, Marketing includes Leads, Social includes Family. The hosted build sells each app as a subscription the organization's admin
 turns on from the account's Apps page; the local build has every app installed.
 
@@ -395,12 +395,96 @@ VIDEOS = _life(
     ),
 )
 
-LIFE_APPS: tuple[App, ...] = (SOCIAL, CARE, LEARN, PLAY, PLANNER, NEWS, VIDEOS)
+JOURNEY = _life(
+    "journey",  # not "life": /api/life is the everyday apps' shared core (people, Today, pulse)
+    "Life",
+    "Goals, milestones and documents",
+    "",
+    "Your life in one place: goals with steps and check-ins, a life score, a timeline of the milestones of your "
+    "life, and a vault for passports, certificates and insurance cards with reminders before they expire.",
+    (
+        "Goals with steps and progress",
+        "A life score and what is coming up",
+        "A timeline of your milestones",
+        "A document vault with expiry reminders",
+    ),
+)
+
+AI = _life(
+    "ai",
+    "AI",
+    "Chat with Aira and manage its agents",
+    "",
+    "One assistant across all your apps: ask about your day, goals, medicines, chores, family or business and get "
+    "a morning brief; ask it to add a goal, a task or a shopping item. One agent per app, each with the consent "
+    "level you choose, approvals for what needs a yes, and a log of everything they did.",
+    (
+        "A chat that knows your apps",
+        "A morning brief",
+        "Agents with consent levels",
+        "Approvals and an activity log",
+    ),
+)
+
+STOCKS = _life(
+    "stocks",
+    "Stocks",
+    "Markets, predictions and your portfolio",
+    "",
+    "Follow the markets and grow your money: live quotes, top gainers and losers, every stock's daily log of highs "
+    "and lows, charts with indicators, predictions with their track record, a practice portfolio and your real "
+    "holdings with profit and loss, price alerts, and paid subscriptions to the stock ideas you publish.",
+    (
+        "Top gainers, losers and each stock's log",
+        "Predictions with their track record",
+        "Practice trading and real holdings",
+        "Earn from the stock ideas you publish",
+    ),
+)
+
+LIFE_APPS: tuple[App, ...] = (
+    SOCIAL,
+    CARE,
+    LEARN,
+    PLAY,
+    PLANNER,
+    NEWS,
+    VIDEOS,
+    JOURNEY,
+    AI,
+    STOCKS,
+)
 APPS: tuple[App, ...] = (CAREERS, API, *INDUSTRY_APPS, *LIFE_APPS)
 APP_IDS = tuple(app.id for app in APPS)
 BY_ID = {app.id: app for app in APPS}
 # Sections that belong to the account itself, shown under every app.
 ACCOUNT_SECTIONS = ("settings", "security")
+
+# Each app's own address, like mail.google.com and drive.google.com: /stocks opens Stocks. The web page is the same
+# for every app (auto_apply_assistant/shell.js reads the address); /home is the account's home (Today).
+APP_PATHS: dict[str, str] = {
+    "careers": "careers",
+    "api": "developers",
+    "studio": "sales",
+    "marketing": "marketing",
+    "service": "service",
+    "commerce": "commerce",
+    "experiences": "courses",
+    "ads": "ads",
+    "social": "social",
+    "care": "health",
+    "learn": "learn",
+    "play": "play",
+    "planner": "planner",
+    "news": "news",
+    "videos": "videos",
+    "journey": "life",
+    "ai": "ai",
+    "stocks": "stocks",
+}
+PAGE_PATHS: tuple[str, ...] = ("home", *APP_PATHS.values())
+# The route pattern of those addresses (with or without a trailing slash).
+PAGE_PATH_PATTERN = r"/(?:" + "|".join(PAGE_PATHS) + r")/?"
 
 
 # Apps that became sections of a bigger app. Subscriptions, grants and packages stored under the old id belong
@@ -456,6 +540,7 @@ def catalog() -> list[dict[str, object]]:
     return [
         {
             "id": app.id,
+            "path": APP_PATHS.get(app.id, app.id),
             "name": app.name,
             "tagline": app.tagline,
             "icon": app.icon,

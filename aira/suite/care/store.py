@@ -135,9 +135,117 @@ SCHEMA = (
 )
 
 
+# Added later: refills, the doctor's report link and paid care work. Only new tables, so older databases simply
+# gain them.
+SCHEMA_V2 = (
+    """CREATE TABLE IF NOT EXISTS cr_refills (
+        id TEXT PRIMARY KEY,
+        owner_id TEXT NOT NULL,
+        medicine_id TEXT NOT NULL,
+        amount INTEGER NOT NULL,
+        note TEXT NOT NULL DEFAULT '',
+        at TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS cr_refills_medicine ON cr_refills (medicine_id, at)",
+    """CREATE TABLE IF NOT EXISTS cr_report_links (
+        owner_id TEXT PRIMARY KEY,
+        days INTEGER NOT NULL DEFAULT 90,
+        include_diary INTEGER NOT NULL DEFAULT 0,
+        expires_at TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS cr_clients (
+        id TEXT PRIMARY KEY,
+        owner_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        email TEXT NOT NULL DEFAULT '',
+        phone TEXT NOT NULL DEFAULT '',
+        rate_cents INTEGER NOT NULL DEFAULT 0,
+        notes TEXT NOT NULL DEFAULT '',
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS cr_clients_owner ON cr_clients (owner_id, active)",
+    """CREATE TABLE IF NOT EXISTS cr_visits (
+        id TEXT PRIMARY KEY,
+        owner_id TEXT NOT NULL,
+        client_id TEXT NOT NULL,
+        day TEXT NOT NULL,
+        start TEXT NOT NULL DEFAULT '',
+        minutes INTEGER NOT NULL,
+        rate_cents INTEGER NOT NULL DEFAULT 0,
+        tasks TEXT NOT NULL DEFAULT '[]',
+        notes TEXT NOT NULL DEFAULT '',
+        statement_id TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS cr_visits_owner ON cr_visits (owner_id, day)",
+    "CREATE INDEX IF NOT EXISTS cr_visits_statement ON cr_visits (statement_id)",
+    """CREATE TABLE IF NOT EXISTS cr_statements (
+        id TEXT PRIMARY KEY,
+        owner_id TEXT NOT NULL,
+        client_id TEXT NOT NULL,
+        number TEXT NOT NULL,
+        period_from TEXT NOT NULL,
+        period_to TEXT NOT NULL,
+        minutes INTEGER NOT NULL DEFAULT 0,
+        total_cents INTEGER NOT NULL DEFAULT 0,
+        currency TEXT NOT NULL DEFAULT 'USD',
+        status TEXT NOT NULL DEFAULT 'open',
+        note TEXT NOT NULL DEFAULT '',
+        sent_at TEXT,
+        paid_at TEXT,
+        client_says_paid_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS cr_statements_owner ON cr_statements (owner_id, status)",
+)
+
+
+# Added later still: each medicine's schedule over time (so changing a time, or stopping and restarting, never
+# rewrites what happened before), and the note a client leaves with "I have paid".
+SCHEMA_V3 = (
+    # One row per stretch of time a medicine kept the same times and days. ``from_at`` NULL means "since the
+    # medicine was added" (its created_at); ``to_at`` NULL means the schedule still holds. A stretch where the
+    # medicine was stopped or only taken when needed has no row.
+    """CREATE TABLE IF NOT EXISTS cr_schedules (
+        id TEXT PRIMARY KEY,
+        owner_id TEXT NOT NULL,
+        medicine_id TEXT NOT NULL,
+        times TEXT NOT NULL DEFAULT '[]',
+        days TEXT NOT NULL DEFAULT '[]',
+        start_date TEXT NOT NULL DEFAULT '',
+        end_date TEXT NOT NULL DEFAULT '',
+        from_at TEXT,
+        to_at TEXT
+    )""",
+    "CREATE INDEX IF NOT EXISTS cr_schedules_owner ON cr_schedules (owner_id, medicine_id)",
+)
+ADDED_COLUMNS = (("cr_statements", "client_paid_note", "TEXT NOT NULL DEFAULT ''"),)
+
+
+def _add_columns(connection: sqlite3.Connection) -> None:
+    """Add the newer columns to a database made by an older Health (safe to run any number of times)."""
+    marker = (kit._db_file(connection), "care.columns.v3")  # noqa: SLF001 - kit.ensure's own marker,
+    if marker in kit._ensured:  # noqa: SLF001 - so kit.forget_schema() resets it too
+        return
+    for table, column, definition in ADDED_COLUMNS:
+        present = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
+        if column not in present:
+            connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+    connection.commit()
+    kit._ensured.add(marker)  # noqa: SLF001
+
+
 def ensure(connection: sqlite3.Connection) -> None:
     life.ensure(connection)
     kit.ensure(connection, "care.v1", SCHEMA)
+    kit.ensure(connection, "care.v2", SCHEMA_V2)
+    kit.ensure(connection, "care.v3", SCHEMA_V3)
+    _add_columns(connection)
 
 
 # ---------------------------------------------------------------------------

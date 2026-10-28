@@ -114,9 +114,53 @@ SCHEMA = (
 )
 
 
+# Paid help: services a customer can ask for from the help centre (``sv_offers``) and the charges on a case
+# (``sv_charges``), paid through the business's own payment link and marked paid by the team.
+SCHEMA_V2 = (
+    """CREATE TABLE IF NOT EXISTS sv_offers (
+        id TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        description TEXT NOT NULL DEFAULT '',
+        price_cents INTEGER NOT NULL DEFAULT 0,
+        active INTEGER NOT NULL DEFAULT 1,
+        position INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS sv_charges (
+        id TEXT PRIMARY KEY,
+        case_id TEXT NOT NULL,
+        offer_id TEXT NOT NULL DEFAULT '',
+        label TEXT NOT NULL,
+        amount_cents INTEGER NOT NULL,
+        status TEXT NOT NULL DEFAULT 'due',
+        paid_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS sv_charges_case ON sv_charges (case_id, created_at)",
+)
+
+
+# Repairs for merges made before a merge moved the charges and followed duplicates of duplicates: a case merged
+# into a case that was merged later points at the case kept in the end, and charges left on a merged duplicate
+# move to that case (so they count, show on the customer's page and go when it is deleted). Safe to run again.
+_FLATTEN_MERGES = (
+    "UPDATE sv_cases SET merged_into = (SELECT t.merged_into FROM sv_cases t WHERE t.id = sv_cases.merged_into) "
+    "WHERE merged_into IN (SELECT id FROM sv_cases WHERE merged_into != '')"
+)
+SCHEMA_V3 = (
+    *(_FLATTEN_MERGES,) * 5,
+    "UPDATE sv_charges SET case_id = (SELECT c.merged_into FROM sv_cases c WHERE c.id = sv_charges.case_id) "
+    "WHERE case_id IN (SELECT id FROM sv_cases WHERE merged_into != '')",
+)
+
+
 def ensure(connection: sqlite3.Connection) -> None:
     kit.ensure_core(connection)
     kit.ensure(connection, "service.v1", SCHEMA)
+    kit.ensure(connection, "service.v2", SCHEMA_V2)
+    kit.ensure(connection, "service.v3", SCHEMA_V3)
 
 
 # ---------------------------------------------------------------------------
@@ -285,6 +329,33 @@ def get_chat(connection: sqlite3.Connection, chat_id: str) -> dict[str, Any]:
     if not found:
         raise LookupError("That chat was not found.")
     return found
+
+
+def get_offer(connection: sqlite3.Connection, offer_id: str) -> dict[str, Any]:
+    found = kit.fetch_one(
+        connection, "SELECT * FROM sv_offers WHERE id = ?", (offer_id,)
+    )
+    if not found:
+        raise LookupError("That paid service was not found.")
+    found["active"] = bool(found["active"])
+    return found
+
+
+def get_charge(connection: sqlite3.Connection, charge_id: str) -> dict[str, Any]:
+    found = kit.fetch_one(
+        connection, "SELECT * FROM sv_charges WHERE id = ?", (charge_id,)
+    )
+    if not found:
+        raise LookupError("That charge was not found.")
+    return found
+
+
+def charges(connection: sqlite3.Connection, case_id: str) -> list[dict[str, Any]]:
+    return kit.fetch_all(
+        connection,
+        "SELECT * FROM sv_charges WHERE case_id = ? ORDER BY created_at, rowid",
+        (case_id,),
+    )
 
 
 def get_macro(connection: sqlite3.Connection, macro_id: str) -> dict[str, Any]:

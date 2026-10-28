@@ -7,7 +7,7 @@ Aira is organised the way a Google account is: one sign-in, several apps, an app
 | Piece | What it is | Where |
 | --- | --- | --- |
 | **Account** | Who you are and what you can use. In the hosted build the account is the organization (owner, admins, coaches, candidates, billing contact, auditor). In the single-user build it is your local sign-in. | `http://127.0.0.1:8780/#/org` (hosted account home) |
-| **Apps** | Products the account can open. Fewer apps that each do more: an app holds several sections, like the clouds of a CRM suite. **Core apps**: **Careers** (find, apply and track), **Developers** (`api`: search engines, keys and connected apps). **Business apps**: **Sales** (`studio`: clients, deals, proposals, invoices), **Marketing** (with **Leads**: find people who need what you sell, content, campaigns, forms), **Service** (cases, help centre, live chat), **Commerce** (**Shop** and **Bookings**), **Courses & Events** (`experiences`: **Academy** and **Events**), **Ads** (advertise on Videos; creators earn a share). **Everyday apps**: **Social** (with **Family**), **Health**, **Learn**, **Play**, **Planner**, **News**, **Videos** (watch, upload and earn). | the app switcher (nine-dot grid) in the top bar; only apps the account can open are shown |
+| **Apps** | Products the account can open. Fewer apps that each do more: an app holds several sections, like the clouds of a CRM suite. **Core apps**: **Careers** (find, apply and track), **Developers** (`api`: search engines, keys and connected apps). **Business apps**: **Sales** (`studio`: clients, deals, proposals, invoices), **Marketing** (with **Leads**: find people who need what you sell, content, campaigns, forms), **Service** (cases, help centre, live chat), **Commerce** (**Shop** and **Bookings**), **Courses & Events** (`experiences`: **Academy** and **Events**), **Ads** (advertise on Videos; creators earn a share). **Everyday apps**: **Social** (with **Family**), **Health**, **Learn**, **Play**, **Planner**, **News**, **Videos** (watch, upload and earn), **Life** (`journey`: goals, timeline, document vault), **AI** (chat with Aira, agents with consent levels), **Stocks** (markets, predictions, portfolios, paid stock ideas). | the app switcher (nine-dot grid) in the top bar; only apps the account can open are shown |
 | **Business hub** | Every industry app at a glance: revenue this month and by app, what customers did on public pages, each app's setup checklist, the business profile customers see, and the one email outbox all apps share. | `#/hub` (Account, under every app) |
 | **Public pages** | What a business shares with its customers without them signing in: a booking page, a storefront, an invoice or proposal, a course page, an event page, a form or a link-in-bio page. Each is `/p/<token>`. | `aira/suite/public.py`, `public.html` |
 | **App switcher** | Lists the apps your account has, opens one, and links to "More apps" (the Apps page) for admins. | top bar, every screen |
@@ -33,7 +33,7 @@ card), **Learn** (spaced-repetition flashcards, streaks, quizzes, maths practice
 shared shopping lists, budget, bills, notes), **News** (today's headlines in your language and country, topics and
 keywords you follow, headlines read aloud, a child-safe mode) and **Videos** (videos, reels and short films from
 people everywhere, your own uploads with a picked frame and captions, subscriptions, playlists, safe ratings for every
-age, a public copyright form, and a creator's earnings from the ads on their videos: [apps/videos.md](apps/videos.md)). Shared core ([life-sdk.md](life-sdk.md)):
+age, a public copyright form, and a creator's earnings from the ads on their videos: [apps/videos.md](apps/videos.md)), **Life** (`journey`: goals with steps and check-ins, a life score, a timeline of milestones and an encrypted document vault with expiry reminders: [apps/journey.md](apps/journey.md)) and **AI** (a chat that answers from every app and acts through one agent per app, each with a consent level, approvals and an activity log: [apps/ai.md](apps/ai.md)) and **Stocks** (live quotes, top gainers and losers, each stock's daily log of highs and lows, charts with indicators, forecasts with their track record, a practice portfolio and real holdings with profit and loss, price alerts, and paid subscriptions to the stock ideas a person publishes, with a public track record: [apps/stocks.md](apps/stocks.md)). Shared core ([life-sdk.md](life-sdk.md)):
 
 * **People.** A shared device has a profile per person (Who's using Aira?, an optional PIN); hosted, the person
   is the signed-in member. Private data (health, money, private notes) stays with its person.
@@ -70,6 +70,18 @@ own payment link or instructions, and the business marks payments received.
 | Courses & Events (Courses, Events) | educators, course creators, venues, organisers | courses with lessons, quizzes and certificates, cohorts; ticket types, an event page, check-in, promo codes, sponsors |
 | Ads (Ads) | every business that wants to be seen | prepaid campaigns with budgets, CPM or CPC bids, pacing and targeting; skippable video ads, banners and sponsored reels on Videos, reviewed before they run; reports and CSV; a share of every ad goes to the video's creator ([apps/ads.md](apps/ads.md)) |
 
+## The frame: every app like a Google app
+
+`auto_apply_assistant/shell.js` draws the same frame around every app, like Gmail and Drive under one Google account:
+
+- **Its own address.** Each app opens at `/<path>`: `/careers`, `/developers`, `/sales`, `/marketing`, `/service`, `/commerce`, `/courses`, `/ads`, `/social`, `/health`, `/learn`, `/play`, `/planner`, `/news`, `/videos`, `/life`, `/ai`, `/stocks`; `/home` is Today. Both builds serve the same page there (`aira.apps.APP_PATHS`, `PAGE_PATH_PATTERN`); the page reads the address and opens the app, and moving between apps keeps the address in step (`/stocks#/stocks?tab=watchlist`). Signing in opens Home unless the person chose another start page.
+- **Its own logo.** The top bar shows the app's icon and name ("Aira Stocks") and the browser tab the app's name and icon. Every app keeps the suite's icon style (a pale tile with a line icon in the brand green).
+- **Search across the top.** It searches the open app (`Aira.appSearch[appId]`: `suggest(query)` fills the list as you type, `run(query)` shows the app's results on Enter). On Home it searches every app at once. Without an app's handler it types into the page's own search field and offers the app's pages and the other apps. `/` focuses it.
+- **"+ New" above the menu** (`Aira.appNew[appId]`): the app's main things to create; one item makes the button do it directly, several open a menu.
+- **The menu.** A page's tabs (`Aira.suite.tabs`, or `Aira.shell.tabs(section, items, current)` for a page with its own tab bar) also show as folders in the left menu, like a mail app's folders; an app's only section is replaced by its folders. Home's menu lists every app.
+- **The launcher** (the nine dots): Home first, then every app in its color. A click switches in place; Ctrl or middle click opens the app in a new tab.
+- The page and its static files are not rate limited (one page is about 90 files and an app may be open in several tabs); the API still is.
+
 ## Navigation
 
 - **Careers** app: Dashboard, Jobs, Applications, Interviews, Recruiters, Documents, Analytics, Research (the job-search research workspace, `#/careers`).
@@ -104,7 +116,7 @@ A plan (Starter, Team, Enterprise) sets seats, limits and the base price. Apps a
 | Careers | every plan | |
 | Developers (API) | Enterprise | Team: $3 per candidate seat per month (Starter: not available) |
 | Every business app (Sales, Marketing with Leads, Service, Commerce, Courses & Events, Ads) | Enterprise | Starter: $5, Team: $4 per candidate seat per month |
-| Every everyday app (Social, Health, Learn, Play, Planner, News, Videos) | Enterprise | Starter: $2, Team: $1.50 per candidate seat per month |
+| Every everyday app (Social, Health, Learn, Play, Planner, News, Videos, Life, AI, Stocks) | Enterprise | Starter: $2, Team: $1.50 per candidate seat per month |
 
 Ad spend is not a seat price: an advertiser prepays an ad balance, billed through the organization's subscription as
 it tops up ([apps/ads.md](apps/ads.md)). Creators earn a share of the ads on their videos.

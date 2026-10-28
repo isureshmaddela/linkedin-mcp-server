@@ -1,0 +1,93 @@
+/* Styles for the care app only. Loaded on every page: scope every selector to the app's own class names. */
+.care-slots { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.care-slot { display: grid; grid-template-columns: auto 1fr; gap: 6px 14px; align-items: center; padding: 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+.care-slot.due { border-color: var(--warning); box-shadow: inset 4px 0 0 var(--warning); }
+.care-slot.missed { border-color: var(--danger); box-shadow: inset 4px 0 0 var(--danger); }
+.care-slot.taken { opacity: 0.85; }
+.care-slot-time { font-size: 22px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.care-slot-main { display: grid; gap: 2px; justify-items: start; font-size: 16px; min-width: 0; }
+.care-slot-actions { grid-column: 1 / -1; }
+.care-big { min-height: 48px; font-size: 16px; padding: 10px 20px; }
+.care-moods { display: flex; flex-wrap: wrap; gap: 10px; }
+.care-mood { display: grid; justify-items: center; gap: 4px; min-width: 88px; padding: 10px; border: 2px solid var(--line); border-radius: 14px; background: var(--surface); color: var(--ink); font: inherit; cursor: pointer; }
+.care-mood[aria-pressed='true'] { border-color: var(--brand); background: var(--brand-soft); }
+.care-mood-emoji { font-size: 32px; line-height: 1; }
+.care-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr)); gap: 12px; }
+.care-med h3, .care-appt h3, .care-client h3, .care-statement h3 { margin: 0 0 4px; font-size: 17px; overflow-wrap: anywhere; }
+.care-med p, .care-client p, .care-statement p { margin: 4px 0; }
+.care-med.paused, .care-client.paused { opacity: 0.7; }
+.care-appt-when { font-size: 16px; font-weight: 700; margin: 0; }
+.care-low { color: var(--danger); font-weight: 700; }
+.care-good { color: var(--success, #15803d); font-weight: 700; }
+.care-hint { color: var(--warning); font-size: 13px; }
+.care-chips, .care-choose { display: flex; flex-wrap: wrap; gap: 6px; }
+.care-choose { gap: 10px; }
+.care-chips [aria-pressed='true'] { background: var(--brand-soft); border-color: var(--brand); }
+.care-diary, .care-readings, .care-visits { list-style: none; margin: 0; padding: 0; display: grid; gap: 12px; }
+.care-diary li { display: flex; gap: 12px; align-items: flex-start; }
+.care-diary li > div { flex: 1; min-width: 0; }
+.care-readings li, .care-visits li { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: center; justify-content: space-between; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.care-readings li.flagged { box-shadow: inset 4px 0 0 var(--warning); }
+.care-reading-main, .care-visit-main { display: grid; gap: 2px; flex: 1 1 220px; min-width: 0; overflow-wrap: anywhere; }
+.care-reading-main strong { font-size: 17px; }
+.care-trend { display: flex; gap: 6px; align-items: stretch; height: 170px; margin: 12px 0; overflow-x: auto; }
+.care-trend-col { flex: 1 0 34px; display: grid; grid-template-rows: auto 1fr auto; gap: 4px; justify-items: center; min-width: 34px; }
+.care-trend-value { font-size: 11px; font-variant-numeric: tabular-nums; color: var(--muted); white-space: nowrap; }
+.care-trend-track { position: relative; width: 14px; background: var(--line); border-radius: 7px; }
+.care-trend-bar { position: absolute; left: 0; right: 0; background: var(--brand); border-radius: 7px; }
+.care-trend-col.flagged .care-trend-bar { background: var(--warning); }
+.care-trend-col.flagged .care-trend-value { color: var(--warning); font-weight: 700; }
+.care-trend-label { font-size: 11px; color: var(--muted); white-space: nowrap; }
+.care-filters { display: flex; flex-wrap: wrap; gap: 8px 12px; align-items: flex-end; margin: 8px 0; }
+.care-filters .field { min-width: 160px; flex: 1 1 160px; margin: 0; }
+.care-tz { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.care-refill { display: flex; flex-wrap: wrap; gap: 6px 12px; align-items: center; }
+.care-emergency { border: 3px solid var(--danger); border-radius: 14px; padding: 14px 16px; overflow-wrap: anywhere; }
+.care-emergency h3 { margin: 0 0 8px; color: var(--danger); }
+.care-whose { max-width: 320px; }
+.care-report { border: 1px solid var(--line); border-radius: 14px; padding: 16px; background: var(--surface); overflow-wrap: anywhere; }
+.care-report h3 { margin: 0 0 4px; font-size: 20px; }
+.care-report h4 { margin: 18px 0 6px; font-size: 16px; }
+.care-report-facts { display: grid; grid-template-columns: minmax(120px, auto) 1fr; gap: 6px 14px; margin: 12px 0; }
+.care-report-facts dt { font-weight: 700; }
+.care-report-facts dd { margin: 0; }
+.care-statement-head { display: flex; flex-wrap: wrap; gap: 6px 10px; align-items: center; justify-content: space-between; }
+.care-statement-total { font-size: 24px; font-weight: 800; font-variant-numeric: tabular-nums; }
+.care-statement.paid { box-shadow: inset 4px 0 0 var(--success, #15803d); }
+.care-report .care-report-table table { overflow-wrap: normal; word-break: normal; }
+.care-note { margin: 4px 0; overflow-wrap: anywhere; }
+/* In the Aira frame the tabs are folders in the left menu on wider screens; the strip under the heading is for
+   phones and tablets, where that menu is folded away. */
+@media (min-width: 901px) {
+  body[data-app="care"] .care-tabstrip { display: none; }
+}
+/* A record the search box opened: outlined until the person moves on (views-care.js answer()). */
+.care-found { outline: 3px solid var(--brand); outline-offset: 3px; }
+.care-found:focus-visible { outline: 3px solid var(--brand); }
+/* Search results (?tab=search): one row per record, like a mail app's list. */
+.care-results { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.care-result { display: flex; gap: 12px; align-items: center; padding: 10px 12px; border-radius: 12px; color: var(--ink); text-decoration: none; min-height: 48px; }
+.care-result:hover { background: var(--brand-soft); }
+.care-result:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+.care-result-icon { flex: 0 0 auto; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; background: var(--brand-soft); color: var(--brand); }
+.care-result-icon svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.care-result-text { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+@media (max-width: 520px) {
+  .care-report-facts { grid-template-columns: 1fr; }
+  .care-report-facts dd { margin-bottom: 6px; }
+  /* The doctor report's tables: one labelled block per medicine or reading, so nothing breaks mid-word. */
+  .care-report .care-report-table { overflow: visible; }
+  .care-report .care-report-table table, .care-report .care-report-table tbody, .care-report .care-report-table tr, .care-report .care-report-table td { display: block; width: auto; }
+  .care-report .care-report-table thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .care-report .care-report-table tr { border: 1px solid var(--line); border-radius: 12px; padding: 8px 12px; margin: 0 0 10px; }
+  .care-report .care-report-table td { display: flex; gap: 12px; justify-content: space-between; align-items: baseline; padding: 4px 0; border: 0; text-align: right; overflow-wrap: anywhere; }
+  .care-report .care-report-table td::before { content: attr(data-label); flex: 0 0 auto; max-width: 50%; text-align: left; font-weight: 700; color: var(--muted); }
+  .care-report .care-report-table td:first-child { font-weight: 700; font-size: 16px; text-align: left; }
+  .care-report .care-report-table td:first-child::before { content: none; }
+}
+/* Printing one part of Health (the emergency card, the doctor report): views-care.js marks it .care-printable. */
+@media print {
+  body.care-print * { visibility: hidden !important; }
+  body.care-print .care-printable, body.care-print .care-printable * { visibility: visible !important; }
+  body.care-print .care-printable { position: absolute; left: 0; top: 0; width: 100%; border: 0; }
+}

@@ -1,0 +1,95 @@
+/* Styles for the videos app only. Loaded on every page: scope every selector to the app's own class names. */
+
+/* a card without a picture */
+.vid-thumb .vid-play { font-size: 28px; opacity: 0.55; }
+
+/* how far into a video the person got */
+.vid-watched { position: absolute; left: 0; right: 0; bottom: 0; height: 4px; background: rgba(255, 255, 255, 0.45); }
+.vid-watched span { display: block; height: 100%; background: #e11d48; }
+
+/* the watch page: carry on, chapters, a reference to copy */
+.vid-resume { justify-content: space-between; padding: 8px 12px; border: 1px solid var(--line); border-radius: var(--radius-sm, 8px); background: var(--surface); }
+.vid-chapters { display: grid; gap: 6px; }
+.vid-chapter-list { display: flex; flex-wrap: wrap; gap: 6px; }
+.vid-chapter { display: inline-flex; gap: 8px; align-items: center; min-height: 44px; padding: 6px 12px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: inherit; font: inherit; cursor: pointer; max-width: 100%; text-align: left; overflow-wrap: anywhere; }
+.vid-chapter:hover { background: var(--surface-2); }
+.vid-chapter:focus-visible { outline: 3px solid var(--focus); outline-offset: 2px; }
+.vid-chapter[aria-current="true"] { border-color: var(--brand); background: var(--surface-2); font-weight: 700; }
+.vid-chapter-time { font-variant-numeric: tabular-nums; color: var(--muted); }
+.vid-code { padding: 4px 8px; border-radius: 6px; background: var(--surface-2); font-size: 15px; overflow-wrap: anywhere; }
+
+/* Studio: the creator's own videos, one per row (fits a phone) */
+.vid-mine { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.vid-mine-item { display: grid; grid-template-columns: 160px minmax(0, 1fr); gap: 12px; align-items: start; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.vid-mine-item:last-child { border-bottom: 0; padding-bottom: 0; }
+.vid-mine-thumb { display: block; border-radius: var(--radius); }
+.vid-mine-thumb .vid-thumb.tall { aspect-ratio: 16 / 9; }
+.vid-mine-thumb .vid-thumb.tall img { object-fit: contain; background: #000; }
+.vid-mine-body { display: grid; gap: 4px; min-width: 0; justify-items: start; }
+.vid-mine-title { font-weight: 700; overflow-wrap: anywhere; }
+
+/* Analytics */
+.vid-chart { display: grid; gap: 6px; margin: 0; }
+.vid-bars { display: flex; align-items: flex-end; gap: 2px; height: 140px; padding: 4px 0; border-bottom: 1px solid var(--line); }
+.vid-bar { flex: 1 1 0; min-width: 1px; border-radius: 3px 3px 0 0; background: var(--brand); opacity: 0.85; }
+.vid-highlights { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.vid-highlight { display: grid; gap: 4px; padding: 14px; min-width: 0; }
+
+/* the watch page: a scheduled video, a members-only video someone has not joined, paid promotion */
+.vid-notice { padding: 12px; border-color: var(--brand); }
+.vid-locked { display: grid; grid-template-columns: minmax(0, 320px) minmax(0, 1fr); gap: 16px; align-items: center; padding: 16px; }
+.vid-locked.no-picture { grid-template-columns: minmax(0, 1fr); }
+.vid-locked img { width: 100%; aspect-ratio: 16 / 9; object-fit: cover; border-radius: var(--radius-sm, 8px); filter: blur(2px) brightness(0.8); }
+.vid-locked .suite-h2 { margin: 0; }
+.vid-price { margin: 0; font-size: 20px; font-weight: 800; }
+.vid-promo { margin: 0; padding: 6px 10px; border-left: 4px solid #facc15; background: var(--surface-2); border-radius: 4px; font-size: 14px; }
+
+/* Earnings > Brand deals: one deal per row (fits a phone) */
+.vid-deals { display: grid; gap: 12px; margin: 0; padding: 0; list-style: none; }
+.vid-deal { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 8px 12px; align-items: start; padding-bottom: 12px; border-bottom: 1px solid var(--line); }
+.vid-deal:last-child { border-bottom: 0; padding-bottom: 0; }
+.vid-deal-main { display: grid; gap: 4px; min-width: 0; }
+.vid-deal > .btn-row { grid-column: 1 / -1; }
+
+/* Earnings > Overview: the 12-month table becomes one card per month on a phone (every column stays in view) */
+@media (max-width: 600px) {
+  .vid-stack { overflow-x: visible; }
+  .vid-stack table, .vid-stack tbody, .vid-stack tr, .vid-stack td { display: block; width: 100%; }
+  .vid-stack thead { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+  .vid-stack tr { padding: 10px 0; border-bottom: 1px solid var(--line); }
+  .vid-stack tr:last-child { border-bottom: 0; }
+  .vid-stack td { display: flex; justify-content: space-between; gap: 12px; padding: 3px 0; border: 0; text-align: right; overflow-wrap: anywhere; }
+  .vid-stack td::before { content: attr(data-label); color: var(--muted); font-weight: 600; text-align: left; }
+  .vid-stack td:first-child { font-weight: 700; }
+  .vid-stack td:first-child::before { content: none; }
+}
+
+@media (max-width: 600px) {
+  .vid-mine-item { grid-template-columns: 112px minmax(0, 1fr); gap: 10px; }
+  .vid-locked { grid-template-columns: minmax(0, 1fr); }
+  .vid-deal { grid-template-columns: minmax(0, 1fr); }
+  .vid-bars { height: 100px; }
+}
+
+/* In the Aira frame: on a wide screen the left menu's folders are the tabs and "+ New" sits above them, so the page's
+   own tab bar and Upload step aside (a phone keeps both: there the menu is a sheet). */
+@media (min-width: 901px) {
+  .vid-page > .tabs { display: none; }
+  .btn.vid-phone-new { display: none; }
+}
+
+/* "+ New" scrolls to the upload form: its heading clears the top bar. */
+#vidUpload { scroll-margin-top: calc(var(--topbar, 64px) + 12px); }
+
+/* Categories and genres: one row that scrolls sideways, like a video site's chips (not four rows on a phone). */
+.vid-page .vid-chipbar { flex-wrap: nowrap; overflow-x: auto; padding: 2px 2px 6px; scrollbar-width: thin; }
+.vid-page .vid-chipbar > .btn { flex: 0 0 auto; }
+
+/* Reels on Home: a row of narrow tall cards; in a mixed list (search, history, a playlist) a reel's card is as tall
+   as the others, its picture letterboxed. */
+.vid-page .vid-grid.vid-shorts { grid-template-columns: repeat(auto-fill, minmax(150px, 180px)); }
+.vid-page .vid-grid:not(.vid-shorts) .vid-thumb.tall { aspect-ratio: 16 / 9; background: #000; }
+.vid-page .vid-grid:not(.vid-shorts) .vid-thumb.tall img { object-fit: contain; }
+@media (max-width: 600px) {
+  .vid-page .vid-grid.vid-shorts { grid-template-columns: none; grid-auto-flow: column; grid-auto-columns: 132px; overflow-x: auto; padding-bottom: 6px; }
+}

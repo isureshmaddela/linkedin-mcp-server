@@ -119,9 +119,14 @@ _index: Index = _default_index
 
 
 def set_default_index(index: Index) -> None:
-    """The process's own index (the single-user build's accounts database); also made current."""
+    """The process's own index (the single-user build's accounts database); made current unless another index was
+    installed over the old default (the hosted build installs its organization index first, then imports the
+    single-user module, which calls this again: that must not put the single-user index back)."""
     global _default_index, _index
-    _default_index = _index = index
+    installed = _index is not _default_index
+    _default_index = index
+    if not installed:
+        _index = index
 
 
 def set_index(index: Index) -> None:
@@ -243,11 +248,23 @@ def view(connection: sqlite3.Connection, token: str) -> dict[str, Any]:
         (kit.now(), link["token"]),
     )
     connection.commit()
+    business = kit.public_business(connection)
+    if isinstance(data, dict):
+        # A personal page (a family board, a Marketplace listing, a member's deck) is not the business's page:
+        # "brand": False leaves the business's name and contacts out, "business_payment": False its payment details.
+        if data.pop("brand", True) is False:
+            business = {}
+        if data.pop("business_payment", True) is False:
+            business = {
+                k: v
+                for k, v in business.items()
+                if k not in ("payment_link", "payment_instructions")
+            }
     return {
         "app": link["app"],
         "kind": link["kind"],
         "title": link["title"],
-        "business": kit.public_business(connection),
+        "business": business,
         "actions": sorted(spec.actions),
         "queries": sorted(spec.queries),
         "page": data,

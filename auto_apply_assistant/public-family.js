@@ -11,6 +11,11 @@
   const NAME_KEY = "aira.familyBoard.name";
   const remembered = () => { try { return localStorage.getItem(NAME_KEY) || ""; } catch { return ""; } };
   const remember = (name) => { try { localStorage.setItem(NAME_KEY, name); } catch { /* storage unavailable */ } };
+  // The gifts this visitor said they will get, remembered on their device only: the board never shows what
+  // others took (the person the gift is for may open it too).
+  const TAKEN_KEY = "aira.familyBoard.taken";
+  const taken = () => { try { return new Set(JSON.parse(localStorage.getItem(TAKEN_KEY) || "[]")); } catch { return new Set(); } };
+  const take = (id) => { try { const ids = taken(); ids.add(id); localStorage.setItem(TAKEN_KEY, JSON.stringify([...ids].slice(-200))); } catch { /* storage unavailable */ } };
   const when = (iso) => { const date = new Date(iso); return Number.isNaN(date.getTime()) ? "" : date.toLocaleString([], { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }); };
 
   P.register("family", "board", (root, data, ctx) => {
@@ -18,6 +23,13 @@
     const page = data.page;
     const face = (person, size = 40) => h("span", { "aria-hidden": "true", style: { display: "inline-grid", placeItems: "center", width: `${size}px`, height: `${size}px`, borderRadius: `${Math.round(size / 3)}px`, background: person.color || "#64748b", fontSize: `${Math.round(size * 0.55)}px`, flex: "none" }, text: person.emoji || "🙂" });
 
+    // The board is the family's page, not the account's business: no business name, logo or contact details.
+    const set = (id, fn) => { const node = document.getElementById(id); if (node) fn(node); };
+    set("pubName", (node) => { node.textContent = page.title || "Our family"; });
+    set("pubTagline", (node) => { node.textContent = "Family board on Aira"; });
+    set("pubLogo", (node) => { node.hidden = true; node.removeAttribute("src"); });
+    set("pubContact", (node) => node.replaceChildren());
+    document.title = page.title || "Our family";
     root.append(h("h1", { text: page.title || "Our family" }));
     if (page.people.length) root.append(h("div", { class: "pub-btn-row", "aria-label": "The family" }, ...page.people.map((person) => h("span", { style: { display: "inline-flex", alignItems: "center", gap: "6px" } }, face(person, 32), h("span", { text: person.name })))));
 
@@ -32,6 +44,28 @@
       else ctx.notice("Thank you! The family will see your message once they approve it.", "good");
     });
     root.append(h("section", { class: "pub-card" }, h("h2", { text: "Write to the family" }), h("div", { class: "pub-form" }, ctx.field("Your name", name), ctx.field("Your message", text, page.auto_publish ? "" : "The family approves messages before they appear here."), h("div", { class: "pub-btn-row" }, send))));
+
+    // Wish lists (when the family shows them): say you will get a gift so nobody buys it twice.
+    const mine = taken();
+    for (const list of page.wish_lists || []) {
+      if (!list.wishes.length) continue;
+      root.append(h("section", { class: "pub-card" },
+        h("div", { style: { display: "flex", gap: "10px", alignItems: "center" } }, face(list.person, 36), h("h2", { style: { margin: 0 }, text: `${list.person.name}'s wish list` })),
+        ...list.wishes.map((wish) => h("div", { class: "pub-item", style: { display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" } },
+          h("div", { style: { flex: "1 1 200px", minWidth: "0" } },
+            /^https:\/\//i.test(wish.link || "") ? h("a", { href: wish.link, target: "_blank", rel: "noopener noreferrer", text: wish.title }) : h("strong", { text: wish.title }),
+            wish.note ? h("div", { class: "pub-muted pub-hint", text: wish.note }) : null),
+          mine.has(wish.id)
+            ? h("span", { class: "pub-badge", text: "You said you will get this" })
+            : ctx.button("I'll get this", async () => {
+              if (!name.value.trim()) { ctx.notice("Write your name above first.", "bad"); name.focus(); return; }
+              await ctx.action("claim", { wish_id: wish.id, name: name.value });
+              remember(name.value.trim());
+              take(wish.id);
+              ctx.notice(`Thank you! The family knows you are getting ${wish.title}. ${list.person.name} will not see it.`, "good");
+              await ctx.reload();
+            }, "ghost")))));
+    }
 
     // The feed
     if (!page.posts.length) { root.append(h("p", { class: "pub-muted", text: "Nothing shared yet. Write the first message!" })); return; }

@@ -68,6 +68,7 @@ def connect() -> sqlite3.Connection:
                 connection.execute("PRAGMA journal_mode = WAL")
                 for statement in (*store.SCHEMA, *ads_store.SCHEMA):
                     connection.execute(statement)
+                store.migrate(connection)
                 connection.commit()
                 _ready.add(key)
     return connection

@@ -498,6 +498,27 @@ def delete_file(sc: sqlite3.Connection, file_id: str) -> None:
     sc.execute("DELETE FROM vi_files WHERE id = ?", (file_id,))
 
 
+ORPHAN_HOURS = 24  # a finished video file, picture or captions file that no video uses after this long is removed
+
+
+def sweep_orphans(sc: sqlite3.Connection, hours: float = ORPHAN_HOURS) -> int:
+    """Remove people's finished files that never became part of a video (the form was refused after the upload,
+    or the tab closed before the last step). Only files of Videos channels: an advertiser's files belong to Ads."""
+    found = store.rows(
+        sc,
+        """SELECT f.id FROM vi_files f WHERE f.created_at < ?
+        AND f.owner_key IN (SELECT id FROM vi_channels)
+        AND NOT EXISTS (SELECT 1 FROM vi_videos v WHERE v.file_id = f.id OR v.thumb_file_id = f.id
+            OR v.captions_file_id = f.id)""",
+        (store.later(-hours),),
+    )
+    for item in found:
+        delete_file(sc, item["id"])
+    if found:
+        sc.commit()
+    return len(found)
+
+
 def delete_owner(sc: sqlite3.Connection, owner_key: str) -> int:
     """Every file and unfinished upload of one owner (a person or an advertiser leaving)."""
     files = store.rows(sc, "SELECT id FROM vi_files WHERE owner_key = ?", (owner_key,))

@@ -25,6 +25,7 @@ MILESTONES = (
 )
 RSVP_ANSWERS = ("yes", "maybe", "no")
 DATE_KINDS = ("birthday", "anniversary", "other")
+MAX_WISHES = 50
 MAX_PHOTOS = 6
 _STAMP = re.compile(r"^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(\.\d{1,6})?Z$")
 
@@ -125,6 +126,22 @@ SCHEMA = (
         created_by TEXT NOT NULL,
         created_at TEXT NOT NULL
     )""",
+    """CREATE TABLE IF NOT EXISTS fm_wishes (
+        id TEXT PRIMARY KEY,
+        owner_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        link TEXT NOT NULL DEFAULT '',
+        note TEXT NOT NULL DEFAULT '',
+        claimed_by TEXT NOT NULL DEFAULT '',
+        claimed_name TEXT NOT NULL DEFAULT '',
+        claimed_at TEXT,
+        received_at TEXT,
+        created_by TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        removed_at TEXT
+    )""",
+    "CREATE INDEX IF NOT EXISTS fm_wishes_owner ON fm_wishes (owner_id, created_at)",
 )
 
 

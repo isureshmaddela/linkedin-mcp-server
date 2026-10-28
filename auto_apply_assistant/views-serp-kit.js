@@ -1766,12 +1766,34 @@
   }
 
   /** Resolves true when the person accepts spending up to n searches. */
-  function confirmCost(n, label = "This action") {
+  /**
+   * Ask before an action that spends searches. ``live``: the searches always run live (monitor and rank
+   * checks), so the cache does not help. A second click of a double click lands on the backdrop as soon as the
+   * question opens; it is ignored for a moment so the question stays open instead of quietly cancelling.
+   */
+  function confirmCost(n, label = "This action", { live = false } = {}) {
     const count = Math.max(0, Math.round(Number(n) || 0));
-    return Aira.confirm({
-      title: `Use up to ${count} search${count === 1 ? "" : "es"}?`,
-      message: `${label} runs ${count} search${count === 1 ? "" : "es"} against your plan. Results that are already cached cost nothing.`,
-      confirmLabel: `Run${count ? ` (up to ${count})` : ""}`,
+    const plural = `search${count === 1 ? "" : "es"}`;
+    const note = live ? `Each check runs live, so ${count === 1 ? "it uses a search" : "each one uses a search"}.` : "Results that are already cached cost nothing.";
+    const title = `Use ${live ? "" : "up to "}${count} ${plural}?`;
+    const message = `${label} runs ${count} ${plural} against your plan. ${note}`;
+    const confirmLabel = `Run${count ? ` (${live ? "" : "up to "}${count})` : ""}`;
+    if (!hasDom || typeof Aira.modal !== "function") return Aira.confirm({ title, message, confirmLabel });
+    return new Promise((resolve) => {
+      let answered = false;
+      const answer = (value) => { if (!answered) { answered = true; resolve(value); } };
+      const opened = Date.now();
+      const dialog = Aira.modal({
+        title,
+        body: h("p", { class: "muted", text: message }),
+        actions: [
+          { label: "Cancel", kind: "ghost", onClick: () => answer(false) },
+          { label: confirmLabel, kind: "", onClick: () => answer(true) },
+        ],
+        onClose: () => answer(false),
+      });
+      const backdrop = dialog && dialog.box ? dialog.box.parentElement : null;
+      if (backdrop) backdrop.addEventListener("click", (event) => { if (event.target === backdrop && Date.now() - opened < 700) event.stopImmediatePropagation(); }, true);
     });
   }
 

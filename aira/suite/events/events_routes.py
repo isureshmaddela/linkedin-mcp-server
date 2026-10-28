@@ -11,6 +11,7 @@ from typing import Any
 
 from aira.airaapi.http import Raw, Request, aira_route
 from aira.suite import kit, public
+from aira.suite.academy import household, partners
 from aira.suite.events import service, store
 from aira.suite.events.store import APP
 
@@ -38,7 +39,7 @@ def _event_payload(request: Request, connection: Any, event_id: str) -> dict[str
 
 @aira_route("GET", f"{BASE}/overview")
 def overview(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with household.connect(request) as connection:
         store.ensure(connection)
         data = service.overview(connection)
         data["checklist"] = _checklist(connection)
@@ -49,7 +50,7 @@ def overview(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("GET", f"{BASE}/events")
 def events_list(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with household.connect(request) as connection:
         store.ensure(connection)
         return 200, {
             "events": service.list_events(
@@ -61,7 +62,7 @@ def events_list(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("POST", f"{BASE}/events")
 def events_create(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with household.connect(request) as connection:
         store.ensure(connection)
         event = service.create_event(connection, request.payload, actor=_actor(request))
         for position, ticket in enumerate(request.payload.get("ticket_types") or []):
@@ -78,7 +79,7 @@ def events_create(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("GET", f"{BASE}/events/{ID}")
 def events_get(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with household.connect(request) as connection:
         store.ensure(connection)
         return 200, _event_payload(request, connection, request.match.group(1))
 
@@ -86,7 +87,7 @@ def events_get(request: Request) -> tuple[int, dict[str, Any]]:
 @aira_route("PATCH", f"{BASE}/events/{ID}")
 def events_update(request: Request) -> tuple[int, dict[str, Any]]:
     event_id = request.match.group(1)
-    with request.connect() as connection:
+    with household.connect(request) as connection:
         store.ensure(connection)
         service.update_event(connection, event_id, request.payload)
         data = _event_payload(request, connection, event_id)
@@ -97,7 +98,7 @@ def events_update(request: Request) -> tuple[int, dict[str, Any]]:
 @aira_route("DELETE", f"{BASE}/events/{ID}")
 def events_delete(request: Request) -> tuple[int, dict[str, Any]]:
     event_id = request.match.group(1)
-    with request.connect() as connection:
+    with household.connect(request) as connection:
         store.ensure(connection)
         service.delete_event(connection, event_id)
     request.audit("events.event_delete", "event", event_id)
@@ -111,7 +112,7 @@ def events_status(request: Request) -> tuple[int, dict[str, Any]]:
     status = kit.choice(
         request.payload.get("status"), "the status", ("draft", "published", "ended")
     )
-    with request.connect() as connection:
+    with household.connect(request) as connection:
         store.ensure(connection)
         service.set_status(connection, event_id, status, actor=_actor(request))
         if status == "published":
@@ -125,7 +126,7 @@ def events_status(request: Request) -> tuple[int, dict[str, Any]]:
 @aira_route("POST", f"{BASE}/events/{ID}/cancel")
 def events_cancel(request: Request) -> tuple[int, dict[str, Any]]:
     event_id = request.match.group(1)
-    with request.connect() as connection:
+    with household.connect(request) as connection:
         store.ensure(connection)
         result = service.cancel_event(
             connection,
@@ -151,7 +152,7 @@ def events_cancel(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("POST", f"{BASE}/events/{ID}/duplicate")
 def events_duplicate(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with household.connect(request) as connection:
         store.ensure(connection)
         copy = service.duplicate_event(
             connection,
@@ -165,7 +166,7 @@ def events_duplicate(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("POST", f"{BASE}/events/{ID}/draft-description")
 def events_draft_description(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with household.connect(request) as connection:
         store.ensure(connection)
         event = store.get_event(connection, request.match.group(1))
         return 200, service.draft_description(event, kit.business(connection)["name"])
@@ -173,7 +174,7 @@ def events_draft_description(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("POST", f"{BASE}/events/{ID}/link")
 def events_link(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with household.connect(request) as connection:
         store.ensure(connection)
         event = store.get_event(connection, request.match.group(1))
         return 200, {
@@ -185,7 +186,7 @@ def events_link(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("DELETE", f"{BASE}/events/{ID}/link")
 def events_unlink(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with household.connect(request) as connection:
         store.ensure(connection)
         event = store.get_event(connection, request.match.group(1))
         return 200, {"revoked": public.revoke(connection, APP, "event", event["id"])}
@@ -194,7 +195,7 @@ def events_unlink(request: Request) -> tuple[int, dict[str, Any]]:
 @aira_route("POST", f"{BASE}/events/{ID}/announce")
 def events_announce(request: Request) -> tuple[int, dict[str, Any]]:
     event_id = request.match.group(1)
-    with request.connect() as connection:
+    with household.connect(request) as connection:
         store.ensure(connection)
         if kit.flag(request.payload.get("thanks")):
             count = service.thank_attendees(
@@ -222,7 +223,7 @@ def events_announce(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("GET", f"{BASE}/events/{ID}/attendees.csv")
 def events_attendees_csv(request: Request) -> Raw:
-    with request.connect() as connection:
+    with household.connect(request) as connection:
         store.ensure(connection)
         event = store.get_event(connection, request.match.group(1))
         rows = service.attendees_rows(connection, event["id"])
@@ -258,7 +259,7 @@ def events_attendees_csv(request: Request) -> Raw:
 @aira_route("POST", f"{BASE}/events/{ID}/ticket-types")
 def ticket_types_create(request: Request) -> tuple[int, dict[str, Any]]:
     event_id = request.match.group(1)
-    with request.connect() as connection:
+    with household.connect(request) as connection:
         store.ensure(connection)
         position = len(store.ticket_types(connection, event_id))
         service.add_ticket_type(
@@ -269,7 +270,7 @@ def ticket_types_create(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("PATCH", f"{BASE}/ticket-types/{ID}")
 def ticket_types_update(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with household.connect(request) as connection:
         store.ensure(connection)
         ticket = service.update_ticket_type(
             connection, request.match.group(1), request.payload
@@ -279,7 +280,7 @@ def ticket_types_update(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("DELETE", f"{BASE}/ticket-types/{ID}")
 def ticket_types_delete(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with household.connect(request) as connection:
         store.ensure(connection)
         ticket = store.get_ticket_type(connection, request.match.group(1))
         result = service.delete_ticket_type(connection, ticket["id"])
@@ -296,7 +297,7 @@ def ticket_types_delete(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("GET", f"{BASE}/orders")
 def orders_list(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with household.connect(request) as connection:
         store.ensure(connection)
         orders = service.list_orders(
             connection,
@@ -309,7 +310,7 @@ def orders_list(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("GET", f"{BASE}/orders/{ID}")
 def orders_get(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with household.connect(request) as connection:
         store.ensure(connection)
         order = store.get_order(connection, request.match.group(1))
         return 200, {
@@ -323,7 +324,7 @@ def orders_get(request: Request) -> tuple[int, dict[str, Any]]:
 @aira_route("POST", f"{BASE}/orders/quote")
 def quote_order(request: Request) -> tuple[int, dict[str, Any]]:
     payload = request.payload
-    with request.connect() as connection:
+    with household.connect(request) as connection:
         store.ensure(connection)
         event = store.get_event(
             connection,
@@ -343,7 +344,7 @@ def orders_create(request: Request) -> tuple[int, dict[str, Any]]:
     """An order taken by the organiser (at the door, by phone) or complimentary tickets (``comp``)."""
     payload = request.payload
     comp = kit.flag(payload.get("comp"))
-    with request.connect() as connection:
+    with household.connect(request) as connection:
         store.ensure(connection)
         event_id = kit.text(
             payload.get("event_id"), "the event", max_len=32, required=True
@@ -363,7 +364,7 @@ def orders_create(request: Request) -> tuple[int, dict[str, Any]]:
 @aira_route("POST", f"{BASE}/orders/{ID}/paid")
 def orders_paid(request: Request) -> tuple[int, dict[str, Any]]:
     order_id = request.match.group(1)
-    with request.connect() as connection:
+    with household.connect(request) as connection:
         store.ensure(connection)
         order = service.mark_paid(
             connection, order_id, via=request, actor=_actor(request)
@@ -376,7 +377,7 @@ def orders_paid(request: Request) -> tuple[int, dict[str, Any]]:
 def orders_cancel(request: Request) -> tuple[int, dict[str, Any]]:
     order_id = request.match.group(1)
     refund = kit.flag(request.payload.get("refund"))
-    with request.connect() as connection:
+    with household.connect(request) as connection:
         store.ensure(connection)
         order = service.cancel_order(
             connection, order_id, refund=refund, actor=_actor(request)
@@ -389,7 +390,7 @@ def orders_cancel(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("POST", f"{BASE}/orders/{ID}/resend")
 def orders_resend(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with household.connect(request) as connection:
         store.ensure(connection)
         link = service.resend_tickets(connection, request.match.group(1), via=request)
     return 200, {"queued": True, "link": link}
@@ -403,7 +404,7 @@ def orders_resend(request: Request) -> tuple[int, dict[str, Any]]:
 @aira_route("GET", f"{BASE}/events/{ID}/checkin")
 def checkin_list(request: Request) -> tuple[int, dict[str, Any]]:
     event_id = request.match.group(1)
-    with request.connect() as connection:
+    with household.connect(request) as connection:
         store.ensure(connection)
         event = store.get_event(connection, event_id)
         counts = store.event_counts(connection, event_id)
@@ -428,7 +429,7 @@ def checkin_list(request: Request) -> tuple[int, dict[str, Any]]:
 @aira_route("POST", f"{BASE}/events/{ID}/checkin")
 def checkin(request: Request) -> tuple[int, dict[str, Any]]:
     event_id = request.match.group(1)
-    with request.connect() as connection:
+    with household.connect(request) as connection:
         store.ensure(connection)
         store.get_event(connection, event_id)
         result = service.check_in(
@@ -443,7 +444,7 @@ def checkin(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("POST", f"{BASE}/tickets/{ID}/undo-checkin")
 def checkin_undo(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with household.connect(request) as connection:
         store.ensure(connection)
         ticket = service.undo_check_in(connection, request.match.group(1))
         return 200, {
@@ -459,7 +460,7 @@ def checkin_undo(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("GET", f"{BASE}/promos")
 def promos_list(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with household.connect(request) as connection:
         store.ensure(connection)
         rows = kit.fetch_all(
             connection,
@@ -472,14 +473,14 @@ def promos_list(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("POST", f"{BASE}/promos")
 def promos_create(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with household.connect(request) as connection:
         store.ensure(connection)
         return 201, {"promo": service.create_promo(connection, request.payload)}
 
 
 @aira_route("PATCH", f"{BASE}/promos/{ID}")
 def promos_update(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with household.connect(request) as connection:
         store.ensure(connection)
         return 200, {
             "promo": service.update_promo(
@@ -490,7 +491,7 @@ def promos_update(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("DELETE", f"{BASE}/promos/{ID}")
 def promos_delete(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with household.connect(request) as connection:
         store.ensure(connection)
         promo = kit.require_row(
             connection, "ev_promos", request.match.group(1), "promo code"
@@ -505,7 +506,7 @@ def promos_delete(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("GET", f"{BASE}/waitlist")
 def waitlist_list(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with household.connect(request) as connection:
         store.ensure(connection)
         params: list[Any] = []
         where = "WHERE w.status IN ('waiting', 'offered')"
@@ -522,7 +523,7 @@ def waitlist_list(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("POST", f"{BASE}/waitlist/{ID}/offer")
 def waitlist_offer(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with household.connect(request) as connection:
         store.ensure(connection)
         return 200, {
             "entry": service.offer_waitlist(
@@ -533,7 +534,7 @@ def waitlist_offer(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("POST", f"{BASE}/waitlist/{ID}/status")
 def waitlist_status(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with household.connect(request) as connection:
         store.ensure(connection)
         return 200, {
             "entry": service.set_waitlist_status(
@@ -546,7 +547,7 @@ def waitlist_status(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("GET", f"{BASE}/sponsors")
 def sponsors_list(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with household.connect(request) as connection:
         store.ensure(connection)
         rows = kit.fetch_all(
             connection,
@@ -565,14 +566,14 @@ def sponsors_list(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("POST", f"{BASE}/sponsors")
 def sponsors_create(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with household.connect(request) as connection:
         store.ensure(connection)
         return 201, {"sponsor": service.save_sponsor(connection, request.payload)}
 
 
 @aira_route("PATCH", f"{BASE}/sponsors/{ID}")
 def sponsors_update(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with household.connect(request) as connection:
         store.ensure(connection)
         return 200, {
             "sponsor": service.save_sponsor(
@@ -583,7 +584,7 @@ def sponsors_update(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("DELETE", f"{BASE}/sponsors/{ID}")
 def sponsors_delete(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with household.connect(request) as connection:
         store.ensure(connection)
         service.delete_sponsor(connection, request.match.group(1))
     return 200, {"deleted": True}
@@ -597,7 +598,10 @@ def sponsors_delete(request: Request) -> tuple[int, dict[str, Any]]:
 @public.page(APP, "event")
 def event_page(connection: Any, link: dict[str, Any]) -> dict[str, Any]:
     store.ensure(connection)
-    return service.public_event(connection, store.get_event(connection, link["ref_id"]))
+    return {
+        **service.public_event(connection, store.get_event(connection, link["ref_id"])),
+        "ref_scope": partners.ref_scope(connection),
+    }
 
 
 @public.action(APP, "event", "quote")
@@ -629,8 +633,12 @@ def event_order(
     visitor: dict[str, Any],
 ) -> tuple[int, dict[str, Any]]:
     store.ensure(connection)
+    fields = {
+        key: payload.get(key)
+        for key in ("items", "promo_code", "name", "email", "phone", "holders", "ref")
+    }
     result = service.place_order(
-        connection, link["ref_id"], payload, source="public", via=visitor
+        connection, link["ref_id"], fields, source="public", via=visitor
     )
     order = result["order"]
     return 201, {

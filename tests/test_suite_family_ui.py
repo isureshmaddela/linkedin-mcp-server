@@ -136,7 +136,7 @@ def test_two_people_chat_live_and_a_relative_writes_on_the_board(browser, env):
     pat.fill(".modal input[name=title]", "Sunday lunch")
     pat.fill(".modal input[name=starts_at]", "2030-06-02T13:00")
     pat.fill(".modal input[name=place]", "Grandma's")
-    pat.click(".modal button:has-text('Save')")
+    pat.click(".modal button:has-text('Add the event')")
     pat.wait_for_selector("article:has-text('Sunday lunch')")
     ana.goto(f"{env.base}/#/family?tab=calendar")
     ana.wait_for_selector("article:has-text('Sunday lunch')")
@@ -177,9 +177,17 @@ def test_two_people_chat_live_and_a_relative_writes_on_the_board(browser, env):
     )
 
     # Every tab renders.
-    for tab in ("feed", "chat", "calendar", "dates", "board"):
+    # Each page is named after its tab (the frame's bar already says Social).
+    titles = {
+        "feed": "Family feed",
+        "chat": "Family chat",
+        "calendar": "Family calendar",
+        "dates": "People & dates",
+        "board": "Family board",
+    }
+    for tab, title in titles.items():
         pat.goto(f"{env.base}/#/family?tab={tab}")
-        pat.wait_for_selector("#main h1:has-text('Family')")
+        pat.wait_for_selector(f"#main .page-head h1:has-text('{title}')")
         pat.wait_for_timeout(300)
         assert pat.locator("#main .error-box").count() == 0, tab
 

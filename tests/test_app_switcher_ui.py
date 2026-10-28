@@ -91,6 +91,7 @@ def test_the_switcher_lists_the_apps_and_each_app_shows_only_its_sections(browse
     switcher = open_switcher(page)
     tiles = switcher.locator(".app-tile")
     assert tiles.evaluate_all("tiles => tiles.map(t => t.dataset.app)") == [
+        "home",  # Home (Today) first, like a suite's account home
         "careers",
         "api",
         # the everyday apps, then the business apps, each under its own heading: fewer apps, each with sections
@@ -101,6 +102,9 @@ def test_the_switcher_lists_the_apps_and_each_app_shows_only_its_sections(browse
         "planner",
         "news",
         "videos",
+        "journey",
+        "ai",
+        "stocks",
         "studio",
         "marketing",
         "service",
@@ -234,7 +238,9 @@ def test_the_switcher_works_from_the_keyboard(browser, env):
     page.wait_for_selector("#appSwitcher:not([hidden])")
     assert button.get_attribute("aria-expanded") == "true"
     assert page.locator("#appSwitcher").get_attribute("role") == "menu"
-    # Focus starts on the first app; the arrows move through the items; Escape closes and returns focus.
+    # Focus starts on Home; the arrows move through the items; Escape closes and returns focus.
+    assert page.evaluate("document.activeElement.dataset.app") == "home"
+    page.keyboard.press("ArrowRight")
     assert page.evaluate("document.activeElement.dataset.app") == "careers"
     page.keyboard.press("ArrowRight")
     assert page.evaluate("document.activeElement.dataset.app") == "api"
@@ -245,9 +251,11 @@ def test_the_switcher_works_from_the_keyboard(browser, env):
     page.keyboard.press("ArrowDown")
     assert page.evaluate("document.activeElement.dataset.app") == "care"
     page.keyboard.press("End")
-    assert page.evaluate("document.activeElement.dataset.app") == "ads"  # the last business app
+    assert (
+        page.evaluate("document.activeElement.dataset.app") == "ads"
+    )  # the last business app
     page.keyboard.press("Home")
-    assert page.evaluate("document.activeElement.dataset.app") == "careers"
+    assert page.evaluate("document.activeElement.dataset.app") == "home"
     page.keyboard.press("Escape")
     page.wait_for_selector("#appSwitcher", state="hidden")
     assert button.get_attribute("aria-expanded") == "false"
@@ -256,8 +264,9 @@ def test_the_switcher_works_from_the_keyboard(browser, env):
     page.keyboard.press("Enter")
     page.wait_for_selector("#appSwitcher:not([hidden])")
     page.keyboard.press("ArrowRight")
+    page.keyboard.press("ArrowRight")
     page.keyboard.press("Enter")
-    page.wait_for_url(re.compile(r"#/airaapi"))
+    page.wait_for_url(re.compile(r"/developers#/airaapi"))
     page.wait_for_selector("#primaryNav a[data-section='airaapi']")
     # An outside click closes an open menu.
     open_switcher(page)

@@ -1,0 +1,86 @@
+/* Styles for the marketing app only. Loaded on every page: scope every selector to the app's own class names. */
+
+/* A row of filters above a list: search grows, the selects keep a sensible width, everything wraps on a phone. */
+.mk-filters { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; margin-bottom: 8px; }
+.mk-filters > input[type="search"] { flex: 2 1 220px; min-width: 0; }
+.mk-filters > select { flex: 1 1 150px; min-width: 0; width: auto; }
+.mk-filters > .suite-check { flex: 0 0 auto; white-space: nowrap; }
+
+/* The media kit's rate card. */
+.mk-packages { list-style: none; margin: 0 0 12px; padding: 0; display: grid; gap: 0; }
+.mk-packages > li { display: flex; gap: 8px; align-items: flex-start; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.mk-packages > li:last-child { border-bottom: 0; }
+.mk-package-main { flex: 1; min-width: 0; display: grid; gap: 2px; overflow-wrap: anywhere; }
+.mk-price { font-weight: 700; color: var(--brand); }
+
+@media (max-width: 560px) {
+  .mk-filters > select, .mk-filters > input[type="search"] { flex-basis: 100%; }
+  .mk-packages > li { flex-direction: column; }
+}
+
+/* The media kit's audience numbers: a compact grid of small number fields. */
+.mk-audience { display: grid; grid-template-columns: repeat(auto-fill, minmax(150px, 1fr)); gap: 0 12px; margin-bottom: 8px; }
+.mk-audience input { width: 100%; min-width: 0; }
+
+/* The leads inbox on a phone: Who, Value and Status stay on screen (paid, won, follow-up due and what the lead is
+   worth); When and where it came from move under the name, and the message is read in the lead's drawer. */
+.mk-inbox .mk-phone-only { display: none; }
+@media (max-width: 560px) {
+  .mk-inbox .mk-phone-only { display: block; }
+  .mk-inbox th:nth-child(1), .mk-inbox td:nth-child(1),
+  .mk-inbox th:nth-child(3), .mk-inbox td:nth-child(3),
+  .mk-inbox th:nth-child(4), .mk-inbox td:nth-child(4) { display: none; }
+  .mk-inbox td:nth-child(2) { overflow-wrap: anywhere; min-width: 0; }
+}
+
+/* The content calendar: a month (or a week) of days, each post a small button with its time, channel and title.
+   On a phone the month keeps seven narrow columns that show only each post's time, and the week becomes a list. */
+.mk-cal-scroll { overflow-x: auto; }
+.mk-cal { display: grid; grid-template-columns: repeat(7, minmax(90px, 1fr)); gap: 6px; min-width: 640px; }
+.mk-cal-wd { text-align: center; font-weight: 700; }
+.mk-cal-day { min-height: 92px; padding: 6px; border: 1px solid var(--line); border-radius: 8px; background: var(--surface); display: grid; align-content: start; gap: 4px; min-width: 0; }
+.mk-cal.week .mk-cal-day { min-height: 180px; }
+.mk-cal-day.today { background: var(--brand-soft); border-color: var(--brand); }
+.mk-cal-day.outside { opacity: 0.55; }
+.mk-cal-post { display: grid; gap: 1px; text-align: left; padding: 4px 6px; min-width: 0; width: 100%; border: 1px solid var(--line); border-left: 3px solid var(--line-strong); border-radius: 6px; background: var(--surface); color: inherit; font: inherit; cursor: pointer; }
+.mk-cal-post.scheduled { border-left-color: var(--brand); }
+.mk-cal-post.published { border-left-color: var(--good); }
+.mk-cal-post:hover { background: var(--surface-2); }
+.mk-cal-post:focus-visible { outline: 2px solid var(--focus, var(--brand)); outline-offset: 1px; }
+.mk-cal-when, .mk-cal-title { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.mk-cal-title { font-size: 12.5px; font-weight: 600; }
+
+@media (max-width: 560px) {
+  .mk-cal { min-width: 0; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 3px; }
+  .mk-cal-day { min-height: 58px; padding: 3px; border-radius: 6px; gap: 2px; }
+  .mk-cal-post { padding: 2px 3px; }
+  .mk-cal-title, .mk-cal-channel { display: none; }
+  .mk-cal-when { font-size: 10px; }
+  .mk-cal.week { grid-template-columns: minmax(0, 1fr); }
+  .mk-cal.week .mk-cal-day { min-height: 0; padding: 8px; }
+  .mk-cal.week .mk-cal-channel { display: inline; }
+  .mk-cal.week .mk-cal-title { display: block; }
+  .mk-cal.week .mk-cal-when { font-size: inherit; }
+}
+
+/* Lists on a phone keep the columns that matter (what it is, and its number or status); the rest is in the drawer. */
+.mk-wrap { overflow-wrap: anywhere; }
+@media (max-width: 560px) {
+  .mk-campaigns th:nth-child(2), .mk-campaigns td:nth-child(2),
+  .mk-campaigns th:nth-child(4), .mk-campaigns td:nth-child(4),
+  .mk-campaigns th:nth-child(6), .mk-campaigns td:nth-child(6),
+  .mk-campaigns th:nth-child(7), .mk-campaigns td:nth-child(7),
+  .mk-campaigns th:nth-child(8), .mk-campaigns td:nth-child(8),
+  .mk-forms th:nth-child(3), .mk-forms td:nth-child(3),
+  .mk-forms th:nth-child(6), .mk-forms td:nth-child(6),
+  .mk-links th:nth-child(2), .mk-links td:nth-child(2),
+  .mk-links th:nth-child(4), .mk-links td:nth-child(4),
+  .mk-subscribers th:nth-child(2), .mk-subscribers td:nth-child(2),
+  .mk-subscribers th:nth-child(3), .mk-subscribers td:nth-child(3),
+  .mk-subscribers th:nth-child(5), .mk-subscribers td:nth-child(5),
+  .mk-newsletters th:nth-child(2), .mk-newsletters td:nth-child(2),
+  .mk-newsletters th:nth-child(4), .mk-newsletters td:nth-child(4),
+  .mk-newsletters th:nth-child(5), .mk-newsletters td:nth-child(5),
+  .mk-drafts th:nth-child(4), .mk-drafts td:nth-child(4) { display: none; }
+  .mk-campaigns td:nth-child(1), .mk-links td:nth-child(1), .mk-subscribers td:nth-child(1), .mk-forms td:nth-child(1), .mk-newsletters td:nth-child(1) { overflow-wrap: anywhere; min-width: 0; }
+}

@@ -1,0 +1,60 @@
+/* Styles for the experiences app only. Loaded on every page: scope every selector to the app's own class names. */
+
+/* Filter rows: a search box that grows, selects as wide as their text (they wrap on a phone). */
+.xp-toolbar input[type="search"] { flex: 1 1 220px; width: auto; }
+.xp-toolbar select { flex: 0 1 auto; width: auto; max-width: 100%; }
+
+/* Academy: the curriculum builder and progress bars */
+.ac-lessons { list-style: none; margin: 0; padding: 0; display: grid; gap: 6px; }
+.ac-lesson { display: flex; gap: 10px; justify-content: space-between; align-items: center; flex-wrap: wrap; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; }
+.ac-lesson-main { display: grid; gap: 2px; min-width: 0; }
+.ac-module { display: grid; gap: 10px; }
+.ac-module-head { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; align-items: center; }
+.ac-progress { height: 8px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
+.ac-progress > span { display: block; height: 100%; background: var(--brand); }
+
+/* Star ratings (reviews) */
+.xp-stars { color: #b7791f; letter-spacing: 0.06em; white-space: nowrap; }
+.xp-review { display: grid; gap: 4px; padding: 10px 0; border-bottom: 1px solid var(--line); }
+.xp-review:last-child { border-bottom: 0; }
+.xp-review-head { display: flex; gap: 8px; flex-wrap: wrap; align-items: baseline; justify-content: space-between; }
+.xp-review.hidden-review { opacity: 0.6; }
+
+/* Earnings: ranked lists of courses and events */
+.xp-rank { display: grid; gap: 10px; margin: 0; padding: 0; list-style: none; }
+.xp-rank li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; align-items: baseline; }
+.xp-rank .xp-rank-title { overflow-wrap: anywhere; }
+.xp-rank .xp-share { grid-column: 1 / -1; height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+.xp-rank .xp-share > span { display: block; height: 100%; background: var(--brand); border-radius: 3px; }
+.xp-rank.low .xp-share > span { background: var(--warning); }
+
+/* Partner links to copy */
+.xp-links { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.xp-links li { display: flex; gap: 8px; align-items: center; justify-content: space-between; flex-wrap: wrap; padding: 8px 10px; border: 1px solid var(--line); border-radius: 8px; }
+.xp-links .xp-link-text { display: grid; gap: 2px; min-width: 0; flex: 1 1 220px; }
+.xp-links .xp-link-url { overflow-wrap: anywhere; font-size: 0.86em; }
+
+@media (max-width: 640px) {
+  .xp-toolbar select, .xp-toolbar input[type="search"] { flex: 1 1 100%; }
+}
+
+/* In the Aira frame: the section's create button sits in the page head only where the left menu (and its
+   "+ New") is folded away. */
+.xp-narrow-new { display: none; }
+@media (max-width: 900px) { .xp-narrow-new { display: flex; } }
+
+/* A course's or an event's own page: status, price and the way back on one line under its title */
+.xp-detail-meta { display: flex; gap: 8px 12px; align-items: center; flex-wrap: wrap; }
+
+/* Search results: the kind's icon beside each record */
+.xp-result { display: flex; gap: 10px; align-items: flex-start; min-width: 0; }
+.xp-result > div { min-width: 0; overflow-wrap: anywhere; }
+.xp-result-icon { display: inline-grid; place-items: center; flex: none; width: 30px; height: 30px; border-radius: 8px; background: var(--surface-2); color: var(--ink-2); }
+.xp-result-icon svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+
+/* Lists on a phone: the wide columns step aside and their facts ride under the first column. */
+.xp-phone-only { display: none; }
+@media (max-width: 640px) {
+  .suite-table .xp-wide { display: none; }
+  .xp-phone-only { display: block; margin-top: 2px; }
+}

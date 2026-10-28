@@ -1,7 +1,8 @@
 """Health rules: who may see what, medicine schedules and dose slots, adherence, stock, caregivers, missed-dose
 notices, appointments, readings with gentle hints, the mood diary and the emergency card.
 
-Times of day are in the business time zone (``kit.business(...)["timezone"]``); stored instants are UTC. A
+Times of day are in the household's time zone (``timezone_info``: the Business hub's zone when one other than UTC
+was chosen there, else the zone Health keeps, which the browser fills in the first time); stored instants are UTC. A
 scheduled slot is *due* from its time, *missed* 60 minutes after it if nobody marked it, and a slot that was
 already missed when the medicine was added does not count. Nothing here is medical advice.
 """
@@ -18,6 +19,9 @@ from aira.suite.care import store
 from aira.suite.care.store import APP
 
 MISSED_AFTER = timedelta(minutes=60)
+FUTURE_GRACE = timedelta(
+    minutes=10
+)  # a device clock a little ahead is not "the future"
 NOT_ADVICE = "This is general information, not medical advice. Talk to your doctor or nurse if you are worried."
 
 
@@ -26,12 +30,64 @@ NOT_ADVICE = "This is general information, not medical advice. Talk to your doct
 # ---------------------------------------------------------------------------
 
 
-def zone(connection: sqlite3.Connection) -> ZoneInfo:
-    name = str(kit.business(connection).get("timezone") or "UTC")
+def _valid_zone(name: str) -> bool:
     try:
-        return ZoneInfo(name)
+        ZoneInfo(name)
     except (ZoneInfoNotFoundError, ValueError):
-        return ZoneInfo("UTC")
+        return False
+    return True
+
+
+def timezone_info(connection: sqlite3.Connection) -> dict[str, str]:
+    """The zone medicine times are read in, and where it came from.
+
+    ``business``: the Business hub names a zone other than UTC (UTC there is also what saving the hub without
+    touching the zone stores, so it does not count as a choice). ``health``: the zone Health keeps (set by the
+    person, or by their browser the first time they open Health). ``default``: nothing set, UTC."""
+    stored = kit.get_setting(connection, "core", "business", {}) or {}
+    chosen = str(stored.get("timezone") or "") if isinstance(stored, dict) else ""
+    if chosen and chosen != "UTC" and _valid_zone(chosen):
+        return {"name": chosen, "source": "business"}
+    mine = str(kit.get_setting(connection, APP, "timezone", "") or "")
+    if mine and _valid_zone(mine):
+        return {"name": mine, "source": "health"}
+    return {"name": "UTC", "source": "default"}
+
+
+def can_set_timezone(me: dict[str, Any]) -> bool:
+    """Who may change the zone everyone's medicine times are read in: in the hosted build the organization's owner
+    or an admin; at home the owner or another adult (not a child)."""
+    from aira import suite
+
+    actor = suite.actor()
+    if actor:
+        return str(actor.get("role") or "") in ("owner", "admin")
+    return life.can_manage_household(me)
+
+
+def set_timezone(
+    connection: sqlite3.Connection, me: dict[str, Any], value: Any
+) -> dict[str, str]:
+    """Save the zone. The first time (nothing chosen yet) anyone's browser may fill it in; changing it later is for
+    the people ``can_set_timezone`` names, because it moves everyone's reminders."""
+    if timezone_info(connection)["source"] != "default" and not can_set_timezone(me):
+        raise PermissionError(
+            "Only the owner or an admin can change the time zone: it sets everyone's reminder times."
+            if me.get("member_ref")
+            else "Ask an adult to change the time zone: it sets the reminder times for everyone at home."
+        )
+    name = kit.text(value, "the time zone", max_len=60, required=True)
+    if ("/" not in name and name != "UTC") or not _valid_zone(name):
+        raise ValueError(
+            f"{name} is not a time zone. Use a name like Asia/Kolkata or Europe/London."
+        )
+    kit.set_setting(connection, APP, "timezone", name)
+    connection.commit()
+    return timezone_info(connection)
+
+
+def zone(connection: sqlite3.Connection) -> ZoneInfo:
+    return ZoneInfo(timezone_info(connection)["name"])
 
 
 def _now(now: datetime | None) -> datetime:
@@ -175,6 +231,8 @@ def create_medicine(
             stamp,
         ),
     )
+    if _schedule_of(values) is not None:
+        _open_schedule(connection, me["id"], medicine_id, values, None)
     kit.log(
         connection,
         APP,
@@ -193,9 +251,17 @@ def update_medicine(
     me: dict[str, Any],
     medicine_id: str,
     raw: dict[str, Any],
+    now: datetime | None = None,
 ) -> dict[str, Any]:
     current = store.get_medicine(connection, medicine_id, me["id"])
     values = store.clean_medicine(raw, current)
+    _keep_schedule(connection, current)
+    if _schedule_of(current) != _schedule_of(values):
+        # The old times stay true for the days they held; the new ones start now.
+        stamp = kit.iso(_now(now))
+        _close_schedule(connection, current, stamp)
+        if _schedule_of(values) is not None:
+            _open_schedule(connection, me["id"], medicine_id, values, stamp)
     kit.update_row(
         connection,
         "cr_medicines",
@@ -218,15 +284,28 @@ def update_medicine(
 
 
 def delete_medicine(
-    connection: sqlite3.Connection, me: dict[str, Any], medicine_id: str
+    connection: sqlite3.Connection,
+    me: dict[str, Any],
+    medicine_id: str,
+    now: datetime | None = None,
 ) -> str:
-    """A medicine with a history is paused (the history stays); one never taken is deleted."""
+    """A medicine with a history is paused (the history stays); one never taken is deleted. Deleting a medicine
+    that is already stopped removes it with its history and refills."""
     medicine = store.get_medicine(connection, medicine_id, me["id"])
-    if kit.count(
+    if not medicine["active"]:
+        for table in ("cr_doses", "cr_refills", "cr_missed_notices", "cr_schedules"):
+            connection.execute(
+                f"DELETE FROM {table} WHERE medicine_id = ?",  # noqa: S608
+                (medicine_id,),
+            )
+        connection.execute("DELETE FROM cr_medicines WHERE id = ?", (medicine_id,))
+        outcome = "deleted"
+    elif kit.count(
         connection,
         "SELECT COUNT(*) FROM cr_doses WHERE medicine_id = ?",
         (medicine_id,),
     ):
+        _close_schedule(connection, medicine, kit.iso(_now(now)))
         kit.update_row(
             connection,
             "cr_medicines",
@@ -236,6 +315,9 @@ def delete_medicine(
         outcome = "paused"
     else:
         connection.execute("DELETE FROM cr_medicines WHERE id = ?", (medicine_id,))
+        connection.execute(
+            "DELETE FROM cr_schedules WHERE medicine_id = ?", (medicine_id,)
+        )
         outcome = "deleted"
     kit.log(
         connection,
@@ -251,13 +333,142 @@ def delete_medicine(
 
 
 def scheduled_on(medicine: dict[str, Any], day: date) -> bool:
+    """Whether the medicine's current schedule has doses on ``day``."""
     if not medicine["active"] or medicine["as_needed"] or not medicine["times"]:
         return False
-    if medicine["start_date"] and day.isoformat() < medicine["start_date"]:
+    return _on_day(medicine, day)
+
+
+def _on_day(schedule: dict[str, Any], day: date) -> bool:
+    if schedule["start_date"] and day.isoformat() < schedule["start_date"]:
         return False
-    if medicine["end_date"] and day.isoformat() > medicine["end_date"]:
+    if schedule["end_date"] and day.isoformat() > schedule["end_date"]:
         return False
-    return not medicine["days"] or day.weekday() in medicine["days"]
+    return not schedule["days"] or day.weekday() in schedule["days"]
+
+
+# ---------------------------------------------------------------------------
+# a medicine's schedule over time (cr_schedules)
+# ---------------------------------------------------------------------------
+
+
+def _schedule_of(values: dict[str, Any]) -> tuple[Any, ...] | None:
+    """What decides when doses are due; None while the medicine is stopped or only taken when needed."""
+    if not values["active"] or values["as_needed"] or not values["times"]:
+        return None
+    return (
+        tuple(values["times"]),
+        tuple(values["days"]),
+        values["start_date"],
+        values["end_date"],
+    )
+
+
+def _open_schedule(
+    connection: sqlite3.Connection,
+    owner_id: str,
+    medicine_id: str,
+    values: dict[str, Any],
+    from_at: str | None,
+) -> None:
+    connection.execute(
+        """INSERT INTO cr_schedules (id, owner_id, medicine_id, times, days, start_date, end_date, from_at, to_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, NULL)""",
+        (
+            kit.new_id(),
+            owner_id,
+            medicine_id,
+            kit.dumps(list(values["times"])),
+            kit.dumps(list(values["days"])),
+            values["start_date"],
+            values["end_date"],
+            from_at,
+        ),
+    )
+
+
+def _keep_schedule(connection: sqlite3.Connection, medicine: dict[str, Any]) -> None:
+    """A medicine added before schedules were kept gets its one schedule stored (from the day it was added, until
+    it was stopped), before anything about it changes."""
+    if medicine["as_needed"] or not medicine["times"]:
+        return
+    if kit.count(
+        connection,
+        "SELECT COUNT(*) FROM cr_schedules WHERE medicine_id = ?",
+        (medicine["id"],),
+    ):
+        return
+    _open_schedule(connection, medicine["owner_id"], medicine["id"], medicine, None)
+    if not medicine["active"]:
+        connection.execute(
+            "UPDATE cr_schedules SET to_at = ? WHERE medicine_id = ?",
+            (medicine["updated_at"], medicine["id"]),
+        )
+
+
+def _close_schedule(
+    connection: sqlite3.Connection, medicine: dict[str, Any], stamp: str
+) -> None:
+    """End the schedule that holds now."""
+    _keep_schedule(connection, medicine)
+    connection.execute(
+        "UPDATE cr_schedules SET to_at = ? WHERE medicine_id = ? AND to_at IS NULL",
+        (stamp, medicine["id"]),
+    )
+
+
+def _plan(
+    row: dict[str, Any], added: datetime, times: Any, days: Any
+) -> dict[str, Any]:
+    return {
+        "times": times,
+        "days": days,
+        "start_date": row["start_date"],
+        "end_date": row["end_date"],
+        "from": kit.parse_time(row["from_at"]) if row["from_at"] else added,
+        "to": kit.parse_time(row["to_at"]) if row["to_at"] else None,
+    }
+
+
+def schedules(
+    connection: sqlite3.Connection, owner_id: str, medicines: list[dict[str, Any]]
+) -> dict[str, list[dict[str, Any]]]:
+    """Each medicine's schedules over time, with ``from``/``to`` as instants (``to`` None while it holds).
+
+    A medicine added before schedules were kept has none stored: its current times count from the day it was
+    added (until it was stopped, for a stopped one)."""
+    stored: dict[str, list[dict[str, Any]]] = {}
+    for row in kit.fetch_all(
+        connection,
+        "SELECT * FROM cr_schedules WHERE owner_id = ? ORDER BY from_at",
+        (owner_id,),
+    ):
+        stored.setdefault(row["medicine_id"], []).append(row)
+    out: dict[str, list[dict[str, Any]]] = {}
+    for medicine in medicines:
+        added = kit.parse_time(medicine["created_at"])
+        rows = stored.get(medicine["id"])
+        if rows is not None:
+            out[medicine["id"]] = [
+                _plan(
+                    row,
+                    added,
+                    kit.loads(row["times"], []) or [],
+                    kit.loads(row["days"], []) or [],
+                )
+                for row in rows
+            ]
+        elif not medicine["as_needed"] and medicine["times"]:
+            legacy = {
+                "start_date": medicine["start_date"],
+                "end_date": medicine["end_date"],
+                "from_at": None,
+                "to_at": None if medicine["active"] else medicine["updated_at"],
+            }
+            out[medicine["id"]] = [
+                _plan(legacy, added, medicine["times"], medicine["days"])
+            ]
+    return out
 
 
 def _status(at: datetime, dose: dict[str, Any] | None, now: datetime) -> str:
@@ -277,14 +488,40 @@ def _status(at: datetime, dose: dict[str, Any] | None, now: datetime) -> str:
     return "missed"
 
 
+def _slot_times(
+    connection: sqlite3.Connection, plans: list[dict[str, Any]], day: date
+) -> dict[str, datetime]:
+    """The times of day a medicine was due on ``day`` under the schedules that held then.
+
+    A slot counts under a schedule only if the schedule began before the slot would have been missed (a time
+    already missed when it was set does not count) and still held when it would have been missed (a dose that was
+    due but not yet missed when the time changed or the medicine stopped does not count either)."""
+    out: dict[str, datetime] = {}
+    for plan in plans:
+        if not _on_day(plan, day):
+            continue
+        for clock in plan["times"]:
+            at = slot_instant(connection, day, clock)
+            if at + MISSED_AFTER < plan["from"]:
+                continue
+            if plan["to"] is not None and at + MISSED_AFTER > plan["to"]:
+                continue
+            out.setdefault(clock, at)
+    return out
+
+
 def day_slots(
     connection: sqlite3.Connection,
     owner_id: str,
     day: date,
     now: datetime | None = None,
+    *,
+    stopped: bool = False,
 ) -> list[dict[str, Any]]:
     """Every scheduled dose of ``day`` for one person, with its state (taken, skipped, snoozed, upcoming, due,
-    missed). Slots that were already missed when the medicine was added are left out."""
+    missed), under the schedule each medicine had on that day. A dose marked taken or skipped always counts, even
+    if its time was changed later. ``stopped`` also includes the medicines that are stopped now (for the history
+    and the numbers; Today shows only the medicines still taken)."""
     moment = _now(now)
     doses = {
         (row["medicine_id"], row["slot_time"]): row
@@ -294,15 +531,23 @@ def day_slots(
             (owner_id, day.isoformat()),
         )
     }
+    medicines = [
+        medicine
+        for medicine in store.medicines(connection, owner_id)
+        if medicine["active"] or stopped
+    ]
+    plans = schedules(connection, owner_id, medicines)
     slots = []
-    for medicine in store.medicines(connection, owner_id, active_only=True):
-        if not scheduled_on(medicine, day):
-            continue
-        added = kit.parse_time(medicine["created_at"])
-        for clock in medicine["times"]:
-            at = slot_instant(connection, day, clock)
-            if at + MISSED_AFTER < added:
-                continue  # it would have been missed before the medicine was even added
+    for medicine in medicines:
+        due = _slot_times(connection, plans.get(medicine["id"], []), day)
+        for (medicine_id, clock), dose in doses.items():
+            if (
+                medicine_id == medicine["id"]
+                and clock not in due
+                and dose["status"] in ("taken", "skipped")
+            ):
+                due[clock] = slot_instant(connection, day, clock)
+        for clock, at in due.items():
             dose = doses.get((medicine["id"], clock))
             slots.append(
                 {
@@ -311,6 +556,7 @@ def day_slots(
                     "dose": medicine["dose"],
                     "form": medicine["form"],
                     "with_food": medicine["with_food"],
+                    "active": medicine["active"],
                     "date": day.isoformat(),
                     "time": clock,
                     "at": kit.iso(at),
@@ -327,15 +573,18 @@ def day_slots(
 def _slot_for(
     connection: sqlite3.Connection, me: dict[str, Any], raw: dict[str, Any]
 ) -> tuple[dict[str, Any], date, str]:
+    """The dose a button marks: one the medicine has on that day, under its schedule now or the one it had then."""
     medicine = store.get_medicine(
         connection, str(raw.get("medicine_id") or ""), me["id"]
     )
     day = _parse_day(raw.get("date"), connection)
     clock = store.clock(raw.get("time"))
-    if not scheduled_on(medicine, day) or clock not in medicine["times"]:
-        raise ValueError(
-            f"{medicine['name']} is not due at {clock} on {day.isoformat()}."
-        )
+    if not (scheduled_on(medicine, day) and clock in medicine["times"]):
+        plans = schedules(connection, me["id"], [medicine]).get(medicine["id"], [])
+        if clock not in _slot_times(connection, plans, day):
+            raise ValueError(
+                f"{medicine['name']} is not due at {clock} on {day.isoformat()}."
+            )
     return medicine, day, clock
 
 
@@ -510,9 +759,8 @@ def take_as_needed(
     if last and medicine["min_gap_hours"]:
         since = moment - kit.parse_time(last["at"])
         if since < timedelta(hours=medicine["min_gap_hours"]):
-            hours = since.total_seconds() / 3600
             warning = (
-                f"Your last dose was {hours:.1f} hours ago; the usual gap for {medicine['name']} is "
+                f"Your last dose was {_ago(since)}; the usual gap for {medicine['name']} is "
                 f"{medicine['min_gap_hours']} hours. Check the leaflet or ask your pharmacist."
             )
     dose_id = kit.new_id()
@@ -555,6 +803,20 @@ def take_as_needed(
     }
 
 
+def _ago(span: timedelta) -> str:
+    """3 minutes -> "3 minutes ago", 150 minutes -> "2 hours and 30 minutes ago" (never "0.0 hours")."""
+    minutes = max(0, int(span.total_seconds() // 60))
+    if minutes < 1:
+        return "just now"
+    hours, rest = divmod(minutes, 60)
+    parts = []
+    if hours:
+        parts.append(f"{hours} hour{'s' if hours != 1 else ''}")
+    if rest:
+        parts.append(f"{rest} minute{'s' if rest != 1 else ''}")
+    return " and ".join(parts) + " ago"
+
+
 def history(
     connection: sqlite3.Connection, owner_id: str, days: int = 30
 ) -> list[dict[str, Any]]:
@@ -579,7 +841,7 @@ def adherence(
     counts = {"taken": 0, "skipped": 0, "missed": 0}
     for offset in range(days):
         for slot in day_slots(
-            connection, owner_id, today - timedelta(days=offset), now
+            connection, owner_id, today - timedelta(days=offset), now, stopped=True
         ):
             if slot["status"] in counts:
                 counts[slot["status"]] += 1
@@ -592,13 +854,151 @@ def adherence(
     }
 
 
-def low_stock(connection: sqlite3.Connection, owner_id: str) -> list[dict[str, Any]]:
-    return [
-        medicine
-        for medicine in store.medicines(connection, owner_id, active_only=True)
-        if medicine["stock"] is not None
-        and medicine["stock"] <= max(medicine["refill_at"], 0)
-    ]
+def per_day(medicine: dict[str, Any]) -> float:
+    """How many a scheduled medicine uses on an average day (0 for 'as needed')."""
+    if medicine["as_needed"] or not medicine["times"]:
+        return 0.0
+    return len(medicine["times"]) * (len(medicine["days"]) or 7) / 7
+
+
+def supply(
+    connection: sqlite3.Connection,
+    medicine: dict[str, Any],
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """How long the count left lasts: ``days_left`` and the date it runs out, when both are known."""
+    use = per_day(medicine)
+    if medicine["stock"] is None or not use:
+        return {"days_left": None, "runs_out": None}
+    days_left = int(medicine["stock"] // use)
+    return {
+        "days_left": days_left,
+        "runs_out": (
+            local_today(connection, now) + timedelta(days=days_left)
+        ).isoformat(),
+    }
+
+
+REFILL_SOON_DAYS = 5
+
+
+def is_low(medicine: dict[str, Any], days_left: int | None) -> bool:
+    """Time to refill: the count reached the number the person chose; with none chosen, when fewer than
+    ``REFILL_SOON_DAYS`` days are left (or none at all)."""
+    if medicine["stock"] is None:
+        return False
+    if medicine["refill_at"]:
+        return medicine["stock"] <= medicine["refill_at"]
+    return medicine["stock"] <= 0 or (
+        days_left is not None and days_left < REFILL_SOON_DAYS
+    )
+
+
+def low_stock(
+    connection: sqlite3.Connection, owner_id: str, now: datetime | None = None
+) -> list[dict[str, Any]]:
+    out = []
+    for medicine in store.medicines(connection, owner_id, active_only=True):
+        left = supply(connection, medicine, now)
+        if is_low(medicine, left["days_left"]):
+            out.append({**medicine, **left})
+    return out
+
+
+def refills(
+    connection: sqlite3.Connection, medicine_id: str, limit: int = 5
+) -> list[dict[str, Any]]:
+    return kit.fetch_all(
+        connection,
+        "SELECT id, amount, note, at FROM cr_refills WHERE medicine_id = ? ORDER BY at DESC LIMIT ?",
+        (medicine_id, limit),
+    )
+
+
+def refill(
+    connection: sqlite3.Connection,
+    me: dict[str, Any],
+    medicine_id: str,
+    raw: dict[str, Any],
+) -> dict[str, Any]:
+    """A new box or bottle: add it to the count left (a count is started if none was kept)."""
+    medicine = store.get_medicine(connection, medicine_id, me["id"])
+    amount = kit.integer(
+        raw.get("amount"), "how many you got", minimum=1, maximum=10000
+    )
+    note = kit.text(raw.get("note"), "a note", max_len=120)
+    stock = min((medicine["stock"] or 0) + amount, 100000)
+    stamp = kit.now()
+    connection.execute(
+        "INSERT INTO cr_refills (id, owner_id, medicine_id, amount, note, at) VALUES (?, ?, ?, ?, ?, ?)",
+        (kit.new_id(), me["id"], medicine_id, amount, note, stamp),
+    )
+    connection.execute(
+        "UPDATE cr_medicines SET stock = ?, updated_at = ? WHERE id = ?",
+        (stock, stamp, medicine_id),
+    )
+    kit.log(
+        connection,
+        APP,
+        "refill",
+        f"Refilled {medicine['name']} (+{amount})",
+        actor=me["name"],
+        ref_type="medicine",
+        ref_id=medicine_id,
+    )
+    connection.commit()
+    return medicine_view(
+        connection, store.get_medicine(connection, medicine_id, me["id"])
+    )
+
+
+def medicine_view(
+    connection: sqlite3.Connection,
+    medicine: dict[str, Any],
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """A medicine with how long it lasts, whether to refill, and its last refills."""
+    left = supply(connection, medicine, now)
+    return {
+        **medicine,
+        **left,
+        "per_day": round(per_day(medicine), 2),
+        "low": medicine["active"] and is_low(medicine, left["days_left"]),
+        "refills": refills(connection, medicine["id"]),
+    }
+
+
+def medicine_adherence(
+    connection: sqlite3.Connection,
+    owner_id: str,
+    days: int = 30,
+    now: datetime | None = None,
+) -> dict[str, dict[str, Any]]:
+    """Taken, skipped and missed per medicine over the last ``days`` days (doses whose time has passed)."""
+    today = local_today(connection, now)
+    out: dict[str, dict[str, Any]] = {}
+    for offset in range(days):
+        for slot in day_slots(
+            connection, owner_id, today - timedelta(days=offset), now, stopped=True
+        ):
+            if slot["status"] not in ("taken", "skipped", "missed"):
+                continue
+            row = out.setdefault(
+                slot["medicine_id"],
+                {
+                    "name": slot["name"],
+                    "dose": slot["dose"],
+                    "taken": 0,
+                    "skipped": 0,
+                    "missed": 0,
+                },
+            )
+            row[slot["status"]] += 1
+    for row in out.values():
+        counted = row["taken"] + row["skipped"] + row["missed"]
+        row["counted"] = counted
+        row["percent"] = round(row["taken"] * 100 / counted) if counted else None
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -863,6 +1263,61 @@ def get_appointment(
     return row
 
 
+def _ics_text(value: str) -> str:
+    """Escape text for a calendar file (RFC 5545)."""
+    return (
+        value.replace("\\", "\\\\")
+        .replace(";", "\\;")
+        .replace(",", "\\,")
+        .replace("\r", "")
+        .replace("\n", "\\n")
+    )
+
+
+def calendar_file(appointment: dict[str, Any]) -> bytes:
+    """One appointment as an .ics file (an hour long, a reminder the day before and two hours before)."""
+    start = kit.parse_time(appointment["at"]).astimezone(timezone.utc)
+    end = start + timedelta(hours=1)
+    stamp = kit.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    description = "\n".join(
+        part
+        for part in (
+            appointment.get("purpose") or "",
+            f"Questions to ask:\n{appointment['questions']}"
+            if appointment.get("questions")
+            else "",
+            appointment.get("notes") or "",
+        )
+        if part
+    )
+    lines = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Aira//Health//EN",
+        "CALSCALE:GREGORIAN",
+        "BEGIN:VEVENT",
+        f"UID:{appointment['id']}@aira-health",
+        f"DTSTAMP:{stamp}",
+        f"DTSTART:{start.strftime('%Y%m%dT%H%M%SZ')}",
+        f"DTEND:{end.strftime('%Y%m%dT%H%M%SZ')}",
+        f"SUMMARY:{_ics_text(appointment['title'])}",
+    ]
+    if appointment.get("place"):
+        lines.append(f"LOCATION:{_ics_text(appointment['place'])}")
+    if description:
+        lines.append(f"DESCRIPTION:{_ics_text(description)}")
+    for trigger in ("-P1D", "-PT2H"):
+        lines += [
+            "BEGIN:VALARM",
+            "ACTION:DISPLAY",
+            f"DESCRIPTION:{_ics_text(appointment['title'])}",
+            f"TRIGGER:{trigger}",
+            "END:VALARM",
+        ]
+    lines += ["END:VEVENT", "END:VCALENDAR"]
+    return ("\r\n".join(lines) + "\r\n").encode("utf-8")
+
+
 def delete_appointment(
     connection: sqlite3.Connection, me: dict[str, Any], appointment_id: str
 ) -> None:
@@ -994,6 +1449,10 @@ def add_reading(
                 "The top number is usually bigger than the bottom number. Check the reading."
             )
     at = kit.moment(raw.get("at"), "the time") or kit.now()
+    if kit.parse_time(at) > kit.utcnow() + FUTURE_GRACE:
+        raise ValueError(
+            "A reading cannot be in the future. Leave the time empty for now."
+        )
     reading_id = kit.new_id()
     connection.execute(
         "INSERT INTO cr_readings (id, owner_id, kind, value1, value2, value3, unit, at, note, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
@@ -1024,6 +1483,9 @@ def reading_view(row: dict[str, Any]) -> dict[str, Any]:
         return row
     row["label"] = KINDS.get(row["kind"], {}).get("label", row["kind"])
     row["hint"] = hint(row["kind"], float(row["value1"]), row["value2"], row["unit"])
+    # The note alone (the page shows "not medical advice" once) and whether it is outside the usual range.
+    row["note_short"] = row["hint"].replace(f" {NOT_ADVICE}", "")
+    row["flagged"] = bool(row["hint"])
     if row["kind"] == "blood_pressure":
         row["display"] = f"{row['value1']:g}/{row['value2']:g} {row['unit']}" + (
             f", pulse {row['value3']:g}" if row.get("value3") is not None else ""
@@ -1034,10 +1496,18 @@ def reading_view(row: dict[str, Any]) -> dict[str, Any]:
 
 
 def readings(
-    connection: sqlite3.Connection, owner_id: str, *, kind: str = "", days: int = 90
+    connection: sqlite3.Connection,
+    owner_id: str,
+    *,
+    kind: str = "",
+    days: int = 90,
+    now: datetime | None = None,
 ) -> list[dict[str, Any]]:
-    since = kit.iso(kit.utcnow() - timedelta(days=days))
-    params: list[Any] = [owner_id, since]
+    since = kit.iso(_now(now) - timedelta(days=days))
+    until = kit.iso(
+        _now(now) + FUTURE_GRACE
+    )  # a reading dated ahead (an older Health allowed it) is left out
+    params: list[Any] = [owner_id, since, until]
     where = ""
     if kind:
         kit.choice(kind, "the kind of reading", tuple(KINDS))
@@ -1045,7 +1515,7 @@ def readings(
         params.append(kind)
     rows = kit.fetch_all(
         connection,
-        f"SELECT * FROM cr_readings WHERE owner_id = ? AND at >= ? {where} ORDER BY at DESC LIMIT 500",  # noqa: S608
+        f"SELECT * FROM cr_readings WHERE owner_id = ? AND at >= ? AND at <= ? {where} ORDER BY at DESC LIMIT 500",  # noqa: S608
         params,
     )
     return [reading_view(row) for row in rows]
@@ -1058,8 +1528,8 @@ def latest_readings(
     for kind in KINDS:
         row = kit.fetch_one(
             connection,
-            "SELECT * FROM cr_readings WHERE owner_id = ? AND kind = ? ORDER BY at DESC LIMIT 1",
-            (owner_id, kind),
+            "SELECT * FROM cr_readings WHERE owner_id = ? AND kind = ? AND at <= ? ORDER BY at DESC LIMIT 1",
+            (owner_id, kind, kit.iso(kit.utcnow() + FUTURE_GRACE)),
         )
         if row:
             out[kind] = reading_view(row)
@@ -1085,7 +1555,12 @@ def delete_reading(
 def save_day(
     connection: sqlite3.Connection, me: dict[str, Any], raw: dict[str, Any]
 ) -> dict[str, Any]:
-    day = kit.day(raw.get("day"), "the day") or local_today(connection).isoformat()
+    today = local_today(connection).isoformat()
+    day = kit.day(raw.get("day"), "the day") or today
+    if day > today:
+        raise ValueError(
+            "The diary is for days that have come. Choose today or a day before."
+        )
     mood = kit.integer(raw.get("mood"), "your mood", minimum=1, maximum=5)
     symptoms = kit.tags(raw.get("symptoms"), limit=15)
     note = kit.text(raw.get("note"), "a note", max_len=1000, multiline=True)
@@ -1103,13 +1578,16 @@ def save_day(
 
 
 def diary(
-    connection: sqlite3.Connection, owner_id: str, days: int = 30
+    connection: sqlite3.Connection,
+    owner_id: str,
+    days: int = 30,
+    now: datetime | None = None,
 ) -> list[dict[str, Any]]:
-    since = (kit.utcnow() - timedelta(days=days)).date().isoformat()
+    since = (_now(now) - timedelta(days=days)).date().isoformat()
     rows = kit.fetch_all(
         connection,
-        "SELECT * FROM cr_diary WHERE owner_id = ? AND day >= ? ORDER BY day DESC",
-        (owner_id, since),
+        "SELECT * FROM cr_diary WHERE owner_id = ? AND day >= ? AND day <= ? ORDER BY day DESC",
+        (owner_id, since, local_today(connection, now).isoformat()),
     )
     for row in rows:
         row["symptoms"] = kit.loads(row["symptoms"], []) or []
@@ -1356,8 +1834,13 @@ def overview(
         "adherence_7": adherence(connection, person["id"], 7, now),
         "adherence_30": adherence(connection, person["id"], 30, now),
         "low_stock": [
-            {"id": m["id"], "name": m["name"], "stock": m["stock"]}
-            for m in low_stock(connection, person["id"])
+            {
+                "id": m["id"],
+                "name": m["name"],
+                "stock": m["stock"],
+                "days_left": m["days_left"],
+            }
+            for m in low_stock(connection, person["id"], now)
         ],
         "as_needed": [
             {"id": m["id"], "name": m["name"], "dose": m["dose"]}
@@ -1370,5 +1853,7 @@ def overview(
         if person["id"] == me["id"]
         else [],  # the diary is private
         "caring_for": caring_for(connection, me, now),
+        "kinds": KINDS,
+        "timezone": timezone_info(connection),
         "not_advice": NOT_ADVICE,
     }

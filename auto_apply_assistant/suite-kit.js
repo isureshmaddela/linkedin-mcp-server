@@ -73,6 +73,8 @@
     const current = active || (route && route.query && route.query.tab) || items[0].id;
     const bar = Aira.ui.tabs(items, current, (id) => Aira.router.go([section], { tab: id }));
     container.append(bar);
+    // The left menu lists them too, like a mail app's folders (shell.js).
+    if (Aira.shell) Aira.shell.tabs(section, items, current);
     return current;
   };
 
@@ -105,7 +107,8 @@
       if (onRow) {
         tr.tabIndex = 0;
         tr.addEventListener("click", (event) => { if (!event.target.closest("button, a, input, select")) onRow(row); });
-        tr.addEventListener("keydown", (event) => { if (event.key === "Enter") onRow(row); });
+        // Only Enter on the row itself: Enter on a button, link or box inside the row does that control's own job.
+        tr.addEventListener("keydown", (event) => { if (event.key === "Enter" && event.target === tr) { event.preventDefault(); onRow(row); } });
       }
       return tr;
     });
@@ -140,7 +143,11 @@
       const out = {};
       for (const [name, { field, control }] of Object.entries(inputs)) {
         if (field.type === "checkbox") out[name] = control.checked;
-        else if (field.type === "money") out[name] = S.toCents(control.value);
+        else if (field.type === "money") {
+          const cents = S.toCents(control.value);
+          if (cents === null && control.value.trim()) throw new Error(`Enter ${field.label.toLowerCase()} as a number, like ${field.example || "4.99"}.`);
+          out[name] = cents;
+        }
         else if (field.type === "number") out[name] = control.value === "" ? null : Number(control.value);
         else out[name] = control.value.trim();
       }
@@ -153,11 +160,14 @@
   S.edit = ({ title, fields, values = {}, submitLabel = "Save", onSave, wide = false }) => new Promise((resolve) => {
     const form = S.form(fields, values);
     let done = false;
+    let dialog = null;
     const finish = (result) => { if (!done) { done = true; resolve(result); } };
-    Aira.modal({
+    // Enter in a one-line field saves, like pressing the main button (a hidden submit button makes Enter submit).
+    const submit = (event) => { event.preventDefault(); const primary = dialog && dialog.box.querySelector(".actions .btn.primary"); if (primary && !primary.disabled) primary.click(); };
+    dialog = Aira.modal({
       title,
       wide,
-      body: h("form", { onsubmit: (event) => event.preventDefault() }, form.node),
+      body: h("form", { onsubmit: submit }, form.node, h("button", { type: "submit", class: "sr-only", tabindex: "-1", "aria-hidden": "true" })),
       onClose: () => finish(null),
       actions: [
         { label: "Cancel", kind: "ghost" },
@@ -219,7 +229,7 @@
   };
 
   S.bars = (series = [], { format = (v) => String(v) } = {}) => {
-    const max = Math.max(1, ...series.map((item) => Number(item.value) || 0));
+    const max = Math.max(0, ...series.map((item) => Number(item.value) || 0)) || 1; // small values (rates, cents) still show
     return h("div", { class: "suite-bars", role: "img", "aria-label": series.map((item) => `${item.label}: ${format(item.value)}`).join(", ") },
       ...series.map((item) => h("div", { class: "suite-bar" }, h("span", { class: "suite-bar-fill", style: { height: `${Math.round(((Number(item.value) || 0) * 100) / max)}%` }, title: format(item.value) }), h("span", { class: "suite-bar-label", text: item.label }))));
   };

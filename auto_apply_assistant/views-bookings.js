@@ -1,10 +1,15 @@
 /* Aira — Bookings (#/bookings): appointments that pay, for salons, clinics, studios, tutors and consultants.
  *
  * Tabs (?tab=): overview (today, this week, revenue, no-shows, the booking page to share, setup), calendar (a week
- * per person), appointments (search, filters, CSV), services, staff (hours and time off), customers (visits, spend,
- * notes, packages), packages and settings (booking rules). A booking opens in a drawer: confirm, complete, no-show,
- * cancel, reschedule, take the deposit or the full price, redeem a package, notes, the customer's own link.
+ * per person), appointments (search, filters, CSV), waiting list (customers waiting for a time on a full day),
+ * services, staff (hours, commission and time off), customers (visits, spend, notes, packages), packages, team pay
+ * (takings and commission per person, CSV) and settings (booking rules). A booking opens in a drawer: confirm,
+ * complete, no-show, cancel, reschedule, take the deposit or the full price, redeem a package, notes, the
+ * customer's own link.
  * Everything runs through /api/bookings/* (aira/suite/bookings/bookings_routes.py). DOM is built with h() and text.
+ *
+ * In the Aira frame, "+ New" and the search box for all of Commerce are set up in views-shop.js; links from them
+ * open here once: new=booking or new=service opens the form, booking=, customer= or service=<id> the record.
  */
 "use strict";
 (() => {
@@ -13,28 +18,40 @@
   const S = Aira.suite;
   const call = (path, opts) => S.api("bookings", path, opts);
   const TABS = [
-    { id: "overview", label: "Overview" },
-    { id: "calendar", label: "Calendar" },
-    { id: "appointments", label: "Appointments" },
-    { id: "services", label: "Services" },
-    { id: "staff", label: "Staff" },
-    { id: "customers", label: "Customers" },
-    { id: "packages", label: "Packages" },
-    { id: "settings", label: "Settings" },
+    { id: "overview", label: "Overview", icon: "dashboard" },
+    { id: "calendar", label: "Calendar", icon: "interviews" },
+    { id: "appointments", label: "Appointments", icon: "bookings" },
+    { id: "waitlist", label: "Waiting list", icon: "planner" },
+    { id: "services", label: "Services", icon: "careers" },
+    { id: "staff", label: "Staff", icon: "family" },
+    { id: "customers", label: "Customers", icon: "recruiters" },
+    { id: "packages", label: "Packages", icon: "events" },
+    { id: "pay", label: "Team pay", icon: "stocks" },
+    { id: "settings", label: "Settings", icon: "settings" },
   ];
+  // A link from "+ New" or the search box opens a form or a record once (see the view at the end).
+  const ONCE = ["new", "booking", "customer", "service"];
+  let pending = {};
+  const take = (key, value) => { const found = pending[key]; if (!found || (value && found !== value)) return ""; delete pending[key]; return found; };
+  const later = (fn) => { Promise.resolve().then(fn).catch((error) => console.warn(error)); };
+  // On a phone a wide table keeps its key columns: cm-hide-<n> hides the nth column under 560px (app-commerce.css).
+  const narrow = (table, ...columns) => h("div", { class: ["cm-narrow", ...columns.map((n) => `cm-hide-${n}`)].join(" ") }, table);
   const STATUS_TONES = { booked: "warn", confirmed: "info", completed: "good", cancelled: "bad", no_show: "bad" };
   const WEEKDAYS = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
   const status = (value) => S.pill(value, STATUS_TONES);
   const isoDay = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
   const addDays = (day, n) => { const d = new Date(`${day}T12:00:00`); d.setDate(d.getDate() + n); return isoDay(d); };
-  const today = () => isoDay(new Date());
+  // Today in the business's time zone (the server says so with its lists), not this computer's date.
+  let businessDay = "";
+  const learnDay = (data) => { if (data && /^\d{4}-\d{2}-\d{2}$/.test(data.today || "")) businessDay = data.today; return data; };
+  const today = () => businessDay || isoDay(new Date());
   const paidLabel = (b) => (b.payment_kind === "package" ? "Package" : b.paid_cents ? S.money(b.paid_cents) : b.price_cents ? "Unpaid" : "Free");
 
   let rerender = () => {};
 
   // ------------------------------------------------------------------ overview
   async function overview(body) {
-    const data = await call("/overview");
+    const data = learnDay(await call("/overview"));
     const revenue = data.revenue;
     const steps = data.checklist || [];
     body.append(
@@ -44,7 +61,8 @@
         { label: "Revenue this month", value: S.money(revenue.this_month_cents, revenue.currency), tone: "good" },
         { label: "No-show rate (90 days)", value: data.no_show_rate === null ? "-" : `${data.no_show_rate}%`, tone: data.no_show_rate >= 10 ? "warn" : "" },
         data.to_confirm ? { label: "Waiting for you to confirm", value: data.to_confirm, tone: "warn" } : null,
-        data.unpaid_completed ? { label: "Completed but unpaid", value: data.unpaid_completed, tone: "bad" } : null,
+        data.unpaid_completed ? { label: "Completed, money still due", value: data.unpaid_completed, tone: "bad" } : null,
+        data.waiting ? { label: "On the waiting list", value: data.waiting, tone: "warn", hint: "Waiting list tab" } : null,
       ]),
       S.share({
         title: "Your booking page",
@@ -56,35 +74,36 @@
     );
     if (steps.some((step) => !step.done)) body.append(S.section("Get set up", S.checklist(steps)));
     body.append(S.grid(
-      S.section("Today", S.table({ columns: [{ key: "local_time", label: "Time" }, { key: "customer_name", label: "Customer" }, { key: "service_name", label: "Service" }, { key: "staff_name", label: "With" }, { key: "status", label: "Status", render: (b) => status(b.status) }], rows: data.today_bookings, empty: Aira.ui.empty("Nothing booked today", "Share your booking page to fill your calendar."), onRow: (b) => openBooking(b.id) })),
+      S.section("Today", narrow(S.table({ columns: [{ key: "local_time", label: "Time" }, { key: "customer_name", label: "Customer" }, { key: "service_name", label: "Service" }, { key: "staff_name", label: "With" }, { key: "status", label: "Status", render: (b) => status(b.status) }], rows: data.today_bookings, empty: Aira.ui.empty("Nothing booked today", "Share your booking page to fill your calendar, or add a booking taken by phone.", S.button("New booking", () => newBooking({}), { kind: "secondary" })), onRow: (b) => openBooking(b.id) }), 4)),
       S.section("Busiest services (30 days)", S.table({ columns: [{ key: "service_name", label: "Service" }, { key: "bookings", label: "Bookings", num: true }], rows: data.busiest, empty: "No bookings yet" })),
     ));
-    body.append(S.section("Coming up", S.table({ columns: [{ key: "local_start", label: "When" }, { key: "customer_name", label: "Customer" }, { key: "service_name", label: "Service" }, { key: "status", label: "Status", render: (b) => status(b.status) }, { key: "paid", label: "Paid", render: paidLabel }], rows: data.upcoming, empty: "No upcoming bookings", onRow: (b) => openBooking(b.id) })));
+    body.append(S.section("Coming up", narrow(S.table({ columns: [{ key: "local_start", label: "When" }, { key: "customer_name", label: "Customer" }, { key: "service_name", label: "Service" }, { key: "status", label: "Status", render: (b) => status(b.status) }, { key: "paid", label: "Paid", render: paidLabel }], rows: data.upcoming, empty: "No upcoming bookings", onRow: (b) => openBooking(b.id) }), 3, 5)));
   }
 
   // ------------------------------------------------------------------ calendar
   async function calendar(body, route) {
-    const start = route.query.start || today();
     const staffId = route.query.staff || "";
-    const data = await call(`/agenda?start=${encodeURIComponent(start)}&days=7${staffId ? `&staff_id=${encodeURIComponent(staffId)}` : ""}`);
+    // Without a start the server begins on today in the business's time zone (not this computer's).
+    const data = await call(`/agenda?days=7${route.query.start ? `&start=${encodeURIComponent(route.query.start)}` : ""}${staffId ? `&staff_id=${encodeURIComponent(staffId)}` : ""}`);
+    const start = data.days.length ? data.days[0].day : today();
     const go = (query) => Aira.router.go(["bookings"], { tab: "calendar", start, staff: staffId, ...query });
     const people = Aira.ui.select([["", "Everyone"], ...data.staff.map((p) => [p.id, p.name])], staffId, { "aria-label": "Person" });
     people.addEventListener("change", () => go({ staff: people.value }));
     const colors = Object.fromEntries(data.staff.map((p) => [p.id, p.color]));
     body.append(
-      h("div", { class: "btn-row" },
+      h("div", { class: "btn-row cm-filters" },
         S.button("Previous week", () => go({ start: addDays(start, -7) }), { kind: "secondary sm" }),
-        S.button("This week", () => go({ start: today() }), { kind: "secondary sm" }),
+        S.button("This week", () => go({ start: "" }), { kind: "secondary sm" }),
         S.button("Next week", () => go({ start: addDays(start, 7) }), { kind: "secondary sm" }),
         people,
-        S.button("New booking", () => newBooking({ day: start }), { kind: "sm" }),
+        S.button("New booking", () => newBooking({ day: start }), { kind: "sm cm-tab-new" }),
         h("span", { class: "muted small", text: `Times in ${data.timezone}` })),
-      h("div", { style: { display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))", gap: "8px" } },
-        ...data.days.map((day) => h("div", { class: "card", style: { padding: "10px", minHeight: "140px", display: "grid", alignContent: "start", gap: "6px" } },
+      h("div", { class: "cm-week" },
+        ...data.days.map((day) => h("div", { class: `card cm-day${day.bookings.length ? "" : " free"}` },
           h("strong", { text: day.label }),
-          ...(day.bookings.length ? day.bookings.map((b) => h("button", { type: "button", class: "kcard", style: { borderLeft: `4px solid ${colors[b.staff_id] || "var(--brand)"}`, opacity: b.status === "cancelled" ? "0.55" : "1" }, onclick: () => openBooking(b.id) },
+          ...(day.bookings.length ? day.bookings.map((b) => h("button", { type: "button", class: `kcard cm-slot${b.status === "cancelled" ? " cancelled" : ""}`, style: { borderLeftColor: colors[b.staff_id] || "var(--brand)" }, onclick: () => openBooking(b.id) },
             h("strong", { text: `${b.local_time}-${b.local_end} ${b.customer_name}` }), h("span", { text: `${b.service_name} · ${b.staff_name}` }), status(b.status))) : [h("span", { class: "muted small", text: "Free" })]),
-          S.button("+", () => newBooking({ day: day.day }), { kind: "ghost sm", title: `Book on ${day.label}` })))),
+          S.button("Book", () => newBooking({ day: day.day }), { kind: "ghost sm", title: `Book on ${day.label}` })))),
     );
   }
 
@@ -102,8 +121,8 @@
     whenSelect.addEventListener("change", apply);
     statusSelect.addEventListener("change", apply);
     body.append(
-      h("div", { class: "btn-row" }, search, whenSelect, statusSelect, S.button("New booking", () => newBooking({})), S.button("Download CSV", () => Aira.download("/api/bookings/bookings?format=csv", "bookings.csv"), { kind: "secondary" })),
-      S.table({
+      h("div", { class: "btn-row cm-filters" }, search, whenSelect, statusSelect, S.button("New booking", () => newBooking({}), { kind: "cm-tab-new" }), S.button("Download CSV", () => Aira.download("/api/bookings/bookings?format=csv", "bookings.csv"), { kind: "secondary" })),
+      narrow(S.table({
         columns: [
           { key: "local_start", label: "When" },
           { key: "customer_name", label: "Customer" },
@@ -114,10 +133,15 @@
           { key: "reference", label: "Ref" },
         ],
         rows: data.bookings,
-        empty: Aira.ui.empty("No bookings match", "Change the filters, or add a booking."),
+        empty: q.q || q.status || when !== "upcoming"
+          ? Aira.ui.empty("No bookings match", "Change the filters, or add a booking.", h("a", { class: "btn secondary", href: "#/bookings?tab=appointments", text: "Clear the filters" }))
+          : Aira.ui.empty("No upcoming bookings", "Share your booking page, or add a booking taken by phone or in person.", S.button("New booking", () => newBooking({}), { kind: "secondary" })),
         onRow: (b) => openBooking(b.id),
-      }),
+      }), 4, 6, 7),
     );
+    if (take("new", "booking")) later(() => newBooking({}));
+    const wanted = take("booking");
+    if (wanted) later(() => openBooking(wanted));
   }
 
   // ------------------------------------------------------------------ a booking
@@ -137,7 +161,7 @@
       }, { kind: "danger secondary" }) : null);
     const payRow = h("div", { class: "btn-row" });
     if (booking.payment_kind === "package") payRow.append(h("span", { class: "muted", text: "Paid with a package session." }), S.button("Undo", () => act("/unpay", {}, "Package session returned."), { kind: "ghost sm" }));
-    else if (booking.paid_cents) payRow.append(...[h("span", { text: `Paid ${S.money(booking.paid_cents)} (${booking.payment_kind})` }), booking.due_cents ? S.button(`Take the rest (${S.money(booking.price_cents)})`, () => act("/pay", { kind: "full" }, "Paid in full.")) : null, S.button("Mark unpaid", () => act("/unpay", {}, "Payment removed."), { kind: "ghost sm" })].filter(Boolean));
+    else if (booking.paid_cents) payRow.append(...[h("span", { text: `Paid ${S.money(booking.paid_cents)} (${booking.payment_kind})` }), booking.due_cents ? S.button(`Take the rest (${S.money(booking.due_cents)})`, () => act("/pay", { kind: "full" }, "Paid in full.")) : null, S.button("Mark unpaid", () => act("/unpay", {}, "Payment removed."), { kind: "ghost sm" })].filter(Boolean));
     else {
       if (booking.deposit_cents) payRow.append(S.button(`Deposit paid (${S.money(booking.deposit_cents)})`, () => act("/pay", { kind: "deposit" }, "Deposit recorded."), { kind: "secondary" }));
       if (booking.price_cents) payRow.append(S.button(`Paid in full (${S.money(booking.price_cents)})`, () => act("/pay", { kind: "full" }, "Payment recorded.")));
@@ -186,31 +210,33 @@
     return { node: h("div", { class: "suite-body" }, Aira.ui.field("Day", dayInput), holder), load, chosen: () => chosen, day: () => dayInput.value };
   }
 
-  async function newBooking({ day = today() } = {}) {
-    const [{ services }, { staff }] = await Promise.all([call("/services"), call("/staff")]);
+  async function newBooking({ day = "", customer = null, serviceId = "", staffId = "" } = {}) {
+    const [{ services }, { staff }] = await Promise.all([call("/services").then(learnDay), call("/staff")]);
+    day = day || today();
     const usable = services.filter((s) => s.active);
     if (!usable.length) { Aira.toast("Add a service first (Services tab)."); Aira.router.go(["bookings"], { tab: "services" }); return; }
-    const serviceSelect = Aira.ui.select(usable.map((s) => [s.id, `${s.name} · ${s.minutes} min · ${S.money(s.price_cents)}`]), usable[0].id, {});
-    const staffSelect = Aira.ui.select([["", "Anyone available"], ...staff.filter((p) => p.active).map((p) => [p.id, p.name])], "", {});
+    const firstService = usable.some((s) => s.id === serviceId) ? serviceId : usable[0].id;
+    const serviceSelect = Aira.ui.select(usable.map((s) => [s.id, `${s.name} · ${s.minutes} min · ${S.money(s.price_cents)}`]), firstService, { "aria-label": "Service" });
+    const staffSelect = Aira.ui.select([["", "Anyone available"], ...staff.filter((p) => p.active).map((p) => [p.id, p.name])], staff.some((p) => p.id === staffId && p.active) ? staffId : "", { "aria-label": "With" });
     let picked = null;
     const picker = slotPicker({ serviceId: () => serviceSelect.value, staffId: () => staffSelect.value, day, onPick: (slot) => { picked = slot; } });
     serviceSelect.addEventListener("change", picker.load);
     staffSelect.addEventListener("change", picker.load);
     const outside = h("input", { type: "checkbox" });
     const time = h("input", { type: "time", value: "18:00" });
-    const customer = S.form([{ name: "name", label: "Customer name", required: true }, { name: "email", label: "Email", type: "email" }, { name: "phone", label: "Phone", type: "tel" }, { name: "note", label: "Note", type: "textarea", rows: 2 }]);
+    const who = S.form([{ name: "name", label: "Customer name", required: true }, { name: "email", label: "Email", type: "email" }, { name: "phone", label: "Phone", type: "tel" }, { name: "note", label: "Note", type: "textarea", rows: 2 }], customer ? { name: customer.name, email: customer.email, phone: customer.phone } : {});
     const error = h("p", { class: "form-error", role: "alert", hidden: true });
     Aira.modal({
       title: "New booking",
       wide: true,
       body: h("div", { class: "suite-form" }, Aira.ui.field("Service", serviceSelect), Aira.ui.field("With", staffSelect), picker.node,
         h("label", { class: "suite-check" }, outside, h("span", { text: "Outside normal hours (a walk-in or a special time)" })), Aira.ui.field("Time (outside hours)", time, "Used only when the box above is ticked."),
-        customer.node, error),
+        who.node, error),
       actions: [
         { label: "Cancel", kind: "ghost" },
         { label: "Book", kind: "primary", onClick: async () => {
           error.hidden = true;
-          const values = customer.read();
+          const values = who.read();
           const body = { service_id: serviceSelect.value, staff_id: staffSelect.value, ...values };
           if (outside.checked) Object.assign(body, { outside_hours: true, day: picker.day(), time: time.value });
           else if (picked) body.start = picked.start;
@@ -272,7 +298,7 @@
     });
     body.append(
       h("div", { class: "btn-row" }, S.button("New service", () => edit(null))),
-      S.table({
+      narrow(S.table({
         columns: [
           { key: "name", label: "Service" },
           { key: "category", label: "Category" },
@@ -286,8 +312,12 @@
         rows,
         empty: Aira.ui.empty("No services yet", "Add what customers can book: its length, price and an optional deposit.", S.button("Add a service", () => edit(null))),
         onRow: edit,
-      }),
+      }), 2, 5, 6),
     );
+    if (take("new", "service")) later(() => edit(null));
+    const serviceId = take("service");
+    const wanted = serviceId && rows.find((row) => row.id === serviceId);
+    if (wanted) later(() => edit(wanted));
   }
 
   // ------------------------------------------------------------------ staff
@@ -300,7 +330,8 @@
     });
   }
   async function staffTab(body) {
-    const [{ staff }, { time_off: timeOff }] = await Promise.all([call("/staff"), call(`/time-off?from=${today()}`)]);
+    const { staff } = learnDay(await call("/staff"));
+    const { time_off: timeOff } = await call(`/time-off?from=${today()}`);
     const names = Object.fromEntries(staff.map((p) => [p.id, p.name]));
     const edit = (row) => S.edit({
       title: row ? `Edit ${row.name}` : "Add a person",
@@ -309,13 +340,14 @@
         { name: "email", label: "Email (never shown to customers)", type: "email" },
         { name: "color", label: "Calendar colour", type: "color" },
         { name: "active", label: "Takes bookings", type: "checkbox" },
+        { name: "commission_percent", label: "Commission (percent of what they bring in)", type: "number", min: 0, max: 100, step: "0.5", hint: "For Team pay. 0 if you pay them another way. A new rate counts from now on: earlier appointments keep the rate they had." },
         { type: "heading", label: "Weekly hours (for example 09:00-12:00, 13:00-17:00; empty = off)" },
         ...WEEKDAYS.map((name, index) => ({ name: `day_${index}`, label: name, placeholder: index < 5 ? "09:00-17:00" : "" })),
       ],
-      values: row ? { ...row, ...Object.fromEntries(WEEKDAYS.map((_, i) => [`day_${i}`, rangesText(row.hours, i)])) } : { color: "#2563eb", active: true, ...Object.fromEntries(WEEKDAYS.map((_, i) => [`day_${i}`, i < 5 ? "09:00-17:00" : ""])) },
+      values: row ? { ...row, ...Object.fromEntries(WEEKDAYS.map((_, i) => [`day_${i}`, rangesText(row.hours, i)])) } : { color: "#2563eb", active: true, commission_percent: 0, ...Object.fromEntries(WEEKDAYS.map((_, i) => [`day_${i}`, i < 5 ? "09:00-17:00" : ""])) },
       onSave: async (values) => {
         const hours = WEEKDAYS.flatMap((_, i) => parseRanges(values[`day_${i}`], i));
-        const payload = { name: values.name, email: values.email, color: values.color, active: values.active, hours };
+        const payload = { name: values.name, email: values.email, color: values.color, active: values.active, commission_percent: values.commission_percent === null ? 0 : values.commission_percent, hours };
         await call(row ? `/staff/${row.id}` : "/staff", { method: row ? "PATCH" : "POST", body: payload });
         rerender();
       },
@@ -332,6 +364,7 @@
         columns: [
           { key: "name", label: "Name", render: (p) => h("span", {}, h("span", { style: { display: "inline-block", width: "10px", height: "10px", borderRadius: "50%", background: p.color, marginRight: "6px" } }), p.name) },
           { key: "hours", label: "Hours", render: (p) => (p.hours.length ? WEEKDAYS.map((d, i) => (rangesText(p.hours, i) ? `${d.slice(0, 3)} ${rangesText(p.hours, i)}` : "")).filter(Boolean).join(" · ") : h("span", { class: "muted", text: "No hours yet: nobody can book them" })) },
+          { key: "commission_percent", label: "Commission", num: true, render: (p) => (p.commission_percent ? `${p.commission_percent}%` : "") },
           { key: "active", label: "", render: (p) => (p.active ? S.pill("active") : S.pill("archived")) },
           { key: "x", label: "", render: (p) => S.button("Remove", async () => { if (await S.confirmDelete(p.name)) { const out = await call(`/staff/${p.id}`, { method: "DELETE" }); Aira.toast(out.deactivated ? "They have past bookings, so they were made inactive." : "Removed.", "success"); rerender(); } }, { kind: "ghost sm" }) },
         ],
@@ -350,8 +383,8 @@
     const search = h("input", { type: "search", placeholder: "Search customers", value: q, "data-search": "1", "aria-label": "Search customers" });
     search.addEventListener("keydown", (e) => { if (e.key === "Enter") Aira.router.go(["bookings"], { tab: "customers", q: search.value.trim() }); });
     body.append(
-      h("div", { class: "btn-row" }, search, S.button("Download CSV", () => Aira.download("/api/bookings/customers?format=csv", "customers.csv"), { kind: "secondary" })),
-      S.table({
+      h("div", { class: "btn-row cm-filters" }, search, S.button("Download CSV", () => Aira.download("/api/bookings/customers?format=csv", "customers.csv"), { kind: "secondary" })),
+      narrow(S.table({
         columns: [
           { key: "name", label: "Customer" },
           { key: "email", label: "Email" },
@@ -363,10 +396,14 @@
           { key: "next_booking", label: "Next", render: (c) => S.day(c.next_booking) },
         ],
         rows: data.customers,
-        empty: Aira.ui.empty("No customers yet", "Customers appear here when they book."),
+        empty: q
+          ? Aira.ui.empty("No customers match", "Try a name, an email or a phone number.", h("a", { class: "btn secondary", href: "#/bookings?tab=customers", text: "Show everyone" }))
+          : Aira.ui.empty("No customers yet", "Customers appear here when they book, or when you add a booking for them.", S.button("New booking", () => newBooking({}), { kind: "secondary" })),
         onRow: (c) => openCustomer(c.id),
-      }),
+      }), 2, 3, 5, 7),
     );
+    const wanted = take("customer");
+    if (wanted) later(() => openCustomer(wanted));
   }
 
   async function openCustomer(id) {
@@ -380,7 +417,7 @@
       subtitle: `${customer.visits} visits · ${S.money(customer.spend_cents)} spent${customer.no_shows ? ` · ${customer.no_shows} no-shows` : ""}`,
       body: h("div", { class: "suite-body" },
         form.node,
-        h("div", { class: "btn-row" }, S.button("Save", async () => { await call(`/customers/${id}`, { method: "PATCH", body: form.read() }); Aira.toast("Saved.", "success"); rerender(); }), S.button("Book again", () => { Aira.closeDrawer(); newBooking({}); }, { kind: "secondary" })),
+        h("div", { class: "btn-row" }, S.button("Save", async () => { await call(`/customers/${id}`, { method: "PATCH", body: form.read() }); Aira.toast("Saved.", "success"); rerender(); }), S.button("Book again", () => { Aira.closeDrawer(); newBooking({ customer }); }, { kind: "secondary" })),
         S.section("Packages", S.table({ columns: [{ key: "name", label: "Package" }, { key: "remaining", label: "Left", num: true }, { key: "status", label: "Status", render: (p) => S.pill(p.status) }, { key: "paid_at", label: "Paid", render: (p) => (p.paid_at ? S.day(p.paid_at) : "Unpaid") }], rows: customer.packages, empty: "No packages" }),
           pick ? h("div", { class: "btn-row" }, pick, h("label", { class: "suite-check" }, paid, h("span", { text: "Paid now" })), S.button("Sell package", async () => { await call("/customer-packages", { method: "POST", body: { customer_id: id, package_id: pick.value, paid: paid.checked } }); Aira.toast("Package sold.", "success"); Aira.closeDrawer(); openCustomer(id); })) : h("p", { class: "muted small", text: "Create packages in the Packages tab to sell them here." })),
         S.section("History", S.table({ columns: [{ key: "start_at", label: "When", render: (b) => S.when(b.start_at) }, { key: "service_name", label: "Service" }, { key: "status", label: "Status", render: (b) => status(b.status) }, { key: "paid", label: "Paid", render: paidLabel }], rows: customer.history, empty: "No bookings", onRow: (b) => { Aira.closeDrawer(); openBooking(b.id); } }))),
@@ -409,6 +446,66 @@
     );
   }
 
+  // ------------------------------------------------------------------ waiting list
+  async function waitlist(body) {
+    const { waitlist: rows } = await call("/waitlist");
+    const STATUS = { waiting: "info", notified: "warn", booked: "good" };
+    body.append(
+      h("p", { class: "muted cm-lead", text: "When a day is fully booked, customers can join its waiting list on your booking page. If a booking that day is cancelled or moved, everyone waiting with an email gets a message (in Business hub > Outbox) and the first to book gets the time. Call the ones who left only a phone number." }),
+      S.table({
+        columns: [
+          { key: "day", label: "Day", render: (w) => h("span", { class: "cm-stack" }, h("strong", { text: S.day(w.day) }), h("span", { class: "muted small", text: `${w.service_name || "?"}${w.staff_name ? ` · ${w.staff_name}` : ""}` })) },
+          { key: "name", label: "Customer", render: (w) => h("span", { class: "cm-stack" }, h("span", { text: w.name }), w.email ? h("a", { class: "small", href: `mailto:${w.email}`, text: w.email }) : null, w.phone ? h("a", { class: "small", href: `tel:${w.phone.replace(/[^0-9+]/g, "")}`, text: w.phone }) : null) },
+          { key: "status", label: "Status", render: (w) => h("span", {}, S.pill(w.status, STATUS), w.free_now && w.status !== "booked" ? h("span", {}, " ", S.pill("time free", { "time free": "good" })) : null) },
+          { key: "x", label: "", render: (w) => h("div", { class: "btn-row" },
+            w.status !== "booked" ? S.button("Book", () => newBooking({ day: w.day, serviceId: w.service_id, staffId: w.staff_id, customer: { name: w.name, email: w.email, phone: w.phone } }), { kind: "secondary sm" }) : null,
+            S.button("Remove", async () => { await call(`/waitlist/${w.id}`, { method: "DELETE" }); Aira.toast("Removed from the waiting list.", "success"); rerender(); }, { kind: "ghost sm" })) },
+        ],
+        rows,
+        empty: Aira.ui.empty("Nobody is waiting", "When a day is full, customers can join its waiting list from your booking page."),
+      }),
+    );
+  }
+
+  // ------------------------------------------------------------------ team pay
+  async function teamPay(body, route) {
+    const q = route.query;
+    const params = new URLSearchParams({ ...(q.from ? { from: q.from } : {}), ...(q.to ? { to: q.to } : {}) });
+    const data = await call(`/earnings${params.toString() ? `?${params}` : ""}`);
+    const from = h("input", { type: "date", value: data.from, "aria-label": "From" });
+    const to = h("input", { type: "date", value: data.to, "aria-label": "To" });
+    const show = (range) => Aira.router.go(["bookings"], { tab: "pay", ...range });
+    const month = (offset) => { const d = new Date(`${data.from}T12:00:00`); d.setDate(1); d.setMonth(d.getMonth() + offset); const end = new Date(d); end.setMonth(end.getMonth() + 1); end.setDate(0); return { from: isoDay(d), to: isoDay(end) }; };
+    from.addEventListener("change", () => show({ from: from.value, to: to.value }));
+    to.addEventListener("change", () => show({ from: from.value, to: to.value }));
+    const money = (cents) => S.money(cents, data.currency);
+    body.append(
+      h("p", { class: "muted cm-lead", text: "What each person brought in from completed appointments, and the commission you owe them at the rate that applied on the day (set rates under Staff). A session paid from a package counts at its share of the package price." }),
+      h("div", { class: "btn-row cm-filters" }, Aira.ui.field("From", from), Aira.ui.field("To", to),
+        S.button("Previous month", () => show(month(-1)), { kind: "secondary sm" }),
+        S.button("Next month", () => show(month(1)), { kind: "secondary sm" }),
+        S.button("Download CSV", () => Aira.download(`/api/bookings/earnings?format=csv&from=${encodeURIComponent(data.from)}&to=${encodeURIComponent(data.to)}`, "team-pay.csv"), { kind: "secondary sm" })),
+      S.kpis([
+        { label: "Completed appointments", value: data.totals.appointments },
+        { label: "Takings", value: money(data.totals.takings_cents), tone: "good" },
+        { label: "Commission to pay", value: money(data.totals.commission_cents), tone: data.totals.commission_cents ? "warn" : "" },
+        { label: "No-shows", value: data.totals.no_shows, tone: data.totals.no_shows ? "bad" : "" },
+      ]),
+      S.table({
+        columns: [
+          { key: "name", label: "Person", render: (p) => h("span", {}, h("span", { class: "cm-dot", style: { background: p.color || "var(--brand)" } }), p.name) },
+          { key: "appointments", label: "Done", num: true },
+          { key: "no_shows", label: "No-shows", num: true },
+          { key: "takings_cents", label: "Takings", num: true, render: (p) => money(p.takings_cents) },
+          { key: "commission_percent", label: "Rate", num: true, render: (p) => ((p.rates || []).length ? p.rates : [p.commission_percent]).map((rate) => `${rate}%`).join(", then ") },
+          { key: "commission_cents", label: "Commission", num: true, render: (p) => money(p.commission_cents) },
+        ],
+        rows: data.team,
+        empty: Aira.ui.empty("Nothing completed in these days", "Mark appointments completed (and record payments) to see takings and commission here."),
+      }),
+    );
+  }
+
   // ------------------------------------------------------------------ settings
   async function settings(body) {
     const data = await call("/settings");
@@ -429,9 +526,22 @@
     );
   }
 
+  // The left menu shows the Bookings folders from the start, before the page is first opened.
+  if (Aira.shell) Aira.shell.tabs("bookings", TABS, null);
+
   Aira.views.bookings = async (main, route) => {
+    // A once-link (#/bookings?tab=appointments&booking=<id>): remember it, take it out of the address so Back and
+    // refresh do not open it again, and let the redrawn tab open it.
+    if (ONCE.some((key) => route.query[key])) {
+      pending = Object.fromEntries(ONCE.filter((key) => route.query[key]).map((key) => [key, route.query[key]]));
+      Aira.router.go(["bookings"], Object.fromEntries(Object.entries(route.query).filter(([key]) => !ONCE.includes(key))), { replace: true });
+      return;
+    }
     await S.business();
-    const body = S.page(main, { title: "Bookings", subtitle: "Appointments that pay: your booking page, calendar, customers and packages.", actions: [S.button("New booking", () => newBooking({}))] });
+    // On a wide screen "+ New" above the menu books; a phone keeps the button in the page head (cm-head-new).
+    const create = !Aira.commerce || !Aira.commerce.canCreate || Aira.commerce.canCreate();
+    const body = S.page(main, { title: "Bookings", subtitle: "Appointments that pay: your booking page, calendar, customers and packages.", actions: [create ? S.button("New booking", () => newBooking({}), { kind: "cm-head-new", icon: "plus" }) : null] });
+    if (create) body.classList.add("cm-has-head-new"); // the tabs' own "New booking" then waits for a wide screen
     const tab = S.tabs(body, route, "bookings", TABS);
     const panel = h("div", { class: "suite-body" });
     body.append(panel);
@@ -441,6 +551,8 @@
       try {
         if (tab === "calendar") await calendar(holder, route);
         else if (tab === "appointments") await appointments(holder, route);
+        else if (tab === "waitlist") await waitlist(holder);
+        else if (tab === "pay") await teamPay(holder, route);
         else if (tab === "services") await services(holder);
         else if (tab === "staff") await staffTab(holder);
         else if (tab === "customers") await customers(holder, route);
@@ -449,6 +561,8 @@
         else await overview(holder);
         panel.replaceChildren(holder);
       } catch (error) { panel.replaceChildren(Aira.ui.error(error, rerender)); }
+      pending = {}; // a once-link for another tab, or a record that failed to load, does not linger
+      if (Aira.commerce && Aira.commerce.forget) Aira.commerce.forget(); // a change shows in the next search
     };
     panel.replaceChildren(Aira.ui.skeleton(4));
     await rerender();

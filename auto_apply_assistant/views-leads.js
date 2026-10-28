@@ -14,6 +14,10 @@
  * - History: every search you ran, with what it found, added and cost.
  *
  * Deep links: #/leads?tab=find&source=maps&query=dentists&location=Austin prefills a search form (it never runs it).
+ * In the Aira frame (shell.js) the tabs are also the left menu's folders under Leads; "+ New > Find leads" arrives as
+ * ?tab=find&new=search (the search form gets the focus), the search box across the top opens a saved lead with
+ * ?tab=leads&open=<id> and filters the Leads tab with ?tab=leads&q=<words>. ?new= and ?open= leave the address before
+ * the page draws, so Back or a refresh does not ask again.
  *
  * The file has two halves. The first is pure logic (form validation, request building, query strings, merging
  * results). It touches no DOM and is exported as Aira.leads.logic and, in node, through CommonJS so
@@ -315,6 +319,18 @@
   const BASE = "/api/leads";
   const TABS = [["find", "Find"], ["leads", "Leads"], ["outreach", "Outreach"], ["settings", "Settings"], ["history", "History"]];
   const TAB_IDS = TABS.map(([id]) => id);
+  // The left menu's folders (shell.js) and each tab's page title and line under it. Aira.ICONS names; the ones the
+  // shared set lacks (mkMail, mkHistory) are added by views-marketing.js, and a missing one falls back to a dot.
+  const FOLDER_ICONS = { find: "jobs", leads: "leads", outreach: "mkMail", settings: "settings", history: "mkHistory" };
+  const PROMISE = "Aira finds and prepares. An email is sent only after you approve it, through your own mail server; you place every call yourself.";
+  const HEADS = {
+    find: ["Find leads", () => `People and businesses that need what you sell: from Google Maps, Google, public requests${Aira.cloud ? ", a Sales Navigator list" : ", your own LinkedIn Sales Navigator"} or a CSV file. ${PROMISE}`],
+    leads: ["Your leads", () => "Every lead you saved, scored against your ideal customer. Open one to add contact details from its own website, prepare a call or draft an email; nothing is sent until you approve it."],
+    outreach: ["Outreach", () => PROMISE],
+    settings: ["Ideal customer", () => "The profile every lead is scored against, and the services you offer."],
+    history: ["Search history", () => "Every search you ran, with what it found, added and cost."],
+  };
+  let ask = null; // what "+ New" or the top search asked for: { new } or { open }, answered once the page is drawn
   const link = (tab, query = {}) => `#/leads?${new URLSearchParams({ tab, ...clean(query) })}`;
   const accountLink = () => "#/airaapi?tab=account";
   const remember = (key, value) => Aira.remember(`leads.${key}`, value);
@@ -874,7 +890,7 @@
     const leadsCatalog = await loadCatalog();
     offeredCache = offeredFrom(overview, leadsCatalog);
     const lists = overview.lists.slice();
-    const filters = { list_id: ctx.route.query.list_id || "", status: "", source: "", kind: "", q: "", min_score: "", has_email: "", tag: "", sort: "updated", limit: 25, offset: 0 };
+    const filters = { list_id: ctx.route.query.list_id || "", status: "", source: "", kind: "", q: String(ctx.route.query.q || "").trim(), min_score: "", has_email: "", tag: "", sort: "updated", limit: 25, offset: 0 };
     const state = { leads: [], total: 0, selected: new Set(), loading: false };
 
     const sidebar = h("nav", { class: "ld-lists", "aria-label": "Lists" });
@@ -937,12 +953,16 @@
     }
 
     // ---- filters ----
-    const searchBox = h("input", { id: "ldFilterText", type: "search", "data-search": "true", placeholder: "Search name, company, title…", "aria-label": "Search leads", autocomplete: "off" });
+    const searchBox = h("input", { id: "ldFilterText", type: "search", "data-search": "true", placeholder: "Search name, company, title…", "aria-label": "Search leads", autocomplete: "off", value: filters.q });
     searchBox.addEventListener("input", debounced(() => { filters.q = searchBox.value; reload(); }, 250));
     const selectOf = (id, label, options, key) => { const s = ui.select(options, filters[key], { id, "aria-label": label }); s.addEventListener("change", () => { filters[key] = s.value; reload(); }); return s; };
     const tagBox = h("input", { id: "ldFilterTag", type: "text", placeholder: "Tag", "aria-label": "Filter by tag", maxlength: "40" });
     tagBox.addEventListener("input", debounced(() => { filters.tag = tagBox.value; reload(); }, 250));
-    fill(bar, searchBox,
+    // On a phone the filters fold away behind one button, so the leads themselves are on the first screen.
+    bar.id = "ldFilterBar";
+    const filterToggle = h("button", { type: "button", class: "btn secondary sm ld-filter-toggle", "aria-expanded": "false", "aria-controls": "ldFilterBar" }, h("span", { text: "More filters" }));
+    filterToggle.addEventListener("click", () => { const open = !bar.classList.contains("open"); bar.classList.toggle("open", open); filterToggle.setAttribute("aria-expanded", String(open)); });
+    fill(bar, searchBox, filterToggle,
       selectOf("ldFilterStatus", "Status", [["", "Any status"], ...STATUSES], "status"),
       selectOf("ldFilterSource", "Source", [["", "Any source"], ...Object.entries(SOURCE_LABELS)], "source"),
       selectOf("ldFilterKind", "People, companies or requests", [["", "All kinds"], ["person", "People"], ["company", "Companies"], ["request", "Public requests"]], "kind"),
@@ -1227,17 +1247,26 @@
   Aira.leads.kit = { h, api, fmt, ui, toast, router, BASE, btn, chip, ico, fill, busy, externalLink, textField, copyText, announce, live, plural, trim, clean, splitList, safeUrl, hostOf, link, session, scoreBadge, problem, setupPanel, remember, recall, loadCatalog, openLeadById, liveOffered, kindIcon, logic };
 
   Aira.views.leads = async (main, route) => {
+    if (route.query.new || route.query.open) {
+      ask = { new: route.query.new || "", open: route.query.open || "" };
+      const rest = { ...route.query };
+      delete rest.new; delete rest.open;
+      router.go(["leads"], rest, { replace: true });
+      return;
+    }
     const tab = TAB_IDS.includes(route.query.tab) ? route.query.tab : "find";
     Aira.closeDrawer();
     const label = (TABS.find(([id]) => id === tab) || TABS[0])[1];
-    document.title = `${label} · Leads · Aira`;
+    const [title, about] = HEADS[tab];
+    document.title = `${title} · Marketing · Aira`;
     const crumbs = document.getElementById("crumbs");
     if (crumbs) crumbs.replaceChildren(h("span", { text: "Leads" }), h("span", { class: "muted", "aria-hidden": "true", text: "/" }), h("span", { text: label }));
+    if (Aira.shell && Aira.shell.tabs) Aira.shell.tabs("leads", TABS.map(([id, text]) => ({ id, label: text, icon: FOLDER_ICONS[id] })), tab);
 
     const content = h("div", { class: "ld-content", id: "ldContent", role: "region", "aria-label": label, tabindex: "-1" });
     const nav = h("nav", { class: "subnav ld-subnav", "aria-label": "Leads workspaces" }, ...TABS.map(([id, text]) => h("a", { href: link(id), "aria-current": id === tab ? "page" : "false" }, text)));
     main.replaceChildren(
-      h("div", { class: "page-head ld-head" }, h("div", {}, h("h1", { text: "Leads" }), h("p", { text: Aira.cloud ? "Find people and businesses that need what you sell, from Google Maps, Google, public requests or a CSV file (a Sales Navigator list too); score them against your ideal customer; add contact details from the company's own website; and keep track of who you contacted. Aira finds and prepares. An email is sent only after you approve it, through your own mail server; you place every call yourself." : "Find people and businesses that need what you sell, from Google Maps, Google, public requests, your own LinkedIn Sales Navigator or a CSV file; score them against your ideal customer; add contact details from the company's own website; and keep track of who you contacted. Aira finds and prepares. An email is sent only after you approve it, through your own mail server; you place every call yourself." }))),
+      h("div", { class: "page-head ld-head" }, h("div", {}, h("h1", { text: title }), h("p", { text: about() }))),
       nav, live, content);
     content.replaceChildren(ui.skeleton(5));
     let overview;
@@ -1255,6 +1284,15 @@
     } catch (error) {
       console.error(error);
       content.replaceChildren(problem(error, () => router.render()));
+    }
+    const asked = ask;
+    ask = null;
+    if (!asked || !main.isConnected) return;
+    if (asked.open) {
+      try { await openLeadById(asked.open, () => router.render()); } catch { toast("That lead is not here any more.", "info"); }
+    } else if (asked.new === "search" && tab === "find") {
+      const first = content.querySelector("#ldSearchForm input:not([type=checkbox]):not([type=radio]):not([type=hidden]), #ldSearchForm textarea");
+      if (first) first.focus();
     }
   };
 })();

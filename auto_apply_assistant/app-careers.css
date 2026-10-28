@@ -1,0 +1,67 @@
+/* Styles for the careers app only. Loaded on every page: scope every selector to the app's own class names. */
+
+/* Jobs: the "Source: ..." chip a link from Analytics adds above the filters. */
+.careers-filter-chip { margin: 0 0 10px; align-items: center; }
+
+/* A job picker: a text box with suggestions (title · company) that fills its field. */
+.careers-job-picker { min-width: 0; }
+.careers-job-picker > input { width: 100%; }
+.careers-email-job { flex: 1 1 220px; max-width: 360px; }
+
+/* Apply tab: "Already applied another way?" */
+.careers-outside-card > summary { cursor: pointer; font-weight: 700; color: var(--brand-ink); min-height: 32px; display: flex; align-items: center; }
+.careers-outside-card[open] > summary { margin-bottom: 6px; }
+
+/* Applications > Offers */
+.careers-offer-table { min-width: 760px; }
+.careers-offer-table td { vertical-align: top; }
+.careers-offer-table .badge { margin-top: 4px; }
+.careers-offer-best td { background: var(--surface-2); }
+.careers-offer-card .kv { margin: 0; }
+/* Each cell carries its own label for the phone layout below; on a wide screen the table head says it. */
+.careers-offer-table .careers-cell-label { display: none; }
+
+/* Applications > Pipeline: a column with more jobs than are loaded. */
+.careers-more-note { padding: 8px 12px; font-size: 12.5px; }
+
+/* On a phone the offer comparison is a stack of cards, so every number and button is in view. */
+@media (max-width: 640px) {
+  .careers-offer-table { min-width: 0; }
+  .careers-offer-table thead { display: none; }
+  .careers-offer-table, .careers-offer-table tbody, .careers-offer-table tr, .careers-offer-table td { display: block; width: 100%; }
+  .careers-offer-table tr { padding: 10px 14px; border-bottom: 1px solid var(--line); }
+  .careers-offer-table td { border: 0; padding: 3px 0; text-align: left; }
+  .careers-offer-table td:has(> .careers-cell-label) { display: flex; justify-content: space-between; gap: 12px; }
+  .careers-offer-table .careers-cell-label { display: inline; color: var(--ink-2); font-weight: 600; }
+  .careers-offer-table .careers-cell-value { text-align: right; }
+  .careers-offer-actions { padding-top: 8px !important; }
+}
+
+/* Jobs on a phone: the long search form folds into one line above the list. */
+.careers-finder { margin: 0 0 14px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+.careers-finder > summary { display: flex; align-items: center; gap: 10px; min-height: 48px; padding: 0 14px; cursor: pointer; font-weight: 700; color: var(--brand-ink); list-style: none; }
+.careers-finder > summary::-webkit-details-marker { display: none; }
+.careers-finder-chevron { display: grid; margin-left: auto; transition: transform 0.15s; }
+.careers-finder[open] .careers-finder-chevron { transform: rotate(180deg); }
+.careers-finder > summary:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; border-radius: 14px; }
+.careers-finder > summary svg { width: 20px; height: 20px; flex: none; stroke: currentColor; fill: none; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.careers-finder > .search-panel { margin: 0; border: 0; border-top: 1px solid var(--line); border-radius: 0 0 14px 14px; }
+
+/* The left menu: Careers has folders under six pages; only the open page's folders show, so the menu stays short. */
+body[data-app="careers"] #primaryNav a.shell-has-subnav:not([aria-current="page"]) + .shell-subnav { display: none; }
+
+/* Jobs and Analytics filters on a phone: two to a row instead of one tall column; the text filter keeps a full row. */
+@media (max-width: 640px) {
+  .careers-compact-filters { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .careers-compact-filters .field { min-width: 0; }
+  .careers-compact-filters .field.grow { grid-column: 1 / -1; }
+  .careers-compact-filters > .btn { justify-self: start; min-height: 44px; }
+  .careers-compact-filters > .field:last-child:nth-child(odd) { grid-column: 1 / -1; }
+  .careers-compact-filters select { min-width: 0; width: 100%; }
+}
+
+/* In the Aira frame the page tabs are folders in the left menu on wider screens; the strip under the heading is for
+   phones and tablets, where that menu is folded away. */
+@media (min-width: 901px) {
+  body[data-app="careers"] .careers-tabstrip { display: none; }
+}

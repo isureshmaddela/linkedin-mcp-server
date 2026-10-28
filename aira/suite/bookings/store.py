@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import math
 import re
 import sqlite3
 from collections.abc import Mapping
@@ -140,6 +141,43 @@ SCHEMA = (
     "CREATE INDEX IF NOT EXISTS bk_customer_packages_customer ON bk_customer_packages (customer_id)",
 )
 
+# Added later: the waiting list for a full day, and what each person earns (their commission).
+WAITLIST_STATUSES = ("waiting", "notified", "booked", "removed")
+SCHEMA_V2 = (
+    """CREATE TABLE IF NOT EXISTS bk_waitlist (
+        id TEXT PRIMARY KEY,
+        service_id TEXT NOT NULL,
+        staff_id TEXT NOT NULL DEFAULT '',
+        day TEXT NOT NULL,
+        name TEXT NOT NULL,
+        email TEXT NOT NULL DEFAULT '',
+        phone TEXT NOT NULL DEFAULT '',
+        note TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'waiting',
+        created_at TEXT NOT NULL,
+        notified_at TEXT
+    )""",
+    "CREATE INDEX IF NOT EXISTS bk_waitlist_day ON bk_waitlist (day, service_id, status)",
+    """CREATE TABLE IF NOT EXISTS bk_staff_pay (
+        staff_id TEXT PRIMARY KEY,
+        commission_bp INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL
+    )""",
+)
+
+# Added later: each commission rate with the moment it started, so a new rate never rewrites pay already worked out
+# for earlier appointments (``from_at`` '' is "from the start").
+SCHEMA_V3 = (
+    """CREATE TABLE IF NOT EXISTS bk_staff_pay_history (
+        id TEXT PRIMARY KEY,
+        staff_id TEXT NOT NULL,
+        commission_bp INTEGER NOT NULL,
+        from_at TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS bk_staff_pay_history_staff ON bk_staff_pay_history (staff_id, from_at)",
+)
+
 
 def cents_field(
     value: Any, name: str, *, default: int | None = 0, minimum: int = 0
@@ -153,6 +191,8 @@ def cents_field(
 def ensure(connection: sqlite3.Connection) -> None:
     kit.ensure_core(connection)
     kit.ensure(connection, "bookings.v1", SCHEMA)
+    kit.ensure(connection, "bookings.v2", SCHEMA_V2)
+    kit.ensure(connection, "bookings.v3", SCHEMA_V3)
 
 
 # ---------------------------------------------------------------------------
@@ -449,6 +489,9 @@ def _staff_values(
     raw: Mapping[str, Any], current: Mapping[str, Any] | None = None
 ) -> dict[str, Any]:
     merged = {**dict(current or {}), **raw}
+    percent_bp(
+        raw.get("commission_percent")
+    )  # refuse a bad commission before anything is saved
     return {
         "name": kit.text(merged.get("name"), "the name", max_len=120, required=True),
         "email": kit.email(merged.get("email")),
@@ -460,7 +503,90 @@ def _staff_values(
 def _staff_out(connection: sqlite3.Connection, row: dict[str, Any]) -> dict[str, Any]:
     row["active"] = bool(row["active"])
     row["hours"] = get_hours(connection, row["id"])
+    row["commission_percent"] = commission_bp(connection, row["id"]) / 100
     return row
+
+
+def commission_bp(connection: sqlite3.Connection, staff_id: str) -> int:
+    found = connection.execute(
+        "SELECT commission_bp FROM bk_staff_pay WHERE staff_id = ?", (staff_id,)
+    ).fetchone()
+    return int(found[0]) if found else 0
+
+
+def percent_bp(value: Any) -> int:
+    """A commission typed as a percent ("12.5") as basis points (1250), 0 to 100 %."""
+    if value is None or value == "":
+        return 0
+    try:
+        number = float(str(value).strip().rstrip("%"))
+    except ValueError:
+        raise ValueError("The commission must be a number, like 40 or 12.5.") from None
+    if not math.isfinite(number):
+        raise ValueError("The commission must be a number, like 40 or 12.5.")
+    if number < 0 or number > 100:
+        raise ValueError("The commission must be between 0 and 100 percent.")
+    return round(number * 100)
+
+
+def _rate_from(
+    connection: sqlite3.Connection, staff_id: str, rate: int, from_at: str
+) -> None:
+    connection.execute(
+        "INSERT INTO bk_staff_pay_history (id, staff_id, commission_bp, from_at, created_at) VALUES (?, ?, ?, ?, ?)",
+        (kit.new_id(), staff_id, rate, from_at, kit.now()),
+    )
+
+
+def set_commission(connection: sqlite3.Connection, staff_id: str, value: Any) -> None:
+    """Set a person's commission. A changed rate counts from now on: appointments before it keep the rate they
+    were worked out at. The first rate a person is given (from none) covers their earlier appointments too."""
+    rate = percent_bp(value)
+    found = connection.execute(
+        "SELECT commission_bp FROM bk_staff_pay WHERE staff_id = ?", (staff_id,)
+    ).fetchone()
+    old = int(found[0]) if found else 0
+    has_history = kit.count(
+        connection,
+        "SELECT COUNT(*) FROM bk_staff_pay_history WHERE staff_id = ?",
+        (staff_id,),
+    )
+    if rate != old:
+        if has_history:
+            _rate_from(connection, staff_id, rate, kit.now())
+        elif (
+            old
+        ):  # a rate set before rates had a history: it covers everything up to now
+            _rate_from(connection, staff_id, old, "")
+            _rate_from(connection, staff_id, rate, kit.now())
+        else:
+            _rate_from(connection, staff_id, rate, "")
+    connection.execute(
+        """INSERT INTO bk_staff_pay (staff_id, commission_bp, updated_at) VALUES (?, ?, ?)
+        ON CONFLICT(staff_id) DO UPDATE SET commission_bp = excluded.commission_bp, updated_at = excluded.updated_at""",
+        (staff_id, rate, kit.now()),
+    )
+
+
+def commission_rates(
+    connection: sqlite3.Connection,
+) -> dict[str, list[tuple[str, int]]]:
+    """Every person's rates in the order they started: {staff_id: [(from_at, basis points), ...]}."""
+    rates: dict[str, list[tuple[str, int]]] = {}
+    for row in connection.execute(
+        "SELECT staff_id, from_at, commission_bp FROM bk_staff_pay_history ORDER BY from_at, rowid"
+    ):
+        rates.setdefault(row[0], []).append((row[1], int(row[2])))
+    return rates
+
+
+def rate_at(rates: list[tuple[str, int]], moment: str, current: int) -> int:
+    """The rate that applied at ``moment`` (an ISO time), or ``current`` when the person has no history."""
+    chosen = None
+    for from_at, rate in rates:
+        if from_at <= moment:
+            chosen = rate
+    return current if chosen is None else chosen
 
 
 def list_staff(
@@ -497,6 +623,8 @@ def create_staff(
     )
     if "hours" in raw:
         set_hours(connection, staff_id, raw.get("hours"))
+    if "commission_percent" in raw:
+        set_commission(connection, staff_id, raw.get("commission_percent"))
     connection.commit()
     return get_staff(connection, staff_id)
 
@@ -510,6 +638,8 @@ def update_staff(
     kit.update_row(connection, "bk_staff", staff_id, values)
     if "hours" in raw:
         set_hours(connection, staff_id, raw.get("hours"))
+    if "commission_percent" in raw:
+        set_commission(connection, staff_id, raw.get("commission_percent"))
     connection.commit()
     return get_staff(connection, staff_id)
 

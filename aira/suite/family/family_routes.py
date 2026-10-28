@@ -6,9 +6,11 @@ Every route starts from the person using Aira (:func:`aira.suite.life.current`).
 
 from __future__ import annotations
 
+import sqlite3
+import time
 from typing import Any
 
-from aira.airaapi.http import Request, aira_route
+from aira.airaapi.http import Raw, Request, aira_route
 from aira.suite import life, public
 from aira.suite.family import service, store
 from aira.suite.family.store import APP
@@ -17,8 +19,22 @@ BASE = "/api/family"
 ID = "([0-9a-f]{32})"
 
 
+def _connect(request: Request) -> sqlite3.Connection:
+    """The account's database. A brand-new account is migrated by the first request that connects; another
+    request starting at that moment (the first Family screen asks several things at once) can see "database
+    schema has changed", so that one waits a moment and connects again (as Social does)."""
+    for attempt in range(4):
+        try:
+            return request.connect()
+        except sqlite3.OperationalError as error:
+            if "schema has changed" not in str(error) or attempt == 3:
+                raise
+            time.sleep(0.05 * (attempt + 1))
+    raise AssertionError("unreachable")
+
+
 def _open(request: Request) -> tuple[Any, dict[str, Any]]:
-    connection = request.connect()
+    connection = _connect(request)
     try:
         me = life.current(request, connection)
         store.ensure(connection)
@@ -234,6 +250,19 @@ def events_list(request: Request) -> tuple[int, dict[str, Any]]:
         }
 
 
+@aira_route("GET", f"{BASE}/events.ics")
+def events_ics(request: Request) -> Raw:
+    """The family calendar (the events you are invited to) as a file a phone's calendar imports."""
+    connection, me = _open(request)
+    with connection:
+        body = service.calendar_ics(
+            connection, me, title=f"Family calendar ({me['name']})"
+        )
+    return Raw(
+        200, body, "text/calendar; charset=utf-8", filename="family-calendar.ics"
+    )
+
+
 @aira_route("POST", f"{BASE}/events")
 def events_create(request: Request) -> tuple[int, dict[str, Any]]:
     connection, me = _open(request)
@@ -278,7 +307,10 @@ def events_rsvp(request: Request) -> tuple[int, dict[str, Any]]:
 def dates_list(request: Request) -> tuple[int, dict[str, Any]]:
     connection, me = _open(request)
     with connection:
-        return 200, {"dates": service.list_dates(connection)}
+        return 200, {
+            "dates": service.list_dates(connection),
+            "wishes": service.wish_counts(connection),
+        }
 
 
 @aira_route("POST", f"{BASE}/dates")
@@ -301,6 +333,62 @@ def wishes(request: Request) -> tuple[int, dict[str, Any]]:
     connection, me = _open(request)
     with connection:
         return 201, {"post": service.wish(connection, me, request.payload)}
+
+
+# ---------------------------------------------------------------------------
+# wish lists (gift ideas; "I'll get this" stays secret from the person it is for)
+# ---------------------------------------------------------------------------
+
+
+@aira_route("GET", f"{BASE}/wishlists")
+def wishlists(request: Request) -> tuple[int, dict[str, Any]]:
+    connection, me = _open(request)
+    with connection:
+        return 200, {"lists": service.wish_lists(connection, me)}
+
+
+@aira_route("POST", f"{BASE}/wishlists")
+def wishlist_add(request: Request) -> tuple[int, dict[str, Any]]:
+    connection, me = _open(request)
+    with connection:
+        return 201, {"wish": service.add_wish(connection, me, request.payload)}
+
+
+@aira_route("PATCH", f"{BASE}/wishlists/{ID}")
+def wishlist_update(request: Request) -> tuple[int, dict[str, Any]]:
+    connection, me = _open(request)
+    with connection:
+        return 200, {
+            "wish": service.update_wish(
+                connection, me, request.match.group(1), request.payload
+            )
+        }
+
+
+@aira_route("DELETE", f"{BASE}/wishlists/{ID}")
+def wishlist_remove(request: Request) -> tuple[int, dict[str, Any]]:
+    connection, me = _open(request)
+    with connection:
+        service.remove_wish(connection, me, request.match.group(1))
+        return 200, {"removed": True}
+
+
+@aira_route("POST", f"{BASE}/wishlists/{ID}/claim")
+def wishlist_claim(request: Request) -> tuple[int, dict[str, Any]]:
+    connection, me = _open(request)
+    with connection:
+        return 200, {
+            "wish": service.claim_wish(connection, me, request.match.group(1), True)
+        }
+
+
+@aira_route("DELETE", f"{BASE}/wishlists/{ID}/claim")
+def wishlist_unclaim(request: Request) -> tuple[int, dict[str, Any]]:
+    connection, me = _open(request)
+    with connection:
+        return 200, {
+            "wish": service.claim_wish(connection, me, request.match.group(1), False)
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -363,7 +451,10 @@ def board_unlink(request: Request) -> tuple[int, dict[str, Any]]:
 @public.page(APP, "board")
 def board_page(connection: Any, link: dict[str, Any]) -> dict[str, Any]:
     store.ensure(connection)
-    return service.board_page(connection)
+    return {
+        **service.board_page(connection),
+        "brand": False,
+    }  # the family's page, not the business's
 
 
 @public.action(APP, "board", "post")
@@ -375,6 +466,17 @@ def board_post(
 ) -> tuple[int, dict[str, Any]]:
     store.ensure(connection)
     return 201, service.board_post(connection, payload, visitor)
+
+
+@public.action(APP, "board", "claim")
+def board_claim(
+    connection: Any,
+    link: dict[str, Any],
+    payload: dict[str, Any],
+    visitor: dict[str, Any],
+) -> tuple[int, dict[str, Any]]:
+    store.ensure(connection)
+    return 200, service.board_claim(connection, payload, visitor)
 
 
 @public.action(APP, "board", "react")

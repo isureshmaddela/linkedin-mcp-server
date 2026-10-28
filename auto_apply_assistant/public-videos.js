@@ -13,9 +13,12 @@
     const minutes = Math.floor(total / 60), secs = total % 60;
     return `${minutes}:${String(secs).padStart(2, "0")}`;
   };
-  window.AiraPublic.register("videos", "video", (root, data, ctx) => {
+  window.AiraPublic.register("videos", "video", (root, response, ctx) => {
     const { h } = ctx;
-    if (!data.available) {
+    // public.js hands over the whole answer; the video's own data is in "page" (reading the answer itself made
+    // every shared video say it was not available).
+    const data = response.page || {};
+    if (!data.available || !data.video) {
       root.append(h("div", { class: "pub-card" }, h("h1", { text: data.title || "This video is not available." }), h("p", { class: "pub-muted", text: "It may have been made private or removed." })));
       return;
     }
@@ -32,11 +35,17 @@
       if (!sent && watched >= need) { sent = true; ctx.action("watched", { watched: Math.round(watched) }).catch(() => { sent = false; }); }
     });
     player.addEventListener("seeking", () => { last = null; });
+    // Chapters written in the description: a button for each moment.
+    const chapters = video.chapters && video.chapters.length
+      ? h("div", { class: "pub-slots", role: "group", "aria-label": "Chapters" }, ...video.chapters.map((chapter) => h("button", { type: "button", class: "pub-slot", text: `${clock(chapter.at)} ${chapter.title}`, onclick: () => { player.currentTime = chapter.at; player.play().catch(() => null); } })))
+      : null;
     const views = Number(video.views) === 1 ? "1 view" : `${Number(video.views || 0).toLocaleString()} views`;
     root.append(
       h("div", { class: "pub-card" }, player,
         h("h1", { text: video.title, style: { marginBottom: "4px" } }),
         h("p", { class: "pub-muted", text: `${video.channel.avatar} ${video.channel.name} · ${views}${video.duration ? ` · ${clock(video.duration)}` : ""}` }),
+        video.paid_promotion ? h("p", {}, h("span", { class: "pub-badge", text: "Includes paid promotion" })) : null,
+        chapters,
         video.description ? h("p", { text: video.description, style: { whiteSpace: "pre-wrap", overflowWrap: "anywhere" } }) : null,
         video.credits && video.credits.length ? h("ul", {}, ...video.credits.map((item) => h("li", { text: `${item.role ? `${item.role}: ` : ""}${item.name}` }))) : null),
       h("p", { class: "pub-muted" }, h("a", { href: `/videos/copyright?video=${video.id}`, text: "Report a copyright problem" }), h("span", { text: ` · Video id: ${video.id}` })));

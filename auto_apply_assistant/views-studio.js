@@ -5,7 +5,11 @@
  * their contacts, deals and activities), activities (calls, meetings, tasks and notes),
  * proposals (priced line items, drafted from a brief, accepted by the client on a public page), projects (tasks,
  * time, invoicing unbilled time), invoices (payments, reminders, a public page with the business's payment link),
- * retainers (a monthly invoice) and settings (numbering, payment terms, default hourly rate).
+ * retainers (a monthly invoice), earnings (income by month, clients from top to lowest earner, what is owed by how
+ * late it is, earnings per hour of each project) and settings (numbering, payment terms, default hourly rate and
+ * deposit, chances of winning, and what Sales does by itself: retainer invoices, reminders, proposal follow-ups).
+ * In the Aira frame (shell.js) the tabs are folders in the left menu, "+ New" opens a tab's create form (?new=) and
+ * the search box across the top finds records through /api/studio/search (?tab=search lists every match).
  * Everything runs through /api/studio/* (aira/suite/studio/studio_routes.py). DOM is built with h() and text only.
  */
 "use strict";
@@ -15,16 +19,26 @@
   const S = Aira.suite;
   const API = (path, opts) => S.api("studio", path, opts);
 
+  // Folder icons the shared set lacks (a receipt, a repeating month, a coin); the frame draws tab icons from Aira.ICONS.
+  const OWN_ICONS = {
+    "studio-invoice": '<svg viewBox="0 0 24 24"><path d="M6 3h12v18l-3-2-3 2-3-2-3 2z"/><path d="M9 8h6M9 12h6M9 16h3"/></svg>',
+    "studio-repeat": '<svg viewBox="0 0 24 24"><path d="m17 2 3 3-3 3"/><path d="M4 11V9a4 4 0 0 1 4-4h12"/><path d="m7 22-3-3 3-3"/><path d="M20 13v2a4 4 0 0 1-4 4H4"/></svg>',
+    "studio-coins": '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M15 9.5c-.5-1-1.6-1.5-3-1.5-1.7 0-3 .9-3 2s1.3 1.7 3 2 3 .9 3 2-1.3 2-3 2c-1.4 0-2.5-.5-3-1.5M12 6v2M12 16v2"/></svg>',
+  };
+  for (const [name, svg] of Object.entries(OWN_ICONS)) if (!Aira.ICONS[name]) Aira.ICONS[name] = svg;
+
+  // Each tab is a folder in the frame's left menu; its heading and line top the page (the logo already says Sales).
   const TABS = [
-    { id: "overview", label: "Overview" },
-    { id: "deals", label: "Deals" },
-    { id: "clients", label: "Clients" },
-    { id: "activities", label: "Activities" },
-    { id: "proposals", label: "Proposals" },
-    { id: "projects", label: "Projects" },
-    { id: "invoices", label: "Invoices" },
-    { id: "retainers", label: "Retainers" },
-    { id: "settings", label: "Settings" },
+    { id: "overview", label: "Overview", icon: "dashboard", blurb: "What you are likely to win, what you are owed and what needs you today." },
+    { id: "deals", label: "Deals", icon: "stocks", blurb: "Work you hope to win, moved stage by stage to won." },
+    { id: "clients", label: "Clients", icon: "recruiters", blurb: "The people and companies you work for, with what they paid and owe." },
+    { id: "activities", label: "Activities", icon: "interviews", blurb: "Calls, meetings, tasks and notes, so nothing slips." },
+    { id: "proposals", label: "Proposals", icon: "documents", blurb: "Priced proposals your clients read and accept online." },
+    { id: "projects", label: "Projects", icon: "applications", blurb: "Tasks and time on the work you won, ready to invoice." },
+    { id: "invoices", label: "Invoices", icon: "studio-invoice", blurb: "Bill your clients, send reminders and see who has paid." },
+    { id: "retainers", label: "Retainers", icon: "studio-repeat", blurb: "Monthly work at a fixed price, invoiced by itself." },
+    { id: "reports", label: "Earnings", icon: "studio-coins", blurb: "What you earned, who pays you most and which work pays best." },
+    { id: "settings", label: "Settings", icon: "settings", blurb: "Numbering, payment terms and what Sales does by itself." },
   ];
   const CLIENT_STATUSES = ["lead", "active", "past"];
   const PROJECT_STATUSES = ["planned", "active", "on_hold", "done"];
@@ -40,14 +54,10 @@
   const KIND_ICONS = { call: "📞", meeting: "🤝", task: "✅", note: "📝" };
 
   let rerender = () => {};
-  // The deals board's own layout (kept here: app.css is shared).
-  if (typeof document !== "undefined" && !document.getElementById("studioSalesStyle")) {
-    const style = document.createElement("style");
-    style.id = "studioSalesStyle";
-    style.textContent = ".studio-board{display:grid;grid-auto-flow:column;grid-auto-columns:minmax(230px,1fr);gap:12px;overflow-x:auto;padding-bottom:6px}.studio-lane{display:grid;gap:8px;align-content:start;padding:10px;border:1px solid var(--line);border-radius:var(--radius);background:var(--surface-2)}.studio-lane header{display:grid;gap:2px}.studio-deal{display:grid;gap:4px;cursor:pointer}.studio-deal:focus-visible{outline:3px solid var(--brand);outline-offset:2px}";
-    document.head.append(style);
-  }
+  // The board, toolbar and report styles are in app-studio.css.
   const money = (cents) => S.money(cents);
+  const plural = (count, one, many = `${one}s`) => `${count} ${count === 1 ? one : many}`;
+  const toolbar = (...children) => h("div", { class: "btn-row studio-toolbar" }, ...children);
   const day = (iso) => (iso ? new Date(`${String(iso).slice(0, 10)}T00:00:00`).toLocaleDateString([], { month: "short", day: "numeric", year: "numeric" }) : "");
   const todayIso = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`; };
   const hours = (minutes) => `${(Number(minutes || 0) / 60).toFixed(minutes % 60 ? 2 : 0)} h`;
@@ -106,7 +116,9 @@
       const subtotal = items.subtotal();
       const off = Math.min(subtotal, S.toCents(discount.value) || 0);
       const tax = Math.round(((subtotal - off) * Math.round((Number(taxPct.value) || 0) * 100)) / 10000);
-      totals.replaceChildren(...S.kpis([{ label: "Subtotal", value: money(subtotal) }, { label: "Discount", value: money(off) }, { label: business.tax_label || "Tax", value: money(tax) }, { label: "Total", value: money(subtotal - off + tax), tone: "good" }]).childNodes);
+      // a final invoice takes off the deposit already invoiced (tax included), as the server does
+      const credit = Math.max(0, Math.min(Number(doc.credit_cents) || 0, subtotal - off + tax));
+      totals.replaceChildren(...S.kpis([{ label: "Subtotal", value: money(subtotal) }, { label: "Discount", value: money(off) }, { label: business.tax_label || "Tax", value: money(tax) }, ...(credit ? [{ label: "Deposit taken off", value: `-${money(credit)}`, hint: doc.credit_label || "" }] : []), { label: "Total", value: money(subtotal - off + tax - credit), tone: "good" }]).childNodes);
     };
     items = itemsEditor(doc.items || [], recompute);
     discount.addEventListener("input", recompute);
@@ -117,6 +129,9 @@
     const scope = h("textarea", { rows: 7 }); scope.value = doc.scope || "";
     const brief = h("textarea", { rows: 2, placeholder: "A short brief: what the client needs, in a sentence or two" });
     const validUntil = h("input", { type: "date", value: doc.valid_until || "" });
+    const settings = isProposal ? (await API("/settings")).settings : {};
+    const depositValue = doc.id ? (doc.deposit_bp || 0) / 100 : settings.default_deposit_percent || 0;
+    const deposit = h("input", { type: "number", min: "0", max: "100", step: "0.01", inputmode: "decimal", value: depositValue ? String(depositValue) : "" });
     const issue = h("input", { type: "date", value: doc.issue_date || "" });
     const due = h("input", { type: "date", value: doc.due_date || "" });
     const notes = h("textarea", { rows: 2, placeholder: "Shown to the client" }); notes.value = doc.notes || "";
@@ -138,7 +153,7 @@
       h("h3", { class: "suite-h3", text: "Lines" }), items.node,
       S.grid(Aira.ui.field("Discount", discount), Aira.ui.field(`${business.tax_label || "Tax"} %`, taxPct, "From your business profile; change it for this document if needed.")),
       totals,
-      isProposal ? Aira.ui.field("Valid until", validUntil) : S.grid(Aira.ui.field("Issue date", issue), Aira.ui.field("Due date", due, "Empty: your payment terms.")),
+      isProposal ? S.grid(Aira.ui.field("Valid until", validUntil), Aira.ui.field("Deposit when accepted (%)", deposit, "Empty for none. When the client accepts, Aira sends them an invoice for this share, and the final invoice takes it off.")) : S.grid(Aira.ui.field("Issue date", issue), Aira.ui.field("Due date", due, "Empty: your payment terms.")),
       isProposal ? null : Aira.ui.field("Note for the client", notes),
       isProposal ? null : Aira.ui.field("Internal notes", internal),
       error);
@@ -155,7 +170,7 @@
           { label: doc.id ? "Save" : `Create ${kind}`, kind: "primary", onClick: async () => {
             error.hidden = true;
             const payload = { client_id: client.value, items: items.read(), discount_cents: S.toCents(discount.value) || 0, tax_rate_bp: Math.round((Number(taxPct.value) || 0) * 100) };
-            if (isProposal) Object.assign(payload, { title: title.value.trim(), intro: intro.value, scope: scope.value, ...(validUntil.value ? { valid_until: validUntil.value } : {}) });
+            if (isProposal) Object.assign(payload, { title: title.value.trim(), intro: intro.value, scope: scope.value, deposit_percent: deposit.value.trim(), ...(validUntil.value ? { valid_until: validUntil.value } : {}) });
             else Object.assign(payload, { notes: notes.value, internal_notes: internal.value, ...(issue.value ? { issue_date: issue.value } : {}), ...(due.value ? { due_date: due.value } : {}) });
             if (!payload.client_id) { error.textContent = "Choose a client."; error.hidden = false; return false; }
             try {
@@ -176,7 +191,7 @@
     const data = await API("/overview");
     const sales = data.sales || {};
     const parts = [S.kpis([
-      { label: "Pipeline", value: money(sales.pipeline_cents), hint: `${sales.open_deals || 0} open deals` },
+      { label: "Pipeline", value: money(sales.pipeline_cents), hint: plural(sales.open_deals || 0, "open deal") },
       { label: "Weighted forecast", value: money(sales.weighted_cents), hint: "Value times the chance of winning" },
       { label: "Won this month", value: money(sales.won_this_month_cents), tone: sales.won_this_month_cents ? "good" : "" },
       { label: "Win rate", value: sales.win_rate === null || sales.win_rate === undefined ? "-" : `${sales.win_rate}%` },
@@ -238,8 +253,9 @@
     const params = new URLSearchParams({ ...(q ? { q } : {}), ...(status ? { status } : {}) }).toString();
     const list = (await API(`/clients${params ? `?${params}` : ""}`)).clients;
     body.append(
-      h("div", { class: "btn-row" }, search, statusSelect, S.button("New client", newClient), S.button("Export CSV", () => Aira.download(`/api/studio/clients/export${params ? `?${params}` : ""}`, "studio-clients.csv"), { kind: "secondary" })),
-      S.table({
+      toolbar(search, statusSelect, S.button("New client", newClient), S.button("Export CSV", () => Aira.download(`/api/studio/clients/export${params ? `?${params}` : ""}`, "studio-clients.csv"), { kind: "secondary" })),
+      // on a phone the tags and billed columns give way (app-studio.css); the client's page has them
+      h("div", { class: "studio-fit", dataset: { list: "clients" } }, S.table({
         columns: [
           { key: "name", label: "Client", render: (c) => h("div", {}, h("strong", { text: c.name }), c.company ? h("div", { class: "muted small", text: c.company }) : null) },
           { key: "status", label: "Status", render: (c) => pill(c.status) },
@@ -251,7 +267,7 @@
         rows: list,
         onRow: (c) => openClient(c.id),
         empty: Aira.ui.empty(q || status ? "No clients match" : "No clients yet", q || status ? "Try another search." : "Add the people and companies you work for.", q || status ? null : h("button", { type: "button", class: "btn", text: "Add a client", onclick: newClient })),
-      }));
+      })));
   }
 
   async function openClient(id) {
@@ -375,8 +391,8 @@
       h("div", { text: money(deal.value_cents) }),
       deal.expected_close ? h("div", { class: "muted small", text: `Closes ${day(deal.expected_close)}` }) : null,
       deal.open ? h("div", { class: "btn-row" },
-        prev ? S.button("◀", () => moveDeal(deal, prev), { kind: "ghost sm", title: `Move back to ${STAGE_LABELS[prev]}` }) : null,
-        next ? S.button("▶", () => moveDeal(deal, next), { kind: "ghost sm", title: `Move on to ${STAGE_LABELS[next]}` }) : null,
+        prev ? S.button("Back", () => moveDeal(deal, prev), { kind: "ghost sm", title: `Move back to ${STAGE_LABELS[prev]}` }) : null,
+        next ? S.button("Next", () => moveDeal(deal, next), { kind: "ghost sm", title: `Move on to ${STAGE_LABELS[next]}` }) : null,
         S.button("Won", () => moveDeal(deal, "won"), { kind: "secondary sm" }),
         S.button("Lost", () => moveDeal(deal, "lost"), { kind: "ghost sm" })) : null);
     card.addEventListener("click", (event) => { if (!event.target.closest("button")) openDeal(deal.id); });
@@ -399,25 +415,26 @@
     const go = (extra = {}) => Aira.router.go(["studio"], { tab: "deals", view, q: search.value.trim(), status: statusSelect.value, ...extra });
     search.addEventListener("keydown", (e) => { if (e.key === "Enter") go(); });
     statusSelect.addEventListener("change", () => go());
-    const toolbar = h("div", { class: "btn-row" }, search, statusSelect,
+    const exportParams = new URLSearchParams({ ...(q ? { q } : {}), ...(status ? { status } : {}) }).toString();
+    const bar = toolbar(search, statusSelect,
       S.button("New deal", () => dealForm()),
       S.button("Add from Leads", () => fromLeads(), { kind: "secondary" }),
       S.button(view === "board" ? "Show as a list" : "Show as a board", () => go({ view: view === "board" ? "list" : "board" }), { kind: "ghost" }),
-      S.button("Export CSV", () => Aira.download("/api/studio/deals/export", "deals.csv"), { kind: "ghost" }));
+      S.button("Export CSV", () => Aira.download(`/api/studio/deals/export${exportParams ? `?${exportParams}` : ""}`, "deals.csv"), { kind: "ghost" }));
     const forecast = await API("/forecast");
     const chart = S.section("Forecast",
       S.kpis([
-        { label: "Weighted pipeline", value: money(forecast.weighted_cents), hint: `${forecast.open_deals} open deals worth ${money(forecast.pipeline_cents)}` },
+        { label: "Weighted pipeline", value: money(forecast.weighted_cents), hint: `${plural(forecast.open_deals, "open deal")} worth ${money(forecast.pipeline_cents)}` },
         { label: "Won this quarter", value: money(forecast.won_this_quarter_cents), tone: forecast.won_this_quarter_cents ? "good" : "" },
         { label: "Average deal won", value: forecast.average_won_cents === null ? "-" : money(forecast.average_won_cents) },
         { label: "Days to win", value: forecast.cycle_days === null ? "-" : forecast.cycle_days, hint: "From adding a deal to winning it" },
       ]),
       S.bars(forecast.months.map((m) => ({ label: new Date(`${m.month}-01T00:00:00`).toLocaleDateString(undefined, { month: "short" }), value: m.weighted_cents })), { format: (v) => money(v) }),
-      forecast.undated.deals ? h("p", { class: "muted small", text: `${forecast.undated.deals} open deals have no expected close date (${money(forecast.undated.weighted_cents)} weighted).` }) : null);
+      forecast.undated.deals ? h("p", { class: "muted small", text: `${plural(forecast.undated.deals, "open deal has", "open deals have")} no expected close date (${money(forecast.undated.weighted_cents)} weighted).` }) : null);
     if (view === "list") {
       const params = new URLSearchParams({ ...(q ? { q } : {}), ...(status ? { status } : {}) }).toString();
       const list = (await API(`/deals${params ? `?${params}` : ""}`)).deals;
-      body.append(toolbar, S.table({ columns: dealColumns(), rows: list, onRow: (d) => openDeal(d.id), empty: Aira.ui.empty(q || status ? "No deals match" : "No deals yet", "Add the work you hope to win and track it to the finish.", h("button", { type: "button", class: "btn", text: "Add a deal", onclick: () => dealForm() })) }), chart);
+      body.append(bar, h("div", { class: "studio-fit", dataset: { list: "deals" } }, S.table({ columns: dealColumns(), rows: list, onRow: (d) => openDeal(d.id), empty: Aira.ui.empty(q || status ? "No deals match" : "No deals yet", "Add the work you hope to win and track it to the finish.", h("button", { type: "button", class: "btn", text: "Add a deal", onclick: () => dealForm() })) })), chart);
       return;
     }
     const board = await API("/deals/board");
@@ -429,7 +446,10 @@
         h("header", {}, h("strong", { text: STAGE_LABELS[column.stage] }), h("span", { class: "muted small", text: `${deals.length} · ${money(deals.reduce((sum, d) => sum + Number(d.value_cents), 0))} · ${column.probability}%` })),
         ...(deals.length ? deals.map(dealCard) : [h("p", { class: "muted small", text: "No deals here." })]));
     };
-    body.append(toolbar, h("div", { class: "studio-board", role: "list" }, ...columns.map(lane)), chart);
+    const none = !board.columns.some((column) => column.deals.length);
+    body.append(bar,
+      ...(none ? [Aira.ui.empty("No deals yet", "A deal is work you hope to win. Add one, move it through the stages, and see what you are likely to earn.", h("button", { type: "button", class: "btn", text: "Add a deal", onclick: () => dealForm() }))] : []),
+      h("div", { class: "studio-board", role: "list" }, ...columns.map(lane)), chart);
   }
 
   async function openDeal(id) {
@@ -504,19 +524,21 @@
     const select = Aira.ui.select([["open", "To do"], ["today", "Due today or late"], ["upcoming", "Coming up"], ["done", "Done"], ["", "Everything"]], when, { "aria-label": "Show" });
     select.addEventListener("change", () => Aira.router.go(["studio"], { tab: "activities", when: select.value }));
     const rows = (await API(`/activities${when ? `?when=${when}` : ""}`)).activities;
-    body.append(h("div", { class: "btn-row" }, select, S.button("Add an activity", () => activityForm())),
+    body.append(toolbar(select, S.button("Add an activity", () => activityForm())),
       S.section("", activityList(rows, { empty: "No activities here. Plan your next call or meeting." })));
   }
 
   // ===================================================================== proposals
+  async function newProposal() { const r = await documentEditor({ kind: "proposal" }); if (r) { rerender(); openProposal(r.proposal.id); } }
+
   async function proposalsTab(body, route) {
     const status = route.query.status || "";
     const filter = Aira.ui.select(PROPOSAL_FILTERS, status, { "aria-label": "Status" });
     filter.addEventListener("change", () => Aira.router.go(["studio"], { tab: "proposals", status: filter.value }));
     const list = (await API(`/proposals${status ? `?status=${status}` : ""}`)).proposals;
-    const create = async () => { const r = await documentEditor({ kind: "proposal" }); if (r) { rerender(); openProposal(r.proposal.id); } };
+    const create = newProposal;
     body.append(
-      h("div", { class: "btn-row" }, filter, S.button("New proposal", create)),
+      toolbar(filter, S.button("New proposal", create)),
       S.table({
         columns: [
           { key: "number", label: "No." },
@@ -534,7 +556,7 @@
   function linesTable(doc, taxLabel) {
     return h("div", {},
       S.table({ columns: [{ key: "description", label: "Description" }, { key: "quantity", label: "Qty", num: true }, { key: "unit_cents", label: "Unit", num: true, render: (i) => money(i.unit_cents) }, { key: "amount_cents", label: "Amount", num: true, render: (i) => money(i.amount_cents) }], rows: doc.items, empty: "No lines" }),
-      Aira.ui.kv([["Subtotal", money(doc.subtotal_cents)], ["Discount", doc.discount_cents ? `-${money(doc.discount_cents)}` : ""], [`${taxLabel || "Tax"} (${doc.tax_rate_bp / 100}%)`, doc.tax_rate_bp ? money(doc.tax_cents) : ""], ["Total", h("strong", { text: money(doc.total_cents) })]]));
+      Aira.ui.kv([["Subtotal", money(doc.subtotal_cents)], ["Discount", doc.discount_cents ? `-${money(doc.discount_cents)}` : ""], [`${taxLabel || "Tax"} (${doc.tax_rate_bp / 100}%)`, doc.tax_rate_bp ? money(doc.tax_cents) : ""], [doc.credit_label || "Deposit already invoiced", doc.credit_cents ? `-${money(doc.credit_cents)}` : ""], ["Total", h("strong", { text: money(doc.total_cents) })]]));
   }
 
   async function convert(id) {
@@ -553,11 +575,15 @@
     if (!locked) actions.push(S.button("Edit", async () => { const r = await documentEditor({ kind: "proposal", doc: p }); if (r) { rerender(); openProposal(id); } }, { kind: "secondary" }));
     if (!locked) actions.push(S.button("Mark accepted", async () => { if (await Aira.confirm({ title: "Mark as accepted", message: "Record that the client agreed outside Aira (on a call or by email)?", confirmLabel: "Mark accepted" })) { await API(`/proposals/${id}/status`, { method: "POST", body: { status: "accepted" } }); rerender(); openProposal(id); } }, { kind: "ghost" }));
     if (!locked) actions.push(S.button("Mark declined", async () => { await API(`/proposals/${id}/status`, { method: "POST", body: { status: "declined" } }); rerender(); openProposal(id); }, { kind: "ghost" }));
-    if (p.converted) actions.push(S.button("Open invoice", () => openInvoice(p.invoice_id), { kind: "secondary" }), S.button("Open project", () => openProject(p.project_id), { kind: "ghost" }));
+    if (p.invoice_id) actions.push(S.button("Open invoice", () => openInvoice(p.invoice_id), { kind: "secondary" }));
+    if (p.project_id) actions.push(S.button("Open project", () => openProject(p.project_id), { kind: "ghost" }));
+    if (p.deposit_invoice_id) actions.push(S.button("Open deposit invoice", () => openInvoice(p.deposit_invoice_id), { kind: "ghost" }));
+    const deposit = p.deposit || {};
     const body = h("div", { class: "suite-body" },
       h("div", { class: "btn-row" }, pill(p.status), h("span", { class: "muted", text: `${who(p)} · valid until ${day(p.valid_until)}` })),
       p.status === "accepted" ? h("div", { class: "cloud-banner info", role: "status" }, h("strong", { text: `Accepted by ${p.accepted_name}` }), h("span", { class: "muted", text: S.when(p.accepted_at) })) : null,
       p.status === "declined" ? h("div", { class: "cloud-banner warning", role: "status" }, h("strong", { text: "Declined" }), p.decline_reason ? h("span", { text: p.decline_reason }) : null) : null,
+      deposit.total_cents ? h("p", { class: "muted" }, h("strong", { text: `Deposit: ${deposit.deposit_bp / 100}% (${money(deposit.total_cents)})` }), h("span", { text: p.deposit_invoice_id ? " · invoiced to the client when they accepted. The final invoice takes it off." : " · when the client accepts, Aira sends them an invoice for it. The final invoice takes it off." })) : null,
       !locked || link ? S.share({ title: "Client page", text: "Your client reads the proposal and accepts it here. Creating the link marks the proposal as sent.", link, onCreate: async () => { const r = await API(`/proposals/${id}/link`, { method: "POST", body: {} }); rerender(); return r.link; }, onRevoke: async () => { await API(`/proposals/${id}/link`, { method: "DELETE" }); } }) : null,
       h("div", { class: "btn-row" }, ...actions),
       p.intro ? S.section("Introduction", h("p", { class: "suite-pre", text: p.intro })) : null,
@@ -592,8 +618,8 @@
     filter.addEventListener("change", () => Aira.router.go(["studio"], { tab: "projects", status: filter.value }));
     const list = (await API(`/projects${status ? `?status=${status}` : ""}`)).projects;
     body.append(
-      h("div", { class: "btn-row" }, filter, S.button("New project", () => projectForm())),
-      S.table({
+      toolbar(filter, S.button("New project", () => projectForm())),
+      h("div", { class: "studio-fit", dataset: { list: "projects" } }, S.table({
         columns: [
           { key: "name", label: "Project", render: (p) => h("div", {}, h("strong", { text: p.name }), h("div", { class: "muted small", text: who(p) })) },
           { key: "status", label: "Status", render: (p) => pill(p.status) },
@@ -606,7 +632,7 @@
         rows: list,
         onRow: (p) => openProject(p.id),
         empty: Aira.ui.empty("No projects yet", "Start one by hand, or from an accepted proposal.", h("button", { type: "button", class: "btn", text: "New project", onclick: () => projectForm() })),
-      }));
+      })));
   }
 
   async function openProject(id) {
@@ -666,9 +692,11 @@
       { key: "due_date", label: "Due", render: (i) => day(i.due_date) },
       { key: "status", label: "Status", render: (i) => h("span", {}, pill(i.status), i.customer_notices && i.customer_notices.length && i.status !== "paid" ? h("span", { class: "muted small", text: " · client says paid" }) : null) },
       { key: "total_cents", label: "Total", num: true, render: (i) => money(i.total_cents) },
-      { key: "balance_cents", label: "Due", num: true, render: (i) => (i.balance_cents ? money(i.balance_cents) : "") },
+      { key: "balance_cents", label: "Still due", num: true, render: (i) => (i.balance_cents ? money(i.balance_cents) : "") },
     ].filter(Boolean);
   }
+
+  async function newInvoice() { const r = await documentEditor({ kind: "invoice" }); if (r) { rerender(); openInvoice(r.invoice.id); } }
 
   async function invoicesTab(body, route) {
     const status = route.query.status || "";
@@ -680,12 +708,13 @@
     search.addEventListener("keydown", (e) => { if (e.key === "Enter") go(); });
     const params = new URLSearchParams({ ...(status ? { status } : {}), ...(q ? { q } : {}) }).toString();
     const list = (await API(`/invoices${params ? `?${params}` : ""}`)).invoices;
-    const create = async () => { const r = await documentEditor({ kind: "invoice" }); if (r) { rerender(); openInvoice(r.invoice.id); } };
+    const create = newInvoice;
     const owed = list.filter((i) => ["sent", "partially_paid", "overdue"].includes(i.status)).reduce((sum, i) => sum + i.balance_cents, 0);
     body.append(
-      h("div", { class: "btn-row" }, search, filter, S.button("New invoice", create), S.button("Export CSV", () => Aira.download(`/api/studio/invoices/export${status ? `?status=${status}` : ""}`, "studio-invoices.csv"), { kind: "secondary" })),
-      list.length ? h("p", { class: "muted", text: `${list.length} invoice${list.length === 1 ? "" : "s"}${owed ? ` · ${money(owed)} still owed` : ""}` }) : null,
-      S.table({ columns: invoiceColumns(true), rows: list, onRow: (i) => openInvoice(i.id), empty: Aira.ui.empty(status || q ? "No invoices here" : "No invoices yet", "Bill a client, convert an accepted proposal, or invoice a project's time.", status || q ? null : h("button", { type: "button", class: "btn", text: "Create an invoice", onclick: create })) }));
+      toolbar(search, filter, S.button("New invoice", create), S.button("Export CSV", () => Aira.download(`/api/studio/invoices/export${params ? `?${params}` : ""}`, "studio-invoices.csv"), { kind: "secondary" })),
+      ...(list.length ? [h("p", { class: "muted", text: `${plural(list.length, "invoice")}${owed ? ` · ${money(owed)} still owed` : ""}` })] : []),
+      // on a phone the dates give way so the money columns fit (app-studio.css); the invoice itself has them
+      h("div", { class: "studio-invoices" }, S.table({ columns: invoiceColumns(true), rows: list, onRow: (i) => openInvoice(i.id), empty: Aira.ui.empty(status || q ? "No invoices here" : "No invoices yet", "Bill a client, convert an accepted proposal, or invoice a project's time.", status || q ? null : h("button", { type: "button", class: "btn", text: "Create an invoice", onclick: create })) })));
   }
 
   async function openInvoice(id) {
@@ -707,7 +736,7 @@
     const notices = (inv.customer_notices || []).slice().reverse();
     const body = h("div", { class: "suite-body" },
       S.kpis([{ label: "Total", value: money(inv.total_cents) }, { label: "Paid", value: money(inv.paid_cents), tone: inv.paid_cents ? "good" : "" }, { label: "Still due", value: money(inv.balance_cents), tone: inv.status === "overdue" ? "bad" : inv.balance_cents ? "warn" : "" }]),
-      h("div", { class: "btn-row" }, pill(inv.status), h("span", { class: "muted", text: `${who(inv)} · issued ${day(inv.issue_date)} · due ${day(inv.due_date)}${inv.days_overdue ? ` (${inv.days_overdue} days late)` : ""}` })),
+      h("div", { class: "btn-row" }, pill(inv.status), inv.kind === "deposit" ? S.pill("deposit", { deposit: "info" }) : null, h("span", { class: "muted", text: `${who(inv)} · issued ${day(inv.issue_date)} · due ${day(inv.due_date)}${inv.days_overdue ? ` (${inv.days_overdue} days late)` : ""}${inv.reminder_count ? ` · ${plural(inv.reminder_count, "reminder")} so far` : ""}` })),
       notices.length && inv.status !== "paid" ? h("div", { class: "cloud-banner info", role: "status" }, h("strong", { text: "Your client says they paid" }), h("span", { text: notices.map((n) => [n.reference && `Reference ${n.reference}`, n.note, Aira.fmt.ago(n.at)].filter(Boolean).join(" · ")).join(" | ") }), h("span", { class: "muted", text: "Check your account, then record the payment." })) : null,
       inv.status !== "void" ? S.share({ title: "Client page", text: "Your client sees the invoice and how to pay you. Creating the link marks a draft as sent.", link, onCreate: async () => { const r = await API(`/invoices/${id}/link`, { method: "POST", body: {} }); rerender(); return r.link; }, onRevoke: async () => { await API(`/invoices/${id}/link`, { method: "DELETE" }); } }) : null,
       business.payment_link || business.payment_instructions ? null : h("p", { class: "muted small" }, "Add a payment link or instructions in the ", h("a", { href: "#/hub?tab=business", text: "business profile" }), " so clients know how to pay."),
@@ -745,7 +774,7 @@
     body.append(
       S.kpis([{ label: "Recurring per month", value: money(monthly), tone: monthly ? "good" : "" }, { label: "Active retainers", value: list.filter((r) => r.active).length }]),
       h("div", { class: "btn-row" }, S.button("New retainer", create), list.length ? run : null),
-      h("p", { class: "muted", text: "A retainer drafts one invoice a month on its date. Create due invoices whenever you like: a month is never invoiced twice." }),
+      h("p", { class: "muted", text: "A retainer drafts one invoice a month on its date, by itself (Settings > What Sales does by itself). Create due invoices any time: a month is never invoiced twice. Pausing skips the months it is paused." }),
       S.table({
         columns: [
           { key: "title", label: "Retainer", render: (r) => h("div", {}, h("strong", { text: r.title }), h("div", { class: "muted small", text: who(r) })) },
@@ -761,6 +790,66 @@
       }));
   }
 
+  // ===================================================================== earnings
+  const monthLabel = (key) => new Date(`${key}-01T00:00:00`).toLocaleDateString(undefined, { month: "short" });
+  const monthLong = (key) => new Date(`${key}-01T00:00:00`).toLocaleDateString(undefined, { month: "long", year: "numeric" });
+  const hourly = (cents) => (cents === null || cents === undefined ? "-" : `${money(cents)} an hour`);
+
+  // Clients ranked by what they paid, with a bar for their share; the lowest are marked so you can look at them.
+  function rankList(clients) {
+    if (!clients.length) return Aira.ui.empty("No payments in this period", "Record payments on your invoices to see who pays you most.");
+    const top = clients[0].received_cents || 1;
+    const lowFrom = clients.length > 3 ? clients.length - Math.min(3, Math.floor(clients.length / 3)) : clients.length;
+    return h("ol", { class: "studio-rank" }, ...clients.map((c, index) => {
+      const low = index >= lowFrom;
+      return h("li", {},
+        h("button", { type: "button", class: "btn ghost sm", style: { justifySelf: "start", textAlign: "left" }, text: [c.name, c.company].filter(Boolean).join(" · ") || "Client", onclick: () => openClient(c.id) }),
+        h("strong", { text: money(c.received_cents) }),
+        h("span", { class: `studio-share ${low ? "studio-low" : ""}`, role: "img", "aria-label": `${c.share}% of what you received` }, h("span", { style: { width: `${Math.max(2, Math.round((c.received_cents * 100) / top))}%` } })),
+        h("span", { class: "muted small", text: [`${c.share}% of your income`, plural(c.payments, "payment"), c.outstanding_cents ? `${money(c.outstanding_cents)} still owed` : "", low ? "one of your lowest" : ""].filter(Boolean).join(" · ") }));
+    }));
+  }
+
+  async function reportsTab(body, route) {
+    const months = ["3", "6", "12", "24"].includes(route.query.months) ? route.query.months : "12";
+    const range = Aira.ui.select([["3", "Last 3 months"], ["6", "Last 6 months"], ["12", "Last 12 months"], ["24", "Last 24 months"]], months, { "aria-label": "Period" });
+    range.addEventListener("change", () => Aira.router.go(["studio"], { tab: "reports", months: range.value }));
+    const data = await API(`/reports?months=${months}`);
+    const late = data.aging.filter((bucket) => bucket.key !== "current").reduce((sum, bucket) => sum + bucket.cents, 0);
+    body.append(
+      toolbar(range, S.button("Export payments (CSV)", () => Aira.download(`/api/studio/payments/export?since=${data.months[0].month}-01&until=${todayIso()}`, "studio-payments.csv"), { kind: "secondary" })),
+      S.kpis([
+        { label: "Received", value: money(data.received_cents), hint: `In the last ${plural(Number(months), "month")}`, tone: data.received_cents ? "good" : "" },
+        { label: "This year", value: money(data.received_this_year_cents) },
+        { label: "Average a month", value: money(data.average_month_cents) },
+        { label: "Best month", value: data.best_month ? money(data.best_month.received_cents) : "-", hint: data.best_month ? monthLong(data.best_month.month) : "No payments yet" },
+        { label: "Days to get paid", value: data.average_days_to_pay === null ? "-" : data.average_days_to_pay, hint: data.paid_invoices ? `Average over ${plural(data.paid_invoices, "paid invoice")}` : "From invoice to the last payment" },
+      ]),
+      S.section("Money received each month",
+        S.bars(data.months.map((m) => ({ label: monthLabel(m.month), value: m.received_cents })), { format: (v) => money(v) }),
+        h("p", { class: "muted small", text: `Invoiced in the same months: ${money(data.months.reduce((sum, m) => sum + m.invoiced_cents, 0))}. Payments count in the month they arrived.` })),
+      S.grid(
+        S.section("Who pays you most", rankList(data.clients)),
+        S.section("Still owed, by how late it is",
+          S.kpis(data.aging.map((bucket) => ({ label: bucket.label, value: money(bucket.cents), hint: bucket.count ? plural(bucket.count, "invoice") : "None", tone: bucket.key === "current" ? "" : bucket.cents ? (bucket.key === "1_30" ? "warn" : "bad") : "" }))),
+          late ? h("div", { class: "btn-row" }, h("span", { class: "muted", text: `${money(late)} is late.` }), S.button("See overdue invoices", () => Aira.router.go(["studio"], { tab: "invoices", status: "overdue" }), { kind: "secondary sm" })) : h("p", { class: "muted", text: "Nothing is late. Well done." }))),
+      S.section("Which work pays best",
+        h("p", { class: "muted", text: "What each project invoiced for every hour you logged on it. Low rates show work to price higher next time." }),
+        S.table({
+          columns: [
+            { key: "name", label: "Project", render: (p) => h("div", {}, h("strong", { text: p.name }), h("div", { class: "muted small", text: who(p) })) },
+            { key: "invoiced_cents", label: "Invoiced", num: true, render: (p) => money(p.invoiced_cents) },
+            { key: "minutes", label: "Time", num: true, render: (p) => (p.minutes ? hours(p.minutes) : "No time logged") },
+            { key: "hourly_cents", label: "Earned per hour", num: true, render: (p) => hourly(p.hourly_cents) },
+          ],
+          rows: data.projects,
+          onRow: (p) => openProject(p.id),
+          empty: Aira.ui.empty("No projects to compare yet", "Log time on your projects and invoice them to see what each hour earns."),
+        })),
+      ...(data.methods.length ? [S.section("How clients paid", S.table({ columns: [{ key: "method", label: "Method", render: (m) => (METHODS.find((x) => x[0] === m.method) || [0, m.method])[1] }, { key: "cents", label: "Received", num: true, render: (m) => money(m.cents) }], rows: data.methods }))] : []),
+    );
+  }
+
   // ===================================================================== settings
   async function settingsTab(body) {
     const { settings } = await API("/settings");
@@ -770,42 +859,188 @@
       { name: "payment_terms_days", label: "Payment terms (days)", type: "number", min: 0, max: 365, hint: "An invoice is due this many days after it is issued." },
       { name: "proposal_valid_days", label: "Proposals are valid for (days)", type: "number", min: 1, max: 365 },
       { name: "default_rate_cents", label: "Default hourly rate", type: "money", hint: "Used when you log time without a rate." },
+      { name: "default_deposit_percent", label: "Deposit on new proposals (%)", type: "number", min: 0, max: 100, step: "0.01", hint: "0 for none. You can change it on each proposal." },
     ], settings);
+    const autoForm = S.form([
+      { name: "auto_retainers", label: "Draft each retainer's invoice on its date", type: "checkbox" },
+      { name: "retainer_auto_send", label: "... and send it to the client", type: "checkbox", hint: "The email waits in the Business hub outbox for your approval, unless you send that kind automatically." },
+      { name: "auto_reminders", label: "Remind clients about overdue invoices", type: "checkbox", hint: "A friendly email with the invoice link. It waits in the outbox for your approval." },
+      { name: "reminder_after_days", label: "First reminder, days after the due date", type: "number", min: 0, max: 90 },
+      { name: "reminder_every_days", label: "Days between reminders", type: "number", min: 1, max: 90 },
+      { name: "reminder_max", label: "Reminders per invoice, at most", type: "number", min: 1, max: 10 },
+      { name: "proposal_followup_days", label: "Follow up a proposal with no answer after (days)", type: "number", min: 0, max: 60, hint: "0 for never. One follow-up email per proposal." },
+    ], settings);
+    const saveAuto = async () => { autoForm.setError(""); try { await API("/settings", { method: "POST", body: autoForm.read() }); Aira.toast("Saved.", "success"); } catch (error) { autoForm.setError(error.message); } };
+    const runNow = async () => {
+      const { done } = await API("/automation/run", { method: "POST", body: {} });
+      const parts = [done.retainer_invoices ? plural(done.retainer_invoices, "retainer invoice") : "", done.reminders ? plural(done.reminders, "reminder") : "", done.followups ? plural(done.followups, "follow-up") : ""].filter(Boolean);
+      const missing = done.no_email ? `${done.no_email === 1 ? "1 late invoice or proposal was" : `${done.no_email} late invoices or proposals were`} not emailed because the client has no email address. Add it on the client's page.` : "";
+      if (missing) Aira.toast(parts.length ? `Done: ${parts.join(", ")}. Emails wait in the outbox. ${missing}` : missing, "error", { timeout: 12000 });
+      else Aira.toast(parts.length ? `Done: ${parts.join(", ")}. Emails wait in the outbox.` : "Nothing needed doing right now.", "success");
+    };
     const { probabilities } = await API("/pipeline");
     const pipelineForm = S.form(OPEN_STAGES.map((stage) => ({ name: stage, label: `${STAGE_LABELS[stage]} (%)`, type: "number", min: 0, max: 100 })), probabilities);
     body.append(S.section("Chance of winning at each stage", h("p", { class: "muted", text: "Used for the weighted forecast. Won is always 100% and lost 0%." }), pipelineForm.node,
-      h("div", { class: "btn-row" }, S.button("Save", async () => { pipelineForm.setError(""); try { await API("/pipeline", { method: "POST", body: pipelineForm.read() }); Aira.toast("Saved.", "success"); } catch (error) { pipelineForm.setError(error.message); } }))));
-    body.append(S.section("Sales settings", form.node, h("div", { class: "btn-row" }, S.button("Save", async () => { form.setError(""); try { await API("/settings", { method: "POST", body: form.read() }); Aira.toast("Saved.", "success"); } catch (error) { form.setError(error.message); } })),
+      h("div", { class: "btn-row" }, S.button("Save chances", async () => { pipelineForm.setError(""); try { await API("/pipeline", { method: "POST", body: pipelineForm.read() }); Aira.toast("Saved.", "success"); } catch (error) { pipelineForm.setError(error.message); } }))));
+    body.append(S.section("What Sales does by itself", h("p", { class: "muted", text: "Every few minutes, even when Aira is closed, Sales can draft retainer invoices, remind clients who are late and follow up proposals. You approve every email before it goes." }), autoForm.node,
+      h("div", { class: "btn-row" }, S.button("Save reminders and retainers", saveAuto), S.button("Check now", runNow, { kind: "secondary" }), h("a", { href: "#/hub?tab=outbox", text: "Open the outbox" }))));
+    body.append(S.section("Sales settings", form.node, h("div", { class: "btn-row" }, S.button("Save settings", async () => { form.setError(""); try { await API("/settings", { method: "POST", body: form.read() }); Aira.toast("Saved.", "success"); } catch (error) { form.setError(error.message); } })),
       h("p", { class: "muted small" }, "Your business name, tax rate, currency and payment link are in the ", h("a", { href: "#/hub?tab=business", text: "Business hub" }), ".")));
   }
 
+  // ===================================================================== search (the box across the top)
+  // GET /search answers with a few of each kind (clients and the people at them, deals, proposals, invoices,
+  // projects); answers are kept for a few seconds so typing back and forth does not ask again.
+  const found = new Map();
+  function find(q, limit) {
+    const key = `${limit}|${q.toLowerCase()}`;
+    const kept = found.get(key);
+    if (kept && Date.now() - kept.at < 5000) return kept.data;
+    for (const [old, entry] of found) if (Date.now() - entry.at >= 5000) found.delete(old);
+    const data = API(`/search?q=${encodeURIComponent(q)}&limit=${limit}`, { silent: true });
+    found.set(key, { at: Date.now(), data });
+    data.catch(() => found.delete(key));
+    return data;
+  }
+  const words = (status) => String(status || "").replaceAll("_", " ");
+  const capital = (text) => (text ? text[0].toUpperCase() + text.slice(1) : "");
+  // Each kind: its heading, icon and tab, how a match reads in the list under the box, and the record it opens.
+  const KINDS = [
+    { key: "clients", label: "Clients", icon: "recruiters", tab: "clients", open: (c) => `#/studio?tab=clients&client=${c.id}`,
+      line: (c) => ({ label: c.company ? `${c.name} (${c.company})` : c.name, sub: ["Client", c.contact ? `Contact: ${c.contact}` : "", c.email, capital(words(c.status))].filter(Boolean).join(" · ") }) },
+    { key: "deals", label: "Deals", icon: "stocks", tab: "deals", open: (d) => `#/studio?tab=deals&deal=${d.id}`,
+      line: (d) => ({ label: d.title, sub: ["Deal", who(d), STAGE_LABELS[d.stage], money(d.value_cents)].filter(Boolean).join(" · ") }) },
+    { key: "invoices", label: "Invoices", icon: "studio-invoice", tab: "invoices", open: (i) => `#/studio?tab=invoices&invoice=${i.id}`,
+      line: (i) => ({ label: `Invoice ${i.number}`, sub: [who(i), money(i.total_cents), capital(words(i.status))].filter(Boolean).join(" · ") }) },
+    { key: "proposals", label: "Proposals", icon: "documents", tab: "proposals", open: (p) => `#/studio?tab=proposals&proposal=${p.id}`,
+      line: (p) => ({ label: `${p.number} · ${p.title}`, sub: ["Proposal", who(p), money(p.total_cents), capital(words(p.status))].filter(Boolean).join(" · ") }) },
+    { key: "projects", label: "Projects", icon: "applications", tab: "projects", open: (p) => `#/studio?tab=projects&project=${p.id}`,
+      line: (p) => ({ label: p.name, sub: ["Project", who(p), capital(words(p.status))].filter(Boolean).join(" · ") }) },
+  ];
+
+  Aira.appSearch.studio = {
+    placeholder: "Search Sales",
+    // Up to six, taking turns between the kinds so one busy kind does not hide the others.
+    async suggest(query) {
+      const [data] = await Promise.all([find(query, 3), S.business()]);
+      const lists = KINDS.map((kind) => (data[kind.key] || []).map((row) => ({ ...kind.line(row), icon: kind.icon, href: kind.open(row) })));
+      const picked = [];
+      for (let round = 0; picked.length < 6 && lists.some((list) => list.length > round); round += 1) {
+        for (const list of lists) if (list[round] && picked.length < 6) picked.push(list[round]);
+      }
+      return picked;
+    },
+    run(query) { Aira.router.go(["studio"], { tab: "search", q: query }); },
+  };
+
+  // Enter in the search box: every kind that matches, each row opening its record.
+  const RESULT_COLUMNS = {
+    clients: [{ key: "name", label: "Client", render: (c) => h("div", {}, h("strong", { text: c.name }), c.company ? h("div", { class: "muted small", text: c.company }) : null) }, { key: "status", label: "Status", render: (c) => pill(c.status) }, { key: "contact", label: "Contact" }, { key: "email", label: "Email" }],
+    deals: [{ key: "title", label: "Deal", render: (d) => h("strong", { text: d.title }) }, { key: "client_name", label: "Client", render: who }, { key: "stage", label: "Stage", render: (d) => pill(d.stage) }, { key: "value_cents", label: "Value", num: true, render: (d) => money(d.value_cents) }],
+    invoices: [{ key: "number", label: "No." }, { key: "client_name", label: "Client", render: who }, { key: "status", label: "Status", render: (i) => pill(i.status) }, { key: "total_cents", label: "Total", num: true, render: (i) => money(i.total_cents) }, { key: "balance_cents", label: "Still due", num: true, render: (i) => (i.balance_cents ? money(i.balance_cents) : "") }],
+    proposals: [{ key: "number", label: "No." }, { key: "title", label: "Proposal", render: (p) => h("strong", { text: p.title }) }, { key: "client_name", label: "Client", render: who }, { key: "status", label: "Status", render: (p) => pill(p.status) }, { key: "total_cents", label: "Total", num: true, render: (p) => money(p.total_cents) }],
+    projects: [{ key: "name", label: "Project", render: (p) => h("strong", { text: p.name }) }, { key: "client_name", label: "Client", render: who }, { key: "status", label: "Status", render: (p) => pill(p.status) }, { key: "deadline", label: "Deadline", render: (p) => day(p.deadline) }],
+  };
+  const SEARCHABLE_TABS = ["clients", "deals", "invoices"]; // their own search shows the rest when a kind fills its 25
+  async function searchTab(body, route) {
+    const q = (route.query.q || "").trim();
+    if (!q) { body.append(Aira.ui.empty("Search Sales", "Type a client, a company, a deal, or an invoice or proposal number in the search box at the top.")); return; }
+    const data = await find(q, 25);
+    const kinds = KINDS.filter((kind) => (data[kind.key] || []).length);
+    if (!kinds.length) {
+      body.append(Aira.ui.empty(`Nothing in Sales matches “${q}”`, "Check the spelling, or search for a client's name, a company, an email, or an invoice or proposal number.",
+        h("div", { class: "btn-row" }, canCreate() ? h("button", { type: "button", class: "btn", text: "Add a client", onclick: newClient }) : null, h("a", { class: "btn secondary", href: "#/studio?tab=overview", text: "Back to the overview" }))));
+      return;
+    }
+    body.append(...kinds.map((kind) => {
+      const rows = data[kind.key];
+      const full = rows.length >= 25;
+      return S.section(`${kind.label} (${rows.length}${full ? "+" : ""})`,
+        // the Contact column only when a client was found through one of its people
+        h("div", { class: "studio-results", dataset: { kind: kind.key } }, S.table({ columns: RESULT_COLUMNS[kind.key].filter((column) => column.key !== "contact" || rows.some((row) => row.contact)), rows, onRow: (row) => { location.hash = kind.open(row); } })),
+        full && SEARCHABLE_TABS.includes(kind.tab) ? h("p", { class: "small" }, h("a", { href: `#/studio?tab=${kind.tab}&q=${encodeURIComponent(q)}`, text: `See every match in ${kind.label}` })) : null);
+    }));
+  }
+
+  // ===================================================================== "+ New" (above the left menu)
+  // A child's or teen's profile cannot open Sales (the server refuses it), and in the hosted build a member who may
+  // only read the business apps has nothing to create: neither gets the button.
+  function canCreate() {
+    const me = Aira.life && Aira.life.me;
+    if (me && me.age_group && !["adult", "senior"].includes(me.age_group)) return false;
+    const cloud = Aira.cloud;
+    if (cloud && cloud.me && typeof cloud.can === "function" && !cloud.can("suite.manage")) return false;
+    return true;
+  }
+  // Each opens the same form as the button on its tab (?new=<kind>, read by the view below).
+  const CREATES = { deal: () => dealForm(), client: () => newClient(), proposal: () => newProposal(), invoice: () => newInvoice(), activity: () => activityForm() };
+  Aira.appNew.studio = () => (canCreate() ? [
+    { label: "New deal", icon: "stocks", href: "#/studio?tab=deals&new=deal" },
+    { label: "New client", icon: "recruiters", href: "#/studio?tab=clients&new=client" },
+    { label: "New proposal", icon: "documents", href: "#/studio?tab=proposals&new=proposal" },
+    { label: "New invoice", icon: "studio-invoice", href: "#/studio?tab=invoices&new=invoice" },
+    { label: "New activity", icon: "interviews", href: "#/studio?tab=activities&new=activity" },
+  ] : []);
+
   // ===================================================================== the view
+  let pendingNew = "";
+  // A record a link names (?invoice=, ?client=, ... from the search box, Today or another app) opens over the page.
+  const DEEP_LINKS = [["invoice", openInvoice], ["proposal", openProposal], ["deal", openDeal], ["client", openClient], ["project", openProject]];
+
   Aira.views.studio = async (main, route) => {
+    // "+ New" comes here with ?new=<kind>: take it off the address first, so Back and refresh do not open the form
+    // again, then open the form over the page that draws.
+    if (route.query.new) {
+      pendingNew = route.query.new;
+      const rest = { ...route.query };
+      delete rest.new;
+      Aira.router.go(["studio"], rest, { replace: true });
+      return;
+    }
     await S.business(true);
     clientCache = null;
-    const body = S.page(main, { title: "Sales", subtitle: "Clients, deals, proposals and invoices: win the work, then get paid for it." });
-    const tab = S.tabs(body, route, "studio", TABS);
+    const searching = route.query.tab === "search";
+    const info = TABS.find((item) => item.id === route.query.tab) || TABS[0];
+    const q = (route.query.q || "").trim();
+    const body = S.page(main, searching
+      ? { title: q ? `Results for “${q}”` : "Search", subtitle: "Clients, deals, invoices, proposals and projects in Sales." }
+      : { title: info.label, subtitle: info.blurb });
+    body.classList.add("studio-page");
+    const tab = S.tabs(body, route, "studio", TABS, searching ? "search" : info.id);
     const panel = h("div", { class: "suite-body" });
     body.append(panel);
+    let ready = false;
     rerender = async () => {
       const holder = h("div", { class: "suite-body" });
       try {
-        if (tab === "deals") await dealsTab(holder, route);
+        if (tab === "search") await searchTab(holder, route);
+        else if (tab === "deals") await dealsTab(holder, route);
         else if (tab === "activities") await activitiesTab(holder, route);
         else if (tab === "clients") await clientsTab(holder, route);
         else if (tab === "proposals") await proposalsTab(holder, route);
         else if (tab === "projects") await projectsTab(holder, route);
         else if (tab === "invoices") await invoicesTab(holder, route);
         else if (tab === "retainers") await retainersTab(holder);
+        else if (tab === "reports") await reportsTab(holder, route);
         else if (tab === "settings") await settingsTab(holder);
         else await overview(holder);
         panel.replaceChildren(holder);
-      } catch (error) { panel.replaceChildren(Aira.ui.error(error, rerender)); }
+        ready = true;
+      } catch (error) {
+        ready = false;
+        // a child's or teen's profile: Sales moves money and emails clients, so it is for the grown-ups only
+        if (error && error.code === "studio_grown_ups") {
+          const canSwitch = Aira.life && typeof Aira.life.switchPerson === "function";
+          panel.replaceChildren(Aira.ui.empty("Sales is for the grown-ups", "It sends emails to clients and keeps track of money, so only the grown-ups in your household can open it.", canSwitch ? h("button", { type: "button", class: "btn", text: "Switch person", onclick: () => Aira.life.switchPerson() }) : null));
+        } else panel.replaceChildren(Aira.ui.error(error, rerender));
+      }
     };
     panel.replaceChildren(Aira.ui.skeleton(4));
     await rerender();
-    if (route.query.invoice && /^[0-9a-f]{32}$/.test(route.query.invoice)) openInvoice(route.query.invoice).catch(Aira.reportError);
-    if (route.query.proposal && /^[0-9a-f]{32}$/.test(route.query.proposal)) openProposal(route.query.proposal).catch(Aira.reportError);
-    if (route.query.deal && /^[0-9a-f]{32}$/.test(route.query.deal)) openDeal(route.query.deal).catch(Aira.reportError);
+    const create = CREATES[pendingNew];
+    pendingNew = "";
+    if (!ready || !panel.isConnected) return;
+    if (create && canCreate()) Promise.resolve().then(create).catch(Aira.reportError);
+    for (const [name, open] of DEEP_LINKS) if (/^[0-9a-f]{32}$/.test(route.query[name] || "")) open(route.query[name]).catch(Aira.reportError);
   };
 })();

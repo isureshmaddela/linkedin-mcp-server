@@ -211,6 +211,11 @@ def today(connection: sqlite3.Connection) -> date:
     return local_now(connection).date()
 
 
+def local_day(connection: sqlite3.Connection, stamp: str) -> date:
+    """The household's calendar day of a stored UTC time."""
+    return kit.parse_time(stamp).astimezone(local_now(connection).tzinfo).date()
+
+
 def people(connection: sqlite3.Connection) -> dict[str, dict[str, Any]]:
     return {p["id"]: life.public(p) for p in life.profiles(connection)}
 
@@ -271,6 +276,46 @@ def next_due(task: dict[str, Any], after: date) -> date | None:
     return None
 
 
+def _rotation(
+    value: Any, everyone: dict[str, dict[str, Any]], *, strict: bool = True
+) -> list[str]:
+    """The people a chore takes turns between, in order. ``strict`` refuses someone not in the household;
+    otherwise (a stored rotation) people who have since left are skipped."""
+    if isinstance(value, str):
+        value = [part for part in value.split(",") if part.strip()]
+    if not isinstance(value, list):
+        return []
+    out: list[str] = []
+    for raw in value[:12]:
+        pid = str(raw or "").strip()
+        if pid not in everyone:
+            if strict:
+                raise ValueError("Choose the people who take turns from the household.")
+            continue
+        if pid not in out:
+            out.append(pid)
+    return out
+
+
+def live_rotation(value: Any, everyone: dict[str, dict[str, Any]]) -> list[str]:
+    """A stored rotation as it is now: the people still in the household, or none when fewer than two are left
+    (one person does not take turns)."""
+    rotation = _rotation(value, everyone, strict=False)
+    return rotation if len(rotation) >= 2 else []
+
+
+def next_turn(
+    rotation: list[str], current: str, everyone: dict[str, dict[str, Any]]
+) -> str:
+    """Whose turn comes after ``current`` (the first person when ``current`` is not one of them)."""
+    live = [pid for pid in rotation if pid in everyone]
+    if not live:
+        return current
+    if current in live:
+        return live[(live.index(current) + 1) % len(live)]
+    return live[0]
+
+
 def visible_to(task: dict[str, Any], me: dict[str, Any]) -> bool:
     if life.is_adult(me):
         return True
@@ -289,6 +334,17 @@ def _clean_task(
     merged = {**(current or {}), **raw}
     everyone = people(connection)
     assignee = str(merged.get("assignee") or "")
+    stored_turns = live_rotation((current or {}).get("rotation"), everyone)
+    if (
+        current is not None
+        and "assignee" not in raw
+        and assignee not in (ANYONE, EVERYONE)
+        and assignee not in everyone
+    ):
+        # The person it was for has left the household: the next one in the turns, or anyone.
+        assignee = (
+            next_turn(stored_turns, assignee, everyone) if stored_turns else ANYONE
+        )
     if assignee not in (ANYONE, EVERYONE) and assignee not in everyone:
         raise ValueError("Choose who the task is for.")
     if not life.is_adult(me) and assignee not in (me["id"], ANYONE):
@@ -297,6 +353,9 @@ def _clean_task(
     due_time = kit.text(merged.get("due_time"), "the time", max_len=5)
     if due_time and not _TIME.match(due_time):
         raise ValueError("Write the time like 18:30.")
+    if due_time and not due_date:
+        # A time is for a reminder, and a reminder needs a day: today, unless another day is chosen.
+        due_date = today(connection).isoformat()
     repeat = kit.choice(merged.get("repeat"), "the repeat", REPEATS, default="none")
     days = merged.get("repeat_days") or []
     if isinstance(days, str):
@@ -329,6 +388,34 @@ def _clean_task(
         and int((current or {}).get("points") or 0) != points
     ):
         raise PermissionError("An adult sets the points for a chore.")
+    rotation = _rotation(merged.get("rotation"), everyone, strict="rotation" in raw)
+    before = _rotation((current or {}).get("rotation"), everyone, strict=False)
+    if rotation != before and not life.is_adult(me):
+        raise PermissionError("An adult chooses who takes turns.")
+    if len(rotation) < 2 and rotation == before:
+        # Someone in the turns left the household and one person is left: it is their chore now.
+        if rotation and assignee not in (ANYONE, EVERYONE, *rotation):
+            assignee = rotation[0]
+        rotation = []
+    if rotation:
+        if len(rotation) < 2:
+            raise ValueError("Choose at least two people to take turns.")
+        if repeat == "none":
+            raise ValueError(
+                "Taking turns is for a chore that repeats. Choose how often it repeats."
+            )
+        chosen = "assignee" in raw and (
+            current is None or str(raw.get("assignee") or "") != current["assignee"]
+        )
+        if assignee not in rotation:
+            if chosen and assignee not in (ANYONE, EVERYONE):
+                who = _name(everyone, assignee) or "That person"
+                raise ValueError(
+                    f"{who} is not one of the people taking turns. Choose one of them in Who, or tick {who} "
+                    "under Take turns too."
+                )
+            # Anyone, Everyone, or the person whose turn it was is no longer in the turns: the next one's.
+            assignee = next_turn(rotation, assignee, everyone)
     return {
         "title": kit.text(
             merged.get("title"), "what needs doing", max_len=120, required=True
@@ -342,6 +429,7 @@ def _clean_task(
         "repeat_day": repeat_day,
         "repeat_every": repeat_every,
         "points": points,
+        "rotation": ",".join(rotation),
     }
 
 
@@ -377,6 +465,7 @@ def task_view(
         who = "Anyone"
     else:
         who = _name(everyone, task["assignee"]) or "Someone"
+    rotation = live_rotation(task.get("rotation"), everyone)
     return {
         "id": task["id"],
         "title": task["title"],
@@ -390,6 +479,11 @@ def task_view(
         "repeat_day": task["repeat_day"],
         "repeat_every": task["repeat_every"],
         "repeat_label": repeat_label(task),
+        "rotation": rotation,
+        "rotation_names": [_name(everyone, pid) or "Someone" for pid in rotation],
+        "next_turn": _name(everyone, next_turn(rotation, task["assignee"], everyone))
+        if rotation
+        else "",
         "points": task["points"],
         "status": task["status"],
         "done": task["status"] == "done",
@@ -440,14 +534,29 @@ def list_tasks(
     *,
     scope: str = "mine",
     status: str = "open",
+    q: str = "",
+    person: str = "",
 ) -> list[dict[str, Any]]:
+    """Tasks this person may see. ``q`` searches the title and notes; ``person`` keeps one person's tasks
+    (plus "anyone" and "everyone" tasks, which are theirs too)."""
     scope = kit.choice(scope, "the scope", ("mine", "family"), default="mine")
     status = kit.choice(status, "the status", ("open", "done", "all"), default="open")
+    q = kit.text(q, "the search", max_len=80)
+    person = kit.text(person, "the person", max_len=40)
     clauses = ["deleted_at IS NULL"]
     params: list[Any] = []
     if status != "all":
         clauses.append("status = ?")
         params.append(status)
+    if q:
+        pattern = (
+            "%" + q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_") + "%"
+        )
+        clauses.append("(title LIKE ? ESCAPE '\\' OR notes LIKE ? ESCAPE '\\')")
+        params.extend([pattern, pattern])
+    if person:
+        clauses.append("assignee IN (?, ?, ?)")
+        params.extend([person, ANYONE, EVERYONE])
     rows = kit.fetch_all(
         connection,
         f"SELECT * FROM pn_tasks WHERE {' AND '.join(clauses)} ORDER BY CASE WHEN due_date = '' THEN 1 ELSE 0 END, due_date, due_time, created_at",  # noqa: S608
@@ -475,9 +584,9 @@ def create_task(
     stamp = kit.now()
     connection.execute(
         """INSERT INTO pn_tasks (id, title, notes, assignee, created_by, due_date, due_time, repeat, repeat_days, repeat_day,
-        repeat_every, points, status, series_id, created_at, updated_at)
+        repeat_every, points, rotation, status, series_id, created_at, updated_at)
         VALUES (:id, :title, :notes, :assignee, :created_by, :due_date, :due_time, :repeat, :repeat_days, :repeat_day,
-        :repeat_every, :points, 'open', :series_id, :created_at, :updated_at)""",
+        :repeat_every, :points, :rotation, 'open', :series_id, :created_at, :updated_at)""",
         {
             **values,
             "id": task_id,
@@ -516,6 +625,15 @@ def update_task(
     if not (life.is_adult(me) or task["created_by"] == me["id"]):
         raise PermissionError("Ask an adult to change this task.")
     values = _clean_task(connection, raw, me, task)
+    if values["due_date"] != task["due_date"] and kit.fetch_one(
+        connection,
+        "SELECT id FROM pn_tasks WHERE series_id = ? AND due_date = ? AND id != ? AND deleted_at IS NULL",
+        (task["series_id"], values["due_date"], task_id),
+    ):
+        # A repeating task already has its next (or last) day there; two of the same task on one day would clash.
+        raise ValueError(
+            "This repeating task is already on that day. Choose another day."
+        )
     kit.update_row(connection, "pn_tasks", task_id, {**values, "updated_at": kit.now()})
     connection.commit()
     return task_view(
@@ -554,21 +672,34 @@ def _award(
 
 
 def _schedule_next(connection: sqlite3.Connection, task: dict[str, Any]) -> None:
+    """The next one of a repeating task. A chore done late catches up: the next one is today or later, never
+    another day already in the past. Taking turns: the next one is the next person's."""
     if (task.get("repeat") or "none") == "none" or not task["due_date"]:
         return
     upcoming = next_due(task, date.fromisoformat(task["due_date"]))
+    on = today(connection)
+    for _ in range(1000):
+        if upcoming is None or upcoming >= on:
+            break
+        upcoming = next_due(task, upcoming)
     if upcoming is None:
         return
+    everyone = people(connection)
+    turns = _rotation(task.get("rotation"), everyone, strict=False)
+    rotation = turns if len(turns) >= 2 else []
+    assignee = (
+        next_turn(turns, task["assignee"], everyone) if turns else task["assignee"]
+    )
     stamp = kit.now()
     connection.execute(
         """INSERT OR IGNORE INTO pn_tasks (id, title, notes, assignee, created_by, due_date, due_time, repeat, repeat_days, repeat_day,
-        repeat_every, points, status, series_id, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)""",
+        repeat_every, points, rotation, status, series_id, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'open', ?, ?, ?)""",
         (
             kit.new_id(),
             task["title"],
             task["notes"],
-            task["assignee"],
+            assignee,
             task["created_by"],
             upcoming.isoformat(),
             task["due_time"],
@@ -577,6 +708,7 @@ def _schedule_next(connection: sqlite3.Connection, task: dict[str, Any]) -> None
             task["repeat_day"],
             task["repeat_every"],
             task["points"],
+            ",".join(rotation),
             task["series_id"],
             stamp,
             stamp,
@@ -649,6 +781,14 @@ def undo(
     task = get_task(connection, task_id, me)
     if task["assignee"] not in (me["id"], ANYONE, EVERYONE) and not life.is_adult(me):
         raise PermissionError("This task is someone else's.")
+    if (
+        task["assignee"] != EVERYONE
+        and task["status"] == "done"
+        and task["done_by"] not in ("", me["id"])
+        and not life.is_adult(me)
+    ):
+        # A child must not take a brother's or sister's points away by un-ticking their chore.
+        raise PermissionError("Someone else did this one. Ask an adult to change it.")
     if task["assignee"] == EVERYONE:
         connection.execute(
             "DELETE FROM pn_task_done WHERE task_id = ? AND profile_id = ?",
@@ -717,14 +857,14 @@ def rewards_view(connection: sqlite3.Connection, me: dict[str, Any]) -> dict[str
     )
     request_rows = kit.fetch_all(
         connection,
-        "SELECT * FROM pn_reward_requests ORDER BY created_at DESC LIMIT 200"
+        "SELECT * FROM pn_reward_requests ORDER BY created_at DESC, rowid DESC LIMIT 200"
         if adult
-        else "SELECT * FROM pn_reward_requests WHERE profile_id = ? ORDER BY created_at DESC LIMIT 200",
+        else "SELECT * FROM pn_reward_requests WHERE profile_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 200",
         () if adult else (me["id"],),
     )
     history = kit.fetch_all(
         connection,
-        "SELECT * FROM pn_points WHERE profile_id = ? ORDER BY at DESC LIMIT 50",
+        "SELECT * FROM pn_points WHERE profile_id = ? ORDER BY at DESC, rowid DESC LIMIT 50",
         (me["id"],),
     )
     balances = (
@@ -773,6 +913,8 @@ def rewards_view(connection: sqlite3.Connection, me: dict[str, Any]) -> dict[str
             {"delta": h["delta"], "reason": h["reason"], "at": h["at"]} for h in history
         ],
         "can_manage": adult,
+        # Children learn that points can become pocket money, never how much: money is for adults.
+        "pocket_money": pocket_rate(connection) > 0,
     }
 
 
@@ -885,6 +1027,178 @@ def decide_reward(
     )
     connection.commit()
     return {"id": request_id, "status": status}
+
+
+# ---------------------------------------------------------------------------
+# pocket money: chore points an adult pays out as money (adults see the money; children see their points)
+# ---------------------------------------------------------------------------
+
+POCKET_CATEGORY = "Children"
+
+
+def pocket_rate(connection: sqlite3.Connection) -> int:
+    """What 100 points are worth, in cents (0 = pocket money is not set up)."""
+    stored = kit.get_setting(connection, APP, "pocket", {}) or {}
+    try:
+        return max(0, int(stored.get("per_100_cents") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def points_worth(points: int, per_100_cents: int) -> int:
+    """Rounded down to the cent, so a payout never pays more than the points are worth."""
+    return max(0, int(points)) * int(per_100_cents) // 100
+
+
+def set_pocket_rate(
+    connection: sqlite3.Connection, me: dict[str, Any], raw: dict[str, Any]
+) -> dict[str, Any]:
+    if not life.is_adult(me):
+        raise PermissionError("An adult sets pocket money.")
+    per_100 = kit.cents_value(
+        raw.get("per_100_cents"), "what 100 points are worth", default=0
+    )
+    if per_100 > 100_000:
+        raise ValueError("100 points can be worth at most 1,000.00.")
+    kit.set_setting(connection, APP, "pocket", {"per_100_cents": per_100})
+    connection.commit()
+    return pocket(connection, me)
+
+
+def pocket(connection: sqlite3.Connection, me: dict[str, Any]) -> dict[str, Any]:
+    """Adults: what each person's points are worth and the payouts so far."""
+    if not life.is_adult(me):
+        raise PermissionError("Pocket money is managed by an adult.")
+    rate = pocket_rate(connection)
+    everyone = people(connection)
+    rows = []
+    for pid, person in everyone.items():
+        points = balance(connection, pid)
+        spendable = max(0, points - pending_points(connection, pid))
+        rows.append(
+            {
+                "profile_id": pid,
+                "name": person["name"],
+                "emoji": person["emoji"],
+                "age_group": person["age_group"],
+                "points": points,
+                "available": spendable,
+                "worth_cents": points_worth(spendable, rate),
+            }
+        )
+    payouts = kit.fetch_all(
+        connection, "SELECT * FROM pn_payouts ORDER BY at DESC, rowid DESC LIMIT 50"
+    )
+    month = today(connection).strftime("%Y-%m")
+    return {
+        "per_100_cents": rate,
+        "currency": kit.business(connection)["currency"],
+        "people": rows,
+        "paid_this_month_cents": sum(
+            int(p["amount_cents"]) for p in payouts if p["at"][:7] == month
+        ),
+        "payouts": [
+            {
+                "id": p["id"],
+                "profile_id": p["profile_id"],
+                "name": _name(everyone, p["profile_id"]) or "Someone",
+                "points": p["points"],
+                "amount_cents": p["amount_cents"],
+                "paid_by": _name(everyone, p["paid_by"]),
+                "at": p["at"],
+            }
+            for p in payouts
+        ],
+    }
+
+
+def pay_out(
+    connection: sqlite3.Connection,
+    me: dict[str, Any],
+    profile_id: str,
+    raw: dict[str, Any],
+) -> dict[str, Any]:
+    """Turn some of a person's points into pocket money: the points are spent, the money is recorded as
+    spending in the budget (Children). Only points not already promised to a reward can be paid out."""
+    if not life.is_adult(me):
+        raise PermissionError("An adult pays out pocket money.")
+    rate = pocket_rate(connection)
+    if not rate:
+        raise ValueError("First set how much 100 points are worth.")
+    everyone = people(connection)
+    if profile_id not in everyone:
+        raise LookupError("That person was not found.")
+    spendable = max(
+        0, balance(connection, profile_id) - pending_points(connection, profile_id)
+    )
+    points = kit.integer(
+        raw.get("points"),
+        "the points",
+        default=spendable,
+        minimum=1,
+        maximum=10_000_000,
+    )
+    if points > spendable:
+        raise ValueError(
+            f"{everyone[profile_id]['name']} has {spendable} points to turn into pocket money."
+        )
+    amount = points_worth(points, rate)
+    if amount < 1:
+        raise ValueError("Those points are worth less than 0.01. Pay out more points.")
+    payout_id, stamp = kit.new_id(), kit.now()
+    name = everyone[profile_id]["name"]
+    connection.execute(
+        "INSERT INTO pn_points (id, profile_id, delta, reason, ref_type, ref_id, at) VALUES (?, ?, ?, 'Pocket money', 'payout', ?, ?)",
+        (kit.new_id(), profile_id, -points, payout_id, stamp),
+    )
+    entry_id = kit.new_id()
+    connection.execute(
+        "INSERT INTO pn_entries (id, kind, amount_cents, day, category, note, profile_id, created_at) VALUES (?, 'expense', ?, ?, ?, ?, ?, ?)",
+        (
+            entry_id,
+            amount,
+            today(connection).isoformat(),
+            POCKET_CATEGORY,
+            f"Pocket money: {name}"[:200],
+            me["id"],
+            stamp,
+        ),
+    )
+    connection.execute(
+        "INSERT INTO pn_payouts (id, profile_id, points, amount_cents, entry_id, paid_by, at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        (payout_id, profile_id, points, amount, entry_id, me["id"], stamp),
+    )
+    kit.log(
+        connection,
+        APP,
+        "pocket_money",
+        f"{name} got pocket money for {points} points",
+        ref_type="payout",
+        ref_id=payout_id,
+        actor=me["name"],
+    )
+    connection.commit()
+    return {"id": payout_id, "points": points, "amount_cents": amount, "name": name}
+
+
+def undo_payout(
+    connection: sqlite3.Connection, me: dict[str, Any], payout_id: str
+) -> None:
+    """Paid by mistake: the points come back and the spending leaves the budget."""
+    if not life.is_adult(me):
+        raise PermissionError("An adult pays out pocket money.")
+    row = kit.fetch_one(
+        connection, "SELECT * FROM pn_payouts WHERE id = ?", (payout_id,)
+    )
+    if not row:
+        raise LookupError("That payout was not found.")
+    connection.execute(
+        "DELETE FROM pn_points WHERE ref_type = 'payout' AND ref_id = ?", (payout_id,)
+    )
+    if row["entry_id"]:
+        connection.execute("DELETE FROM pn_entries WHERE id = ?", (row["entry_id"],))
+    connection.execute("DELETE FROM pn_payouts WHERE id = ?", (payout_id,))
+    connection.commit()
 
 
 # ---------------------------------------------------------------------------
@@ -1015,9 +1329,11 @@ def list_detail(
     everyone = people(connection)
     now = kit.now()
     if since:
+        # ">=": a change written later in the same second as the cursor has the same time. Changes from that
+        # second come again on the next poll, which is harmless (the page applies them by id).
         rows = kit.fetch_all(
             connection,
-            "SELECT * FROM pn_items WHERE list_id = ? AND updated_at > ? ORDER BY updated_at",
+            "SELECT * FROM pn_items WHERE list_id = ? AND updated_at >= ? ORDER BY updated_at",
             (list_id, since),
         )
         return {
@@ -1262,6 +1578,10 @@ def save_entry(
         "note": kit.text(merged.get("note"), "a note", max_len=200),
     }
     if entry_id:
+        from aira.suite.planner import selling
+
+        # Money in from a sale or a side job: the sale, the job, Aira's earnings and any goal follow.
+        selling.entry_changed(connection, current, values)
         kit.update_row(connection, "pn_entries", entry_id, values)
     else:
         entry_id = kit.new_id()
@@ -1293,6 +1613,27 @@ def delete_entry(
         connection.execute(
             "DELETE FROM pn_bill_payments WHERE entry_id = ?", (entry_id,)
         )
+    payout = kit.fetch_one(
+        connection, "SELECT id FROM pn_payouts WHERE entry_id = ?", (entry_id,)
+    )
+    if payout:  # removing pocket money from the budget gives the points back
+        undo_payout(connection, me, payout["id"])
+    sold = kit.fetch_one(
+        connection,
+        "SELECT id FROM pn_sale_items WHERE entry_id = ? AND status = 'sold'",
+        (entry_id,),
+    )
+    if sold:  # removing a sale's money puts the thing back on sale (a removed thing's money stops counting)
+        from aira.suite.planner import selling
+
+        selling.unsell(connection, me, sold["id"], removed_too=True)
+    job = kit.fetch_one(
+        connection, "SELECT id FROM pn_jobs WHERE entry_id = ?", (entry_id,)
+    )
+    if job:  # removing a side job's money takes the job off the record
+        from aira.suite.planner import selling
+
+        selling.undo_job(connection, me, job["id"])
     connection.execute("DELETE FROM pn_entries WHERE id = ?", (entry_id,))
     connection.commit()
 
@@ -1363,8 +1704,10 @@ def budget(
         )
     planned = sum(int(c["monthly_cents"]) for c in cats)
     everyone = people(connection)
+    trend = _trend(connection, month)
     return {
         "month": month,
+        "today": today(connection).isoformat(),
         "currency": kit.business(connection)["currency"],
         "income_cents": income,
         "expense_cents": expense,
@@ -1372,15 +1715,114 @@ def budget(
         "planned_cents": planned,
         "categories": rows,
         "entries": [_entry_view(e, everyone) for e in entries],
+        "trend": trend,
     }
+
+
+def _trend(
+    connection: sqlite3.Connection, month: str, months: int = 6
+) -> list[dict[str, Any]]:
+    """Money in, money spent and what was left for ``month`` and the months before it (oldest first)."""
+    year, number = (int(x) for x in month.split("-"))
+    keys = []
+    for _ in range(months):
+        keys.append(f"{year:04d}-{number:02d}")
+        year, number = (year - 1, 12) if number == 1 else (year, number - 1)
+    keys.reverse()
+    totals = {
+        (r["month"], r["kind"]): int(r["total"] or 0)
+        for r in kit.fetch_all(
+            connection,
+            "SELECT substr(day, 1, 7) AS month, kind, SUM(amount_cents) AS total FROM pn_entries "
+            "WHERE substr(day, 1, 7) BETWEEN ? AND ? GROUP BY substr(day, 1, 7), kind",
+            (keys[0], keys[-1]),
+        )
+    }
+    out = []
+    for key in keys:
+        income = totals.get((key, "income"), 0)
+        spent = totals.get((key, "expense"), 0)
+        out.append(
+            {
+                "month": key,
+                "income_cents": income,
+                "expense_cents": spent,
+                "net_cents": income - spent,
+            }
+        )
+    return out
+
+
+def _amount(cents: int) -> str:
+    """Cents as a plain number a spreadsheet adds up (1250 -> "12.50")."""
+    sign = "-" if cents < 0 else ""
+    return f"{sign}{abs(int(cents)) // 100}.{abs(int(cents)) % 100:02d}"
 
 
 def budget_csv(
     connection: sqlite3.Connection, me: dict[str, Any], month: str = ""
 ) -> bytes:
+    """The month's entries: money in is positive, money spent negative, so a spreadsheet's SUM is what is left."""
     data = budget(connection, me, month)
+    rows = [
+        {
+            "day": e["day"],
+            "type": "Money in" if e["kind"] == "income" else "Money spent",
+            "category": e["category"],
+            "amount": _amount(
+                e["amount_cents"] if e["kind"] == "income" else -e["amount_cents"]
+            ),
+            "currency": data["currency"],
+            "note": e["note"],
+            "who": e["who"],
+        }
+        for e in data["entries"]
+    ]
     return kit.csv_bytes(
-        data["entries"], ("day", "kind", "category", "amount_cents", "note", "who")
+        rows, ("day", "type", "category", "amount", "currency", "note", "who")
+    )
+
+
+def tasks_csv(
+    connection: sqlite3.Connection,
+    me: dict[str, Any],
+    *,
+    scope: str = "family",
+    status: str = "all",
+    q: str = "",
+    person: str = "",
+) -> bytes:
+    rows = [
+        {
+            "task": t["title"],
+            "who": t["assignee_name"],
+            "takes_turns": ", ".join(t["rotation_names"]),
+            "day": t["due_date"],
+            "time": t["due_time"],
+            "repeats": t["repeat_label"],
+            "points": t["points"],
+            "status": "done" if t["done"] else "to do",
+            "done_by": ", ".join(t["done_by"]),
+            "notes": t["notes"],
+        }
+        for t in list_tasks(
+            connection, me, scope=scope, status=status, q=q, person=person
+        )
+    ]
+    return kit.csv_bytes(
+        rows,
+        (
+            "task",
+            "who",
+            "takes_turns",
+            "day",
+            "time",
+            "repeats",
+            "points",
+            "status",
+            "done_by",
+            "notes",
+        ),
     )
 
 
@@ -1448,19 +1890,29 @@ def next_bill(
             if bill["due_date"] in paid
             else (bill["due_date"], date.fromisoformat(bill["due_date"]))
         )
-    created = kit.parse_time(bill["created_at"]).date()
+    created = local_day(connection, bill["created_at"])
     period = _period_of(bill, on)
     previous = _previous_period(bill, period)
     if previous and previous not in paid and created <= _bill_due(bill, previous) < on:
         return previous, _bill_due(bill, previous)
     for _ in range(36):
-        if period not in paid:
+        # A period whose day came before the bill was added is not owed (a bill added on the 27th that is due
+        # on the 5th is next due on the 5th of next month, not overdue straight away).
+        if period not in paid and _bill_due(bill, period) >= created:
             return period, _bill_due(bill, period)
         following = _next_period(bill, period)
         if following is None:
             return None
         period = following
     return None
+
+
+def _valid_period(bill: dict[str, Any], period: str) -> bool:
+    if bill["repeat"] == "once":
+        return period == bill["due_date"]
+    if bill["repeat"] == "yearly":
+        return bool(re.fullmatch(r"\d{4}", period))
+    return bool(re.fullmatch(r"\d{4}-(0[1-9]|1[0-2])", period))
 
 
 def _clean_bill(
@@ -1589,7 +2041,11 @@ def pay_bill(
     require_adult(me)
     bill = store.one(connection, "pn_bills", bill_id, "bill")
     on = today(connection)
-    period = str(raw.get("period") or "")
+    period = kit.text(raw.get("period"), "the period", max_len=10)
+    if period and not _valid_period(bill, period):
+        raise ValueError(
+            "Choose the month (like 2026-10) or year (like 2026) this payment is for."
+        )
     if not period:
         upcoming = next_bill(connection, bill, on)
         if upcoming is None:
@@ -1825,4 +2281,33 @@ def overview(connection: sqlite3.Connection, me: dict[str, Any]) -> dict[str, An
         "bills_soon": soon,
         "lists": lists(connection),
         "people": list(people(connection).values()),
+        "meals_today": _meals_today(connection),
+        "sale_requests": _sale_requests(connection) if adult else 0,
+        "earned_this_month_cents": _earned(connection) if adult else 0,
+        "currency": kit.business(connection)["currency"],
     }
+
+
+def _meals_today(connection: sqlite3.Connection) -> list[dict[str, Any]]:
+    from aira.suite.planner import meals
+
+    return [
+        {
+            "slot": m["slot"],
+            "slot_name": meals.SLOT_NAMES.get(m["slot"], m["slot"]),
+            "title": m["title"],
+        }
+        for m in meals.today_meals(connection)
+    ]
+
+
+def _earned(connection: sqlite3.Connection) -> int:
+    from aira.suite.planner import selling
+
+    return selling.earned_this_month(connection)
+
+
+def _sale_requests(connection: sqlite3.Connection) -> int:
+    from aira.suite.planner import selling
+
+    return selling.new_request_count(connection)

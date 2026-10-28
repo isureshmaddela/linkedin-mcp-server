@@ -24,6 +24,10 @@ from aira.audit import record_audit
 from aira.hosting import notify_submission
 
 PREP_STATUSES = ("draft", "needs_review", "approved", "submitted", "failed")
+# manual: the person sent Aira's packet; assisted / auto: Aira filled or sent it; outside: the person applied
+# another way (email, in person, before using Aira), which the daily limit does not pace.
+SUBMISSION_METHODS = ("manual", "assisted", "auto", "outside")
+EARLIEST_SUBMISSION_YEAR = 1990
 DEFAULT_QUESTIONS: tuple[dict[str, Any], ...] = (
     {"label": "First name", "required": True, "type": "text"},
     {"label": "Last name", "required": True, "type": "text"},
@@ -367,26 +371,19 @@ def record_submission(
     idempotency_key: str | None = None,
     submitted_at: str | None = None,
 ) -> dict[str, Any]:
-    if method not in {"manual", "assisted", "auto"}:
-        raise ValueError("Submission method must be manual, assisted or auto.")
+    if method not in SUBMISSION_METHODS:
+        raise ValueError("Submission method must be manual, assisted, auto or outside.")
     existing = connection.execute(
         "SELECT * FROM application_submissions WHERE job_id = ?", (job_id,)
     ).fetchone()
     key = (idempotency_key or f"job:{job_id}").strip()[:120]
     if existing:
         return dict(existing) | {"duplicate": True}
-    if submitted_at:
-        try:
-            when = datetime.fromisoformat(submitted_at.replace("Z", "+00:00"))
-        except ValueError as error:
-            raise ValueError(
-                "Submission time must be an ISO 8601 date-time."
-            ) from error
-        if when.tzinfo is None:
-            when = when.replace(tzinfo=timezone.utc)
-        submitted_iso = when.isoformat(timespec="minutes")
-    else:
-        submitted_iso = _now()
+    submitted_iso = (
+        parse_submitted_at(submitted_at).isoformat(timespec="minutes")
+        if submitted_at
+        else _now()
+    )
     submission_id = uuid.uuid4().hex
     try:
         connection.execute(
@@ -440,6 +437,32 @@ def record_submission(
     return result
 
 
+def parse_submitted_at(value: str, *, now: datetime | None = None) -> datetime:
+    """When an application was sent, in UTC; never in the future (a typo in the year would otherwise take a
+    place in the daily limit every day until then).
+
+    A time without a zone is read as UTC. A time up to 14 hours ahead (the widest time-zone offset: "today at
+    noon" typed in the morning, or a local time read as UTC) is taken as now; anything later is refused.
+    """
+    try:
+        when = datetime.fromisoformat(str(value).strip().replace("Z", "+00:00"))
+    except ValueError as error:
+        raise ValueError("Submission time must be an ISO 8601 date-time.") from error
+    current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    when = (
+        when.replace(tzinfo=timezone.utc)
+        if when.tzinfo is None
+        else when.astimezone(timezone.utc)
+    )
+    if when > current + timedelta(hours=14):
+        raise ValueError(
+            "The day you applied cannot be in the future. Check the date and the year."
+        )
+    if when.year < EARLIEST_SUBMISSION_YEAR:
+        raise ValueError("Check the year of the day you applied.")
+    return min(when, current)
+
+
 def get_submission(
     connection: sqlite3.Connection, job_id: str
 ) -> dict[str, Any] | None:
@@ -452,11 +475,20 @@ def get_submission(
 def submissions_today(
     connection: sqlite3.Connection, *, now: datetime | None = None
 ) -> int:
-    current = now or datetime.now(timezone.utc)
+    """Applications sent through Aira today (UTC): what the daily limit paces.
+
+    Applications the person recorded as sent another way (``method = 'outside'``) are not counted, and only
+    today's rows count (a row dated later never takes a place every day until then).
+    """
+    current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
     start = current.replace(hour=0, minute=0, second=0, microsecond=0)
     return connection.execute(
-        "SELECT COUNT(*) FROM application_submissions WHERE submitted_at >= ?",
-        (start.isoformat(timespec="minutes"),),
+        """SELECT COUNT(*) FROM application_submissions
+        WHERE submitted_at >= ? AND submitted_at < ? AND method != 'outside'""",
+        (
+            start.isoformat(timespec="minutes"),
+            (start + timedelta(days=1)).isoformat(timespec="minutes"),
+        ),
     ).fetchone()[0]
 
 

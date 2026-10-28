@@ -129,6 +129,9 @@ LIFE_PACKAGES = (
     "news",
     "social",
     "videos",
+    "journey",
+    "ai",
+    "stocks",
 )
 APP_PACKAGES = (*INDUSTRY_PACKAGES, *LIFE_PACKAGES)
 ROUTE_MODULES = (

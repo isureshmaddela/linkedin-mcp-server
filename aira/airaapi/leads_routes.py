@@ -15,9 +15,17 @@ from aira.airaapi import routes as console
 from aira.airaapi import store as airastore
 from aira.airaapi.http import Raw, Request, aira_route
 from aira.leads import calls, intent, mail, scoring, service, store
+from aira.suite.marketing import access
 
 BASE = "/api/leads"
 ID = "([0-9a-f]{32})"
+
+
+def _connect(request: Request) -> Any:
+    """The account's database, refused (403) to a child or teen household profile (customers, a paid search key)."""
+    connection = request.connect()
+    access.require_grown_up(request, connection)
+    return connection
 
 
 def _flag(value: Any, name: str) -> bool:
@@ -48,7 +56,7 @@ def _list_id(request: Request, connection: Any, *, create: bool) -> str:
 
 @aira_route("GET", f"{BASE}/overview")
 def overview(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with _connect(request) as connection:
         resolved = console._resolved(request, connection)
         data = service.overview(
             connection, serpapi_configured=resolved.configured, key=resolved.public()
@@ -59,14 +67,14 @@ def overview(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("GET", f"{BASE}/icp")
 def icp_get(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with _connect(request) as connection:
         icp = scoring.get_icp(connection)
     return 200, {"icp": icp, "empty": scoring.is_empty(icp)}
 
 
 @aira_route("POST", f"{BASE}/icp")
 def icp_save(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with _connect(request) as connection:
         outcome = service.save_icp(connection, request.payload)
     request.audit("leads.icp", "leads", "", {"rescored": outcome["rescored"]})
     return 200, outcome
@@ -79,13 +87,13 @@ def icp_save(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("GET", f"{BASE}/lists")
 def lists_get(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with _connect(request) as connection:
         return 200, {"lists": store.list_lists(connection)}
 
 
 @aira_route("POST", f"{BASE}/lists")
 def lists_create(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with _connect(request) as connection:
         created = store.create_list(
             connection,
             str(request.payload.get("name") or ""),
@@ -98,7 +106,7 @@ def lists_create(request: Request) -> tuple[int, dict[str, Any]]:
 @aira_route("PATCH", f"{BASE}/lists/{ID}")
 def lists_update(request: Request) -> tuple[int, dict[str, Any]]:
     payload = request.payload
-    with request.connect() as connection:
+    with _connect(request) as connection:
         updated = store.rename_list(
             connection,
             request.match.group(1),
@@ -110,7 +118,7 @@ def lists_update(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("DELETE", f"{BASE}/lists/{ID}")
 def lists_delete(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with _connect(request) as connection:
         removed = store.delete_list(connection, request.match.group(1))
     request.audit(
         "leads.list.delete", "lead_list", request.match.group(1), {"leads": removed}
@@ -126,7 +134,7 @@ def lists_delete(request: Request) -> tuple[int, dict[str, Any]]:
 @aira_route("POST", f"{BASE}/search")
 def search(request: Request) -> tuple[int, dict[str, Any]]:
     source = str(request.payload.get("source") or "")
-    with request.connect() as connection:
+    with _connect(request) as connection:
         client = (
             console._client(request, connection, required=False)
             if source in service.SERP_SOURCES
@@ -158,7 +166,7 @@ def search(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("GET", f"{BASE}/searches")
 def searches_list(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with _connect(request) as connection:
         return 200, {"searches": store.list_searches(connection)}
 
 
@@ -168,7 +176,7 @@ def searches_create(request: Request) -> tuple[int, dict[str, Any]]:
     params = payload.get("params")
     if not isinstance(params, dict):
         raise ValueError("Send the search form as params.")
-    with request.connect() as connection:
+    with _connect(request) as connection:
         created = store.create_search(
             connection,
             str(payload.get("name") or ""),
@@ -181,14 +189,14 @@ def searches_create(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("DELETE", f"{BASE}/searches/{ID}")
 def searches_delete(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with _connect(request) as connection:
         store.delete_search(connection, request.match.group(1))
     return 200, {"deleted": True}
 
 
 @aira_route("POST", f"{BASE}/searches/{ID}/run")
 def searches_run(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with _connect(request) as connection:
         saved = store.get_search(connection, request.match.group(1))
         payload = {
             **saved["params"],
@@ -231,7 +239,7 @@ def searches_run(request: Request) -> tuple[int, dict[str, Any]]:
 @aira_route("GET", f"{BASE}/items")
 def items_list(request: Request) -> tuple[int, dict[str, Any]]:
     min_score = request.q("min_score")
-    with request.connect() as connection:
+    with _connect(request) as connection:
         return 200, store.query_leads(
             connection,
             list_id=request.q("list_id"),
@@ -253,7 +261,7 @@ def items_save(request: Request) -> tuple[int, dict[str, Any]]:
     leads = request.payload.get("leads")
     if not isinstance(leads, list) or not leads:
         raise ValueError("Choose at least one lead to save.")
-    with request.connect() as connection:
+    with _connect(request) as connection:
         list_id = _list_id(request, connection, create=True)
         outcome = service.save_leads(
             connection, [lead for lead in leads if isinstance(lead, dict)], list_id
@@ -273,7 +281,7 @@ def items_import_csv(request: Request) -> tuple[int, dict[str, Any]]:
     text = request.payload.get("csv")
     if not isinstance(text, str) or not text.strip():
         raise ValueError("Send the CSV text as csv.")
-    with request.connect() as connection:
+    with _connect(request) as connection:
         list_id = _list_id(request, connection, create=True)
         outcome = service.import_csv(connection, text, list_id)
     request.audit(
@@ -291,7 +299,7 @@ def items_bulk(request: Request) -> tuple[int, dict[str, Any]]:
     ids = request.payload.get("ids")
     if not isinstance(ids, list):
         raise ValueError("Send the lead ids as ids.")
-    with request.connect() as connection:
+    with _connect(request) as connection:
         outcome = store.bulk_update(
             connection,
             [str(i) for i in ids],
@@ -309,13 +317,13 @@ def items_bulk(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("GET", f"{BASE}/items/{ID}")
 def item_get(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with _connect(request) as connection:
         return 200, {"lead": store.get_lead(connection, request.match.group(1))}
 
 
 @aira_route("PATCH", f"{BASE}/items/{ID}")
 def item_update(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with _connect(request) as connection:
         updated = store.update_lead(connection, request.match.group(1), request.payload)
         score, reasons = scoring.score_lead(updated, scoring.get_icp(connection))
         store.save_scoring(connection, updated["id"], score, reasons)
@@ -326,7 +334,7 @@ def item_update(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("DELETE", f"{BASE}/items/{ID}")
 def item_delete(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with _connect(request) as connection:
         store.get_lead(connection, request.match.group(1))
         store.delete_leads(connection, [request.match.group(1)])
     return 200, {"deleted": True}
@@ -334,7 +342,7 @@ def item_delete(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("POST", f"{BASE}/items/{ID}/enrich")
 def item_enrich(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with _connect(request) as connection:
         lead = service.enrich_lead(connection, request.match.group(1))
     request.audit(
         "leads.enrich",
@@ -348,7 +356,7 @@ def item_enrich(request: Request) -> tuple[int, dict[str, Any]]:
 @aira_route("POST", f"{BASE}/items/{ID}/signals")
 def item_signals(request: Request) -> tuple[int, dict[str, Any]]:
     """Recent news about the lead's company, kept as buying signals (1 search)."""
-    with request.connect() as connection:
+    with _connect(request) as connection:
         client = console._client(request, connection, required=False)
         outcome = service.news_signals(
             connection,
@@ -370,7 +378,7 @@ def item_signals(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("POST", f"{BASE}/items/{ID}/draft")
 def item_draft(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with _connect(request) as connection:
         return 200, {
             "draft": service.draft_message(
                 connection, request.match.group(1), request.payload
@@ -386,7 +394,7 @@ def item_draft(request: Request) -> tuple[int, dict[str, Any]]:
 @aira_route("GET", f"{BASE}/export")
 def export(request: Request) -> Raw:
     min_score = request.q("min_score")
-    with request.connect() as connection:
+    with _connect(request) as connection:
         body, content_type, filename = service.export(
             connection,
             fmt=request.q("format", "csv").lower(),
@@ -418,7 +426,7 @@ def _smtp_password(request: Request, connection: Any) -> str:
 
 @aira_route("GET", f"{BASE}/outreach/settings")
 def outreach_settings_get(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with _connect(request) as connection:
         settings = mail.get_settings(connection)
         has_password = bool(_smtp_password(request, connection))
         return 200, {
@@ -437,7 +445,7 @@ def outreach_settings_get(request: Request) -> tuple[int, dict[str, Any]]:
 @aira_route("POST", f"{BASE}/outreach/settings")
 def outreach_settings_save(request: Request) -> tuple[int, dict[str, Any]]:
     payload = request.payload
-    with request.connect() as connection:
+    with _connect(request) as connection:
         settings = mail.save_settings(connection, payload)
         password = payload.get("smtp_password")
         if isinstance(password, str) and password:
@@ -463,7 +471,7 @@ def outreach_settings_save(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("POST", f"{BASE}/outreach/test")
 def outreach_test(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with _connect(request) as connection:
         settings = mail.get_settings(connection)
         password = _smtp_password(request, connection)
     try:
@@ -474,7 +482,7 @@ def outreach_test(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("GET", f"{BASE}/outbox")
 def outbox_list(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with _connect(request) as connection:
         return 200, {
             "messages": mail.list_messages(
                 connection,
@@ -491,7 +499,7 @@ def outbox_drafts(request: Request) -> tuple[int, dict[str, Any]]:
     ids = request.payload.get("lead_ids")
     if not isinstance(ids, list) or not ids:
         raise ValueError("Choose at least one lead.")
-    with request.connect() as connection:
+    with _connect(request) as connection:
         outcome = service.draft_emails(
             connection, [str(i) for i in ids], request.payload
         )
@@ -507,7 +515,7 @@ def outbox_drafts(request: Request) -> tuple[int, dict[str, Any]]:
 @aira_route("PATCH", f"{BASE}/outbox/{ID}")
 def outbox_update(request: Request) -> tuple[int, dict[str, Any]]:
     payload = request.payload
-    with request.connect() as connection:
+    with _connect(request) as connection:
         message = mail.update_message(
             connection,
             request.match.group(1),
@@ -519,7 +527,7 @@ def outbox_update(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("DELETE", f"{BASE}/outbox/{ID}")
 def outbox_delete(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with _connect(request) as connection:
         mail.delete_message(connection, request.match.group(1))
     return 200, {"deleted": True}
 
@@ -529,7 +537,7 @@ def outbox_approve(request: Request) -> tuple[int, dict[str, Any]]:
     ids = request.payload.get("ids")
     if not isinstance(ids, list):
         raise ValueError("Send the message ids as ids.")
-    with request.connect() as connection:
+    with _connect(request) as connection:
         outcome = mail.approve(connection, [str(i) for i in ids])
     request.audit("leads.outbox.approve", "leads", "", outcome)
     return 200, outcome
@@ -540,14 +548,14 @@ def outbox_reject(request: Request) -> tuple[int, dict[str, Any]]:
     ids = request.payload.get("ids")
     if not isinstance(ids, list):
         raise ValueError("Send the message ids as ids.")
-    with request.connect() as connection:
+    with _connect(request) as connection:
         return 200, mail.reject(connection, [str(i) for i in ids])
 
 
 @aira_route("POST", f"{BASE}/outbox/send")
 def outbox_send(request: Request) -> tuple[int, dict[str, Any]]:
     """Send up to ten approved messages (one at a time, with a pause), within the daily cap."""
-    with request.connect() as connection:
+    with _connect(request) as connection:
         settings = mail.get_settings(connection)
         password = _smtp_password(request, connection)
         outcome = mail.send_approved(
@@ -571,13 +579,13 @@ def outbox_send(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("GET", f"{BASE}/suppressions")
 def suppressions_list(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with _connect(request) as connection:
         return 200, {"suppressions": mail.list_suppressions(connection)}
 
 
 @aira_route("POST", f"{BASE}/suppressions")
 def suppressions_add(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with _connect(request) as connection:
         entry = mail.add_suppression(
             connection,
             str(request.payload.get("value") or ""),
@@ -588,7 +596,7 @@ def suppressions_add(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("POST", f"{BASE}/suppressions/remove")
 def suppressions_remove(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with _connect(request) as connection:
         mail.remove_suppression(connection, str(request.payload.get("key") or ""))
     return 200, {"removed": True}
 
@@ -600,7 +608,7 @@ def suppressions_remove(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("GET", f"{BASE}/items/{ID}/dial")
 def item_dial(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with _connect(request) as connection:
         lead = store.get_lead(connection, request.match.group(1))
         return 200, {
             "dial": calls.dial_info(connection, lead, mail.get_settings(connection))
@@ -609,7 +617,7 @@ def item_dial(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("POST", f"{BASE}/items/{ID}/call-script")
 def item_call_script(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with _connect(request) as connection:
         return 200, {
             "script": service.make_call_script(
                 connection, request.match.group(1), request.payload
@@ -619,7 +627,7 @@ def item_call_script(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("GET", f"{BASE}/items/{ID}/calls")
 def item_calls(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with _connect(request) as connection:
         return 200, {"calls": calls.list_calls(connection, request.match.group(1))}
 
 
@@ -627,7 +635,7 @@ def item_calls(request: Request) -> tuple[int, dict[str, Any]]:
 def item_call_log(request: Request) -> tuple[int, dict[str, Any]]:
     payload = request.payload
     days = payload.get("follow_up_days")
-    with request.connect() as connection:
+    with _connect(request) as connection:
         call = calls.log_call(
             connection,
             request.match.group(1),
@@ -644,5 +652,5 @@ def item_call_log(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("GET", f"{BASE}/follow-ups")
 def follow_ups(request: Request) -> tuple[int, dict[str, Any]]:
-    with request.connect() as connection:
+    with _connect(request) as connection:
         return 200, {"follow_ups": calls.follow_ups_due(connection)}

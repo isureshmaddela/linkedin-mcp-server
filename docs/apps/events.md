@@ -40,6 +40,17 @@ Aira never takes card payments itself and never says money arrived when it did n
   outbox like everything else; nothing is sent until you approve it, unless you turned on automatic sending for that
   kind (`ticket`, `event_reminder`, `payment_request`, `event_update`, `waitlist_offer`, `post_event_thanks`).
 
+## Times, partners and earnings
+
+* Start, end, sales windows and promo expiry are typed and shown in your business's time zone (Business hub >
+  Business profile), whatever the time zone of the computer you use; customers see the same time.
+* A free order is confirmed at once and cannot be "marked paid".
+* **Partners** earn a commission on the tickets their links sell (type their code in **Sell tickets** for a sale
+  you take yourself; complimentary tickets never count). **Earnings** ranks every event and course from the top
+  earner to the lowest, with ticket and sponsor money. See [experiences.md](experiences.md).
+* Errors on the event page (a missing email, a promo code that does not apply) show next to the form they belong
+  to and clear when fixed.
+
 ## Guarantees
 
 * Two buyers can never get the same last seat: availability is re-checked inside one write transaction.

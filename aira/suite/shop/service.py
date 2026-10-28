@@ -7,8 +7,10 @@ numbered together, so two customers cannot buy the last item twice.
 
 from __future__ import annotations
 
+import secrets
 import sqlite3
 from collections.abc import Mapping, Sequence
+from datetime import date, timedelta
 from typing import Any
 
 from aira.suite import kit, public
@@ -20,6 +22,8 @@ MAX_QUANTITY = 99
 MAX_IMAGES = 8
 MAX_OPTIONS = 30
 DELIVERY_METHODS = ("pickup", "delivery")
+CODE_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+MAX_WAITING_PER_PRODUCT = 1000
 
 
 # ---------------------------------------------------------------------------
@@ -159,17 +163,23 @@ def create_product(
 
 
 def update_product(
-    connection: sqlite3.Connection, product_id: str, raw: Mapping[str, Any]
+    connection: sqlite3.Connection,
+    product_id: str,
+    raw: Mapping[str, Any],
+    *,
+    origin: str = "",
 ) -> dict[str, Any]:
     current = store.get_product(connection, product_id)
     values = product_values(raw, partial=True)
     price = values.get("price_cents", current["price_cents"])
-    if values.get("compare_at_cents") is None and "compare_at_cents" not in values:
-        if current["compare_at_cents"] and current["compare_at_cents"] <= price:
-            values["compare_at_cents"] = 0
+    compare_at = values.get("compare_at_cents", current["compare_at_cents"])
+    if compare_at and compare_at <= price:
+        values["compare_at_cents"] = 0  # a "was" price only makes sense above the price
     store.update_product(connection, product_id, values)
     connection.commit()
-    return store.get_product(connection, product_id)
+    updated = store.get_product(connection, product_id)
+    notify_restocked(connection, updated, origin=origin)
+    return updated
 
 
 def delete_product(connection: sqlite3.Connection, product_id: str) -> dict[str, Any]:
@@ -185,6 +195,10 @@ def delete_product(connection: sqlite3.Connection, product_id: str) -> dict[str,
         connection.commit()
         return {"archived": True, "deleted": False}
     connection.execute("DELETE FROM sh_products WHERE id = ?", (product["id"],))
+    # Nobody can be told it is back any more: its back-in-stock requests go too.
+    connection.execute(
+        "DELETE FROM sh_restock_alerts WHERE product_id = ?", (product["id"],)
+    )
     connection.commit()
     return {"archived": False, "deleted": True}
 
@@ -319,7 +333,7 @@ def create_discount(
     connection: sqlite3.Connection, raw: Mapping[str, Any]
 ) -> dict[str, Any]:
     values = discount_values({"active": True, **raw})
-    if store.discount_by_code(connection, values["code"]):
+    if store.code_taken(connection, values["code"]):
         raise ValueError(f"The code {values['code']} already exists.")
     discount_id = kit.new_id()
     stamp = kit.now()
@@ -354,7 +368,7 @@ def update_discount(
     if (
         "code" in values
         and values["code"] != current["code"]
-        and store.discount_by_code(connection, values["code"])
+        and store.code_taken(connection, values["code"])
     ):
         raise ValueError(f"The code {values['code']} already exists.")
     if "kind" in values and "value" not in values and values["kind"] != current["kind"]:
@@ -494,17 +508,26 @@ def price(
         )
     discount_code = (code or "").strip().upper()
     discount = None
+    referrer = None
     discount_cents = 0
     if discount_code:
         discount = store.discount_by_code(connection, discount_code)
-        discount_cents, problem = discount_amount(
-            discount,
-            subtotal,
-            today=today,
-            currency=str(profile.get("currency") or "USD"),
-        )
-        if problem:
-            raise ValueError(problem)
+        if discount is None and shop.get("referrals_enabled"):
+            referrer = store.referrer_by_code(connection, discount_code)
+        if referrer is not None:
+            # A friend's referral code: a percent off a new customer's first order (checked when it is placed).
+            discount_cents = kit.percent_of(
+                subtotal, int(shop.get("referral_friend_percent") or 0) * 100
+            )
+        else:
+            discount_cents, problem = discount_amount(
+                discount,
+                subtotal,
+                today=today,
+                currency=str(profile.get("currency") or "USD"),
+            )
+            if problem:
+                raise ValueError(problem)
     goods = subtotal - discount_cents
     delivery_cents = 0
     free_over = int(shop["free_delivery_over_cents"] or 0)
@@ -516,8 +539,10 @@ def price(
     return {
         "lines": lines,
         "subtotal_cents": subtotal,
-        "discount_code": discount_code if discount else "",
+        "discount_code": discount_code if discount or referrer else "",
         "discount_id": discount["id"] if discount else "",
+        "referral": referrer is not None,
+        "referrer_id": referrer["id"] if referrer else "",
         "discount_cents": discount_cents,
         "delivery_method": method,
         "delivery_cents": delivery_cents,
@@ -651,6 +676,8 @@ def place_order(
             business=profile,
             include_drafts=include_drafts,
         )
+        if quote["referrer_id"]:
+            _check_referral(connection, quote["referrer_id"], customer)
         for line in quote["lines"]:
             _take_stock(connection, line, -1)
         if quote["discount_id"]:
@@ -742,6 +769,14 @@ def mark_paid(
     order = store.get_order(connection, order_id)
     if order["payment_status"] == "paid":
         return order
+    if order["payment_status"] == "refunded":
+        raise ValueError(
+            "This order was refunded, so it cannot be paid again. Place a new order instead."
+        )
+    if order["fulfilment_status"] == "cancelled":
+        raise ValueError(
+            "This order is cancelled, so it cannot be marked paid. Place a new order instead."
+        )
     stamp = kit.now()
     connection.execute(
         "UPDATE sh_orders SET payment_status = 'paid', paid_at = ?, history = ?, updated_at = ? WHERE id = ?",
@@ -768,6 +803,7 @@ def mark_paid(
     )
     connection.commit()
     updated = store.get_order(connection, order_id)
+    referral_on_paid(connection, updated, origin=origin)
     link = public.link_for(connection, APP, "order", order_id)
     queue_message(
         connection,
@@ -792,6 +828,7 @@ def refund(
         (_history(order, "refunded", note or "Refunded"), stamp, order_id),
     )
     kit.void_revenue(connection, APP, "order", order_id)
+    void_referral_reward(connection, order_id)
     kit.log(
         connection,
         APP,
@@ -815,6 +852,8 @@ def mark_unpaid(connection: sqlite3.Connection, order_id: str) -> dict[str, Any]
         (_history(order, "unpaid", "Payment unmarked"), kit.now(), order_id),
     )
     kit.void_revenue(connection, APP, "order", order_id)
+    # No money arrived after all: the reward the sharer got for this order stops working (until it is paid).
+    void_referral_reward(connection, order_id)
     connection.commit()
     return store.get_order(connection, order_id)
 
@@ -847,6 +886,7 @@ def cancel(
     except BaseException:
         connection.rollback()
         raise
+    void_referral_reward(connection, order_id)
     kit.log(
         connection,
         APP,
@@ -856,6 +896,14 @@ def cancel(
         ref_id=order_id,
     )
     connection.commit()
+    if not order["restocked"]:
+        # The stock that came back may be what someone is waiting for.
+        for product_id in {line["product_id"] for line in order["items"]}:
+            row = kit.fetch_one(
+                connection, "SELECT * FROM sh_products WHERE id = ?", (product_id,)
+            )
+            if row:
+                notify_restocked(connection, store.decode_product(row))
     return store.get_order(connection, order_id)
 
 
@@ -961,6 +1009,471 @@ def customer_says_paid(
 
 
 # ---------------------------------------------------------------------------
+# back in stock: customers ask to be told, and are told once when it is back
+# ---------------------------------------------------------------------------
+
+
+def _storefront_url(connection: sqlite3.Connection, origin: Any = "") -> str:
+    link = public.link_for(connection, APP, "storefront", "shop")
+    if not link:
+        return ""
+    source = {"base_url": origin} if isinstance(origin, str) else origin
+    return kit.public_url(link["path"], source)
+
+
+def ask_restock_alert(
+    connection: sqlite3.Connection, raw: Mapping[str, Any]
+) -> dict[str, Any]:
+    """A customer on the storefront asks to be emailed when a sold-out product (or one of its options) is back."""
+    product_id = str(raw.get("product_id") or "").strip()[:64]
+    row = kit.fetch_one(
+        connection,
+        "SELECT * FROM sh_products WHERE id = ? AND status = 'active'",
+        (product_id,),
+    )
+    if row is None:
+        raise LookupError("That product is no longer in the shop.")
+    product = store.decode_product(row)
+    option = kit.text(raw.get("option"), "an option", max_len=60)
+    if product["options"]:
+        entry = find_option(product, option) if option else None
+        if entry is None:
+            raise ValueError(f"Choose which option of {product['name']} you want.")
+        option = entry["name"]
+    elif option:
+        raise ValueError(f"{product['name']} has no options.")
+    address = kit.email(raw.get("email"), "your email", required=True)
+    name = kit.text(raw.get("name"), "your name", max_len=120)
+    left = available(product, option)
+    if left is None or left > 0:
+        raise ValueError("Good news: it is in stock now. Add it to your cart.")
+    existing = kit.fetch_one(
+        connection,
+        "SELECT * FROM sh_restock_alerts WHERE product_id = ? AND option = ? AND email = ?",
+        (product_id, option, address),
+    )
+    if existing:
+        connection.execute(
+            "UPDATE sh_restock_alerts SET notified_at = NULL, name = COALESCE(NULLIF(?, ''), name) WHERE id = ?",
+            (name, existing["id"]),
+        )
+        connection.commit()
+        return {"waiting": True}
+    waiting = kit.count(
+        connection,
+        "SELECT COUNT(*) FROM sh_restock_alerts WHERE product_id = ? AND notified_at IS NULL",
+        (product_id,),
+    )
+    if waiting >= MAX_WAITING_PER_PRODUCT:
+        raise ValueError(
+            "The waiting list for this product is full. Please check back soon."
+        )
+    label = f"{product['name']}{f' ({option})' if option else ''}"
+    connection.execute(
+        "INSERT INTO sh_restock_alerts (id, product_id, option, email, name, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        (kit.new_id(), product_id, option, address, name, kit.now()),
+    )
+    kit.log(
+        connection,
+        APP,
+        "restock_alert",
+        f"{name or 'A customer'} wants {label} when it is back",
+        ref_type="product",
+        ref_id=product_id,
+        public=True,
+    )
+    connection.commit()
+    return {"waiting": True}
+
+
+def restock_alerts(
+    connection: sqlite3.Connection, product_id: str = ""
+) -> list[dict[str, Any]]:
+    where, params = "", ()
+    if product_id:
+        where, params = "WHERE a.product_id = ?", (product_id,)
+    return kit.fetch_all(
+        connection,
+        f"""SELECT a.*, p.name AS product_name FROM sh_restock_alerts a
+        JOIN sh_products p ON p.id = a.product_id {where}
+        ORDER BY a.notified_at IS NOT NULL, a.created_at LIMIT 2000""",  # noqa: S608
+        params,
+    )
+
+
+def waiting_counts(connection: sqlite3.Connection) -> dict[str, int]:
+    return {
+        row[0]: int(row[1])
+        for row in connection.execute(
+            "SELECT product_id, COUNT(*) FROM sh_restock_alerts WHERE notified_at IS NULL GROUP BY product_id"
+        )
+    }
+
+
+def delete_restock_alert(connection: sqlite3.Connection, alert_id: str) -> None:
+    kit.require_row(connection, "sh_restock_alerts", alert_id, "request")
+    connection.execute("DELETE FROM sh_restock_alerts WHERE id = ?", (alert_id,))
+    connection.commit()
+
+
+def notify_restocked(
+    connection: sqlite3.Connection, product: Mapping[str, Any], *, origin: Any = ""
+) -> int:
+    """Email everyone waiting for something that is in stock again (once each). Returns how many were told."""
+    if product.get("status") != "active":
+        return 0
+    waiting = kit.fetch_all(
+        connection,
+        "SELECT * FROM sh_restock_alerts WHERE product_id = ? AND notified_at IS NULL",
+        (product["id"],),
+    )
+    if not waiting:
+        return 0
+    shop_name = kit.business(connection).get("name") or "our shop"
+    url = _storefront_url(connection, origin)
+    told = 0
+    for alert in waiting:
+        left = available(product, alert["option"])
+        if left is not None and left <= 0:
+            continue
+        option = alert["option"]
+        label = f"{product['name']}{f' ({option})' if option else ''}"
+        first = str(alert["name"] or "").split(" ")[0] or "there"
+        few = f", but only {left} left" if left is not None and left <= 5 else ""
+        kit.queue_email(
+            connection,
+            APP,
+            "back_in_stock",
+            to=alert["email"],
+            subject=f"{label} is back - {shop_name}",
+            body="\n\n".join(
+                part
+                for part in (
+                    f"Hi {first},",
+                    f"Good news: {label} is back in stock{few}.",
+                    f"Order it here: {url}" if url else "",
+                    f"Thanks,\n{shop_name}",
+                )
+                if part
+            ),
+            ref_type="product",
+            ref_id=str(product["id"]),
+        )
+        connection.execute(
+            "UPDATE sh_restock_alerts SET notified_at = ? WHERE id = ?",
+            (kit.now(), alert["id"]),
+        )
+        told += 1
+    if told:
+        kit.log(
+            connection,
+            APP,
+            "restocked",
+            f"{product['name']} is back: {told} waiting customer{'s' if told != 1 else ''} told",
+            ref_type="product",
+            ref_id=str(product["id"]),
+        )
+    connection.commit()
+    return told
+
+
+# ---------------------------------------------------------------------------
+# share and earn: referral codes and rewards
+# ---------------------------------------------------------------------------
+
+
+def _new_code(connection: sqlite3.Connection, prefix: str) -> str:
+    stem = "".join(ch for ch in prefix.upper() if "A" <= ch <= "Z")[:8] or "FRIEND"
+    for _ in range(30):
+        code = f"{stem}-" + "".join(secrets.choice(CODE_ALPHABET) for _ in range(4))
+        if not store.code_taken(connection, code):
+            return code
+    raise RuntimeError("Could not make a code.")
+
+
+def ensure_referrer(
+    connection: sqlite3.Connection, *, email: str, name: str = ""
+) -> dict[str, Any] | None:
+    """The customer's own share code (one per email), made the first time one of their orders is paid."""
+    address = (email or "").strip().lower()
+    if not address:
+        return None
+    found = store.referrer_by_email(connection, address)
+    if found:
+        return found
+    first = (name or address).split(" ")[0].split("@")[0]
+    row = {
+        "id": kit.new_id(),
+        "code": _new_code(connection, first),
+        "email": address,
+        "name": (name or "")[:120],
+        "created_at": kit.now(),
+    }
+    connection.execute(
+        "INSERT INTO sh_referrers (id, code, email, name, created_at) VALUES (:id, :code, :email, :name, :created_at)",
+        row,
+    )
+    return row
+
+
+def backfill_referrers(connection: sqlite3.Connection) -> int:
+    """Give a share code to every customer who has a paid order but none yet (they paid before share and earn
+    was turned on). Returns how many codes were made."""
+    rows = kit.fetch_all(
+        connection,
+        """SELECT customer_email, customer_name FROM sh_orders o WHERE payment_status = 'paid' AND customer_email != ''
+        AND NOT EXISTS (SELECT 1 FROM sh_referrers r WHERE r.email = LOWER(o.customer_email))
+        ORDER BY paid_at LIMIT 5000""",
+    )
+    made = 0
+    for row in rows:
+        if not store.referrer_by_email(connection, row["customer_email"].lower()):
+            ensure_referrer(
+                connection, email=row["customer_email"], name=row["customer_name"]
+            )
+            made += 1
+    connection.commit()
+    return made
+
+
+def _check_referral(
+    connection: sqlite3.Connection, referrer_id: str, customer: Mapping[str, Any]
+) -> None:
+    """A referral code is for a new customer who is not the person who shared it."""
+    referrer = kit.fetch_one(
+        connection, "SELECT * FROM sh_referrers WHERE id = ?", (referrer_id,)
+    )
+    address = customer.get("customer_email") or ""
+    if not address:
+        raise ValueError("Enter your email address to use a friend's code.")
+    if referrer and referrer["email"] == address:
+        raise ValueError("That is your own code. Share it with friends instead.")
+    returning = kit.count(
+        connection,
+        "SELECT COUNT(*) FROM sh_orders WHERE customer_email = ? AND fulfilment_status != 'cancelled'",
+        (address,),
+    )
+    if returning:
+        raise ValueError(
+            "A friend's code is for a first order. Thanks for coming back!"
+        )
+
+
+def referral_on_paid(
+    connection: sqlite3.Connection, order: Mapping[str, Any], *, origin: Any = ""
+) -> dict[str, Any] | None:
+    """When an order is paid: the customer gets their own share code, and the friend who referred them earns a
+    one-time reward code (once per order). Returns the reward issued, if any."""
+    shop = store.settings(connection)
+    if not shop["referrals_enabled"]:
+        return None
+    if order.get("customer_email"):
+        ensure_referrer(
+            connection, email=order["customer_email"], name=order["customer_name"]
+        )
+    code = str(order.get("discount_code") or "")
+    referrer = store.referrer_by_code(connection, code) if code else None
+    reward_cents = int(shop["referral_reward_cents"] or 0)
+    withdrawn = kit.fetch_one(
+        connection,
+        "SELECT * FROM sh_referral_rewards WHERE order_id = ? AND voided_at IS NOT NULL",
+        (order["id"],),
+    )
+    if withdrawn:
+        # Marked unpaid by mistake and now paid again: the same reward code works again (sent only once).
+        connection.execute(
+            "UPDATE sh_discounts SET active = 1, updated_at = ? WHERE code = ? AND uses = 0",
+            (kit.now(), withdrawn["reward_code"]),
+        )
+        connection.execute(
+            "UPDATE sh_referral_rewards SET voided_at = NULL WHERE id = ?",
+            (withdrawn["id"],),
+        )
+        connection.commit()
+        return None
+    already = kit.count(
+        connection,
+        "SELECT COUNT(*) FROM sh_referral_rewards WHERE order_id = ?",
+        (order["id"],),
+    )
+    if referrer is None or reward_cents <= 0 or already:
+        connection.commit()
+        return None
+    reward_code = _new_code(connection, "THANKS")
+    days = int(shop["referral_reward_days"])
+    expires = (date.fromisoformat(kit.today()) + timedelta(days=days)).isoformat()
+    stamp = kit.now()
+    connection.execute(
+        """INSERT INTO sh_discounts (id, code, kind, value, min_order_cents, expires_on, usage_limit, uses, active,
+        created_at, updated_at) VALUES (?, ?, 'fixed', ?, 0, ?, 1, 0, 1, ?, ?)""",
+        (kit.new_id(), reward_code, reward_cents, expires, stamp, stamp),
+    )
+    reward = {
+        "id": kit.new_id(),
+        "referrer_id": referrer["id"],
+        "order_id": order["id"],
+        "friend_name": str(order.get("customer_name") or "")[:120],
+        "reward_code": reward_code,
+        "amount_cents": reward_cents,
+        "created_at": stamp,
+    }
+    connection.execute(
+        """INSERT INTO sh_referral_rewards (id, referrer_id, order_id, friend_name, reward_code, amount_cents,
+        created_at) VALUES (:id, :referrer_id, :order_id, :friend_name, :reward_code, :amount_cents, :created_at)""",
+        reward,
+    )
+    currency = str(order.get("currency") or kit.business(connection)["currency"])
+    worth = kit.fmt_money(reward_cents, currency)
+    friend = reward["friend_name"] or "a friend"
+    kit.log(
+        connection,
+        APP,
+        "referral_reward",
+        f"{referrer['name'] or referrer['email']} earned {worth} for bringing {friend}",
+        ref_type="order",
+        ref_id=str(order["id"]),
+        amount_cents=0,
+    )
+    shop_name = kit.business(connection).get("name") or "our shop"
+    url = _storefront_url(connection, origin)
+    first = str(referrer["name"] or "").split(" ")[0] or "there"
+    kit.queue_email(
+        connection,
+        APP,
+        "referral_reward",
+        to=referrer["email"],
+        subject=f"You earned {worth} at {shop_name}",
+        body="\n\n".join(
+            part
+            for part in (
+                f"Hi {first},",
+                f"{friend.split(' ')[0]} just shopped with us using your code. Thank you for sharing!",
+                f"Here is {worth} off your next order: use the code {reward_code} at checkout (until {expires}).",
+                f"Shop here: {url}" if url else "",
+                f"Keep sharing your code {referrer['code']}: you earn this every time a new friend orders.",
+                f"Thanks,\n{shop_name}",
+            )
+            if part
+        ),
+        ref_type="order",
+        ref_id=str(order["id"]),
+    )
+    connection.commit()
+    return reward
+
+
+def void_referral_reward(connection: sqlite3.Connection, order_id: str) -> None:
+    """A refunded or cancelled friend's order takes back the reward it earned, if it was not used yet."""
+    reward = kit.fetch_one(
+        connection,
+        "SELECT * FROM sh_referral_rewards WHERE order_id = ? AND voided_at IS NULL",
+        (order_id,),
+    )
+    if not reward:
+        return
+    used = kit.count(
+        connection,
+        "SELECT COUNT(*) FROM sh_discounts WHERE code = ? AND uses > 0",
+        (reward["reward_code"],),
+    )
+    if used:
+        return
+    connection.execute(
+        "UPDATE sh_discounts SET active = 0, updated_at = ? WHERE code = ?",
+        (kit.now(), reward["reward_code"]),
+    )
+    connection.execute(
+        "UPDATE sh_referral_rewards SET voided_at = ? WHERE id = ?",
+        (kit.now(), reward["id"]),
+    )
+
+
+def order_referral(
+    connection: sqlite3.Connection, order: Mapping[str, Any]
+) -> dict[str, Any] | None:
+    """What the customer's order page shows about sharing: their own code, once an order of theirs was paid."""
+    shop = store.settings(connection)
+    if not shop["referrals_enabled"] or order.get("payment_status") != "paid":
+        return None
+    referrer = store.referrer_by_email(
+        connection, str(order.get("customer_email") or "")
+    )
+    if not referrer and order.get("customer_email"):
+        # Paid before share and earn was turned on: their code is made now.
+        referrer = ensure_referrer(
+            connection,
+            email=str(order["customer_email"]),
+            name=str(order.get("customer_name") or ""),
+        )
+        connection.commit()
+    if not referrer:
+        return None
+    link = public.link_for(connection, APP, "storefront", "shop")
+    earned = kit.count(
+        connection,
+        "SELECT COALESCE(SUM(amount_cents), 0) FROM sh_referral_rewards WHERE referrer_id = ? AND voided_at IS NULL",
+        (referrer["id"],),
+    )
+    return {
+        "code": referrer["code"],
+        "friend_percent": int(shop["referral_friend_percent"] or 0),
+        "reward_cents": int(shop["referral_reward_cents"] or 0),
+        "storefront_path": link["path"] if link else "",
+        "earned_cents": earned,
+    }
+
+
+def referrals(connection: sqlite3.Connection) -> dict[str, Any]:
+    """The share-and-earn report: who shared, the friends they brought, what those friends paid, rewards earned."""
+    rows = kit.fetch_all(
+        connection, "SELECT * FROM sh_referrers ORDER BY created_at DESC"
+    )
+    report = []
+    totals = {"friends": 0, "sales_cents": 0, "rewards_cents": 0, "rewards_used": 0}
+    for row in rows:
+        orders = kit.fetch_all(
+            connection,
+            "SELECT total_cents, payment_status FROM sh_orders WHERE discount_code = ? AND fulfilment_status != 'cancelled'",
+            (row["code"],),
+        )
+        rewards = kit.fetch_all(
+            connection,
+            """SELECT r.amount_cents, d.uses FROM sh_referral_rewards r LEFT JOIN sh_discounts d
+            ON d.code = r.reward_code WHERE r.referrer_id = ? AND r.voided_at IS NULL""",
+            (row["id"],),
+        )
+        entry = {
+            "id": row["id"],
+            "name": row["name"],
+            "email": row["email"],
+            "code": row["code"],
+            "created_at": row["created_at"],
+            "friends": len(orders),
+            "sales_cents": sum(
+                int(o["total_cents"]) for o in orders if o["payment_status"] == "paid"
+            ),
+            "rewards": len(rewards),
+            "rewards_cents": sum(int(r["amount_cents"]) for r in rewards),
+            "rewards_used": sum(1 for r in rewards if int(r["uses"] or 0) > 0),
+        }
+        for key in ("friends", "sales_cents", "rewards_cents", "rewards_used"):
+            totals[key] += entry[key]
+        report.append(entry)
+    report.sort(
+        key=lambda item: (-item["sales_cents"], -item["friends"], item["name"].lower())
+    )
+    shop = store.settings(connection)
+    return {
+        "enabled": shop["referrals_enabled"],
+        "friend_percent": shop["referral_friend_percent"],
+        "reward_cents": shop["referral_reward_cents"],
+        "reward_days": shop["referral_reward_days"],
+        "referrers": report,
+        "totals": {**totals, "referrers": len(report)},
+    }
+
+
+# ---------------------------------------------------------------------------
 # messages to customers (the shared outbox)
 # ---------------------------------------------------------------------------
 
@@ -1019,11 +1532,29 @@ def queue_message(
         )
     elif kind == "payment_receipt":
         subject = f"Payment received for order #{number} - {name}"
+        share = order_referral(connection, order)
+        share_text = ""
+        if share:
+            code = order.get("currency") or "USD"
+            perks = []
+            if share["friend_percent"]:
+                perks.append(
+                    f"friends get {share['friend_percent']}% off their first order"
+                )
+            if share["reward_cents"]:
+                perks.append(
+                    f"you get {kit.fmt_money(share['reward_cents'], code)} off your next order for each friend who buys"
+                )
+            terms = " and ".join(perks)
+            share_text = f"Share and earn: give friends your code {share['code']}." + (
+                f" {terms[:1].upper()}{terms[1:]}." if terms else ""
+            )
         body = "\n\n".join(
             part
             for part in (
                 f"Hi {first},",
                 f"We received your payment of {kit.fmt_money(int(order['total_cents']), order['currency'])} for order #{number}. Thank you!",
+                share_text,
                 f"Your order: {link}" if link else "",
                 f"Thanks,\n{name}",
             )
@@ -1155,8 +1686,19 @@ def overview(connection: sqlite3.Connection) -> dict[str, Any]:
         for product in products
         if product["status"] == "active" and is_low(product)
     ]
+    waiting = waiting_counts(connection)
+    names = {product["id"]: product["name"] for product in products}
+    wanted = sorted(
+        (
+            {"id": pid, "name": names[pid], "waiting": count}
+            for pid, count in waiting.items()
+            if pid in names
+        ),
+        key=lambda item: (-item["waiting"], item["name"].lower()),
+    )[:5]
     return {
         "revenue": kit.revenue(connection, app=APP),
+        "wanted": wanted,
         "orders_this_month": sum(
             1 for order in live if order["created_at"][:7] == month
         ),
@@ -1249,15 +1791,21 @@ def storefront(connection: sqlite3.Connection) -> dict[str, Any]:
         },
         "categories": sorted({p["category"] for p in products if p["category"]}),
         "products": products,
-        "has_discounts": kit.count(
-            connection, "SELECT COUNT(*) FROM sh_discounts WHERE active = 1"
-        )
+        "has_discounts": shop["referrals_enabled"]
+        or kit.count(connection, "SELECT COUNT(*) FROM sh_discounts WHERE active = 1")
         > 0,
+        "referral_percent": int(shop["referral_friend_percent"] or 0)
+        if shop["referrals_enabled"]
+        else 0,
+        # a ?ref= link counts even when friends get 0% off: the sharer still earns their reward
+        "referrals": bool(shop["referrals_enabled"]),
     }
 
 
-def public_order(order: Mapping[str, Any]) -> dict[str, Any]:
-    """An order as its customer sees it from their link (no internal notes)."""
+def public_order(
+    order: Mapping[str, Any], referral: Mapping[str, Any] | None = None
+) -> dict[str, Any]:
+    """An order as its customer sees it from their link (no internal notes); ``referral`` is their share code."""
     steps = ["placed", "packed", "shipped", "delivered"]
     return {
         "number": order["number"],
@@ -1289,4 +1837,5 @@ def public_order(order: Mapping[str, Any]) -> dict[str, Any]:
             for entry in order["history"]
             if entry.get("status") in (*steps, "paid", "cancelled", "refunded")
         ],
+        "referral": dict(referral) if referral else None,
     }

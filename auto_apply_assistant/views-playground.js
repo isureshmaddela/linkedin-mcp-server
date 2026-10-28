@@ -848,6 +848,8 @@
         return;
       }
       const params = S.form.getValues();
+      // values that came from a shared link or a history row never fired onChange; running them is using them
+      rememberParams(S.engineId, params);
       const options = { ...optionValues() };
       if (fresh) options.no_cache = true;
       const cost = creditCost(params);
@@ -1143,8 +1145,9 @@
       try {
         const [saved, monitors] = await Promise.all([call(`${API}/saved`), call(`${API}/monitors`)]);
         if (!alive()) return;
-        S.saved = saved.saved || [];
-        S.monitors = monitors.monitors || [];
+        // rank-tracker keywords are run and changed from the Rank tracker tab, not saved or monitored here
+        S.saved = (saved.saved || []).filter((item) => !item.rank_tracker);
+        S.monitors = (monitors.monitors || []).filter((item) => !item.rank_tracker);
         S.savedLoaded = true;
         paintSaved();
       } catch (error) {
@@ -1273,7 +1276,7 @@
               let target = existing;
               if (!target) {
                 if (!name.value.trim()) { problem.textContent = "Give the saved search a name."; problem.hidden = false; name.focus(); return false; }
-                target = await call(`${API}/saved`, { method: "POST", body: { name: name.value.trim(), engine: engineId, params: useParams, tags: tags.value } });
+                target = await call(`${API}/saved`, { method: "POST", body: { name: name.value.trim(), engine: engineId, params: useParams, tags: tags.value, from_search_id: record && record.status === "ok" ? record.id : "" } });
               }
               let created = null;
               if (watch.get() && !existingMonitor) created = await call(`${API}/monitors`, { method: "POST", body: { saved_id: target.id, interval_minutes: Number(interval.value), notify_on_change: notify.get() } });
@@ -1294,6 +1297,8 @@
       const relabel = () => { if (!primary) return; const on = watch.get() && !existingMonitor; primary.textContent = existing ? (on ? "Start monitor" : "Done") : on ? "Save and monitor" : "Save search"; };
       watch.node.addEventListener("change", relabel);
       relabel();
+      // Enter in a text field saves, like any one-question form
+      for (const field of [name, tags]) field.addEventListener("keydown", (event) => { if (event.key === "Enter" && !event.isComposing && primary) { event.preventDefault(); primary.click(); } });
     }
 
     // ---- compare -----------------------------------------------------------------------------------------------------------

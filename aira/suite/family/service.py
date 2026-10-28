@@ -997,6 +997,7 @@ def list_dates(
                 "relation": row["relation"],
                 "year_known": bool(row["year_known"]),
                 "profile_id": "",
+                "created_by": row["created_by"],
                 "emoji": "🎂" if row["kind"] == "birthday" else "💐",
             }
         )
@@ -1051,11 +1052,374 @@ def wished_recently(
 
 
 # ---------------------------------------------------------------------------
+# the calendar as a file (phones and other calendars import it)
+# ---------------------------------------------------------------------------
+
+
+def _ics_text(value: str) -> str:
+    return (
+        str(value or "")
+        .replace("\\", "\\\\")
+        .replace(";", "\\;")
+        .replace(",", "\\,")
+        .replace("\r\n", "\\n")
+        .replace("\n", "\\n")
+    )
+
+
+def _ics_fold(line: str) -> list[str]:
+    """Lines longer than 75 bytes continue on the next line after a space (RFC 5545)."""
+    out, current = [], ""
+    for char in line:
+        if len((current + char).encode("utf-8")) > 74:
+            out.append(current)
+            current = " " + char
+        else:
+            current += char
+    out.append(current)
+    return out
+
+
+def _ics_time(value: str) -> str:
+    return kit.parse_time(value).strftime("%Y%m%dT%H%M%SZ")
+
+
+def calendar_ics(
+    connection: sqlite3.Connection, me: dict[str, Any], *, title: str = "Family"
+) -> bytes:
+    """The events this person is invited to (from a month ago on), as an iCalendar file."""
+    events = list_events(
+        connection, me, start=kit.iso(kit.utcnow() - timedelta(days=31))
+    )
+    lines = [
+        "BEGIN:VCALENDAR",
+        "VERSION:2.0",
+        "PRODID:-//Aira//Family calendar//EN",
+        "CALSCALE:GREGORIAN",
+        f"X-WR-CALNAME:{_ics_text(title)}",
+    ]
+    stamp_now = kit.utcnow().strftime("%Y%m%dT%H%M%SZ")
+    for event in events:
+        lines += [
+            "BEGIN:VEVENT",
+            f"UID:{event['id']}@family.aira",
+            f"DTSTAMP:{stamp_now}",
+        ]
+        if event["all_day"]:
+            first = kit.parse_time(event["starts_at"]).date()
+            last = kit.parse_time(event["ends_at"] or event["starts_at"]).date()
+            lines += [
+                f"DTSTART;VALUE=DATE:{first.strftime('%Y%m%d')}",
+                f"DTEND;VALUE=DATE:{(last + timedelta(days=1)).strftime('%Y%m%d')}",
+            ]
+        else:
+            lines.append(f"DTSTART:{_ics_time(event['starts_at'])}")
+            ends = event["ends_at"] or kit.iso(
+                kit.parse_time(event["starts_at"]) + timedelta(hours=1)
+            )
+            lines.append(f"DTEND:{_ics_time(ends)}")
+        lines.append(f"SUMMARY:{_ics_text(event['title'])}")
+        if event["place"]:
+            lines.append(f"LOCATION:{_ics_text(event['place'])}")
+        going = ", ".join(p["name"] for p in event["answers"]["yes"])
+        notes = "\n".join(
+            part
+            for part in (event["notes"], f"Going: {going}" if going else "")
+            if part
+        )
+        if notes:
+            lines.append(f"DESCRIPTION:{_ics_text(notes)}")
+        lines.append("END:VEVENT")
+    lines.append("END:VCALENDAR")
+    folded = [piece for line in lines for piece in _ics_fold(line)]
+    return ("\r\n".join(folded) + "\r\n").encode("utf-8")
+
+
+# ---------------------------------------------------------------------------
+# wish lists: gift ideas, with secret "I'll get this" so presents stay a surprise
+# ---------------------------------------------------------------------------
+
+
+def _may_manage_list(me: dict[str, Any], owner: dict[str, Any]) -> bool:
+    """Your own list; a grown-up also looks after a child's list."""
+    return me["id"] == owner["id"] or (
+        _adult_or_owner(me) and owner.get("age_group") == "child"
+    )
+
+
+def _wish_row(connection: sqlite3.Connection, wish_id: str) -> dict[str, Any]:
+    row = kit.fetch_one(
+        connection,
+        "SELECT * FROM fm_wishes WHERE id = ? AND removed_at IS NULL",
+        (wish_id,),
+    )
+    if not row:
+        raise LookupError("That wish was not found.")
+    return row
+
+
+def wish_view(
+    row: dict[str, Any],
+    me_id: str,
+    names: dict[str, dict[str, Any]],
+    *,
+    public_view: bool = False,
+    grown_up: bool = False,
+) -> dict[str, Any]:
+    """The owner never learns whether something was claimed (the surprise); everyone else in the app does.
+
+    The board (``public_view``) never says it either: anyone with its link opens it, the person the gift is for
+    too. A relative who tries to take a gift someone already took is told then (:func:`board_claim`)."""
+    own = row["owner_id"] == me_id
+    claimed = bool(row["claimed_by"] or row["claimed_name"])
+    view: dict[str, Any] = {
+        "id": row["id"],
+        "title": row["title"],
+        "link": row["link"],
+        "note": row["note"],
+        "received": bool(row["received_at"]),
+        "created_at": row["created_at"],
+    }
+    if public_view:
+        return view
+    view["mine"] = own
+    if not own:
+        claimer = (
+            _person(names, row["claimed_by"])["name"]
+            if row["claimed_by"]
+            else row["claimed_name"]
+        )
+        view.update(
+            {
+                "claimed": claimed,
+                "claimed_by_me": row["claimed_by"] == me_id,
+                "claimed_by": claimer if claimed else "",
+                "claimed_on_board": bool(row["claimed_name"]) and not row["claimed_by"],
+                "can_unclaim": _may_unclaim(row, me_id, grown_up),
+            }
+        )
+    return view
+
+
+def _may_unclaim(row: dict[str, Any], me_id: str, grown_up: bool) -> bool:
+    """Who takes back "I'll get this": the person who said it; a claim a visitor made on the board (it may be a
+    mistake or a joke) any grown-up of the family except the person the gift is for."""
+    if row["owner_id"] == me_id or not (row["claimed_by"] or row["claimed_name"]):
+        return False
+    if row["claimed_by"]:
+        return row["claimed_by"] == me_id
+    return grown_up
+
+
+def wish_lists(
+    connection: sqlite3.Connection, me: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """Everyone in the household with their wishes (yours first)."""
+    names = store.people(connection)
+    rows = kit.fetch_all(
+        connection,
+        "SELECT * FROM fm_wishes WHERE removed_at IS NULL ORDER BY received_at IS NOT NULL, created_at DESC",
+    )
+    by_owner: dict[str, list[dict[str, Any]]] = {}
+    for row in rows:
+        by_owner.setdefault(row["owner_id"], []).append(row)
+    out = []
+    for person in sorted(
+        names.values(), key=lambda p: (p["id"] != me["id"], p["name"].lower())
+    ):
+        mine = person["id"] == me["id"]
+        out.append(
+            {
+                "person": _person(names, person["id"]),
+                "mine": mine,
+                "can_manage": _may_manage_list(me, person),
+                "wishes": [
+                    wish_view(row, me["id"], names, grown_up=_adult_or_owner(me))
+                    for row in by_owner.get(person["id"], [])
+                ],
+            }
+        )
+    return out
+
+
+def add_wish(
+    connection: sqlite3.Connection, me: dict[str, Any], raw: dict[str, Any]
+) -> dict[str, Any]:
+    owner_id = str(raw.get("owner_id") or me["id"])
+    owner = life.public(life.get(connection, owner_id))
+    if not _may_manage_list(me, owner):
+        raise PermissionError(
+            "You can add to your own wish list (and a child's, as a grown-up)."
+        )
+    if (
+        kit.count(
+            connection,
+            "SELECT COUNT(*) FROM fm_wishes WHERE owner_id = ? AND removed_at IS NULL",
+            (owner_id,),
+        )
+        >= store.MAX_WISHES
+    ):
+        raise ValueError(f"A wish list holds at most {store.MAX_WISHES} wishes.")
+    link = kit.url(raw.get("link"), "the link")
+    if link and not link.lower().startswith("https://"):
+        raise ValueError("The link must start with https://.")
+    moment = store.stamp()
+    wish_id = kit.new_id()
+    connection.execute(
+        """INSERT INTO fm_wishes (id, owner_id, title, link, note, created_by, created_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            wish_id,
+            owner_id,
+            kit.text(
+                raw.get("title"), "what you would like", max_len=120, required=True
+            ),
+            link,
+            kit.text(raw.get("note"), "a note", max_len=300, multiline=True),
+            me["id"],
+            moment,
+            moment,
+        ),
+    )
+    connection.commit()
+    return wish_view(_wish_row(connection, wish_id), me["id"], store.people(connection))
+
+
+def update_wish(
+    connection: sqlite3.Connection,
+    me: dict[str, Any],
+    wish_id: str,
+    raw: dict[str, Any],
+) -> dict[str, Any]:
+    """The list's owner (or a grown-up for a child) edits it, or marks it received."""
+    row = _wish_row(connection, wish_id)
+    owner = life.public(life.get(connection, row["owner_id"]))
+    if not _may_manage_list(me, owner):
+        raise PermissionError("Only the person whose wish it is changes it.")
+    values: dict[str, Any] = {"updated_at": store.stamp()}
+    if "title" in raw:
+        values["title"] = kit.text(
+            raw["title"], "what you would like", max_len=120, required=True
+        )
+    if "link" in raw:
+        link = kit.url(raw["link"], "the link")
+        if link and not link.lower().startswith("https://"):
+            raise ValueError("The link must start with https://.")
+        values["link"] = link
+    if "note" in raw:
+        values["note"] = kit.text(raw["note"], "a note", max_len=300, multiline=True)
+    if "received" in raw:
+        values["received_at"] = store.stamp() if kit.flag(raw["received"]) else None
+    kit.update_row(connection, "fm_wishes", wish_id, values)
+    connection.commit()
+    return wish_view(_wish_row(connection, wish_id), me["id"], store.people(connection))
+
+
+def remove_wish(
+    connection: sqlite3.Connection, me: dict[str, Any], wish_id: str
+) -> None:
+    row = _wish_row(connection, wish_id)
+    owner = life.public(life.get(connection, row["owner_id"]))
+    if not _may_manage_list(me, owner):
+        raise PermissionError("Only the person whose wish it is removes it.")
+    kit.update_row(
+        connection,
+        "fm_wishes",
+        wish_id,
+        {"removed_at": store.stamp(), "updated_at": store.stamp()},
+    )
+    connection.commit()
+
+
+def claim_wish(
+    connection: sqlite3.Connection, me: dict[str, Any], wish_id: str, on: bool
+) -> dict[str, Any]:
+    """Say "I'll get this" (or take it back): the others see it, the person it is for never does."""
+    row = _wish_row(connection, wish_id)
+    if row["owner_id"] == me["id"]:
+        raise PermissionError("It is your own wish: let the others surprise you.")
+    if row["received_at"]:
+        raise ValueError("They already have it.")
+    if on:
+        if (row["claimed_by"] or row["claimed_name"]) and row["claimed_by"] != me["id"]:
+            raise ValueError("Someone else is already getting this.")
+        values = {
+            "claimed_by": me["id"],
+            "claimed_name": "",
+            "claimed_at": store.stamp(),
+        }
+    else:
+        if not _may_unclaim(row, me["id"], _adult_or_owner(me)):
+            raise PermissionError(
+                "Only the person who said they would get it can take that back."
+                if row["claimed_by"]
+                else "A grown-up of the family takes back a gift someone chose on the board."
+            )
+        values = {"claimed_by": "", "claimed_name": "", "claimed_at": None}
+    kit.update_row(
+        connection, "fm_wishes", wish_id, {**values, "updated_at": store.stamp()}
+    )
+    connection.commit()
+    return wish_view(
+        _wish_row(connection, wish_id),
+        me["id"],
+        store.people(connection),
+        grown_up=_adult_or_owner(me),
+    )
+
+
+def wish_counts(connection: sqlite3.Connection) -> dict[str, int]:
+    """Wishes per person not received yet (for the birthdays list: "3 gift ideas"). Claimed ones count too,
+    so the number never tells the person it is for that someone is getting them something."""
+    return {
+        str(r[0]): int(r[1])
+        for r in connection.execute(
+            "SELECT owner_id, COUNT(*) FROM fm_wishes WHERE removed_at IS NULL AND received_at IS NULL GROUP BY owner_id"
+        )
+    }
+
+
+def board_claim(
+    connection: sqlite3.Connection, payload: dict[str, Any], visitor: dict[str, Any]
+) -> dict[str, Any]:
+    """A relative on the board says they will get a gift (only when the family shows wish lists there)."""
+    if not board_settings(connection)["show_wishes"]:
+        raise LookupError("That wish was not found.")
+    row = _wish_row(connection, str(payload.get("wish_id") or ""))
+    if row["received_at"] or row["claimed_by"] or row["claimed_name"]:
+        raise ValueError(
+            "Someone already said they will get this. Thank you! Choose another gift."
+        )
+    name = kit.text(payload.get("name"), "your name", max_len=40, required=True)
+    kit.update_row(
+        connection,
+        "fm_wishes",
+        row["id"],
+        {
+            "claimed_name": name,
+            "claimed_at": store.stamp(),
+            "updated_at": store.stamp(),
+        },
+    )
+    kit.log(
+        connection,
+        APP,
+        "board_claim",
+        f"{name} will get a gift from a wish list",
+        ref_type="wish",
+        ref_id=row["id"],
+        public=True,
+    )
+    connection.commit()
+    return {"claimed": True}
+
+
+# ---------------------------------------------------------------------------
 # the public board
 # ---------------------------------------------------------------------------
 
 BOARD_REF = "family"
-BOARD_DEFAULTS = {"title": "Our family", "auto_publish": False}
+BOARD_DEFAULTS = {"title": "Our family", "auto_publish": False, "show_wishes": False}
 
 
 def board_settings(connection: sqlite3.Connection) -> dict[str, Any]:
@@ -1076,6 +1440,7 @@ def save_board_settings(
         "title": kit.text(raw.get("title", current["title"]), "a title", max_len=60)
         or BOARD_DEFAULTS["title"],
         "auto_publish": kit.flag(raw.get("auto_publish", current["auto_publish"])),
+        "show_wishes": kit.flag(raw.get("show_wishes", current["show_wishes"])),
     }
     kit.set_setting(connection, APP, "board", values)
     connection.commit()
@@ -1096,9 +1461,35 @@ def board_page(connection: sqlite3.Connection) -> dict[str, Any]:
         connection,
         "SELECT * FROM fm_posts WHERE status = 'live' ORDER BY pinned DESC, created_at DESC LIMIT 50",
     )
+    wishes = []
+    if settings["show_wishes"]:
+        rows_by_owner: dict[str, list[dict[str, Any]]] = {}
+        for row in kit.fetch_all(
+            connection,
+            "SELECT * FROM fm_wishes WHERE removed_at IS NULL AND received_at IS NULL ORDER BY created_at DESC",
+        ):
+            rows_by_owner.setdefault(row["owner_id"], []).append(row)
+        for owner_id, items in rows_by_owner.items():
+            if owner_id not in names:
+                continue
+            person = names[owner_id]
+            wishes.append(
+                {
+                    "person": {
+                        "name": person["name"],
+                        "emoji": person["emoji"],
+                        "color": person["color"],
+                    },
+                    "wishes": [
+                        wish_view(row, "", names, public_view=True)
+                        for row in items[:20]
+                    ],
+                }
+            )
     return {
         "title": settings["title"],
         "auto_publish": settings["auto_publish"],
+        "wish_lists": wishes,
         "reactions": list(store.REACTIONS),
         "people": [
             {"name": p["name"], "emoji": p["emoji"], "color": p["color"]}
@@ -1168,6 +1559,14 @@ def _when(value: str, all_day: bool) -> str:
         else moment.strftime("%a %d %b")
     )
     return label if all_day else f"{label} at {moment.strftime('%H:%M')} UTC"
+
+
+def _gift_ideas(count: int) -> str:
+    return (
+        f"{count} gift idea{'s' if count != 1 else ''} on the wish list"
+        if count
+        else ""
+    )
 
 
 def today_cards(
@@ -1246,6 +1645,7 @@ def today_cards(
         )
     dates = list_dates(connection, within=7)
     if dates:
+        ideas = wish_counts(connection)
         date_lines = []
         for entry in dates[:5]:
             if entry.get("profile_id") == me["id"]:
@@ -1273,11 +1673,20 @@ def today_cards(
                 else ""
             )
             done = wished_recently(connection, me, entry["name"])
-            line = {
+            line: dict[str, Any] = {
                 "text": f"{entry['name']}'s {'birthday' if entry['kind'] == 'birthday' else entry['kind']} {when}{turning}",
-                "sub": entry["relation"]
-                if entry["relation"] not in ("", "household")
-                else "",
+                "sub": " · ".join(
+                    part
+                    for part in (
+                        entry["relation"]
+                        if entry["relation"] not in ("", "household")
+                        else "",
+                        _gift_ideas(ideas.get(entry.get("profile_id") or "", 0))
+                        if entry["kind"] == "birthday"
+                        else "",
+                    )
+                    if part
+                ),
                 "done": done,
             }
             if not done:

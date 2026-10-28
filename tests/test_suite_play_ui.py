@@ -164,8 +164,9 @@ def test_the_games_are_playable_and_live_trivia_reaches_a_relative(browser, env)
     page.click("button:has-text('Next question')")
     page.wait_for_selector("text=Question 2 of 8")
     page.click("button:has-text('End the game')")
-    page.wait_for_selector("text=wins with")
-    visitor.wait_for_selector("text=wins!", timeout=15000)
+    # A winner is named only when someone scored (a game where everyone missed is just over).
+    page.wait_for_selector("text=/wins with|The game is over/")
+    visitor.wait_for_selector("text=/wins!|The game is over/", timeout=15000)
     assert not visitor_errors, visitor_errors
     visitor_context.close()
 

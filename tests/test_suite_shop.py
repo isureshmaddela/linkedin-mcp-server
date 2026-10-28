@@ -251,9 +251,14 @@ def test_revenue_is_recorded_once_and_voided_on_refund(db):
     assert kit.revenue(db)["total_cents"] == 0
     with pytest.raises(ValueError, match="Only a paid order"):
         service.refund(db, placed["id"])
-    service.mark_paid(db, placed["id"])
+    # the money went back: the refunded order is never paid (and counted) again
+    with pytest.raises(ValueError, match="refunded"):
+        service.mark_paid(db, placed["id"])
+    assert kit.revenue(db)["total_cents"] == 0
+    again = order(db, [{"product_id": mug["id"], "quantity": 2}])
+    service.mark_paid(db, again["id"])
     assert kit.revenue(db)["total_cents"] == 2400
-    service.mark_unpaid(db, placed["id"])
+    service.mark_unpaid(db, again["id"])
     assert kit.revenue(db)["total_cents"] == 0
 
 

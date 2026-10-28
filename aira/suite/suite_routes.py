@@ -11,10 +11,17 @@ from typing import Any
 
 from aira import apps as app_catalog
 from aira.airaapi.http import Raw, Request, aira_route
-from aira.suite import kit, public
+from aira.suite import kit, life, public
 
 BASE = "/api/suite"
 TOKEN = f"({public.TOKEN_PATTERN})"
+HUB_ADULTS = "The Business hub is for the grown-ups in your household. Ask one of them to open it."
+
+
+def _grown_up(request: Request) -> None:
+    """The hub shows money and customers: a child's or a teen's profile may not open it (single-user build)."""
+    with request.connect() as connection:
+        life.require_grown_up(request, connection, HUB_ADULTS)
 
 
 def _section_summary(connection: Any, package: str) -> dict[str, Any]:
@@ -67,11 +74,39 @@ def _apps_summary(connection: Any) -> list[dict[str, Any]]:
                 "cards": [card for section in sections for card in section["cards"]],
             }
         )
+    # Everyday apps that earn (newsletters in News, decks in Learn, paid ideas in Stocks) join when they have numbers.
+    for app in app_catalog.LIFE_APPS:
+        sections = [
+            _section_summary(connection, package)
+            for package in app.sections
+            if package in kit.SUMMARIES or package in kit.CHECKLISTS
+        ]
+        if not any(section["cards"] for section in sections):
+            continue
+        steps = [step for section in sections for step in section["checklist"]]
+        out.append(
+            {
+                "id": app.id,
+                "home": app.home,
+                "name": app.name,
+                "tagline": app.tagline,
+                "industry": app.industry,
+                "installed": True,
+                "sections": sections,
+                "checklist": steps,
+                "progress": {
+                    "done": sum(1 for step in steps if step.get("done")),
+                    "total": len(steps),
+                },
+                "cards": [card for section in sections for card in section["cards"]],
+            }
+        )
     return out
 
 
 @aira_route("GET", f"{BASE}/home")
 def home(request: Request) -> tuple[int, dict[str, Any]]:
+    _grown_up(request)
     with request.connect() as connection:
         kit.ensure_core(connection)
         profile = kit.business(connection)
@@ -104,6 +139,7 @@ def _goal(connection: Any, this_month_cents: int) -> dict[str, Any]:
 
 @aira_route("POST", f"{BASE}/goal")
 def goal_save(request: Request) -> tuple[int, dict[str, Any]]:
+    _grown_up(request)
     with request.connect() as connection:
         target = kit.integer(
             request.payload.get("monthly_cents"),
@@ -121,6 +157,7 @@ def goal_save(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("GET", f"{BASE}/business")
 def business_get(request: Request) -> tuple[int, dict[str, Any]]:
+    _grown_up(request)
     with request.connect() as connection:
         return 200, {
             "business": kit.business(connection),
@@ -130,6 +167,7 @@ def business_get(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("POST", f"{BASE}/business")
 def business_save(request: Request) -> tuple[int, dict[str, Any]]:
+    _grown_up(request)
     with request.connect() as connection:
         saved = kit.save_business(connection, request.payload)
         kit.log(
@@ -146,6 +184,7 @@ def business_save(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("GET", f"{BASE}/activity")
 def activity(request: Request) -> tuple[int, dict[str, Any]]:
+    _grown_up(request)
     with request.connect() as connection:
         rows = kit.activity(
             connection,
@@ -158,6 +197,7 @@ def activity(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("GET", f"{BASE}/revenue")
 def revenue(request: Request) -> tuple[int, dict[str, Any]] | Raw:
+    _grown_up(request)
     with request.connect() as connection:
         app = request.q("app")
         lines = kit.revenue_lines(connection, app=app)
@@ -207,12 +247,14 @@ def _email_view(request: Request, connection: Any) -> dict[str, Any]:
 
 @aira_route("GET", f"{BASE}/email")
 def email_get(request: Request) -> tuple[int, dict[str, Any]]:
+    _grown_up(request)
     with request.connect() as connection:
         return 200, _email_view(request, connection)
 
 
 @aira_route("POST", f"{BASE}/email")
 def email_save(request: Request) -> tuple[int, dict[str, Any]]:
+    _grown_up(request)
     payload = request.payload
     with request.connect() as connection:
         kit.save_email_settings(connection, payload)
@@ -238,6 +280,7 @@ def email_save(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("GET", f"{BASE}/outbox")
 def outbox_list(request: Request) -> tuple[int, dict[str, Any]]:
+    _grown_up(request)
     with request.connect() as connection:
         return 200, {
             "messages": kit.outbox(
@@ -249,6 +292,7 @@ def outbox_list(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("POST", f"{BASE}/outbox/approve")
 def outbox_approve(request: Request) -> tuple[int, dict[str, Any]]:
+    _grown_up(request)
     ids = [str(item) for item in (request.payload.get("ids") or [])]
     with request.connect() as connection:
         changed = kit.set_outbox_status(connection, ids, "approved")
@@ -257,6 +301,7 @@ def outbox_approve(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("POST", f"{BASE}/outbox/cancel")
 def outbox_cancel(request: Request) -> tuple[int, dict[str, Any]]:
+    _grown_up(request)
     ids = [str(item) for item in (request.payload.get("ids") or [])]
     with request.connect() as connection:
         changed = kit.set_outbox_status(connection, ids, "cancelled")
@@ -265,6 +310,7 @@ def outbox_cancel(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("PATCH", f"{BASE}/outbox/([0-9a-f]{{32}})")
 def outbox_edit(request: Request) -> tuple[int, dict[str, Any]]:
+    _grown_up(request)
     with request.connect() as connection:
         return 200, {
             "message": kit.edit_outbox(
@@ -275,6 +321,7 @@ def outbox_edit(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("POST", f"{BASE}/outbox/send")
 def outbox_send(request: Request) -> tuple[int, dict[str, Any]]:
+    _grown_up(request)
     with request.connect() as connection:
         password = request.secret_store.get(connection, kit.SMTP_PASSWORD_SECRET) or ""
         result = kit.send_outbox(connection, password)

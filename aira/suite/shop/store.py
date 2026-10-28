@@ -81,10 +81,44 @@ SCHEMA = (
     )""",
 )
 
+# Added later: customers asking to be told when a product is back, and the "share and earn" referral programme.
+SCHEMA_V2 = (
+    """CREATE TABLE IF NOT EXISTS sh_restock_alerts (
+        id TEXT PRIMARY KEY,
+        product_id TEXT NOT NULL,
+        option TEXT NOT NULL DEFAULT '',
+        email TEXT NOT NULL,
+        name TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        notified_at TEXT,
+        UNIQUE (product_id, option, email)
+    )""",
+    "CREATE INDEX IF NOT EXISTS sh_restock_alerts_waiting ON sh_restock_alerts (product_id, notified_at)",
+    """CREATE TABLE IF NOT EXISTS sh_referrers (
+        id TEXT PRIMARY KEY,
+        code TEXT NOT NULL UNIQUE,
+        email TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS sh_referral_rewards (
+        id TEXT PRIMARY KEY,
+        referrer_id TEXT NOT NULL,
+        order_id TEXT NOT NULL UNIQUE,
+        friend_name TEXT NOT NULL DEFAULT '',
+        reward_code TEXT NOT NULL,
+        amount_cents INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        voided_at TEXT
+    )""",
+    "CREATE INDEX IF NOT EXISTS sh_referral_rewards_referrer ON sh_referral_rewards (referrer_id)",
+)
+
 
 def ensure(connection: sqlite3.Connection) -> None:
     kit.ensure_core(connection)
     kit.ensure(connection, "shop.v1", SCHEMA)
+    kit.ensure(connection, "shop.v2", SCHEMA_V2)
 
 
 # ---------------------------------------------------------------------------
@@ -256,6 +290,39 @@ def get_discount(connection: sqlite3.Connection, discount_id: str) -> dict[str, 
     )
 
 
+def code_taken(connection: sqlite3.Connection, code: str) -> bool:
+    """A discount code and a referral code share one namespace (customers type either at checkout)."""
+    text = code.strip().upper()
+    return bool(
+        kit.count(
+            connection, "SELECT COUNT(*) FROM sh_discounts WHERE code = ?", (text,)
+        )
+        or kit.count(
+            connection, "SELECT COUNT(*) FROM sh_referrers WHERE code = ?", (text,)
+        )
+    )
+
+
+def referrer_by_code(
+    connection: sqlite3.Connection, code: str
+) -> dict[str, Any] | None:
+    return kit.fetch_one(
+        connection, "SELECT * FROM sh_referrers WHERE code = ?", (code.strip().upper(),)
+    )
+
+
+def referrer_by_email(
+    connection: sqlite3.Connection, email: str
+) -> dict[str, Any] | None:
+    if not email:
+        return None
+    return kit.fetch_one(
+        connection,
+        "SELECT * FROM sh_referrers WHERE email = ?",
+        (email.strip().lower(),),
+    )
+
+
 def discount_by_code(
     connection: sqlite3.Connection, code: str
 ) -> dict[str, Any] | None:
@@ -278,6 +345,12 @@ SETTINGS_DEFAULTS: dict[str, Any] = {
     "free_delivery_over_cents": 0,  # 0 = no free-delivery threshold
     "notice": "",  # shown at the top of the storefront
     "closed_message": "We are not taking orders right now. Please check back soon.",
+    # Share and earn: a customer who paid gets a code; a new customer using it gets a percent off their first
+    # order, and the customer who shared it gets a one-time amount off their next order when that order is paid.
+    "referrals_enabled": False,
+    "referral_friend_percent": 10,
+    "referral_reward_cents": 500,
+    "referral_reward_days": 180,
 }
 
 
@@ -318,6 +391,34 @@ def save_settings(
         )
         or SETTINGS_DEFAULTS["closed_message"],
     }
+    clean.update(
+        {
+            "referrals_enabled": kit.flag(merged["referrals_enabled"]),
+            "referral_friend_percent": kit.integer(
+                merged["referral_friend_percent"],
+                "the friend's discount",
+                default=10,
+                minimum=0,
+                maximum=90,
+            ),
+            "referral_reward_cents": amount(
+                merged["referral_reward_cents"], "the reward"
+            ),
+            "referral_reward_days": kit.integer(
+                merged["referral_reward_days"],
+                "how long a reward can be used",
+                default=180,
+                minimum=1,
+                maximum=3650,
+            ),
+        }
+    )
+    if clean["referrals_enabled"] and not (
+        clean["referral_friend_percent"] or clean["referral_reward_cents"]
+    ):
+        raise ValueError(
+            "Give friends a discount, the person who shared a reward, or both."
+        )
     if not clean["pickup_enabled"] and not clean["delivery_enabled"]:
         raise ValueError("Offer pickup, delivery or both.")
     kit.set_setting(connection, APP, "settings", clean)

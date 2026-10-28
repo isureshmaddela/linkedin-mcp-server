@@ -69,7 +69,7 @@ A plan sets seats, limits and the base price; the apps ([apps.md](apps.md), cata
 | Careers | included | included | included | included |
 | Developers (API) | included | not available | add-on, $3 per candidate seat per month | included |
 | Business apps: Sales, Marketing (with Leads), Service, Commerce, Courses & Events, Ads | included | add-on, $5 per candidate seat per month | add-on, $4 per candidate seat per month | included |
-| Everyday apps: Social, Health, Learn, Play, Planner, News, Videos | included | add-on, $2 per candidate seat per month | add-on, $1.50 per candidate seat per month | included |
+| Everyday apps: Social, Health, Learn, Play, Planner, News, Videos, Life, AI, Stocks | included | add-on, $2 per candidate seat per month | add-on, $1.50 per candidate seat per month | included |
 
 **Ads spend is separate from the seat price.** An advertiser prepays an ad balance: a top-up (`POST /api/org/ads/topup`,
 $5 to $10,000, owners and billing contacts) is one invoice item at the organization's billing provider, billed with

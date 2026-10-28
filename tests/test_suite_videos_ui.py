@@ -318,7 +318,7 @@ def test_an_ad_runs_before_a_video_and_the_creator_is_credited(browser, env):
     # the creator sees it on their Earnings page and on Today
     creator_problems: list[str] = []
     creator_page = _watching_page(creator_context, creator_problems)
-    go(creator_page, env, "videos?tab=earnings")
+    go(creator_page, env, "videos?tab=earnings&part=ads")
     creator_page.wait_for_selector(".suite-kpi:has-text('Earned today')")
     assert (
         "$0.0055"
@@ -453,7 +453,10 @@ def test_videos_and_ads_fit_a_phone_and_easy_mode(browser, env, width):
         ("videos", ".vid-card"),
         (f"videos?watch={video['id']}", ".vid-player"),
         ("videos?tab=studio", "text=Upload a video"),
-        ("videos?tab=earnings", "text=Start earning"),
+        ("videos?tab=earnings", "text=Ways to earn"),
+        ("videos?tab=earnings&part=ads", "text=Start earning"),
+        ("videos?tab=earnings&part=memberships", "text=Your membership"),
+        ("videos?tab=earnings&part=deals", "text=No brand deals yet"),
         ("ads", "text=How Ads works"),
         ("ads?tab=admin", "text=Creators' share and payouts"),
     ):

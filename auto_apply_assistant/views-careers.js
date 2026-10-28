@@ -36,6 +36,8 @@
     ["alerts", "Alerts"],
   ];
   const TAB_IDS = TABS.map(([id]) => id);
+  // The workspaces as folders in the left menu (shell.js), each with its own icon.
+  const TAB_ICONS = { jobs: "jobs", company: "careers-building", salary: "careers-coin", market: "analytics", interview: "interviews", travel: "careers-plane", learn: "learn", alerts: "careers-bell" };
   const CONFIRM_ABOVE = 3; // a report that would use more searches than this asks first
   const POSTED = [["", "Any time"], ["today", "Past day"], ["3days", "Past 3 days"], ["week", "Past week"], ["month", "Past month"]];
   const POSTED_CHIP = { today: "date_posted:today", "3days": "date_posted:3days", week: "date_posted:week", month: "date_posted:month" };
@@ -1618,6 +1620,7 @@
     const statsNode = h("div", { class: "stats cr-alert-stats" });
     const listNode = h("div", { class: "cr-alerts" });
     const newBtn = btn("New alert", { icon: "plus", kind: "", onClick: () => openAlertFor({ q: "", location: "", gl: "", radius: "", remote: false, posted: "", employment: "", chips: [], uds: "" }, () => reload()) });
+    const making = Aira.careersTakeNew(ctx.route);
     fill(content, live, setup,
       h("div", { class: "cr-intro" }, h("div", {}, h("h2", { text: "Job alerts" }), h("p", { class: "muted", text: `A job alert is a saved Google Jobs search that Aira re-runs on a schedule. It lists only jobs it has not seen before, can notify you, and can save strong matches into Jobs. Nothing is ever applied for you. Each run uses one search; you can keep up to ${limits.max_alerts || 10} alerts.` })), newBtn),
       statsNode, listNode);
@@ -1723,6 +1726,7 @@
     }
 
     paint();
+    if (making === "alert") newBtn.click(); // "+ New > Create a job alert"
     if (ctx.route.query.alert) {
       const target = listNode.querySelector(`#crAlert${CSS.escape(ctx.route.query.alert)}`);
       if (target) target.scrollIntoView({ block: "start" });
@@ -1739,18 +1743,21 @@
     const tab = TAB_IDS.includes(route.query.tab) ? route.query.tab : "jobs";
     Aira.closeDrawer(); // a drawer from the previous tab must not survive navigation
     const label = (TABS.find(([id]) => id === tab) || TABS[0])[1];
-    document.title = `${label} · Careers · Aira`;
+    document.title = `${label} · Research · Careers · Aira`;
     const crumbs = document.getElementById("crumbs");
-    if (crumbs) crumbs.replaceChildren(h("span", { text: "Careers" }), h("span", { class: "muted", "aria-hidden": "true", text: "/" }), h("span", { text: label }));
+    const sep = () => h("span", { class: "crumb-sep", "aria-hidden": "true", text: "/" });
+    if (crumbs) crumbs.replaceChildren(h("span", { class: "crumb-app", text: "Careers" }), sep(), h("span", { text: "Research" }), sep(), h("span", { text: label }));
 
     const content = h("div", { class: "cr-content", id: "crContent", role: "region", "aria-label": label, tabindex: "-1" });
-    const nav = h("nav", { class: "subnav cr-subnav", "aria-label": "Careers workspaces" });
+    const nav = h("nav", { class: "subnav cr-subnav careers-tabstrip", "aria-label": "Research workspaces" });
     const usage = h("span", { class: "cr-usage" });
     const renderNav = (alertCount) => fill(nav, ...TABS.map(([id, text]) => h("a", { href: link(id), "aria-current": id === tab ? "page" : "false" }, text, id === "alerts" && alertCount ? h("span", { class: "cr-nav-n", text: String(alertCount) }) : null)));
     renderNav(0);
+    // The menu folders are drawn once the alert count is known (the menu does not redraw for a count alone).
+    const folders = (alertCount) => Aira.careersFolders("careers", TABS.map(([id, text]) => ({ id, label: text, icon: TAB_ICONS[id], count: id === "alerts" ? alertCount : 0 })), tab);
     main.replaceChildren(
       h("div", { class: "page-head cr-head" },
-        h("div", {}, h("h1", { text: "Careers" }), h("p", { text: "Find jobs (free with Aira Jobs, or on Google), research a company, check pay and demand, prepare for the interview, plan the trip and keep learning. Google searches and the research workspaces use your own SerpApi key; everything lands in your Aira pipeline." })),
+        h("div", {}, h("h1", { text: "Research" }), h("p", { text: "Find jobs on Google or free job boards, research a company, check pay and demand, prepare for the interview, plan the trip and keep learning. Everything you keep lands in your Aira pipeline." })),
         h("div", { class: "page-actions" }, usage)),
       nav, content);
     const active = nav.querySelector('[aria-current="page"]');
@@ -1759,9 +1766,10 @@
     content.replaceChildren(ui.skeleton(5));
     let overview;
     try { overview = await api(`${BASE}/overview`); }
-    catch (error) { content.replaceChildren(problem(error, () => router.render())); return; }
+    catch (error) { folders(0); content.replaceChildren(problem(error, () => router.render())); return; }
     const fresh = (overview.alerts || []).reduce((sum, alert) => sum + (alert.new_count || 0), 0);
     renderNav(fresh);
+    folders(fresh);
     const usage30 = overview.usage_30d || {};
     const searchesUsed = ((usage30.jobs || {}).searches || 0) + ((usage30.reports || {}).searches || 0);
     if (overview.configured && searchesUsed) fill(usage, h("a", { class: "btn ghost sm", href: "#/airaapi?tab=history", title: "Careers searches in the last 30 days (they are tagged careers and intel in API history)" }, `${searchCount(searchesUsed)} in 30 days`));

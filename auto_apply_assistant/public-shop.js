@@ -1,9 +1,11 @@
 /* Aira — Shop: the pages customers open (aira/suite/shop).
  *
- * storefront: products with categories and search, a cart kept in this browser, a discount code, pickup or
- *             delivery, a checkout that the shop prices on its own server (quote, then place_order), and the
- *             confirmation with how to pay.
- * order:      one order's status, items and totals, how to pay, and "I have paid" (the shop confirms it).
+ * storefront: products with categories and search, a cart kept in this browser, a discount code (or a friend's
+ *             share code from ?ref= in the link), pickup or delivery, a checkout that the shop prices on its own
+ *             server (quote, then place_order), the confirmation with how to pay, and "Email me when it's back"
+ *             on sold-out products (notify_me).
+ * order:      one order's status, items and totals, how to pay, "I have paid" (the shop confirms it) and, once
+ *             paid, the customer's own share code ("Share and earn").
  * Built with ctx.h and text only; classes from public.css.
  */
 "use strict";
@@ -14,6 +16,9 @@
   const storageKey = (token) => `aira.shop.cart.${token.slice(0, 16)}`;
   const loadCart = (token) => { try { const raw = localStorage.getItem(storageKey(token)); const value = raw ? JSON.parse(raw) : []; return Array.isArray(value) ? value : []; } catch { return []; } };
   const saveCart = (token, cart) => { try { localStorage.setItem(storageKey(token), JSON.stringify(cart)); } catch { /* storage unavailable: the cart lives for this visit */ } };
+  // Small inputs that sit in a row (quantity, a code) look like the page's other fields.
+  const INPUT = { minHeight: "42px", padding: "8px 10px", border: "1px solid var(--pub-line)", borderRadius: "8px", background: "var(--pub-surface)", color: "var(--pub-ink)", font: "inherit" };
+  const refCode = () => { try { return (new URLSearchParams(location.search).get("ref") || "").trim().toUpperCase().replace(/[^A-Z0-9_-]/g, "").slice(0, 30); } catch { return ""; } };
 
   P.register("shop", "storefront", (root, data, ctx) => {
     const { h, money } = ctx;
@@ -24,7 +29,9 @@
     let category = "";
     let text = "";
     let quote = null;
-    let discount = "";
+    // Share and earn is on: a ?ref= link adds the friend's code (even at 0% off, so the sharer still earns).
+    const friendCode = page.referrals || page.referral_percent ? refCode() : "";
+    let discount = friendCode;
     let method = page.pickup.enabled ? "pickup" : "delivery";
 
     const grid = h("div", { class: "pub-grid" });
@@ -34,6 +41,7 @@
       data.business.tagline ? h("p", { class: "pub-muted", text: data.business.tagline }) : null,
       page.notice ? h("p", { class: "pub-notice", text: page.notice }) : null,
       !page.open ? h("p", { class: "pub-notice bad", text: page.closed_message }) : null,
+      friendCode ? h("p", { class: "pub-notice good", text: page.referral_percent ? `A friend shared this shop with you: ${page.referral_percent}% off your first order. Their code ${friendCode} is added at checkout.` : `A friend shared this shop with you. Their code ${friendCode} is added at checkout, so they get a thank-you when you order.` }) : null,
       page.delivery.enabled && page.delivery.free_over_cents ? h("p", { class: "pub-muted", text: `Free delivery on orders over ${money(page.delivery.free_over_cents)}.` }) : null);
 
     const search = h("input", { type: "search", placeholder: "Search products", "aria-label": "Search products" });
@@ -56,11 +64,30 @@
       cartBox.scrollIntoView({ behavior: "smooth", block: "nearest" });
     }
 
+    // Sold out (or one option sold out): the customer leaves an email and hears when it is back.
+    function notifyForm(product) {
+      const soldOut = (product.options || []).filter((o) => !o.available);
+      if (product.in_stock && !soldOut.length) return null;
+      const box = h("div", { class: "pub-form", hidden: true });
+      const toggle = h("button", { type: "button", class: "pub-btn ghost", "aria-expanded": "false", text: product.in_stock ? "Option sold out? Email me when it's back" : "Email me when it's back" });
+      toggle.addEventListener("click", () => { box.hidden = !box.hidden; toggle.setAttribute("aria-expanded", String(!box.hidden)); if (!box.hidden) email.focus(); });
+      const email = h("input", { type: "email", autocomplete: "email", required: true });
+      const option = soldOut.length ? h("select", {}, ...soldOut.map((o) => h("option", { value: o.name, text: o.name }))) : null;
+      const send = ctx.button("Tell me", async () => {
+        if (!email.value.trim()) { email.focus(); throw new Error("Enter your email address."); }
+        await ctx.action("notify_me", { product_id: product.id, option: option ? option.value : "", email: email.value.trim() });
+        box.replaceChildren(h("p", { class: "pub-notice good", role: "status", text: "Thanks! We will email you when it is back." }));
+        toggle.hidden = true;
+      });
+      box.append(...[option ? ctx.field("Which one", option) : null, ctx.field("Your email", email, "Only used to tell you it is back."), h("div", { class: "pub-btn-row" }, send)].filter(Boolean));
+      return h("div", {}, toggle, box);
+    }
+
     function card(product) {
       const options = product.options || [];
       const select = options.length ? h("select", { "aria-label": `Option for ${product.name}` }, ...options.map((o) => h("option", { value: o.name, disabled: !o.available, text: `${o.name}${o.price_cents !== product.price_cents ? ` · ${money(o.price_cents)}` : ""}${!o.available ? " (sold out)" : o.left ? ` (only ${o.left} left)` : ""}` }))) : null;
       if (select) { const firstAvailable = options.find((o) => o.available); if (firstAvailable) select.value = firstAvailable.name; }
-      const quantity = h("input", { type: "number", min: 1, max: 99, value: 1, "aria-label": `Quantity of ${product.name}`, style: { width: "72px" } });
+      const quantity = h("input", { type: "number", min: 1, max: 99, value: 1, "aria-label": `Quantity of ${product.name}`, style: { ...INPUT, width: "76px" } });
       const details = h("p", { class: "pub-pre", text: product.description || "", hidden: true });
       const more = product.description ? h("button", { type: "button", class: "pub-btn ghost", text: "Details" }) : null;
       if (more) more.addEventListener("click", () => { details.hidden = !details.hidden; more.textContent = details.hidden ? "Details" : "Hide details"; });
@@ -72,7 +99,8 @@
         h("div", {}, h("span", { class: "pub-price", text: money(product.price_cents) }), product.compare_at_cents ? h("s", { class: "pub-muted", text: ` ${money(product.compare_at_cents)}` }) : null),
         product.left ? h("span", { class: "pub-badge bad", text: `Only ${product.left} left` }) : null,
         select ? ctx.field("Option", select) : null,
-        h("div", { class: "pub-btn-row" }, quantity, add),
+        h("div", { class: "pub-btn-row" }, product.in_stock ? quantity : null, add),
+        notifyForm(product),
         more, details);
     }
 
@@ -100,7 +128,7 @@
       const row = (label, value, strong) => h("tr", {}, h("td", { text: label }), h("td", { class: `num${strong ? " pub-total" : ""}`, text: value }));
       totals.replaceChildren(h("table", { class: "pub-table" }, h("tbody", {},
         row("Subtotal", money(quote.subtotal_cents)),
-        quote.discount_cents ? row(`Discount (${quote.discount_code})`, `-${money(quote.discount_cents)}`) : null,
+        quote.discount_cents ? row(`${quote.referral ? "Friend's code" : "Discount"} (${quote.discount_code})`, `-${money(quote.discount_cents)}`) : quote.referral ? row(`Friend's code (${quote.discount_code})`, "Added") : null,
         quote.delivery_method === "delivery" ? row("Delivery", quote.delivery_cents ? money(quote.delivery_cents) : "Free") : null,
         quote.tax_cents ? row(quote.tax_label, money(quote.tax_cents)) : null,
         row("Total", money(quote.total_cents), true))));
@@ -111,7 +139,7 @@
     const phone = h("input", { type: "tel", autocomplete: "tel" });
     const address = h("textarea", { autocomplete: "street-address", rows: 3 });
     const note = h("textarea", { rows: 2, placeholder: "Anything the shop should know" });
-    const code = h("input", { placeholder: "Discount code", "aria-label": "Discount code", style: { maxWidth: "180px" } });
+    const code = h("input", { placeholder: "Discount code", "aria-label": "Discount code", value: discount, style: { ...INPUT, flex: "1 1 160px", maxWidth: "240px" } });
     const addressField = ctx.field("Delivery address", address);
 
     function renderCart() {
@@ -124,7 +152,7 @@
         const product = byId[line.product_id];
         const option = (product.options || []).find((o) => o.name === line.option);
         const unit = option ? option.price_cents : product.price_cents;
-        const qty = h("input", { type: "number", min: 1, max: 99, value: line.quantity, "aria-label": `Quantity of ${product.name}`, style: { width: "64px" } });
+        const qty = h("input", { type: "number", min: 1, max: 99, value: line.quantity, "aria-label": `Quantity of ${product.name}`, style: { ...INPUT, width: "70px" } });
         qty.addEventListener("change", () => { line.quantity = Math.max(1, Math.min(99, Number(qty.value) || 1)); saveCart(ctx.token, cart); renderCart(); });
         const remove = h("button", { type: "button", class: "pub-btn ghost", text: "Remove" });
         remove.addEventListener("click", () => { cart.splice(index, 1); saveCart(ctx.token, cart); renderCart(); });
@@ -151,7 +179,8 @@
         confirmation(result);
       });
       place.disabled = !page.open;
-      cartBox.replaceChildren(
+      // Native replaceChildren would print "null" for a missing part: keep only real nodes.
+      cartBox.replaceChildren(...[
         h("h2", { text: `Your cart (${cart.reduce((sum, line) => sum + line.quantity, 0)})` }),
         h("table", { class: "pub-table" }, h("tbody", {}, ...lines)),
         page.has_discounts ? h("div", { class: "pub-btn-row" }, code, apply) : null,
@@ -159,20 +188,22 @@
         methods,
         totals, totalsError,
         h("div", { class: "pub-form" }, ctx.field("Your name", name), ctx.field("Email", email, "For your order confirmation"), ctx.field("Phone", phone), addressField, ctx.field("Note", note)),
-        h("div", { class: "pub-btn-row" }, place));
+        h("div", { class: "pub-btn-row" }, place),
+      ].filter(Boolean));
       requote();
     }
 
     function confirmation(result) {
       const order = result.order;
-      root.replaceChildren(
+      root.replaceChildren(...[
         h("section", { class: "pub-card" },
           h("p", { class: "pub-badge good", text: "Order placed" }),
           h("h1", { text: `Thank you, ${order.customer_name.split(" ")[0]}!` }),
           h("p", { text: `Your order number is #${order.number}. Total ${money(order.total_cents, order.currency)}.` }),
           h("p", { class: "pub-muted", text: order.delivery_method === "delivery" ? "We will let you know when it ships." : "We will let you know when it is ready to pick up." }),
           h("div", { class: "pub-btn-row" }, h("a", { class: "pub-btn secondary", href: result.link, text: "See your order" }), ctx.button("Copy order link", () => ctx.copy(`${location.origin}${result.link}`), "ghost"))),
-        ctx.paymentBox(order.total_cents, `#${order.number}`));
+        order.total_cents ? ctx.paymentBox(order.total_cents, `#${order.number}`) : null,
+      ].filter(Boolean));
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
 
@@ -218,5 +249,31 @@
       if (order.customer_says_paid) root.append(h("p", { class: "pub-notice", text: "Thanks! The shop will confirm your payment shortly." }));
       else root.append(h("section", { class: "pub-card" }, h("h2", { text: "Already paid?" }), h("p", { class: "pub-muted", text: "Let the shop know so they can check and confirm it." }), ctx.field("Reference", reference), h("div", { class: "pub-btn-row" }, ctx.button("I have paid", async () => { await ctx.action("notify_paid", { reference: reference.value }); await ctx.reload(); }))));
     }
+    if (order.referral) root.append(shareCard(ctx, order.referral));
   });
+
+  // Share and earn: the customer's own code, a link that adds it for friends, and what they have earned.
+  function shareCard(ctx, share) {
+    const { h, money } = ctx;
+    const url = share.storefront_path ? `${location.origin}${share.storefront_path}?ref=${encodeURIComponent(share.code)}` : "";
+    const joined = [
+      share.friend_percent ? `friends get ${share.friend_percent}% off their first order` : "",
+      share.reward_cents ? `you get ${money(share.reward_cents)} off your next order for each friend who buys` : "",
+    ].filter(Boolean).join(", and ");
+    const perks = joined ? `${joined[0].toUpperCase()}${joined.slice(1)}` : "";
+    const shop = (ctx.business && ctx.business.name) || "this shop";
+    const invite = share.friend_percent ? `Get ${share.friend_percent}% off your first order at ${shop} with my code ${share.code}.` : `Have a look at ${shop}. My code is ${share.code}.`;
+    const actions = [
+      url ? ctx.button("Copy your link", () => ctx.copy(url)) : null,
+      ctx.button("Copy your code", () => ctx.copy(share.code), url ? "ghost" : ""),
+      url && navigator.share ? ctx.button("Share", async () => { try { await navigator.share({ title: shop, text: invite, url }); } catch { /* the person closed the share sheet */ } }, "secondary") : null,
+    ].filter(Boolean);
+    return h("section", { class: "pub-card" },
+      h("h2", { text: "Share and earn" }),
+      perks ? h("p", { text: `${perks}.` }) : null,
+      h("p", {}, "Your code ", h("span", { class: "pub-badge", text: share.code })),
+      url ? h("p", { class: "pub-muted", style: { overflowWrap: "anywhere" }, text: url }) : null,
+      h("div", { class: "pub-btn-row" }, ...actions),
+      share.earned_cents ? h("p", { class: "pub-notice good", text: `You have earned ${money(share.earned_cents)} so far. Thank you for sharing!` }) : null);
+  }
 })();

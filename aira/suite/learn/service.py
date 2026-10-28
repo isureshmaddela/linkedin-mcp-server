@@ -397,6 +397,9 @@ def _card_view(row: dict[str, Any], is_new: bool) -> dict[str, Any]:
     }
 
 
+card_view = _card_view
+
+
 def counts(
     connection: sqlite3.Connection,
     profile: dict[str, Any],
@@ -498,10 +501,17 @@ def answer(
     seconds: int = 0,
     now: datetime | None = None,
 ) -> dict[str, Any]:
+    """Grade one card. A card that is due (or new) is scheduled by SM-2.
+
+    A card answered before it is due (extra practice: "Practise my hardest cards") is practice, not a review: a right
+    answer leaves its schedule as it was (practising early must not push it months away), a miss sends it back for
+    today like any miss. Practice counts toward XP and the goal once per card a day, so repeating it earns nothing.
+    """
     grade = kit.choice(grade, "the answer", GRADES)
     found = store.card(connection, card_id)
     store.visible_deck(connection, profile, found["deck_id"])
     today = today_of(connection, now)
+    day = today.isoformat()
     state = kit.fetch_one(
         connection,
         "SELECT * FROM ln_progress WHERE profile_id = ? AND card_id = ?",
@@ -512,29 +522,41 @@ def answer(
         raise ValueError(
             "That's all the new cards for today. Come back tomorrow for more!"
         )
-    nxt = schedule(state or {}, grade, today)
-    connection.execute(
-        """INSERT INTO ln_progress (profile_id, card_id, deck_id, ease, interval_days, reps, lapses, due, last_reviewed_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(profile_id, card_id) DO UPDATE SET ease = excluded.ease, interval_days = excluded.interval_days,
-        reps = excluded.reps, lapses = excluded.lapses, due = excluded.due, last_reviewed_at = excluded.last_reviewed_at""",
-        (
-            profile["id"],
-            card_id,
-            found["deck_id"],
-            nxt["ease"],
-            nxt["interval_days"],
-            nxt["reps"],
-            nxt["lapses"],
-            nxt["due"],
-            kit.now(),
-        ),
+    practice = state is not None and str(state["due"]) > day
+    counted = not practice or not kit.count(
+        connection,
+        "SELECT COUNT(*) FROM ln_reviews WHERE profile_id = ? AND card_id = ? AND day = ?",
+        (profile["id"], card_id, day),
     )
+    if practice and grade != "again":
+        assert state is not None
+        nxt = {
+            "interval_days": int(state["interval_days"]),
+            "due": str(state["due"]),
+        }
+    else:
+        nxt = schedule(state or {}, grade, today)
+        connection.execute(
+            """INSERT INTO ln_progress (profile_id, card_id, deck_id, ease, interval_days, reps, lapses, due, last_reviewed_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ON CONFLICT(profile_id, card_id) DO UPDATE SET ease = excluded.ease, interval_days = excluded.interval_days,
+            reps = excluded.reps, lapses = excluded.lapses, due = excluded.due, last_reviewed_at = excluded.last_reviewed_at""",
+            (
+                profile["id"],
+                card_id,
+                found["deck_id"],
+                nxt["ease"],
+                nxt["interval_days"],
+                nxt["reps"],
+                nxt["lapses"],
+                nxt["due"],
+                kit.now(),
+            ),
+        )
     spent = max(0, min(int(seconds or 0), SECONDS_CAP))
-    day = today.isoformat()
     connection.execute(
-        """INSERT INTO ln_reviews (id, profile_id, card_id, deck_id, grade, was_new, seconds, day, at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        """INSERT INTO ln_reviews (id, profile_id, card_id, deck_id, grade, was_new, seconds, day, at, practice)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             kit.new_id(),
             profile["id"],
@@ -545,23 +567,28 @@ def answer(
             spent,
             day,
             kit.now(),
+            1 if practice else 0,
         ),
     )
     store.touch_day(connection, profile["id"], day)
-    connection.execute(
-        "UPDATE ln_days SET cards = cards + 1, new_cards = new_cards + ?, seconds = seconds + ? WHERE profile_id = ? AND day = ?",
-        (1 if was_new else 0, spent, profile["id"], day),
-    )
-    xp = XP_FOR[grade] + (XP_NEW_CARD if was_new else 0)
-    store.add_xp(connection, profile["id"], day, xp)
+    xp = 0
+    if counted:
+        connection.execute(
+            "UPDATE ln_days SET cards = cards + 1, new_cards = new_cards + ?, seconds = seconds + ? WHERE profile_id = ? AND day = ?",
+            (1 if was_new else 0, spent, profile["id"], day),
+        )
+        xp = XP_FOR[grade] + (XP_NEW_CARD if was_new else 0)
+        store.add_xp(connection, profile["id"], day, xp)
     result = _finish(connection, profile, today, xp)
+    days_left = (date.fromisoformat(str(nxt["due"])) - today).days
     return {
         **result,
         "card_id": card_id,
         "grade": grade,
+        "practice": practice,
         "interval_days": nxt["interval_days"],
         "due": nxt["due"],
-        "when": when_label(nxt["interval_days"]),
+        "when": when_label(max(0, days_left)),
     }
 
 
@@ -762,6 +789,54 @@ def generate_deck(
     award_badges(connection, profile, today_of(connection, now))
     connection.commit()
     return {**deck, "note": note, "cards_added": len(cards)}
+
+
+def copy_deck(
+    connection: sqlite3.Connection, profile: dict[str, Any], deck_id: str
+) -> dict[str, Any]:
+    """This person's own copy of a deck they may study (a household member's shared deck), to change freely.
+    The copy starts with fresh progress. A deck someone else is selling is theirs to sell: it is studied here, not
+    copied (a copy could be sold under it), and a copy of another person's deck cannot be put on sale."""
+    found = store.visible_deck(connection, profile, deck_id)
+    if found["owner_id"] != profile["id"] and int(found.get("price_cents") or 0) > 0:
+        raise PermissionError(
+            f"{life.name_of(connection, found['owner_id'])} sells this deck, so it cannot be copied. "
+            "You can still study it here."
+        )
+    copy = store.create_deck(
+        connection,
+        profile["id"],
+        {
+            "title": f"{found['title']} (my copy)"[:80],
+            "description": found["description"],
+            "emoji": found["emoji"],
+            "age_group": found["age_group"],
+        },
+        source="copy",
+    )
+    # Whose deck it first was (a copy of a copy keeps the first owner).
+    origin = (
+        found.get("copied_from")
+        if found.get("source") == "copy" and found.get("copied_from")
+        else found["owner_id"]
+    )
+    connection.execute(
+        "UPDATE ln_decks SET copied_from = ? WHERE id = ?", (origin, copy["id"])
+    )
+    copy["copied_from"] = origin
+    for row in store.cards(connection, found["id"]):
+        store.add_card(connection, copy["id"], row)
+    kit.log(
+        connection,
+        APP,
+        "deck",
+        f"{profile['name']} made a copy of {found['title']}",
+        ref_type="deck",
+        ref_id=copy["id"],
+    )
+    award_badges(connection, profile, today_of(connection))
+    connection.commit()
+    return copy
 
 
 def delete_deck(
@@ -1240,6 +1315,36 @@ def finish_book(
             connection, APP, "book", f"{profile['name']} finished {found['title']} 📖"
         )
     connection.commit()
+    return book(connection, profile, book_id)
+
+
+def update_book(
+    connection: sqlite3.Connection,
+    profile: dict[str, Any],
+    book_id: str,
+    raw: dict[str, Any],
+) -> dict[str, Any]:
+    """Change a book's title or author, and/or mark it finished (``finished: true``) or back to reading."""
+    found = book(connection, profile, book_id)
+    if "title" in raw or "author" in raw:
+        connection.execute(
+            "UPDATE ln_books SET title = ?, author = ? WHERE id = ?",
+            (
+                kit.text(
+                    raw.get("title", found["title"]),
+                    "the book's title",
+                    max_len=150,
+                    required=True,
+                ),
+                kit.text(raw.get("author", found["author"]), "the author", max_len=100),
+                book_id,
+            ),
+        )
+        connection.commit()
+    if "finished" in raw:
+        finished = kit.flag(raw.get("finished"))
+        if finished != (found["status"] == "finished"):
+            return finish_book(connection, profile, book_id, finished)
     return book(connection, profile, book_id)
 
 

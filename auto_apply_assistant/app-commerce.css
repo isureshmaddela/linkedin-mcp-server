@@ -1,0 +1,51 @@
+/* Commerce (Shop and Bookings) only. Loaded on every page: every selector is scoped to Commerce's own cm-* classes. */
+
+/* Search boxes and filters sit in one row on a wide screen and wrap on a phone. */
+.cm-filters { align-items: flex-end; }
+.cm-filters > input, .cm-filters > select { width: auto; flex: 1 1 170px; max-width: 260px; }
+.cm-filters > input[type="search"] { flex: 2 1 240px; max-width: 420px; }
+.cm-filters > .field { flex: 0 1 170px; }
+
+/* A line of a new order: product, option, quantity, remove. */
+.cm-line > select { width: auto; flex: 2 1 200px; }
+.cm-line > select + select { flex: 1 1 120px; }
+.cm-line > input[type="number"] { width: 84px; flex: 0 0 84px; }
+
+.cm-lead { max-width: 78ch; margin: 0; }
+.cm-dot { display: inline-block; width: 10px; height: 10px; border-radius: 50%; margin-right: 6px; vertical-align: middle; }
+
+@media (max-width: 560px) {
+  .cm-filters > input, .cm-filters > select, .cm-filters > input[type="search"] { max-width: none; flex-basis: 100%; }
+  .cm-filters > .field { flex: 1 1 140px; }
+}
+.cm-stack { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+
+/* Wide tables on a phone: the key columns stay, the rest wait for a wider screen (cm-hide-<n> names a column). */
+@media (max-width: 560px) {
+  .cm-hide-2 :is(th, td):nth-child(2), .cm-hide-3 :is(th, td):nth-child(3), .cm-hide-4 :is(th, td):nth-child(4),
+  .cm-hide-5 :is(th, td):nth-child(5), .cm-hide-6 :is(th, td):nth-child(6), .cm-hide-7 :is(th, td):nth-child(7) { display: none; }
+  .cm-narrow .suite-table td, .cm-narrow .suite-table th { padding-left: 8px; padding-right: 8px; }
+}
+
+/* A product's photo beside its name. */
+.cm-product { display: inline-flex; align-items: center; gap: 8px; min-width: 0; }
+.cm-product img { width: 32px; height: 32px; flex: none; object-fit: cover; border-radius: 6px; }
+
+/* The first-run prompt on an empty shop. */
+.cm-start .empty { padding: 20px 12px; }
+
+/* The calendar: a week of days, one column on a phone; a free day stays short. */
+.cm-week { display: grid; grid-template-columns: repeat(auto-fill, minmax(160px, 1fr)); gap: 8px; }
+.cm-day { display: grid; align-content: start; gap: 6px; min-height: 140px; padding: 10px; min-width: 0; }
+.cm-slot { border-left: 4px solid var(--brand); text-align: left; min-width: 0; overflow-wrap: anywhere; }
+.cm-slot.cancelled { opacity: 0.6; }
+@media (max-width: 560px) {
+  .cm-week { grid-template-columns: 1fr; }
+  .cm-day { min-height: 0; }
+  .cm-day.free { grid-template-columns: 1fr auto; align-items: center; }
+  .cm-day.free > strong { grid-column: 1 / -1; }
+}
+
+/* "New booking" in the page head where "+ New" is out of sight (a phone or a tablet), in the tabs on a wide screen. */
+@media (min-width: 901px) { .btn.cm-head-new { display: none; } }
+@media (max-width: 900px) { .cm-has-head-new .btn.cm-tab-new { display: none; } }

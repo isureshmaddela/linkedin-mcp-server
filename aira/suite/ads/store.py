@@ -10,6 +10,13 @@ Every table starts with ``ad_``. Money is integer **micros** of a US dollar (1 c
 * ``ad_impressions`` - one row per ad served; ``counted`` ones were charged and credit the creator a share.
 * ``ad_payouts`` - creators' requests to be paid what they earned, and the payments made.
 * ``ad_months`` - months closed after the invalid-traffic review (their earnings became payable).
+* ``ad_campaign_options`` - a campaign's extra choices kept beside it (tracking tags added to the page link).
+* ``ad_sales`` - the sales an advertiser counted from a campaign (orders and their value), for the return on ad spend.
+* ``ad_campaign_pages`` - the pages a campaign sent clicks to before its page was changed, and until when: a click on
+  an ad served earlier goes to the page that was reviewed then, never to a newer page nobody has checked.
+
+New columns never go on the older tables: the Videos database runs these statements on every first connection, so
+anything new is a new ``CREATE TABLE IF NOT EXISTS``.
 """
 
 from __future__ import annotations
@@ -132,4 +139,31 @@ SCHEMA = (
         refunded_micros INTEGER NOT NULL DEFAULT 0,
         confirmed_micros INTEGER NOT NULL DEFAULT 0
     )""",
+    """CREATE TABLE IF NOT EXISTS ad_campaign_options (
+        campaign_id TEXT PRIMARY KEY,
+        home TEXT NOT NULL,
+        utm INTEGER NOT NULL DEFAULT 1,
+        updated_at TEXT NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS ad_sales (
+        id TEXT PRIMARY KEY,
+        campaign_id TEXT NOT NULL,
+        home TEXT NOT NULL,
+        day TEXT NOT NULL,
+        orders INTEGER NOT NULL DEFAULT 1,
+        value_micros INTEGER NOT NULL DEFAULT 0,
+        note TEXT NOT NULL DEFAULT '',
+        created_by TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS ad_sales_campaign ON ad_sales (campaign_id, day)",
+    "CREATE INDEX IF NOT EXISTS ad_sales_home ON ad_sales (home, day)",
+    """CREATE TABLE IF NOT EXISTS ad_campaign_pages (
+        id TEXT PRIMARY KEY,
+        campaign_id TEXT NOT NULL,
+        home TEXT NOT NULL,
+        landing_url TEXT NOT NULL,
+        until_at TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS ad_campaign_pages_campaign ON ad_campaign_pages (campaign_id, until_at)",
 )

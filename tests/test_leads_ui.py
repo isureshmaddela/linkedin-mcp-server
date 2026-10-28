@@ -112,7 +112,7 @@ def test_leads_is_in_the_navigation_and_first_run_explains_the_ways_to_get_leads
         page.locator("#primaryNav a[data-section='leads']").inner_text().strip()
         == "Leads"
     )
-    assert page.locator(".ld-head h1").inner_text() == "Leads"
+    assert page.locator(".ld-head h1").inner_text() == "Find leads"
     assert "Four ways to get leads" in page.locator(".ld-intro").inner_text()
     assert page.locator(".ld-source").count() == 7
     page.keyboard.press("g")

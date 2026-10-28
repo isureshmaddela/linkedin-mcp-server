@@ -217,7 +217,66 @@ SCHEMA = (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
     )""",
+    """CREATE TABLE IF NOT EXISTS so_listings (
+        id TEXT PRIMARY KEY,
+        seller_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        about TEXT NOT NULL DEFAULT '',
+        price_cents INTEGER NOT NULL DEFAULT 0,
+        currency TEXT NOT NULL DEFAULT 'USD',
+        category TEXT NOT NULL DEFAULT 'other',
+        condition TEXT NOT NULL DEFAULT 'used',
+        place TEXT NOT NULL DEFAULT '',
+        photos TEXT NOT NULL DEFAULT '[]',
+        audience TEXT NOT NULL DEFAULT 'public',
+        payment_link TEXT NOT NULL DEFAULT '',
+        for_business INTEGER NOT NULL DEFAULT 0,
+        business_link TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'available',
+        buyer TEXT NOT NULL DEFAULT '',
+        sold_cents INTEGER NOT NULL DEFAULT 0,
+        sold_at TEXT,
+        views INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        deleted_at TEXT,
+        hidden_at TEXT
+    )""",
+    "CREATE INDEX IF NOT EXISTS so_listings_seller ON so_listings (seller_id, created_at)",
+    "CREATE INDEX IF NOT EXISTS so_listings_status ON so_listings (status, created_at)",
+    """CREATE TABLE IF NOT EXISTS so_guardian (
+        child_id TEXT NOT NULL,
+        other_id TEXT NOT NULL,
+        action TEXT NOT NULL DEFAULT 'request',
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (child_id, other_id)
+    )""",
+    """CREATE TABLE IF NOT EXISTS so_listing_saves (
+        account_id TEXT NOT NULL,
+        listing_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, listing_id)
+    )""",
 )
+
+# Columns added after a table first shipped: (table, column, definition). db.connect adds the missing ones.
+COLUMNS = (
+    ("so_posts", "edited_at", "TEXT"),
+    ("so_chats", "context", "TEXT NOT NULL DEFAULT ''"),
+    ("so_chats", "listing_id", "TEXT NOT NULL DEFAULT ''"),
+    # a listing is the seller's own unless they sell it for the business they run (owner, admin, coach)
+    ("so_listings", "for_business", "INTEGER NOT NULL DEFAULT 0"),
+    ("so_listings", "business_link", "TEXT NOT NULL DEFAULT ''"),
+)
+
+
+def migrate(connection: sqlite3.Connection) -> None:
+    """Add the columns of :data:`COLUMNS` that an older database does not have yet."""
+    for table, column, definition in COLUMNS:
+        have = {r[1] for r in connection.execute(f"PRAGMA table_info({table})")}  # noqa: S608 - fixed names
+        if column not in have:
+            connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")  # noqa: S608
+
 
 HEX = re.compile(r"[0-9a-f]{32}")
 

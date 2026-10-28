@@ -393,3 +393,48 @@ def _template(pattern: str) -> str | None:
     if any(ch in path for ch in "()[]?*+\\^$|"):
         return None
     return path
+
+
+# ---------------------------------------------------------------------------
+# hosted rules for the Developers app's newer routes
+# ---------------------------------------------------------------------------
+
+
+# The gateway refuses a local route that aira_cloud.policy.POLICY does not list (default deny). The rank tracker,
+# the Earnings tab and editing a key's terms came after that table, so their rules are registered here, with the
+# same permissions and plan features as the console routes beside them, until policy.py lists them itself (an
+# entry there wins: ``setdefault``). Reads need ``integrations.read`` (owner, admin, auditor), changes
+# ``integrations.manage`` (owner, admin); every route sits under /api/airaapi/, so it answers 402 app_required
+# until the organization subscribes to the Developers app.
+def developers_rules() -> dict[str, Any]:
+    from aira_cloud.policy import Rule
+
+    def read(**kw: Any) -> Rule:
+        return Rule("org_api", "integrations.read", feature="api.console_read", **kw)
+
+    def manage(feature: str, **kw: Any) -> Rule:
+        return Rule("org_api", "integrations.manage", write=True, feature=feature, **kw)
+
+    return {
+        "airaapi__routes__rank_list": read(),
+        "airaapi__routes__rank_detail": read(),
+        "airaapi__routes__rank_report": read(audit=True),
+        "airaapi__routes__rank_create": manage("api.searches"),
+        "airaapi__routes__rank_update": manage("api.searches"),
+        "airaapi__routes__rank_delete": manage("api.searches", audit=True),
+        "airaapi__routes__rank_run": manage("api.searches", kind="api_search"),
+        "airaapi__routes__earnings_report": read(),
+        "airaapi__routes__earnings_statement": read(audit=True),
+        "airaapi__routes__earnings_settings": manage("api.console_read", audit=True),
+        "airaapi__routes__keys_update": manage("api.v1", audit=True),
+    }
+
+
+def _register_developers_rules() -> None:
+    from aira_cloud.policy import POLICY
+
+    for name, rule in developers_rules().items():
+        POLICY.setdefault(name, rule)
+
+
+_register_developers_rules()

@@ -5,6 +5,9 @@ import pytest
 os.environ.setdefault(
     "AIRA_SUITE_STRICT", "1"
 )  # a broken industry app fails the tests, never hides
+os.environ.setdefault(
+    "AIRA_MARKET_PROVIDER", "stub"
+)  # Stocks: seeded offline prices; no test reaches Yahoo Finance
 
 from cloud_support import cloud  # noqa: F401  (the hosted-shell fixture, available to every test module)
 

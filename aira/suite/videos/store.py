@@ -213,7 +213,118 @@ SCHEMA = (
         key TEXT PRIMARY KEY,
         value TEXT NOT NULL
     )""",
+    # Seconds really watched, per video per day (others' watching only): the creator's analytics.
+    """CREATE TABLE IF NOT EXISTS vi_watch_days (
+        video_id TEXT NOT NULL,
+        day TEXT NOT NULL,
+        seconds REAL NOT NULL DEFAULT 0,
+        PRIMARY KEY (video_id, day)
+    )""",
+    # A creator's own way to be supported by viewers (their payment page or UPI id; Aira moves no money).
+    """CREATE TABLE IF NOT EXISTS vi_support (
+        channel_id TEXT PRIMARY KEY,
+        enabled INTEGER NOT NULL DEFAULT 0,
+        link TEXT NOT NULL DEFAULT '',
+        upi TEXT NOT NULL DEFAULT '',
+        note TEXT NOT NULL DEFAULT '',
+        currency TEXT NOT NULL DEFAULT 'USD',
+        updated_at TEXT NOT NULL
+    )""",
+    # A viewer's pledge to support a channel; the creator marks it received (or not) once the money arrives.
+    """CREATE TABLE IF NOT EXISTS vi_tips (
+        id TEXT PRIMARY KEY,
+        channel_id TEXT NOT NULL,
+        supporter_id TEXT NOT NULL,
+        video_id TEXT NOT NULL DEFAULT '',
+        amount_cents INTEGER NOT NULL,
+        currency TEXT NOT NULL DEFAULT 'USD',
+        message TEXT NOT NULL DEFAULT '',
+        show_name INTEGER NOT NULL DEFAULT 1,
+        reference TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pledged',
+        created_at TEXT NOT NULL,
+        decided_at TEXT
+    )""",
+    "CREATE INDEX IF NOT EXISTS vi_tips_channel ON vi_tips (channel_id, created_at)",
+    "CREATE INDEX IF NOT EXISTS vi_tips_supporter ON vi_tips (supporter_id, created_at)",
+    # A creator's paid membership: a monthly price, what members get, paid on the creator's own page or UPI id.
+    """CREATE TABLE IF NOT EXISTS vi_member_plans (
+        channel_id TEXT PRIMARY KEY,
+        enabled INTEGER NOT NULL DEFAULT 0,
+        price_cents INTEGER NOT NULL DEFAULT 0,
+        currency TEXT NOT NULL DEFAULT 'USD',
+        perks TEXT NOT NULL DEFAULT '',
+        updated_at TEXT NOT NULL
+    )""",
+    # One row per member of a channel; they may watch members-only videos until paid_until.
+    """CREATE TABLE IF NOT EXISTS vi_members (
+        id TEXT PRIMARY KEY,
+        channel_id TEXT NOT NULL,
+        member_id TEXT NOT NULL,
+        paid_until TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        UNIQUE (channel_id, member_id)
+    )""",
+    "CREATE INDEX IF NOT EXISTS vi_members_member ON vi_members (member_id)",
+    # Each month (or months) a member pays for; the creator marks it received when the money arrives.
+    """CREATE TABLE IF NOT EXISTS vi_member_payments (
+        id TEXT PRIMARY KEY,
+        membership_id TEXT NOT NULL,
+        channel_id TEXT NOT NULL,
+        member_id TEXT NOT NULL,
+        months INTEGER NOT NULL DEFAULT 1,
+        amount_cents INTEGER NOT NULL,
+        currency TEXT NOT NULL DEFAULT 'USD',
+        reference TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pledged',
+        created_at TEXT NOT NULL,
+        decided_at TEXT
+    )""",
+    "CREATE INDEX IF NOT EXISTS vi_member_payments_channel ON vi_member_payments (channel_id, created_at)",
+    "CREATE INDEX IF NOT EXISTS vi_member_payments_member ON vi_member_payments (member_id, created_at)",
+    # A creator's brand deals (sponsorships): their own records, from first contact to the money received.
+    """CREATE TABLE IF NOT EXISTS vi_deals (
+        id TEXT PRIMARY KEY,
+        channel_id TEXT NOT NULL,
+        brand TEXT NOT NULL,
+        contact TEXT NOT NULL DEFAULT '',
+        amount_cents INTEGER NOT NULL DEFAULT 0,
+        currency TEXT NOT NULL DEFAULT 'USD',
+        video_id TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'proposed',
+        due_on TEXT NOT NULL DEFAULT '',
+        notes TEXT NOT NULL DEFAULT '',
+        paid_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS vi_deals_channel ON vi_deals (channel_id, updated_at)",
 )
+
+# Columns added after the first release: (table, column, declaration). ``migrate`` adds the missing ones to a
+# database made before them (CREATE TABLE IF NOT EXISTS does not change a table that exists).
+COLUMNS = (
+    ("vi_videos", "members_only", "INTEGER NOT NULL DEFAULT 0"),
+    ("vi_videos", "paid_promotion", "INTEGER NOT NULL DEFAULT 0"),
+    # 1 when this deal turned on its video's "Includes paid promotion" (it goes off again with the deal)
+    ("vi_deals", "promoted", "INTEGER NOT NULL DEFAULT 0"),
+)
+
+
+def migrate(connection: sqlite3.Connection) -> None:
+    for table, column, declaration in COLUMNS:
+        present = {
+            item[1] for item in connection.execute(f"PRAGMA table_info({table})")
+        }
+        if column in present:
+            continue
+        try:
+            connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {declaration}")
+        except sqlite3.OperationalError as error:  # another process added it first
+            if "duplicate column" not in str(error).lower():
+                raise
+
 
 HEX = re.compile(r"[0-9a-f]{32}")
 

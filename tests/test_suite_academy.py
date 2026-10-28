@@ -645,7 +645,7 @@ def test_the_academy_screen_and_a_student_journey_in_a_browser(
 
     page.goto(f"{env.base}/#/academy")
     page.wait_for_selector(".suite-kpis")
-    assert page.locator(".page-head h1").inner_text() == "Academy"
+    assert page.locator(".page-head h1").inner_text() == "Courses overview"
     page.goto(f"{env.base}/#/academy?tab=courses&course={course['id']}")
     page.wait_for_selector(".ac-module")
     assert "Module 1: Start" in page.locator(".ac-module").inner_text()
@@ -676,8 +676,8 @@ def test_the_academy_screen_and_a_student_journey_in_a_browser(
     visitor.locator(".pub-item", has_text="Maths").get_by_role(
         "button", name="Open lesson"
     ).click()
-    visitor.get_by_label("4").check()
-    visitor.get_by_label("Paris").check()
+    visitor.get_by_label("4", exact=True).check()
+    visitor.get_by_label("Paris", exact=True).check()
     visitor.get_by_role("button", name="Submit answers").click()
     visitor.wait_for_selector("text=Passed!")
     visitor.get_by_role("link", name="View your certificate").click()

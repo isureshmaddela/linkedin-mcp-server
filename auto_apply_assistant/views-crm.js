@@ -8,12 +8,21 @@
   // -------------------------------------------------------------------------
   // Interviews
   // -------------------------------------------------------------------------
+  const SCOPES = [
+    { id: "upcoming", label: "Upcoming", icon: "interviews" },
+    { id: "past", label: "Past", icon: "careers-history" },
+    { id: "all", label: "All", icon: "careers-list" },
+  ];
   Aira.views.interviews = async (main, route) => {
-    const scope = route.query.scope || "upcoming";
+    const making = Aira.careersTakeNew(route);
+    // ?tab= (the menu folders) and the older ?scope= name the same thing.
+    const asked = route.query.tab || route.query.scope;
+    const scope = SCOPES.some((item) => item.id === asked) ? asked : "upcoming";
+    Aira.careersFolders("interviews", SCOPES, scope);
     const list = h("div", { class: "panel" });
     main.replaceChildren(
       h("div", { class: "page-head" }, h("div", {}, h("h1", { text: "Interviews" }), h("p", { text: "Track every conversation with its time zone, participants, prep notes, and follow-ups. Add events to any calendar with one click." })), h("div", { class: "page-actions" }, h("button", { type: "button", class: "btn secondary sm", text: "Download all (.ics)", onclick: () => Aira.download("/api/interviews/calendar.ics", "aira-interviews.ics") }), h("a", { class: "btn secondary sm", href: "#/applications?tab=email", text: "Detect from email" }), h("button", { type: "button", class: "btn sm", text: "+ Add interview", onclick: () => interviewForm(null, () => router.render()) }))),
-      h("nav", { class: "subnav", "aria-label": "Interview scope" }, ...[["upcoming", "Upcoming"], ["past", "Past"], ["all", "All"]].map(([id, label]) => h("a", { href: `#/interviews?scope=${id}`, "aria-current": id === scope ? "page" : "false", text: label }))),
+      h("nav", { class: "subnav careers-tabstrip", "aria-label": "Interview scope" }, ...SCOPES.map(({ id, label }) => h("a", { href: `#/interviews?tab=${id}`, "aria-current": id === scope ? "page" : "false", text: label }))),
       list,
     );
     const load = async () => {
@@ -21,11 +30,12 @@
       try {
         const data = await api(`/api/interviews?scope=${scope}`);
         const rows = h("div", { class: "list", "data-roving": "1" });
-        if (!data.interviews.length) rows.append(ui.empty(scope === "upcoming" ? "No upcoming interviews" : "Nothing here", "Add one manually or import an invitation email.", h("button", { type: "button", class: "btn", text: "Add interview", onclick: () => interviewForm(null, load) })));
+        if (!data.interviews.length) rows.append(ui.empty(scope === "upcoming" ? "No upcoming interviews" : scope === "past" ? "No past interviews" : "No interviews yet", "Add one yourself, or import the invitation email and Aira reads the date, time and link from it.", h("div", { class: "btn-row", style: { justifyContent: "center" } }, h("button", { type: "button", class: "btn", text: "+ Add interview", onclick: () => interviewForm(null, load) }), h("a", { class: "btn secondary", href: "#/applications?tab=email", text: "Import an email" }))));
         for (const item of data.interviews) rows.append(h("button", { type: "button", class: "row", "data-roving-item": "1", onclick: () => openInterview(item.interview_id, load) }, h("div", {}, h("span", { class: "title", text: `${fmt.title(fmt.stage(item.interview_type))} · ${item.company || item.job_title || "Interview"}` }), h("span", { class: "sub", text: `${fmt.datetime(item.start_at, item.timezone)} (${item.timezone})${item.role ? ` · ${item.role}` : ""}${item.recruiter_name ? ` · with ${item.recruiter_name}` : ""}` }), h("div", { class: "meta" }, h("span", { class: `badge ${item.status === "cancelled" ? "stage rejected" : item.status === "completed" ? "stage applied" : "stage saved"}`, text: item.status }), item.meeting_link ? h("span", { class: "badge", text: "Meeting link" }) : null, item.source === "email" ? h("span", { class: "badge", text: "From email" }) : null)), h("small", { class: "muted", text: fmt.ago(item.start_at) })));
         list.replaceChildren(h("div", { class: "panel-head" }, h("h3", { text: `${fmt.title(scope)} interviews` }), h("small", { class: "muted", text: String(data.interviews.length) })), rows);
       } catch (error) { list.replaceChildren(ui.error(error, load)); }
     };
+    if (making === "interview") interviewForm(null, load);
     await load();
     if (route.path[1]) openInterview(route.path[1], load);
   };
@@ -55,7 +65,7 @@
 
   function interviewForm(existing, onSaved) {
     const v = existing || {};
-    const jobId = h("input", { type: "text", value: v.job_id || "", placeholder: "Optional job ID (e.g. 4123456789 or greenhouse:123)" });
+    const jobId = Aira.jobPicker(v.job_id || "");
     const company = h("input", { type: "text", value: v.company || "", maxlength: 160 });
     const role = h("input", { type: "text", value: v.role || "", maxlength: 160 });
     const type = ui.select(INTERVIEW_TYPES.map((t) => [t, fmt.title(fmt.stage(t))]), v.interview_type || "recruiter_screen");
@@ -74,12 +84,14 @@
     const status = ui.select([["scheduled", "Scheduled"], ["rescheduled", "Rescheduled"], ["completed", "Completed"], ["cancelled", "Cancelled"]], v.status || "scheduled");
     const updateStage = h("input", { type: "checkbox", checked: true });
     const body = h("div", {},
-      h("div", { class: "form-grid" }, ui.field("Company", company), ui.field("Role", role), ui.field("Interview type", type), ui.field("Status", status), ui.field("Start (in the interview's time zone)", start), ui.field("End", end, "Defaults to 45 minutes after the start."), ui.field("Time zone (IANA)", timezone, "e.g. America/New_York"), ui.field("Meeting link", link), ui.field("Location", location), ui.field("Hiring manager", manager), ui.field("Linked job", jobId), ui.field("Follow-up reminder", followUp)),
+      h("div", { class: "form-grid" }, ui.field("Company", company), ui.field("Role", role), ui.field("Interview type", type), ui.field("Status", status), ui.field("Start (in the interview's time zone)", start), ui.field("End", end, "Defaults to 45 minutes after the start."), ui.field("Time zone (IANA)", timezone, "e.g. America/New_York"), ui.field("Meeting link", link), ui.field("Location", location), ui.field("Hiring manager", manager), Aira.jobPickerField("Linked job", jobId), ui.field("Follow-up reminder", followUp)),
       h("div", { class: "form-grid", style: { marginTop: "12px" } }, h("div", { class: "field wide" }, h("label", { text: "Participants", for: participants.id = "ivParts" }), participants), h("div", { class: "field" }, h("label", { text: "Preparation", for: prep.id = "ivPrep" }), prep), h("div", { class: "field" }, h("label", { text: "Action items", for: actions.id = "ivActions" }), actions), h("div", { class: "field" }, h("label", { text: "Notes", for: notes.id = "ivNotes" }), notes), h("div", { class: "field" }, h("label", { text: "Feedback", for: feedback.id = "ivFeedback" }), feedback)),
       existing ? null : h("label", { class: "check", style: { marginTop: "10px" } }, updateStage, "Move the linked application to the matching interview stage"),
     );
     Aira.modal({ title: existing ? "Edit interview" : "Add interview", body, wide: true, actions: [{ label: "Cancel", kind: "ghost" }, { label: existing ? "Save changes" : "Create interview", kind: "", onClick: async () => {
-      const payload = { job_id: jobId.value.trim() || null, company: company.value, role: role.value, interview_type: type.value, status: status.value, timezone: timezone.value.trim(), start_at: start.value, end_at: end.value || null, meeting_link: link.value, location: location.value, hiring_manager: manager.value, preparation: prep.value, notes: notes.value, feedback: feedback.value, action_items: actions.value.split("\n").map((s) => s.trim()).filter(Boolean), follow_up_at: followUp.value || null, participants: participants.value.split("\n").map((line) => line.split(",").map((s) => s.trim())).filter((parts) => parts[0]).map(([name, roleName, email]) => ({ name, role: roleName || "", email: email || "" })), update_stage: updateStage.checked };
+      let linkedJob;
+      try { linkedJob = jobId.jobId() || null; } catch (error) { Aira.reportError(error); return false; }
+      const payload = { job_id: linkedJob, company: company.value, role: role.value, interview_type: type.value, status: status.value, timezone: timezone.value.trim(), start_at: start.value, end_at: end.value || null, meeting_link: link.value, location: location.value, hiring_manager: manager.value, preparation: prep.value, notes: notes.value, feedback: feedback.value, action_items: actions.value.split("\n").map((s) => s.trim()).filter(Boolean), follow_up_at: followUp.value || null, participants: participants.value.split("\n").map((line) => line.split(",").map((s) => s.trim())).filter((parts) => parts[0]).map(([name, roleName, email]) => ({ name, role: roleName || "", email: email || "" })), update_stage: updateStage.checked };
       try {
         if (existing) await api(`/api/interviews/${existing.interview_id}`, { method: "PATCH", body: payload });
         else await api("/api/interviews", { method: "POST", body: payload });
@@ -100,12 +112,15 @@
   // -------------------------------------------------------------------------
   // Recruiters
   // -------------------------------------------------------------------------
+  const PEOPLE_TABS = [{ id: "contacts", label: "Contacts", icon: "recruiters" }, { id: "messages", label: "Messages", icon: "careers-chat" }];
   Aira.views.recruiters = async (main, route) => {
-    const tab = route.query.tab || "contacts";
+    const making = Aira.careersTakeNew(route);
+    const tab = route.query.tab === "messages" ? "messages" : "contacts";
+    Aira.careersFolders("recruiters", PEOPLE_TABS, tab);
     const content = h("div", {});
     main.replaceChildren(
       h("div", { class: "page-head" }, h("div", {}, h("h1", { text: "Recruiters" }), h("p", { text: "A lightweight CRM: contacts, every interaction, follow-up reminders, and the jobs and interviews each person is connected to." })), h("div", { class: "page-actions" }, h("button", { type: "button", class: "btn sm", text: "+ Add recruiter", onclick: () => recruiterForm(null, () => router.render()) }))),
-      ui.tabs([{ id: "contacts", label: "Contacts" }, { id: "messages", label: "Messages" }], tab, (id) => router.go(["recruiters"], { tab: id }, { replace: true })),
+      Aira.careersStrip(ui.tabs(PEOPLE_TABS, tab, (id) => router.go(["recruiters"], { tab: id }, { replace: true }))),
       content,
     );
     if (tab === "messages") { await Aira.renderMessages(content, route); return; }
@@ -120,12 +135,14 @@
       try {
         const data = await api(`/api/recruiters?q=${encodeURIComponent(search.value)}`);
         const rows = h("div", { class: "list", "data-roving": "1" });
-        if (!data.recruiters.length) rows.append(ui.empty("No recruiters yet", "Add contacts manually or import a recruiter email.", h("button", { type: "button", class: "btn", text: "Add recruiter", onclick: () => recruiterForm(null, load) })));
+        if (!data.recruiters.length && search.value.trim()) rows.append(ui.empty(`No contacts match “${search.value.trim()}”`, "Search by name, company, title or email.", h("button", { type: "button", class: "btn secondary", text: "Show every contact", onclick: () => { search.value = ""; load(); } })));
+        else if (!data.recruiters.length) rows.append(ui.empty("No recruiters yet", "Add contacts manually or import a recruiter email.", h("button", { type: "button", class: "btn", text: "+ Add recruiter", onclick: () => recruiterForm(null, load) })));
         for (const r of data.recruiters) rows.append(h("button", { type: "button", class: "row", "data-roving-item": "1", onclick: () => openRecruiter(r.recruiter_id, load) }, h("div", {}, h("span", { class: "title", text: r.name }), h("span", { class: "sub", text: [r.title, r.company, r.email].filter(Boolean).join(" · ") }), h("div", { class: "meta" }, h("span", { class: "badge", text: `${fmt.plural(r.interaction_count || 0, "interaction")}` }), r.next_follow_up_at ? h("span", { class: "badge stage needs_review", text: `Follow up ${fmt.date(r.next_follow_up_at)}` }) : null, r.source === "email" ? h("span", { class: "badge", text: "From email" }) : null)), h("small", { class: "muted", text: r.last_interaction_at ? fmt.ago(r.last_interaction_at) : "" })));
-        list.replaceChildren(h("div", { class: "panel-head" }, h("h3", { text: "Contacts" }), h("small", { class: "muted", text: String(data.recruiters.length) })), rows);
+        list.replaceChildren(h("div", { class: "panel-head" }, h("h3", { text: search.value.trim() ? `Contacts matching “${search.value.trim()}”` : "Contacts" }), h("small", { class: "muted", text: String(data.recruiters.length) })), rows);
         followUps.replaceChildren(h("div", { class: "panel-head" }, h("h3", { text: "Upcoming follow-ups" })), data.follow_ups.length ? h("div", { class: "list" }, ...data.follow_ups.map((f) => h("button", { type: "button", class: "row", onclick: () => openRecruiter(f.recruiter_id, load) }, h("div", {}, h("span", { class: "title", text: f.name }), h("span", { class: "sub", text: `${fmt.datetime(f.follow_up_at)} · ${f.summary.slice(0, 80)}` }))))) : h("div", { class: "empty", text: "No follow-ups scheduled." }));
       } catch (error) { list.replaceChildren(ui.error(error, load)); }
     }
+    if (making === "recruiter") recruiterForm(null, load);
     await load();
     if (route.path[1]) openRecruiter(route.path[1], load);
   };
@@ -141,9 +158,9 @@
     const summary = h("textarea", { rows: 2, placeholder: "What happened?" });
     const when = h("input", { type: "datetime-local", value: Aira.toLocalInput(new Date().toISOString()) });
     const followUp = h("input", { type: "datetime-local" });
-    const jobLink = h("input", { type: "text", placeholder: "Job ID (optional)" });
+    const jobLink = Aira.jobPicker("");
     const addBtn = h("button", { type: "button", class: "btn sm", text: "Log interaction" });
-    addBtn.addEventListener("click", () => withBusy(addBtn, async () => { await api(`/api/recruiters/${id}/interactions`, { method: "POST", body: { kind: kind.value, direction: direction.value, summary: summary.value, occurred_at: when.value ? new Date(when.value).toISOString() : null, follow_up_at: followUp.value ? new Date(followUp.value).toISOString() : null, job_id: jobLink.value.trim() || null } }); toast("Interaction logged.", "success"); openRecruiter(id, refresh); }));
+    addBtn.addEventListener("click", () => withBusy(addBtn, async () => { await api(`/api/recruiters/${id}/interactions`, { method: "POST", body: { kind: kind.value, direction: direction.value, summary: summary.value, occurred_at: when.value ? new Date(when.value).toISOString() : null, follow_up_at: followUp.value ? new Date(followUp.value).toISOString() : null, job_id: jobLink.jobId() || null } }); toast("Interaction logged.", "success"); openRecruiter(id, refresh); }));
     // Element.replaceChildren prints a null as the text "null": drop the empty slots.
     body.replaceChildren(...[
       h("div", { class: "btn-row", style: { marginBottom: "12px" } }, h("button", { type: "button", class: "btn sm", text: "Edit", onclick: () => recruiterForm(r, () => openRecruiter(id, refresh)) }), r.email ? h("a", { class: "btn secondary sm", href: `mailto:${r.email}`, text: "Email" }) : null, h("button", { type: "button", class: "btn ghost sm danger", text: "Delete", onclick: async (event) => { if (await Aira.confirm({ title: "Delete this recruiter?", message: "The contact is removed from lists; interactions stay in history.", confirmLabel: "Delete", danger: true })) await withBusy(event.currentTarget, async () => { await api(`/api/recruiters/${id}`, { method: "DELETE" }); toast("Recruiter deleted.", "success"); Aira.closeDrawer(); }); } })),
@@ -152,7 +169,7 @@
         h("div", { class: "card" }, h("h3", { text: "Related" }), r.related_jobs.length ? h("ul", { class: "inline-list" }, ...r.related_jobs.map((j) => h("li", {}, h("a", { href: "#", text: `${j.title} (${fmt.stage(j.stage)})`, onclick: (event) => { event.preventDefault(); Aira.openJob(j.job_id); } })))) : h("p", { class: "muted", text: "No linked jobs yet. Link one when logging an interaction." }), r.interviews.length ? h("ul", { class: "inline-list" }, ...r.interviews.map((i) => h("li", {}, h("a", { href: `#/interviews/${i.interview_id}`, text: `${fmt.title(fmt.stage(i.interview_type))} · ${fmt.datetime(i.start_at)} · ${i.status}` })))) : null),
       ),
       (r.threads || []).length ? h("div", { class: "card", style: { marginTop: "14px" } }, h("h3", { text: "LinkedIn conversations" }), ...r.threads.map((t) => h("div", { class: "row", style: { padding: "6px 0" } }, h("div", {}, h("span", { class: "title", text: t.participant || "Conversation" }), h("span", { class: "sub", text: t.mode === "auto" ? "Auto-reply is on" : "Manual send" })), h("a", { class: "btn secondary sm", href: `#/recruiters?tab=messages&thread=${encodeURIComponent(t.thread_id)}&participant=${encodeURIComponent(t.participant || "")}`, text: "Open conversation", onclick: () => Aira.closeDrawer() })))) : null,
-      h("div", { class: "card", style: { marginTop: "14px" } }, h("h3", { text: "Log an interaction" }), h("div", { class: "form-grid" }, ui.field("Type", kind), ui.field("Direction", direction), ui.field("When", when), ui.field("Follow-up reminder", followUp), ui.field("Related job", jobLink), h("div", { class: "field wide" }, h("label", { for: "intSummary", text: "Summary" }), Object.assign(summary, { id: "intSummary" }))), h("div", { style: { marginTop: "10px" } }, addBtn)),
+      h("div", { class: "card", style: { marginTop: "14px" } }, h("h3", { text: "Log an interaction" }), h("div", { class: "form-grid" }, ui.field("Type", kind), ui.field("Direction", direction), ui.field("When", when), ui.field("Follow-up reminder", followUp), Aira.jobPickerField("Related job", jobLink), h("div", { class: "field wide" }, h("label", { for: "intSummary", text: "Summary" }), Object.assign(summary, { id: "intSummary" }))), h("div", { style: { marginTop: "10px" } }, addBtn)),
       h("div", { class: "card", style: { marginTop: "14px" } }, h("h3", { text: "Communication history" }), r.interactions.length ? h("ul", { class: "timeline" }, ...r.interactions.map((x) => h("li", {}, h("strong", { text: `${fmt.title(x.kind)} · ${x.direction === "inbound" ? "from them" : "from you"}` }), h("div", { text: x.summary }), h("small", { text: `${fmt.datetime(x.occurred_at)}${x.job_title ? ` · ${x.job_title}` : ""}${x.follow_up_at ? ` · follow up ${fmt.datetime(x.follow_up_at)}` : ""}` }), h("button", { type: "button", class: "btn ghost sm", text: "Remove", onclick: async (event) => { if (await Aira.confirm({ title: "Remove this interaction?", message: "", confirmLabel: "Remove", danger: true })) await withBusy(event.currentTarget, async () => { await api(`/api/interactions/${x.interaction_id}`, { method: "DELETE" }); openRecruiter(id, refresh); }); } })))) : h("p", { class: "muted", text: "No interactions logged yet." })),
     ].filter(Boolean));
   }
@@ -184,15 +201,27 @@
   // -------------------------------------------------------------------------
   // Documents
   // -------------------------------------------------------------------------
+  // The menu folders: the kinds people look for most (the Kind filter lists every kind).
+  const DOC_FOLDERS = [
+    { id: "all", label: "All files", icon: "documents" },
+    { id: "master_resume", label: "Resumes", icon: "careers-pen" },
+    { id: "tailored_resume", label: "Tailored resumes", icon: "careers-sparkle" },
+    { id: "cover_letter", label: "Cover letters", icon: "careers-mail" },
+    { id: "application_confirmation", label: "Confirmations", icon: "careers-check" },
+    { id: "offer", label: "Offers", icon: "careers-coin" },
+  ];
   Aira.views.documents = async (main, route) => {
-    const kind = route.query.kind || "";
+    const making = Aira.careersTakeNew(route);
+    const folder = route.query.tab && route.query.tab !== "all" ? route.query.tab : "";
+    const kind = route.query.kind || folder;
+    Aira.careersFolders("documents", DOC_FOLDERS, DOC_FOLDERS.some((item) => item.id === kind) ? kind : kind ? "" : "all");
     const list = h("div", { class: "panel" });
     const kindSelect = ui.select([["", "All kinds"]], kind);
-    kindSelect.addEventListener("change", () => router.go(["documents"], { kind: kindSelect.value }, { replace: true }));
-    const uploadKind = ui.select([["other", "Other"]], "master_resume");
+    kindSelect.addEventListener("change", () => router.go(["documents"], { tab: kindSelect.value || "all" }, { replace: true }));
+    const uploadKind = ui.select([["other", "Other"]], kind || "master_resume");
     const file = h("input", { type: "file", accept: ".pdf,.docx,.txt,.md,.png,.jpg,.jpeg,.eml,.json,.ics,.csv" });
     const title = h("input", { type: "text", maxlength: 200, placeholder: "Optional title" });
-    const jobId = h("input", { type: "text", placeholder: "Link to a job ID (optional)" });
+    const jobId = Aira.jobPicker("");
     const uploadBtn = h("button", { type: "button", class: "btn", text: "Upload" });
     const drop = h("div", { class: "dropzone", tabindex: "0", role: "button", "aria-label": "Drop a file here or press Enter to choose" }, h("strong", { text: "Drop a file here" }), h("span", { text: "PDF, DOCX, TXT, MD, PNG, JPG, EML, JSON, ICS, CSV · up to 10 MB · encrypted at rest" }));
     drop.addEventListener("click", () => file.click());
@@ -205,29 +234,37 @@
       const chosen = file.files[0];
       if (!chosen) { toast("Choose a file first.", "error"); return; }
       if (chosen.size > 10 * 1024 * 1024) { toast("Files must be under 10 MB.", "error"); return; }
-      await api("/api/documents", { method: "POST", body: { filename: chosen.name, content_base64: await Aira.fileToBase64(chosen), kind: uploadKind.value, title: title.value, job_id: jobId.value.trim() || null } });
+      await api("/api/documents", { method: "POST", body: { filename: chosen.name, content_base64: await Aira.fileToBase64(chosen), kind: uploadKind.value, title: title.value, job_id: jobId.jobId() || null } });
       toast("Document stored.", "success");
-      file.value = ""; title.value = ""; drop.querySelector("strong").textContent = "Drop a file here";
+      file.value = ""; title.value = ""; jobId.input.value = ""; drop.querySelector("strong").textContent = "Drop a file here";
       load();
     }));
     main.replaceChildren(
       h("div", { class: "page-head" }, h("div", {}, h("h1", { text: "Documents" }), h("p", { text: "Master resumes, tailored versions, cover letters, confirmations, screenshots, offers, and certificates. Versioned, encrypted at rest, and auditable." }))),
       h("div", { class: "grid sidebar-right" },
         h("div", {}, h("div", { class: "filters" }, ui.field("Kind", kindSelect)), list),
-        h("div", { class: "card" }, h("h3", { text: "Upload" }), drop, h("div", { style: { display: "none" } }, file), h("div", { class: "form-grid", style: { marginTop: "12px" } }, ui.field("Kind", uploadKind), ui.field("Title", title), ui.field("Job", jobId)), h("div", { style: { marginTop: "10px" } }, uploadBtn)),
+        h("div", { class: "card careers-upload-card", id: "careersUpload" }, h("h3", { text: "Upload" }), drop, h("div", { style: { display: "none" } }, file), h("div", { class: "form-grid", style: { marginTop: "12px" } }, ui.field("Kind", uploadKind), ui.field("Title", title), Aira.jobPickerField("Job", jobId)), h("div", { style: { marginTop: "10px" } }, uploadBtn)),
       ),
     );
     async function load() {
       list.replaceChildren(ui.skeleton(4));
       try {
         const data = await api(`/api/documents${kind ? `?kind=${encodeURIComponent(kind)}` : ""}`);
-        if (kindSelect.options.length === 1) { for (const k of data.kinds) { kindSelect.append(h("option", { value: k, text: fmt.title(fmt.stage(k)), selected: k === kind })); } uploadKind.replaceChildren(...data.kinds.map((k) => h("option", { value: k, text: fmt.title(fmt.stage(k)), selected: k === "master_resume" }))); }
+        if (kindSelect.options.length === 1) { for (const k of data.kinds) { kindSelect.append(h("option", { value: k, text: fmt.title(fmt.stage(k)), selected: k === kind })); } uploadKind.replaceChildren(...data.kinds.map((k) => h("option", { value: k, text: fmt.title(fmt.stage(k)), selected: k === (kind || "master_resume") }))); }
         const rows = h("div", { class: "list" });
-        if (!data.documents.length) rows.append(ui.empty("No documents yet", "Upload a master resume or save tailored drafts from a job."));
-        for (const d of data.documents) rows.append(h("div", { class: "row" }, h("div", {}, h("span", { class: "title", text: d.title || d.filename }), h("span", { class: "sub", text: `${fmt.title(fmt.stage(d.kind))} · v${d.version} · ${fmt.bytes(d.size)} · ${fmt.ago(d.created_at)}${d.job_id ? ` · job ${d.job_id}` : ""} · scan: ${fmt.stage(d.scan_status)}` })), h("div", { class: "btn-row" }, h("button", { type: "button", class: "btn secondary sm", text: "Download", onclick: () => Aira.download(`/api/documents/${d.document_id}/download`, d.filename) }), h("button", { type: "button", class: "btn ghost sm", text: "History", onclick: () => showVersions(d) }), h("button", { type: "button", class: "btn ghost sm danger", text: "Delete", onclick: async (event) => { if (await Aira.confirm({ title: "Delete this document?", message: "The encrypted file is removed. The audit record is kept.", confirmLabel: "Delete", danger: true })) await withBusy(event.currentTarget, async () => { await api(`/api/documents/${d.document_id}`, { method: "DELETE" }); toast("Deleted.", "success"); load(); }); } }))));
+        if (!data.documents.length) rows.append(ui.empty(kind ? `No ${fmt.stage(kind)} files yet` : "No documents yet", "Upload a master resume, or save the tailored drafts from a job's Documents tab.", h("button", { type: "button", class: "btn", text: "Upload a document", onclick: () => startUpload(false) })));
+        for (const d of data.documents) rows.append(h("div", { class: "row" }, h("div", {}, h("span", { class: "title", text: d.title || d.filename }), h("span", { class: "sub", text: `${fmt.title(fmt.stage(d.kind))} · v${d.version} · ${fmt.bytes(d.size)} · ${fmt.ago(d.created_at)}${d.job_id ? ` · ${d.job_title || "a job"}` : ""} · scan: ${fmt.stage(d.scan_status)}` })), h("div", { class: "btn-row" }, h("button", { type: "button", class: "btn secondary sm", text: "Download", onclick: () => Aira.download(`/api/documents/${d.document_id}/download`, d.filename) }), h("button", { type: "button", class: "btn ghost sm", text: "History", onclick: () => showVersions(d) }), h("button", { type: "button", class: "btn ghost sm danger", text: "Delete", onclick: async (event) => { if (await Aira.confirm({ title: "Delete this document?", message: "The encrypted file is removed. The audit record is kept.", confirmLabel: "Delete", danger: true })) await withBusy(event.currentTarget, async () => { await api(`/api/documents/${d.document_id}`, { method: "DELETE" }); toast("Deleted.", "success"); load(); }); } }))));
         list.replaceChildren(h("div", { class: "panel-head" }, h("h3", { text: "Library" }), h("small", { class: "muted", text: `${data.usage.count} files · ${fmt.bytes(data.usage.bytes)} · kept ${data.retention_days} days` })), rows);
       } catch (error) { list.replaceChildren(ui.error(error, load)); }
     }
+    // "+ New > Upload a document" (and the empty library's button): the upload card, ready for a file.
+    function startUpload(pick) {
+      const card = document.getElementById("careersUpload");
+      if (card) card.scrollIntoView({ block: "nearest", behavior: "smooth" });
+      drop.focus({ preventScroll: true });
+      if (pick) file.click(); // opens the file chooser while the click that asked for it still counts
+    }
+    if (making === "document") startUpload(true);
     await load();
   };
   async function showVersions(doc) {

@@ -144,12 +144,61 @@ SCHEMA = (
     )""",
 )
 
+# Tables added after the first release (created on any database, old or new).
+SCHEMA_V2 = (
+    """CREATE TABLE IF NOT EXISTS mk_packages (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        price_cents INTEGER NOT NULL DEFAULT 0,
+        details TEXT NOT NULL DEFAULT '',
+        days INTEGER NOT NULL DEFAULT 0,
+        position INTEGER NOT NULL DEFAULT 0,
+        active INTEGER NOT NULL DEFAULT 1,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )""",
+)
+
+# Columns added after the first release: (table, column, definition).
+ADDED_COLUMNS = (
+    ("mk_submissions", "value_cents", "INTEGER NOT NULL DEFAULT 0"),
+    ("mk_submissions", "follow_up_on", "TEXT NOT NULL DEFAULT ''"),
+    ("mk_submissions", "source", "TEXT NOT NULL DEFAULT 'form'"),
+    ("mk_submissions", "package", "TEXT NOT NULL DEFAULT ''"),
+    ("mk_submissions", "paid_at", "TEXT"),
+    ("mk_submissions", "contacted_at", "TEXT"),
+    ("mk_posts", "reminded_at", "TEXT"),
+)
+
 JSON_COLUMNS = {"channels", "tags", "fields"}
+
+
+def _add_columns(connection: sqlite3.Connection) -> None:
+    """Add the newer columns to a database made by an older Marketing (safe to run any number of times)."""
+    marker = (kit._db_file(connection), "marketing.columns.v2")  # noqa: SLF001 - kit.ensure's own marker,
+    if marker in kit._ensured:  # noqa: SLF001 - so kit.forget_schema() resets it too
+        return
+    tables: dict[str, set[str]] = {}
+    for table, column, definition in ADDED_COLUMNS:
+        if table not in tables:
+            tables[table] = {
+                row[1] for row in connection.execute(f"PRAGMA table_info({table})")
+            }
+        if column not in tables[table]:
+            connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+            tables[table].add(column)
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS mk_submissions_follow ON mk_submissions (follow_up_on)"
+    )
+    connection.commit()
+    kit._ensured.add(marker)  # noqa: SLF001
 
 
 def ensure(connection: sqlite3.Connection) -> None:
     kit.ensure_core(connection)
     kit.ensure(connection, "marketing.v1", SCHEMA)
+    kit.ensure(connection, "marketing.v2", SCHEMA_V2)
+    _add_columns(connection)
 
 
 def decode(row: dict[str, Any] | None) -> dict[str, Any]:
@@ -158,7 +207,7 @@ def decode(row: dict[str, Any] | None) -> dict[str, Any]:
     out = dict(row)
     for column in JSON_COLUMNS & out.keys():
         out[column] = kit.loads(out[column], [] if column != "fields" else {})
-    for column in ("add_subscriber", "highlight", "consent"):
+    for column in ("add_subscriber", "highlight", "consent", "active"):
         if column in out:
             out[column] = bool(out[column])
     return out

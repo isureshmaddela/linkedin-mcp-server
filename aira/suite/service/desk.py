@@ -7,6 +7,7 @@ from __future__ import annotations
 
 import hashlib
 import hmac
+import re
 import secrets
 import sqlite3
 from collections.abc import Mapping
@@ -299,11 +300,79 @@ def case_detail(
     connection: sqlite3.Connection, case_id: str, now: datetime | None = None
 ) -> dict[str, Any]:
     case = get_case(connection, case_id, now)
+    thread = store.messages(connection, case_id)
+    last_customer = next(
+        (m["body"] for m in reversed(thread) if m["author_kind"] == "customer"), ""
+    )
     return {
         "case": case,
-        "messages": store.messages(connection, case_id),
+        "messages": thread,
         "link": public.link_for(connection, APP, "case", case_id),
+        "charges": store.charges(connection, case_id),
+        "history": [c for c in customer_cases(connection, case) if c["id"] != case_id][
+            :20
+        ],
+        "answers": suggest_articles(
+            connection, f"{case['subject']} {last_customer}", limit=3
+        ),
     }
+
+
+def delete_case(
+    connection: sqlite3.Connection, case_id: str, *, actor: str = ""
+) -> int:
+    """Remove a case for good (spam, a test, a mistake): its messages, its charges and its customer link go too,
+    and so do the duplicates merged into it (their conversation was moved into this case). A case with a payment
+    marked received keeps the business's records straight: mark it unpaid first. Returns how many cases went."""
+    case = store.get_case(connection, case_id)
+    ids = [case_id] + [
+        row["id"]
+        for row in kit.fetch_all(
+            connection, "SELECT id FROM sv_cases WHERE merged_into = ?", (case_id,)
+        )
+    ]
+    marks = ", ".join("?" for _ in ids)
+    if kit.count(
+        connection,
+        f"SELECT COUNT(*) FROM sv_charges WHERE case_id IN ({marks}) AND status = 'paid'",  # noqa: S608
+        tuple(ids),
+    ):
+        raise ValueError(
+            "This case has a payment you received. Mark it unpaid before deleting the case."
+        )
+    for table in ("sv_messages", "sv_charges"):
+        connection.execute(
+            f"DELETE FROM {table} WHERE case_id IN ({marks})",  # noqa: S608
+            tuple(ids),
+        )
+    connection.execute(
+        f"UPDATE sv_chats SET case_id = '' WHERE case_id IN ({marks})",  # noqa: S608
+        tuple(ids),
+    )
+    connection.execute(
+        f"DELETE FROM sv_cases WHERE id IN ({marks})",  # noqa: S608
+        tuple(ids),
+    )
+    for gone in ids:
+        public.revoke(connection, APP, "case", gone)
+    merged = len(ids) - 1
+    kit.log(
+        connection,
+        APP,
+        "deleted",
+        f"Case {case['reference']} deleted"
+        + (
+            f" with {merged} merged {'case' if merged == 1 else 'cases'}"
+            if merged
+            else ""
+        ),
+        detail=case["subject"],
+        ref_type="case",
+        ref_id=case_id,
+        actor=actor,
+    )
+    connection.commit()
+    return len(ids)
 
 
 def _set_status(case: Mapping[str, Any], status: str, stamp: str) -> dict[str, Any]:
@@ -518,9 +587,7 @@ def customer_reply(
     *,
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    case = store.get_case(connection, case_id)
-    if case["merged_into"]:
-        case = store.get_case(connection, case["merged_into"])
+    case = _customer_view(connection, case_id)
     if case["status"] == "closed":
         raise ValueError(
             "This request is closed. Please start a new one from our help centre."
@@ -555,6 +622,71 @@ def customer_reply(
     return get_case(connection, case["id"], now)
 
 
+def _digits(value: Any) -> str:
+    return re.sub(r"\D", "", str(value or ""))
+
+
+# A phone number as digits only, in SQL (the formats kit.phone accepts: digits, spaces, + ( ) - .).
+_PHONE_DIGITS_SQL = (
+    "replace(replace(replace(replace(replace(replace(customer_phone, ' ', ''), '-', ''), '(', ''), ')', ''), "
+    "'+', ''), '.', '')"
+)
+
+
+def _identity(case: Mapping[str, Any]) -> dict[str, str]:
+    return {
+        "email": str(case.get("customer_email") or "").strip().lower(),
+        "phone": _digits(case.get("customer_phone")),
+        "name": " ".join(str(case.get("customer_name") or "").lower().split()),
+    }
+
+
+def _same_phone(left: str, right: str) -> bool:
+    """The same number written with or without the country code (+1 555 222 3333 and 555-222-3333)."""
+    short, long = (left, right) if len(left) <= len(right) else (right, left)
+    return short == long or (len(short) >= 7 and long.endswith(short))
+
+
+def same_customer(left: Mapping[str, Any], right: Mapping[str, Any]) -> bool:
+    """Whether two cases are from the same person: the first detail both cases have (email, then phone, then
+    name) must match. A case with no customer details at all goes with any case."""
+    a, b = _identity(left), _identity(right)
+    if not any(a.values()) or not any(b.values()):
+        return True
+    for field in ("email", "phone", "name"):
+        if a[field] and b[field]:
+            return (
+                _same_phone(a[field], b[field])
+                if field == "phone"
+                else a[field] == b[field]
+            )
+    return False
+
+
+def kept_case(
+    connection: sqlite3.Connection, case: Mapping[str, Any]
+) -> dict[str, Any]:
+    """The case a merged duplicate now lives in (following a duplicate of a duplicate), or the case itself."""
+    current = dict(case)
+    for _ in range(20):
+        if not current.get("merged_into"):
+            break
+        current = store.get_case(connection, current["merged_into"])
+    return current
+
+
+COMBINED = "This request was combined with another one. We will reply to you by email."
+
+
+def _customer_view(connection: sqlite3.Connection, case_id: str) -> dict[str, Any]:
+    """The case a customer's link acts on: the case kept after merges, unless it is another customer's."""
+    own = store.get_case(connection, case_id)
+    case = kept_case(connection, own)
+    if case["id"] != own["id"] and not same_customer(own, case):
+        raise ValueError(COMBINED)
+    return case
+
+
 def merge(
     connection: sqlite3.Connection,
     source_id: str,
@@ -563,7 +695,9 @@ def merge(
     actor: str = "",
     now: datetime | None = None,
 ) -> dict[str, Any]:
-    """Merge a duplicate (``source``) into ``target``: its messages move, it closes and points at the target."""
+    """Merge a duplicate (``source``) into ``target``: its messages and charges move, it closes and points at the
+    target. Only cases from the same customer merge: the duplicate's customer link shows the kept case, so a
+    merge across customers would show each one the other's conversation."""
     if source_id == target_id:
         raise ValueError("Choose a different case to merge into.")
     source = store.get_case(connection, source_id)
@@ -572,9 +706,32 @@ def merge(
         raise ValueError("This case was already merged.")
     if target["merged_into"] or target["status"] == "closed":
         raise ValueError("Merge into a case that is still open.")
+    if not same_customer(source, target):
+        who = (
+            target["customer_email"]
+            or target["customer_phone"]
+            or target["customer_name"]
+        )
+        raise ValueError(
+            f"Case {target['reference']} is from another customer ({who}). Merge only duplicates from the same "
+            "customer, so nobody sees someone else's conversation. If it is the same person, correct the "
+            "customer details with Edit details first."
+        )
     stamp = kit.iso(_now(now))
     connection.execute(
         "UPDATE sv_messages SET case_id = ? WHERE case_id = ?", (target_id, source_id)
+    )
+    # The money moves with the conversation: the charges show on the kept case and on the customer's page.
+    connection.execute(
+        "UPDATE sv_charges SET case_id = ? WHERE case_id = ?", (target_id, source_id)
+    )
+    # Cases merged into the duplicate earlier now point at the kept case too.
+    connection.execute(
+        "UPDATE sv_cases SET merged_into = ? WHERE merged_into = ?",
+        (target_id, source_id),
+    )
+    connection.execute(
+        "UPDATE sv_chats SET case_id = ? WHERE case_id = ?", (target_id, source_id)
     )
     _message(
         connection,
@@ -596,7 +753,24 @@ def merge(
             "updated_at": stamp,
         },
     )
-    kit.update_row(connection, "sv_cases", target_id, {"updated_at": stamp})
+    # A kept case without the customer's details takes them from the duplicate, so replies reach them.
+    values: dict[str, Any] = {"updated_at": stamp}
+    for field in ("customer_name", "customer_email", "customer_phone"):
+        if not target[field] and source[field]:
+            values[field] = source[field]
+    if not target["last_customer_at"] and source["last_customer_at"]:
+        values["last_customer_at"] = source["last_customer_at"]
+    kit.update_row(connection, "sv_cases", target_id, values)
+    kit.log(
+        connection,
+        APP,
+        "merged",
+        f"Case {source['reference']} merged into {target['reference']}",
+        detail=source["subject"],
+        ref_type="case",
+        ref_id=target_id,
+        actor=actor,
+    )
     connection.commit()
     return get_case(connection, target_id, now)
 
@@ -604,7 +778,9 @@ def merge(
 def rate(
     connection: sqlite3.Connection, case_id: str, raw: Mapping[str, Any]
 ) -> dict[str, Any]:
-    case = store.get_case(connection, case_id)
+    # A duplicate's link shows the case it was merged into: the rating goes there.
+    case = _customer_view(connection, case_id)
+    case_id = case["id"]
     if case["status"] not in ("solved", "closed") or case["merged_into"]:
         raise ValueError("You can rate a request once it is solved.")
     if case["csat_score"] is not None:
@@ -684,11 +860,18 @@ def list_cases(
         clauses.append("channel = ?")
         params.append(kit.choice(channel, "the channel", CHANNELS))
     if q:
-        like = f"%{kit.text(q, 'a search', max_len=100).lower()}%"
+        needle = kit.text(q, "a search", max_len=100).lower()
+        like = f"%{needle}%"
+        digits = _digits(needle) if len(_digits(needle)) >= 3 else ""
         clauses.append(
-            "(lower(subject) LIKE ? OR lower(customer_name) LIKE ? OR lower(customer_email) LIKE ? OR CAST(number AS TEXT) LIKE ?)"
+            "(lower(subject) LIKE ? OR lower(customer_name) LIKE ? OR lower(customer_email) LIKE ? OR customer_phone LIKE ?"
+            " OR CAST(number AS TEXT) LIKE ?"
+            + (f" OR {_PHONE_DIGITS_SQL} LIKE ?" if digits else "")
+            + ")"
         )
-        params += [like, like, like, like.strip("%#")]
+        params += [like, like, like, like, like.strip("%#")]
+        if digits:  # 5551234567 finds +1 (555) 123-4567
+            params.append(f"%{digits}%")
     rows = kit.fetch_all(
         connection,
         f"SELECT * FROM sv_cases WHERE {' AND '.join(clauses)} ORDER BY updated_at DESC LIMIT ?",  # noqa: S608
@@ -1116,12 +1299,19 @@ def _cursor(rows: list[dict[str, Any]], after: int) -> int:
     return max([int(after or 0), *[int(r["seq"]) for r in rows]])
 
 
-def _public_chat_messages(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+def _team_name(connection: sqlite3.Connection) -> str:
+    """How the team appears to customers: the business name, never a team member's own email address."""
+    return str(kit.business(connection).get("name") or "Support")
+
+
+def _public_chat_messages(
+    rows: list[dict[str, Any]], team: str
+) -> list[dict[str, Any]]:
     return [
         {
             "id": r["id"],
             "from": "you" if r["author_kind"] == "visitor" else "agent",
-            "name": r["author_name"] if r["author_kind"] != "visitor" else "",
+            "name": team if r["author_kind"] != "visitor" else "",
             "body": r["body"],
             "at": r["created_at"],
         }
@@ -1151,7 +1341,7 @@ def visitor_poll(
     rows = chat_messages(connection, chat["id"], after)
     return {
         "status": chat["status"],
-        "messages": _public_chat_messages(rows),
+        "messages": _public_chat_messages(rows, _team_name(connection)),
         "cursor": _cursor(rows, after),
     }
 
@@ -1217,10 +1407,6 @@ def chat_to_case(
     if chat["case_id"]:
         return get_case(connection, chat["case_id"])
     rows = chat_messages(connection, chat_id)
-    transcript = "\n".join(
-        f"{'Visitor' if r['author_kind'] == 'visitor' else r['author_name'] or 'Agent'}: {r['body']}"
-        for r in rows
-    )
     first = next(
         (r["body"] for r in rows if r["author_kind"] == "visitor"), "Live chat"
     )
@@ -1228,7 +1414,6 @@ def chat_to_case(
         connection,
         {
             "subject": f"Live chat: {first[:80]}",
-            "description": f"Live chat transcript:\n{transcript}",
             "name": chat["visitor_name"],
             "email": chat["visitor_email"],
         },
@@ -1236,12 +1421,763 @@ def chat_to_case(
         origin=origin,
         acknowledge=False,
     )
+    # The conversation moves over message by message, so the customer's request page reads like the chat did
+    # and an answer the team already gave in the chat counts as the first reply.
+    team = _team_name(connection)
+    values: dict[str, Any] = {"description": first, "updated_at": kit.now()}
+    for row in rows:
+        visitor = row["author_kind"] == "visitor"
+        _message(
+            connection,
+            case["id"],
+            "customer" if visitor else "agent",
+            row["body"],
+            name=chat["visitor_name"] if visitor else row["author_name"] or team,
+            at=row["created_at"],
+        )
+        if visitor:
+            values["last_customer_at"] = row["created_at"]
+        else:
+            values.setdefault("first_responded_at", row["created_at"])
+            values["last_agent_at"] = row["created_at"]
+    if values.get("first_responded_at"):
+        values["status"] = "open"
+    kit.update_row(connection, "sv_cases", case["id"], values)
     connection.execute(
         "UPDATE sv_chats SET case_id = ?, updated_at = ? WHERE id = ?",
         (case["id"], kit.now(), chat_id),
     )
     connection.commit()
-    return case
+    return get_case(connection, case["id"])
+
+
+BULK_ACTIONS = ("assign", "solve", "close", "delete")
+
+
+def bulk(
+    connection: sqlite3.Connection,
+    ids: Any,
+    action: str,
+    *,
+    actor: str = "",
+    assignee: str = "",
+    origin: Any = None,
+) -> dict[str, Any]:
+    """One action on several cases. A case the action cannot apply to (a closed case to solve, a case with a
+    payment to delete) is skipped with the reason; the others go through."""
+    action = kit.choice(action, "the action", BULK_ACTIONS)
+    wanted = [str(i) for i in ids] if isinstance(ids, list) else []
+    wanted = list(dict.fromkeys(i for i in wanted if re.fullmatch(r"[0-9a-f]{32}", i)))
+    if not wanted:
+        raise ValueError("Choose at least one case.")
+    if len(wanted) > 200:
+        raise ValueError("Choose at most 200 cases at a time.")
+    done, skipped = 0, []
+    for case_id in wanted:
+        try:
+            if action == "assign":
+                update_case(connection, case_id, {"assignee": assignee}, actor=actor)
+            elif action == "solve":
+                update_case(
+                    connection,
+                    case_id,
+                    {"status": "solved"},
+                    actor=actor,
+                    origin=origin,
+                )
+            elif action == "close":
+                update_case(connection, case_id, {"status": "closed"}, actor=actor)
+            else:
+                delete_case(connection, case_id, actor=actor)
+            done += 1
+        except (ValueError, LookupError) as error:
+            skipped.append({"id": case_id, "reason": str(error)})
+    return {"done": done, "skipped": skipped}
+
+
+# ---------------------------------------------------------------------------
+# paid help: services offered in the help centre, charges on a case, payments marked received
+# ---------------------------------------------------------------------------
+
+
+def _money(connection: sqlite3.Connection, amount_cents: int) -> str:
+    return kit.fmt_money(int(amount_cents), kit.business(connection)["currency"])
+
+
+def _pay_lines(connection: sqlite3.Connection, reference: str) -> str:
+    """How the customer pays: the business's own payment link and instructions (Aira never takes the money)."""
+    profile = kit.business(connection)
+    lines = []
+    if profile.get("payment_link"):
+        lines.append(f"Pay here: {profile['payment_link']}")
+    if profile.get("payment_instructions"):
+        lines.append(str(profile["payment_instructions"]))
+    lines.append(f"Please use the reference {reference} with your payment.")
+    return "\n".join(lines)
+
+
+def list_offers(
+    connection: sqlite3.Connection, *, active_only: bool = False
+) -> list[dict[str, Any]]:
+    where = "WHERE active = 1" if active_only else ""
+    rows = kit.fetch_all(
+        connection,
+        f"SELECT * FROM sv_offers {where} ORDER BY position, title",  # noqa: S608
+    )
+    sold = {
+        r["offer_id"]: r
+        for r in kit.fetch_all(
+            connection,
+            "SELECT offer_id, COUNT(*) AS n, SUM(amount_cents) AS total FROM sv_charges WHERE status = 'paid' "
+            "AND offer_id != '' GROUP BY offer_id",
+        )
+    }
+    for row in rows:
+        row["active"] = bool(row["active"])
+        row["sold"] = int((sold.get(row["id"]) or {}).get("n") or 0)
+        row["earned_cents"] = int((sold.get(row["id"]) or {}).get("total") or 0)
+    return rows
+
+
+def _amount(raw: Mapping[str, Any], name: str, default: int | None = None) -> int:
+    """An amount from the UI kit's money field (``*_cents``, already cents) or typed by a person (``"25.00"``)."""
+    for key in ("amount_cents", "price_cents"):
+        if raw.get(key) not in (None, ""):
+            return kit.cents_value(raw.get(key), name, minimum=1)
+    for key in ("amount", "price"):
+        if raw.get(key) not in (None, ""):
+            return kit.cents(raw.get(key), name, minimum=1)
+    if default is not None:
+        return default
+    raise ValueError(f"Enter {name}.")
+
+
+def save_offer(
+    connection: sqlite3.Connection, raw: Mapping[str, Any], offer_id: str = ""
+) -> dict[str, Any]:
+    current = store.get_offer(connection, offer_id) if offer_id else {}
+    merged = {**current, **raw}
+    title = kit.text(merged.get("title"), "a name", max_len=120, required=True)
+    description = kit.text(
+        merged.get("description"), "a description", max_len=600, multiline=True
+    )
+    price = _amount(raw, "the price", current.get("price_cents") if current else None)
+    active = kit.flag(merged.get("active", True))
+    position = kit.integer(
+        merged.get("position"), "the position", default=0, minimum=0, maximum=999
+    )
+    stamp = kit.now()
+    values = {
+        "title": title,
+        "description": description,
+        "price_cents": price,
+        "active": 1 if active else 0,
+        "position": position,
+        "updated_at": stamp,
+    }
+    if offer_id:
+        kit.update_row(connection, "sv_offers", offer_id, values)
+    else:
+        offer_id = kit.new_id()
+        connection.execute(
+            "INSERT INTO sv_offers (id, title, description, price_cents, active, position, created_at, updated_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+            (
+                offer_id,
+                title,
+                description,
+                price,
+                values["active"],
+                position,
+                stamp,
+                stamp,
+            ),
+        )
+    connection.commit()
+    return store.get_offer(connection, offer_id)
+
+
+def delete_offer(connection: sqlite3.Connection, offer_id: str) -> None:
+    """The service leaves the help centre; charges already made keep their own name and amount."""
+    store.get_offer(connection, offer_id)
+    connection.execute("DELETE FROM sv_offers WHERE id = ?", (offer_id,))
+    connection.commit()
+
+
+def add_charge(
+    connection: sqlite3.Connection,
+    case_id: str,
+    raw: Mapping[str, Any],
+    *,
+    actor: str = "",
+    origin: Any = None,
+    notify: bool = True,
+) -> dict[str, Any]:
+    """Charge the customer for help on this case: it shows on their request page with how to pay, and an email
+    with the amount waits in the outbox."""
+    case = store.get_case(connection, case_id)
+    if case["merged_into"]:
+        raise ValueError("This case was merged into another one; charge there.")
+    if case["status"] == "closed":
+        raise ValueError(
+            "This case is closed. Create a new case to charge for more help."
+        )
+    offer: dict[str, Any] = {}
+    if raw.get("offer_id"):
+        offer = store.get_offer(connection, str(raw["offer_id"]))
+    label = kit.text(
+        raw.get("label") or offer.get("title"),
+        "what the charge is for",
+        max_len=120,
+        required=True,
+    )
+    amount = _amount(raw, "the amount", offer.get("price_cents"))
+    stamp = kit.now()
+    charge_id = kit.new_id()
+    connection.execute(
+        "INSERT INTO sv_charges (id, case_id, offer_id, label, amount_cents, status, created_at, updated_at) "
+        "VALUES (?, ?, ?, ?, ?, 'due', ?, ?)",
+        (charge_id, case_id, offer.get("id", ""), label, amount, stamp, stamp),
+    )
+    shown = _money(connection, amount)
+    _message(
+        connection,
+        case_id,
+        "system",
+        f"Charge added: {label}, {shown}.",
+        name=actor,
+        internal=True,
+        at=stamp,
+    )
+    kit.log(
+        connection,
+        APP,
+        "charge",
+        f"{shown} charged on {case['reference']}",
+        detail=label,
+        ref_type="case",
+        ref_id=case_id,
+        actor=actor,
+    )
+    if notify and case["customer_email"]:
+        link = case_link(connection, case)
+        kit.queue_email(
+            connection,
+            APP,
+            "case_charge",
+            to=case["customer_email"],
+            subject=f"Payment for your request {case['reference']}",
+            body=(
+                f"Hello {(case['customer_name'] or 'there').split(' ')[0]},\n\n{label}: {shown}.\n\n"
+                f"{_pay_lines(connection, case['reference'])}\n\nYour request and its payments: "
+                f"{kit.public_url(link['path'], origin)}"
+            ),
+            ref_type="case",
+            ref_id=case_id,
+        )
+    connection.execute(
+        "UPDATE sv_cases SET updated_at = ? WHERE id = ?", (stamp, case_id)
+    )
+    connection.commit()
+    return store.get_charge(connection, charge_id)
+
+
+def set_charge_paid(
+    connection: sqlite3.Connection,
+    charge_id: str,
+    paid: bool,
+    *,
+    actor: str = "",
+) -> dict[str, Any]:
+    """The business received the money (it goes into the revenue the Business hub adds up), or marked it by
+    mistake (the revenue line stops counting). Marking twice changes nothing."""
+    charge = store.get_charge(connection, charge_id)
+    if (charge["status"] == "paid") == paid:
+        return charge
+    case = store.get_case(connection, charge["case_id"])
+    stamp = kit.now()
+    shown = _money(connection, charge["amount_cents"])
+    if paid:
+        kit.update_row(
+            connection,
+            "sv_charges",
+            charge_id,
+            {"status": "paid", "paid_at": stamp, "updated_at": stamp},
+        )
+        kit.record_revenue(
+            connection,
+            APP,
+            source_type="case_charge",
+            source_id=charge_id,
+            amount_cents=int(charge["amount_cents"]),
+            label=f"{charge['label']} ({case['reference']})",
+            customer=case["customer_name"] or case["customer_email"],
+            at=stamp,
+        )
+        kit.log(
+            connection,
+            APP,
+            "paid",
+            f"Payment received for {case['reference']}",
+            detail=charge["label"],
+            ref_type="case",
+            ref_id=case["id"],
+            amount_cents=int(charge["amount_cents"]),
+            actor=actor,
+        )
+        if case["customer_email"]:
+            kit.queue_email(
+                connection,
+                APP,
+                "payment_receipt",
+                to=case["customer_email"],
+                subject=f"Payment received for {case['reference']}",
+                body=(
+                    f"Hello {(case['customer_name'] or 'there').split(' ')[0]},\n\nWe received your payment of "
+                    f"{shown} for {charge['label']}. Thank you.\n\nReference {case['reference']}."
+                ),
+                ref_type="case",
+                ref_id=case["id"],
+            )
+    else:
+        kit.update_row(
+            connection,
+            "sv_charges",
+            charge_id,
+            {"status": "due", "paid_at": None, "updated_at": stamp},
+        )
+        kit.void_revenue(connection, APP, "case_charge", charge_id)
+        kit.log(
+            connection,
+            APP,
+            "unpaid",
+            f"Payment for {case['reference']} marked not received",
+            detail=charge["label"],
+            ref_type="case",
+            ref_id=case["id"],
+            actor=actor,
+        )
+    _message(
+        connection,
+        case["id"],
+        "system",
+        f"{charge['label']} ({shown}) marked {'paid' if paid else 'not paid'}.",
+        name=actor,
+        internal=True,
+        at=stamp,
+    )
+    connection.commit()
+    return store.get_charge(connection, charge_id)
+
+
+def delete_charge(
+    connection: sqlite3.Connection, charge_id: str, *, actor: str = ""
+) -> None:
+    charge = store.get_charge(connection, charge_id)
+    if charge["status"] == "paid":
+        raise ValueError("This charge is paid. Mark it unpaid before removing it.")
+    connection.execute("DELETE FROM sv_charges WHERE id = ?", (charge_id,))
+    _message(
+        connection,
+        charge["case_id"],
+        "system",
+        f"Charge removed: {charge['label']}.",
+        name=actor,
+        internal=True,
+    )
+    connection.commit()
+
+
+def request_offer(
+    connection: sqlite3.Connection, raw: Mapping[str, Any], *, origin: Any = None
+) -> dict[str, Any]:
+    """A customer asks for a paid service from the help centre: a case with the charge on it, and one email with
+    their request number, the amount and how to pay."""
+    offer = store.get_offer(connection, str(raw.get("offer_id") or ""))
+    if not offer["active"]:
+        raise LookupError("That paid service is not offered any more.")
+    message = kit.text(raw.get("message"), "your message", max_len=5000, multiline=True)
+    case = create_case(
+        connection,
+        {
+            "subject": offer["title"],
+            "message": message or f"I would like: {offer['title']}.",
+            "name": raw.get("name"),
+            "email": raw.get("email"),
+            "phone": raw.get("phone"),
+            "tags": ["paid help"],
+        },
+        channel="web",
+        origin=origin,
+        acknowledge=False,
+    )
+    add_charge(connection, case["id"], {"offer_id": offer["id"]}, notify=False)
+    link = case_link(connection, case)
+    kit.queue_email(
+        connection,
+        APP,
+        "case_received",
+        to=case["customer_email"],
+        subject=f"We received your request {case['reference']}",
+        body=(
+            f"Hello {(case['customer_name'] or 'there').split(' ')[0]},\n\nThanks for asking for "
+            f'"{offer["title"]}" ({_money(connection, offer["price_cents"])}). We will be in touch soon.\n\n'
+            f"{_pay_lines(connection, case['reference'])}\n\nFollow your request and reply here: "
+            f"{kit.public_url(link['path'], origin)}"
+        ),
+        ref_type="case",
+        ref_id=case["id"],
+    )
+    kit.log(
+        connection,
+        APP,
+        "offer_request",
+        f"{case['customer_name'] or case['customer_email']} asked for {offer['title']}",
+        ref_type="case",
+        ref_id=case["id"],
+        amount_cents=int(offer["price_cents"]),
+        public=True,
+    )
+    connection.commit()
+    return get_case(connection, case["id"])
+
+
+def charge_lists(connection: sqlite3.Connection) -> dict[str, list[dict[str, Any]]]:
+    """Charges waiting to be paid (oldest first) and the latest payments received, with their case."""
+
+    def rows(where: str, order: str) -> list[dict[str, Any]]:
+        found = kit.fetch_all(
+            connection,
+            "SELECT ch.*, c.number, c.subject, c.customer_name, c.customer_email FROM sv_charges ch "
+            f"JOIN sv_cases c ON c.id = ch.case_id WHERE c.merged_into = '' AND {where} ORDER BY {order} LIMIT 100",  # noqa: S608
+        )
+        for row in found:
+            row["reference"] = f"#{row['number']}"
+        return found
+
+    return {
+        "due": rows("ch.status = 'due'", "ch.created_at"),
+        "paid": rows("ch.status = 'paid'", "ch.paid_at DESC")[:20],
+    }
+
+
+def public_charges(connection: sqlite3.Connection, case_id: str) -> dict[str, Any]:
+    rows = [
+        c for c in store.charges(connection, case_id) if c["status"] in ("due", "paid")
+    ]
+    return {
+        "charges": [
+            {
+                "label": c["label"],
+                "amount_cents": int(c["amount_cents"]),
+                "status": c["status"],
+            }
+            for c in rows
+        ],
+        "due_cents": sum(int(c["amount_cents"]) for c in rows if c["status"] == "due"),
+    }
+
+
+# ---------------------------------------------------------------------------
+# customers: everyone who asked for help, with their history
+# ---------------------------------------------------------------------------
+
+
+def _customer_key(case: Mapping[str, Any]) -> str:
+    """Who a case is from: the email, else the name, else the phone number (``tel:`` and its digits)."""
+    found = (
+        str(case.get("customer_email") or case.get("customer_name") or "")
+        .strip()
+        .lower()
+    )
+    if found:
+        return found
+    digits = _digits(case.get("customer_phone"))
+    return f"tel:{digits}" if digits else ""
+
+
+def customer_cases(
+    connection: sqlite3.Connection, who: Mapping[str, Any] | str
+) -> list[dict[str, Any]]:
+    """Every request from one customer (by email, or by name when they left no email, or by phone when they left
+    only a phone number), newest first."""
+    key = who if isinstance(who, str) else _customer_key(who)
+    key = str(key or "").strip().lower()[:200]
+    if not key:
+        return []
+    if key.startswith("tel:"):
+        rows = kit.fetch_all(
+            connection,
+            "SELECT * FROM sv_cases WHERE merged_into = '' AND customer_email = '' AND customer_name = '' "
+            f"AND {_PHONE_DIGITS_SQL} = ? ORDER BY created_at DESC LIMIT 200",  # noqa: S608
+            (key[4:],),
+        )
+        return [_view(store.case_row(row) or {}) for row in rows]
+    rows = kit.fetch_all(
+        connection,
+        "SELECT * FROM sv_cases WHERE merged_into = '' AND (lower(customer_email) = ? OR "
+        "(customer_email = '' AND lower(customer_name) = ?)) ORDER BY created_at DESC LIMIT 200",
+        (key, key),
+    )
+    return [_view(store.case_row(row) or {}) for row in rows]
+
+
+def customers(
+    connection: sqlite3.Connection, *, q: str = "", limit: int = 1000
+) -> list[dict[str, Any]]:
+    rows = kit.fetch_all(
+        connection,
+        "SELECT id, customer_name, customer_email, customer_phone, status, csat_score, created_at, updated_at "
+        "FROM sv_cases WHERE merged_into = '' ORDER BY created_at",
+    )
+    money: dict[tuple[str, str], int] = {}
+    for row in kit.fetch_all(
+        connection,
+        "SELECT case_id, status, SUM(amount_cents) AS total FROM sv_charges GROUP BY case_id, status",
+    ):
+        money[(row["case_id"], row["status"])] = int(row["total"] or 0)
+    people: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        key = _customer_key(row)
+        if not key:
+            continue
+        person = people.setdefault(
+            key,
+            {
+                "key": key,
+                "name": "",
+                "email": "",
+                "phone": "",
+                "cases": 0,
+                "open": 0,
+                "first_contact": row["created_at"],
+                "last_contact": row["updated_at"],
+                "ratings": [],
+                "paid_cents": 0,
+                "due_cents": 0,
+            },
+        )
+        person["name"] = row["customer_name"] or person["name"]
+        person["email"] = row["customer_email"] or person["email"]
+        person["phone"] = row["customer_phone"] or person["phone"]
+        person["cases"] += 1
+        person["open"] += 1 if row["status"] in OPEN_STATUSES else 0
+        person["last_contact"] = max(person["last_contact"], row["updated_at"])
+        if row["csat_score"] is not None:
+            person["ratings"].append(int(row["csat_score"]))
+        person["paid_cents"] += money.get((row["id"], "paid"), 0)
+        person["due_cents"] += money.get((row["id"], "due"), 0)
+    needle = str(q or "").strip().lower()[:100]
+    out = []
+    for person in people.values():
+        ratings = person.pop("ratings")
+        person["csat_average"] = (
+            round(sum(ratings) / len(ratings), 1) if ratings else None
+        )
+        if needle and not any(
+            needle in str(person[field]).lower() for field in ("name", "email", "phone")
+        ):
+            continue
+        out.append(person)
+    out.sort(key=lambda p: p["last_contact"], reverse=True)
+    return out[: max(1, min(limit, 5000))]
+
+
+CUSTOMER_CSV_COLUMNS = (
+    "name",
+    "email",
+    "phone",
+    "cases",
+    "open",
+    "first_contact",
+    "last_contact",
+    "csat_average",
+    "paid",
+    "due",
+)
+
+
+# ---------------------------------------------------------------------------
+# answers that might help: matching published articles for what a customer wrote
+# ---------------------------------------------------------------------------
+
+STOPWORDS = frozenset(
+    (
+        "the and for you your are was were with this that have has had not but can could would should will what "
+        "when where which who how why our ours from about into there their they them then than too very just also "
+        "any all please thanks thank hello dear need want help get got does did doing done its cannot "
+        "still been being some more most much many one two yet again"
+    ).split()
+)
+
+
+def _stem(word: str) -> str:
+    """A word without its plain English ending, so "passwords" matches "password" and "boxes" matches "box"."""
+    for ending in ("ing", "ed", "es", "s"):
+        if (
+            word.endswith(ending)
+            and len(word) - len(ending) >= 3
+            and not word.endswith("ss")
+        ):
+            return word[: -len(ending)]
+    return word
+
+
+def _words(text: str) -> list[str]:
+    seen: list[str] = []
+    for word in re.findall(r"[a-z0-9]+", str(text or "").lower()):
+        if len(word) >= 3 and word not in STOPWORDS:
+            stem = _stem(word)
+            if stem not in seen:
+                seen.append(stem)
+    return seen[:20]
+
+
+def _stems(text: str) -> set[str]:
+    return {_stem(word) for word in re.findall(r"[a-z0-9]+", str(text or "").lower())}
+
+
+def suggest_articles(
+    connection: sqlite3.Connection, text: str, *, limit: int = 3
+) -> list[dict[str, Any]]:
+    """Published answers that share words with ``text`` (whole words: "set" never matches "reset"): a word in
+    the title counts three times, in the body once. An article needs a title match or two body matches."""
+    words = _words(str(text or "")[:2000])
+    if not words:
+        return []
+    scored = []
+    for row in list_articles(connection, published_only=True):
+        title = _stems(row["title"])
+        body = _stems(row["body"] or "")
+        in_title = sum(1 for word in words if word in title)
+        in_body = sum(1 for word in words if word in body)
+        if in_title or in_body >= 2:
+            scored.append((in_title * 3 + in_body, int(row["views"] or 0), row))
+    scored.sort(key=lambda item: (-item[0], -item[1]))
+    return [public_article(row) for _, _, row in scored[: max(1, min(limit, 10))]]
+
+
+# ---------------------------------------------------------------------------
+# reports: the team, due times kept, ratings, what customers ask about, money
+# ---------------------------------------------------------------------------
+
+
+def _average(values: list[float]) -> float | None:
+    return round(sum(values) / len(values)) if values else None
+
+
+def reports(
+    connection: sqlite3.Connection, now: datetime | None = None
+) -> dict[str, Any]:
+    store.ensure(connection)
+    rows = [
+        store.case_row(r) or {}
+        for r in kit.fetch_all(
+            connection, "SELECT * FROM sv_cases WHERE merged_into = ''"
+        )
+    ]
+    team: dict[str, dict[str, Any]] = {}
+    for row in rows:
+        member = team.setdefault(
+            row["assignee"],
+            {
+                "assignee": row["assignee"],
+                "open": 0,
+                "solved": 0,
+                "_first": [],
+                "_ratings": [],
+            },
+        )
+        member["open"] += 1 if row["status"] in OPEN_STATUSES else 0
+        member["solved"] += 1 if row["solved_at"] else 0
+        minutes = _minutes(row["created_at"], row["first_responded_at"])
+        if minutes is not None:
+            member["_first"].append(minutes)
+        if row["csat_score"] is not None:
+            member["_ratings"].append(int(row["csat_score"]))
+    people = []
+    for member in team.values():
+        first, ratings = member.pop("_first"), member.pop("_ratings")
+        member["first_response_minutes"] = _average(first)
+        member["csat_average"] = (
+            round(sum(ratings) / len(ratings), 1) if ratings else None
+        )
+        member["ratings"] = len(ratings)
+        people.append(member)
+    people.sort(key=lambda m: (not m["assignee"], -m["solved"], m["assignee"].lower()))
+
+    replied = [r for r in rows if r["first_responded_at"] and r["first_response_due"]]
+    solved = [r for r in rows if r["solved_at"] and r["resolution_due"]]
+    first_met = sum(
+        1 for r in replied if r["first_responded_at"] <= r["first_response_due"]
+    )
+    solve_met = sum(1 for r in solved if r["solved_at"] <= r["resolution_due"])
+
+    rated = sorted(
+        (r for r in rows if r["csat_score"] is not None),
+        key=lambda r: r["csat_at"] or "",
+        reverse=True,
+    )
+    moment = _now(now)
+    month_ago = kit.iso(moment - timedelta(days=30))
+    topics: dict[str, int] = {}
+    for row in rows:
+        if row["created_at"] >= month_ago:
+            for tag in row["tags"]:
+                topics[tag] = topics.get(tag, 0) + 1
+
+    earned = kit.revenue(connection, app=APP, moment=moment)
+    return {
+        "team": people,
+        "sla": {
+            "first_reply_percent": round(first_met * 100 / len(replied))
+            if replied
+            else None,
+            "first_reply_cases": len(replied),
+            "solution_percent": round(solve_met * 100 / len(solved))
+            if solved
+            else None,
+            "solution_cases": len(solved),
+        },
+        "ratings": [
+            {
+                "id": r["id"],
+                "reference": r["reference"],
+                "subject": r["subject"],
+                "customer": r["customer_name"] or r["customer_email"],
+                "score": int(r["csat_score"]),
+                "comment": r["csat_comment"],
+                "at": r["csat_at"],
+            }
+            for r in rated[:10]
+        ],
+        "topics": [
+            {"tag": tag, "cases": n}
+            for tag, n in sorted(topics.items(), key=lambda item: (-item[1], item[0]))[
+                :8
+            ]
+        ],
+        "money": {
+            "currency": earned["currency"],
+            "this_month_cents": earned["this_month_cents"],
+            "total_cents": earned["total_cents"],
+            "payments": earned["payments"],
+            "due_cents": kit.count(
+                connection,
+                "SELECT SUM(ch.amount_cents) FROM sv_charges ch JOIN sv_cases c ON c.id = ch.case_id "
+                "WHERE ch.status = 'due' AND c.merged_into = ''",
+            ),
+            "offers": [
+                {
+                    "title": o["title"],
+                    "sold": o["sold"],
+                    "earned_cents": o["earned_cents"],
+                }
+                for o in list_offers(connection)
+                if o["sold"]
+            ],
+        },
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -1301,6 +2237,17 @@ def stats(
             connection, "SELECT COUNT(*) FROM sv_chats WHERE status = 'waiting'"
         ),
         "total": len(rows),
+        "earned_this_month_cents": kit.revenue(connection, app=APP, moment=moment)[
+            "this_month_cents"
+        ],
+        "due_cents": kit.count(
+            connection,
+            "SELECT SUM(ch.amount_cents) FROM sv_charges ch JOIN sv_cases c ON c.id = ch.case_id "
+            "WHERE ch.status = 'due' AND c.merged_into = ''",
+        ),
+        "offers": kit.count(
+            connection, "SELECT COUNT(*) FROM sv_offers WHERE active = 1"
+        ),
     }
 
 
@@ -1413,7 +2360,33 @@ def checklist(connection: sqlite3.Connection) -> list[dict[str, Any]]:
 
 
 def summary(connection: sqlite3.Connection) -> dict[str, Any]:
+    """The Business hub card shows three numbers. Once the business offers paid help, the money is one of them
+    and the overdue count moves into the open cases' hint."""
     numbers = stats(connection)
+    satisfaction = {
+        "label": "Satisfaction",
+        "value": f"{numbers['csat_average']} / 5"
+        if numbers["csat_average"] is not None
+        else "-",
+        "tone": "good" if (numbers["csat_average"] or 0) >= 4 else "",
+    }
+    if numbers["offers"] or numbers["earned_this_month_cents"]:
+        return {
+            "cards": [
+                {
+                    "label": "Open cases",
+                    "value": numbers["open"],
+                    "hint": f"{numbers['overdue']} overdue",
+                    "tone": "bad" if numbers["overdue"] else "",
+                },
+                {
+                    "label": "Paid help this month",
+                    "value": _money(connection, numbers["earned_this_month_cents"]),
+                    "tone": "good" if numbers["earned_this_month_cents"] else "",
+                },
+                satisfaction,
+            ]
+        }
     return {
         "cards": [
             {"label": "Open cases", "value": numbers["open"]},
@@ -1422,12 +2395,6 @@ def summary(connection: sqlite3.Connection) -> dict[str, Any]:
                 "value": numbers["overdue"],
                 "tone": "bad" if numbers["overdue"] else "",
             },
-            {
-                "label": "Satisfaction",
-                "value": f"{numbers['csat_average']} / 5"
-                if numbers["csat_average"] is not None
-                else "-",
-                "tone": "good" if (numbers["csat_average"] or 0) >= 4 else "",
-            },
+            satisfaction,
         ]
     }

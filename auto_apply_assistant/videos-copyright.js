@@ -21,6 +21,13 @@
     return node;
   };
   const field = (label, input, hint) => h("div", { class: "pub-field" }, h("label", { for: input.id, text: label }), input, hint ? h("span", { class: "pub-muted", text: hint }) : null);
+  // A checkbox beside its sentence (the form's field style stretched a box across the page above the words).
+  const statement = (box, text) => {
+    const label = h("label", { for: box.id }, box, h("span", { text }));
+    Object.assign(label.style, { display: "flex", gap: "12px", alignItems: "flex-start", margin: "4px 0 14px", cursor: "pointer" });
+    Object.assign(box.style, { flex: "none", width: "24px", height: "24px", minHeight: "0", margin: "2px 0 0", padding: "0" });
+    return label;
+  };
   const params = new URLSearchParams(location.search);
 
   const video = h("input", { id: "cpVideo", name: "video", required: true, value: params.get("video") || "", placeholder: "The video's address, or the id shown under it" });
@@ -61,8 +68,8 @@
     field("Your email address", email, "We write to you about this notice only."),
     field("Who you act for", organization),
     field("Your work", work),
-    h("label", { class: "pub-field", for: "cpGoodFaith" }, h("span", {}, goodFaith, " I believe in good faith that this use of the work is not allowed by its owner, its agent or the law.")),
-    h("label", { class: "pub-field", for: "cpAccurate" }, h("span", {}, accurate, " This notice is accurate, and I own the work or may act for its owner.")),
+    statement(goodFaith, "I believe in good faith that this use of the work is not allowed by its owner, its agent or the law."),
+    statement(accurate, "This notice is accurate, and I own the work or may act for its owner."),
     field("Signature", signature),
     notice,
     h("div", { class: "pub-btn-row" }, send),

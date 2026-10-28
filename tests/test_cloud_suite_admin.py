@@ -149,6 +149,9 @@ def test_the_catalog_combines_sections_into_fewer_apps():
         "planner",
         "news",
         "videos",
+        "journey",
+        "ai",
+        "stocks",
     ]
     assert (
         app_catalog.BY_ID["studio"].name == "Sales"

@@ -9,8 +9,9 @@ import io
 import re
 import sqlite3
 from collections.abc import Mapping, Sequence
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import Any
+from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 from urllib.parse import parse_qsl, urlencode, urlsplit, urlunsplit
 
 from aira.suite import kit, public
@@ -84,6 +85,7 @@ SUBMISSION_STATUSES = ("new", "contacted", "won", "lost")
 SUBSCRIBER_STATUSES = ("subscribed", "unsubscribed")
 FORM_FIELDS = ("name", "email", "phone", "company", "message", "custom")
 NEWSLETTER_CAP = 500
+MAX_CENTS = 10_000_000_00  # the kit's own ceiling for an amount
 PILLARS = (
     ("tip", "A practical tip"),
     ("behind", "Behind the scenes"),
@@ -120,6 +122,24 @@ def _https(value: Any, name: str, *, required: bool = False) -> str:
     return cleaned
 
 
+_NOT_A_NUMBER = re.compile(r"nan|inf", re.IGNORECASE)
+
+
+def amount(value: Any, name: str, *, default: int = 0) -> int:
+    """An amount typed as text ("12.50", "1,200") -> cents, with a 400 for anything that is not a real number.
+
+    ``kit.cents`` lets "Infinity", "sNaN" and huge exponents ("1e400") through to ``Decimal`` arithmetic, which
+    raises ``InvalidOperation`` (an ``ArithmeticError``, so the route answered 500), and "NaN" gives Python's own
+    message. They are refused here first, in plain words."""
+    label = f"{name[:1].upper()}{name[1:]}"
+    if value is not None and _NOT_A_NUMBER.search(str(value)):
+        raise ValueError(f"{label} must be a number like 12.50.")
+    try:
+        return kit.cents(value, name, default=default)
+    except ArithmeticError:  # an exponent too large for Decimal ("1e400")
+        raise ValueError(f"{label} is too large.") from None
+
+
 def money_field(value: Any, name: str) -> int:
     """Money from the app: an integer is already cents (the UI kit sends cents); text is read as an amount."""
     if isinstance(value, bool):
@@ -127,10 +147,14 @@ def money_field(value: Any, name: str) -> int:
     if isinstance(value, int):
         if value < 0:
             raise ValueError(f"{name[:1].upper()}{name[1:]} cannot be negative.")
+        if value > MAX_CENTS:  # too large to store, and never a real amount
+            raise ValueError(f"{name[:1].upper()}{name[1:]} is too large.")
         return value
-    if isinstance(value, float):
-        return kit.cents(str(value), name)
-    return kit.cents(value, name, default=0)
+    if isinstance(
+        value, float
+    ):  # JSON also allows Infinity, NaN and 1e400 (read as inf)
+        return amount(repr(value), name)
+    return amount(value, name)
 
 
 def _apply(raw: Mapping[str, Any], current: Mapping[str, Any] | None) -> dict[str, Any]:
@@ -180,7 +204,7 @@ def _store_values(values: dict[str, Any]) -> dict[str, Any]:
     out = dict(values)
     for column in store.JSON_COLUMNS & out.keys():
         out[column] = kit.dumps(out[column])
-    for column in ("add_subscriber", "highlight", "consent"):
+    for column in ("add_subscriber", "highlight", "consent", "active"):
         if column in out:
             out[column] = 1 if out[column] else 0
     return out
@@ -240,13 +264,23 @@ def campaign_results(
         "SELECT COUNT(*) FROM mk_posts WHERE campaign_id = ?",
         (campaign_id,),
     )
+    paid = kit.fetch_one(
+        connection,
+        "SELECT COUNT(*) AS n, COALESCE(SUM(value_cents), 0) AS total FROM mk_submissions WHERE campaign_id = ? AND paid_at IS NOT NULL",
+        (campaign_id,),
+    ) or {"n": 0, "total": 0}
     spend = int(campaign["spend_cents"] or 0)
-    revenue = int(campaign["revenue_cents"] or 0)
+    paid_cents = int(paid["total"] or 0)
+    # What the business typed in (sales the app cannot see) plus what its leads really paid.
+    revenue = int(campaign["revenue_cents"] or 0) + paid_cents
     return {
         "clicks": clicks,
         "leads": leads,
         "subscribers": subscribers,
         "posts": posts,
+        "customers": int(paid["n"] or 0),
+        "paid_cents": paid_cents,
+        "revenue_total_cents": revenue,
         "roi_percent": roi_percent(revenue, spend),
         "cost_per_lead_cents": round(spend / leads) if leads else None,
         "budget_left_cents": int(campaign["budget_cents"] or 0) - spend,
@@ -382,8 +416,16 @@ def list_posts(
     status: str = "",
     channel: str = "",
     campaign_id: str = "",
+    unscheduled: bool = False,
+    query: str = "",
 ) -> list[dict[str, Any]]:
+    """Posts on the calendar between ``start`` and ``end``, or (``unscheduled``) the ones with no date yet."""
     clauses, params = [], []
+    if unscheduled:
+        clauses.append("scheduled_at = ''")
+    if query:
+        clauses.append("(title LIKE ? OR body LIKE ? OR hashtags LIKE ?)")
+        params.extend([f"%{query.strip()[:80]}%"] * 3)
     if start:
         clauses.append("scheduled_at >= ?")
         params.append(kit.moment(start, "the start"))
@@ -420,7 +462,10 @@ def update_post(
     connection: sqlite3.Connection, post_id: str, raw: Mapping[str, Any]
 ) -> dict[str, Any]:
     current = store.get(connection, "mk_posts", post_id, "post")
-    _update(connection, "mk_posts", post_id, clean_post(connection, raw, current))
+    values = clean_post(connection, raw, current)
+    if values["scheduled_at"] != current["scheduled_at"]:
+        values["reminded_at"] = None  # moved to a new time: remind again then
+    _update(connection, "mk_posts", post_id, values)
     connection.commit()
     return store.get(connection, "mk_posts", post_id, "post")
 
@@ -605,6 +650,23 @@ def repurpose(
     return created
 
 
+def _zone(name: Any) -> ZoneInfo | None:
+    """A time zone by its IANA name (``America/New_York``); None when it is empty or unknown (then UTC)."""
+    text = str(name or "").strip()
+    if not text or len(text) > 60 or text.upper() == "UTC":
+        return None
+    try:
+        return ZoneInfo(text)
+    except (ZoneInfoNotFoundError, ValueError):
+        return None
+
+
+def _local_moment(day: str, hour: int, zone: ZoneInfo | None) -> str:
+    """``hour``:00 on ``day`` where the person is, as an ISO UTC moment."""
+    local = datetime.fromisoformat(day).replace(hour=hour, tzinfo=zone or timezone.utc)
+    return local.astimezone(timezone.utc).strftime("%Y-%m-%dT%H:%M:%SZ")
+
+
 def content_plan(
     connection: sqlite3.Connection, raw: Mapping[str, Any]
 ) -> dict[str, Any]:
@@ -630,6 +692,10 @@ def content_plan(
         or (kit.utcnow().date() + timedelta(days=1)).isoformat()
     )
     first = datetime.fromisoformat(start)
+    zone = _zone(raw.get("time_zone") or kit.business(connection).get("timezone"))
+    post_hour = kit.integer(
+        raw.get("hour"), "the hour to post", default=9, minimum=0, maximum=23
+    )
     fallback_ideas = []
     for index in range(days):
         pillar, label = PILLARS[index % len(PILLARS)]
@@ -688,7 +754,7 @@ def content_plan(
                     "channel": idea["channel"],
                     "title": idea["title"],
                     "body": idea["text"],
-                    "scheduled_at": f"{idea['day']}T09:00:00Z",
+                    "scheduled_at": _local_moment(idea["day"], post_hour, zone),
                     "status": "idea",
                     "campaign_id": raw.get("campaign_id") or "",
                     "source": "plan",
@@ -960,11 +1026,16 @@ def clean_form(
     }
 
 
+def conversion(submissions: int, views: int) -> int | None:
+    """Leads per page view, in whole percent, never above 100 (one visit can send a form twice)."""
+    if not views:
+        return None
+    return min(100, round(submissions * 100 / views))
+
+
 def _form_view(connection: sqlite3.Connection, form: dict[str, Any]) -> dict[str, Any]:
     form["public"] = public.link_for(connection, APP, "form", form["id"])
-    form["conversion_percent"] = (
-        round(form["submissions"] * 100 / form["views"]) if form["views"] else None
-    )
+    form["conversion_percent"] = conversion(form["submissions"], form["views"])
     form["new_submissions"] = store.count(
         connection,
         "SELECT COUNT(*) FROM mk_submissions WHERE form_id = ? AND status = 'new'",
@@ -1150,13 +1221,21 @@ def submit(
     return {"thank_you": form["thank_you"], "stored": True}
 
 
+SUBMISSION_SOURCES = ("form", "media_kit")
+SOURCE_LABELS = {"form": "Form", "media_kit": "Sponsorship"}
+
+
 def list_submissions(
     connection: sqlite3.Connection,
     *,
     form_id: str = "",
     status: str = "",
+    query: str = "",
+    source: str = "",
+    due: bool = False,
     limit: int = 500,
 ) -> list[dict[str, Any]]:
+    """The leads inbox: filter by form, status, where it came from, words, or follow-ups that are due."""
     clauses, params = [], []
     if form_id:
         clauses.append("s.form_id = ?")
@@ -1164,19 +1243,99 @@ def list_submissions(
     if status:
         clauses.append("s.status = ?")
         params.append(kit.choice(status, "the status", SUBMISSION_STATUSES))
+    if source:
+        clauses.append("s.source = ?")
+        params.append(kit.choice(source, "the source", SUBMISSION_SOURCES))
+    if query:
+        clauses.append(
+            "(s.name LIKE ? OR s.email LIKE ? OR s.phone LIKE ? OR s.company LIKE ? OR s.message LIKE ? OR s.notes LIKE ?)"
+        )
+        params.extend([f"%{query.strip()[:80]}%"] * 6)
+    if due:
+        clauses.append(
+            "s.follow_up_on <> '' AND s.follow_up_on <= ? AND s.status IN ('new', 'contacted')"
+        )
+        params.append(kit.today())
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-    return store.all_rows(
+    rows = store.all_rows(
         connection,
         f"SELECT s.*, f.title AS form_title FROM mk_submissions s LEFT JOIN mk_forms f ON f.id = s.form_id {where} ORDER BY s.created_at DESC LIMIT ?",  # noqa: S608
         (*params, max(1, min(limit, 5000))),
     )
+    for row in rows:
+        _lead_view(row)
+    return rows
+
+
+def _lead_view(row: dict[str, Any]) -> dict[str, Any]:
+    row["source_label"] = SOURCE_LABELS.get(row.get("source") or "form", "Form")
+    if not row.get("form_title"):
+        row["form_title"] = (
+            "Media kit" if row.get("source") == "media_kit" else "A deleted form"
+        )
+    row["paid"] = bool(row.get("paid_at"))
+    row["value"] = f"{int(row.get('value_cents') or 0) / 100:.2f}"
+    row["follow_up_due"] = bool(
+        row.get("follow_up_on")
+        and row["follow_up_on"] <= kit.today()
+        and row.get("status") in ("new", "contacted")
+    )
+    return row
+
+
+def get_submission(
+    connection: sqlite3.Connection, submission_id: str
+) -> dict[str, Any]:
+    row = kit.fetch_one(
+        connection,
+        "SELECT s.*, f.title AS form_title FROM mk_submissions s LEFT JOIN mk_forms f ON f.id = s.form_id WHERE s.id = ?",
+        (submission_id,),
+    )
+    if not row:
+        raise LookupError("That lead was not found.")
+    return _lead_view(store.decode(row))
+
+
+def _who(lead: Mapping[str, Any]) -> str:
+    return str(
+        lead.get("company")
+        or lead.get("name")
+        or lead.get("email")
+        or lead.get("phone")
+        or "A lead"
+    )
+
+
+def _record_lead_revenue(
+    connection: sqlite3.Connection, lead: Mapping[str, Any]
+) -> None:
+    what = lead.get("package") or lead.get("form_title") or "Marketing lead"
+    kit.record_revenue(
+        connection,
+        APP,
+        source_type="lead",
+        source_id=lead["id"],
+        amount_cents=int(lead["value_cents"] or 0),
+        label=f"{what}: {_who(lead)}"[:200],
+        customer=_who(lead),
+        at=lead.get("paid_at") or "",
+    )
+    if lead.get("paid_at"):
+        # kit.record_revenue keeps the first date when the line already exists (paid, undone, paid again later):
+        # the payment counts in the month it really came, the same month the Marketing overview shows.
+        connection.execute(
+            "UPDATE suite_revenue SET at = ? WHERE app = ? AND source_type = 'lead' AND source_id = ?",
+            (lead["paid_at"], APP, lead["id"]),
+        )
 
 
 def update_submission(
     connection: sqlite3.Connection, submission_id: str, raw: Mapping[str, Any]
 ) -> dict[str, Any]:
-    current = store.get(connection, "mk_submissions", submission_id, "submission")
-    values = {
+    """Status, notes, the deal's value and a follow-up date. A paid lead keeps its revenue line in step with
+    its value; moving it away from won takes the payment off (the money did not come)."""
+    current = get_submission(connection, submission_id)
+    values: dict[str, Any] = {
         "status": kit.choice(
             raw.get("status", current["status"]), "the status", SUBMISSION_STATUSES
         ),
@@ -1187,31 +1346,236 @@ def update_submission(
             multiline=True,
         ),
     }
+    if "value_cents" in raw:
+        values["value_cents"] = money_field(raw.get("value_cents"), "the value")
+    if "follow_up_on" in raw:
+        values["follow_up_on"] = kit.day(raw.get("follow_up_on"), "the follow-up date")
+    if values["status"] != "new" and not current.get("contacted_at"):
+        values["contacted_at"] = kit.now()
+    paid = bool(current["paid_at"])
+    if paid and (
+        values["status"] != "won" or int(values.get("value_cents", 1) or 0) <= 0
+    ):
+        values["paid_at"] = None
+        kit.void_revenue(connection, APP, "lead", submission_id)
+        paid = False
     _update(connection, "mk_submissions", submission_id, values)
     if values["status"] != current["status"] and values["status"] == "won":
         kit.log(
             connection,
             APP,
             "won",
-            f"{current['name'] or current['email']} became a customer",
+            f"{current['name'] or current['email'] or current['phone']} became a customer",
             ref_type="submission",
             ref_id=submission_id,
         )
+    lead = get_submission(connection, submission_id)
+    if paid:
+        _record_lead_revenue(connection, lead)
     connection.commit()
-    return store.get(connection, "mk_submissions", submission_id, "submission")
+    return lead
+
+
+def mark_paid(
+    connection: sqlite3.Connection, submission_id: str, raw: Mapping[str, Any]
+) -> dict[str, Any]:
+    """The customer paid you (through your own payment link, a transfer or cash): the lead becomes a won
+    customer and its value counts as revenue in the Business hub, once."""
+    lead = get_submission(connection, submission_id)
+    value = (
+        money_field(raw.get("value_cents"), "the amount")
+        if raw.get("value_cents") not in (None, "")
+        else int(lead["value_cents"] or 0)
+    )
+    if value <= 0:
+        raise ValueError("Enter how much they paid.")
+    first_time = not lead["paid_at"]
+    _update(
+        connection,
+        "mk_submissions",
+        submission_id,
+        {
+            "status": "won",
+            "value_cents": value,
+            "paid_at": lead["paid_at"] or kit.now(),
+        },
+    )
+    lead = get_submission(connection, submission_id)
+    _record_lead_revenue(connection, lead)
+    if first_time:
+        kit.log(
+            connection,
+            APP,
+            "paid",
+            f"{_who(lead)} paid",
+            ref_type="submission",
+            ref_id=submission_id,
+            amount_cents=value,
+        )
+    connection.commit()
+    return lead
+
+
+def mark_unpaid(connection: sqlite3.Connection, submission_id: str) -> dict[str, Any]:
+    """Marked paid by mistake, or refunded: the revenue line stops counting (it stays for the record)."""
+    get_submission(connection, submission_id)
+    _update(connection, "mk_submissions", submission_id, {"paid_at": None})
+    kit.void_revenue(connection, APP, "lead", submission_id)
+    connection.commit()
+    return get_submission(connection, submission_id)
+
+
+def delete_submission(connection: sqlite3.Connection, submission_id: str) -> None:
+    store.delete(connection, "mk_submissions", submission_id, "submission")
+    kit.void_revenue(connection, APP, "lead", submission_id)
+    connection.commit()
+
+
+def reply_template(
+    connection: sqlite3.Connection, lead: Mapping[str, Any]
+) -> dict[str, str]:
+    """A starting point for a reply: a greeting, a thank-you and your name (you write the middle)."""
+    profile = kit.business(connection)
+    first = str(lead.get("name") or "").split(" ")[0]
+    about = lead.get("package") or lead.get("form_title") or "your message"
+    return {
+        "subject": f"Re: {about}"[:200],
+        "body": f"Hi {first or 'there'},\n\nThank you for getting in touch with {profile.get('name') or 'us'}.\n\n"
+        f"\n\nBest wishes,\n{profile.get('name') or ''}".rstrip(),
+    }
+
+
+def reply_to_lead(
+    connection: sqlite3.Connection, submission_id: str, raw: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Write back to a lead by email: the message waits in Business hub > Outbox until you approve it (or goes
+    by itself if you turned on automatic sending for ``lead_reply``). A new lead becomes contacted."""
+    lead = get_submission(connection, submission_id)
+    if not lead["email"]:
+        raise ValueError("This lead left no email address. Call them instead.")
+    subject = kit.text(raw.get("subject"), "the subject", max_len=200, required=True)
+    body = kit.text(
+        raw.get("body"), "the message", max_len=10000, required=True, multiline=True
+    )
+    message = kit.queue_email(
+        connection,
+        APP,
+        "lead_reply",
+        to=lead["email"],
+        subject=subject,
+        body=body,
+        ref_type="submission",
+        ref_id=submission_id,
+    )
+    values: dict[str, Any] = {}
+    if lead["status"] == "new":
+        values["status"] = "contacted"
+    if not lead.get("contacted_at"):
+        values["contacted_at"] = kit.now()
+    if values:
+        _update(connection, "mk_submissions", submission_id, values)
+    kit.log(
+        connection,
+        APP,
+        "reply",
+        f"Reply to {lead['name'] or lead['email']} written",
+        ref_type="submission",
+        ref_id=submission_id,
+    )
+    connection.commit()
+    return {"lead": get_submission(connection, submission_id), "message": message}
+
+
+def payment_request(
+    connection: sqlite3.Connection, submission_id: str, raw: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Ask a lead to pay: an email with the amount and your own payment link or instructions (Aira never takes
+    the money). It waits in the outbox for your approval. Mark the lead paid when the money arrives."""
+    lead = get_submission(connection, submission_id)
+    if not lead["email"]:
+        raise ValueError(
+            "This lead left no email address to send a payment request to."
+        )
+    value = (
+        money_field(raw.get("value_cents"), "the amount")
+        if raw.get("value_cents") not in (None, "")
+        else int(lead["value_cents"] or 0)
+    )
+    if value <= 0:
+        raise ValueError("Enter the amount to ask for.")
+    profile = kit.business(connection)
+    if not (profile.get("payment_link") or profile.get("payment_instructions")):
+        raise ValueError(
+            "Add your payment link or payment instructions in Business hub > Business profile first."
+        )
+    what = kit.text(raw.get("for"), "what it is for", max_len=200) or (
+        lead.get("package") or "our work together"
+    )
+    amount = kit.fmt_money(value, profile.get("currency") or "USD")
+    first = str(lead["name"] or "").split(" ")[0]
+    lines = [
+        f"Hi {first or 'there'},",
+        "",
+        f"Thank you for choosing {profile.get('name') or 'us'}. Here is how to pay {amount} for {what}.",
+        "",
+    ]
+    if profile.get("payment_link"):
+        lines.append(f"Pay online: {profile['payment_link']}")
+    if profile.get("payment_instructions"):
+        lines.append(profile["payment_instructions"])
+    lines += [
+        "",
+        f"Please mention this reference: {submission_id[:8].upper()}",
+        "",
+        profile.get("name") or "",
+    ]
+    message = kit.queue_email(
+        connection,
+        APP,
+        "payment_request",
+        to=lead["email"],
+        subject=f"Payment for {what}"[:200],
+        body="\n".join(lines).strip(),
+        ref_type="submission",
+        ref_id=submission_id,
+    )
+    values: dict[str, Any] = {"value_cents": value}
+    if lead["status"] in ("new", "contacted"):
+        values["status"] = "won"
+    if not lead.get("contacted_at"):
+        values["contacted_at"] = kit.now()
+    _update(connection, "mk_submissions", submission_id, values)
+    if lead["paid_at"]:
+        _record_lead_revenue(connection, get_submission(connection, submission_id))
+    kit.log(
+        connection,
+        APP,
+        "payment_request",
+        f"Payment request for {amount} to {lead['name'] or lead['email']}",
+        ref_type="submission",
+        ref_id=submission_id,
+        amount_cents=value,
+    )
+    connection.commit()
+    return {"lead": get_submission(connection, submission_id), "message": message}
 
 
 SUBMISSION_COLUMNS = (
     "created_at",
+    "source_label",
     "form_title",
     "name",
     "email",
     "phone",
     "company",
+    "package",
     "message",
     "answer",
     "consent",
     "status",
+    "value",
+    "paid_at",
+    "follow_up_on",
     "notes",
 )
 
@@ -1343,16 +1707,30 @@ def list_subscribers(
     if query:
         clauses.append("(email LIKE ? OR name LIKE ?)")
         params.extend([f"%{query[:80]}%"] * 2)
+    wanted = tag.strip().lower()
+    if wanted:
+        # The tag list is stored as JSON: narrow in SQL (before the limit), then match exactly below.
+        clauses.append("tags LIKE ?")
+        params.append(f"%{kit.dumps(wanted)}%")
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     rows = store.all_rows(
         connection,
-        f"SELECT * FROM mk_subscribers {where} ORDER BY created_at DESC LIMIT ?",
+        f"SELECT * FROM mk_subscribers {where} ORDER BY created_at DESC LIMIT ?",  # noqa: S608
         (*params, max(1, min(limit, 20000))),
-    )  # noqa: S608
-    if tag:
-        wanted = tag.strip().lower()
+    )
+    if wanted:
         rows = [row for row in rows if wanted in row["tags"]]
     return rows
+
+
+def all_tags(connection: sqlite3.Connection) -> list[str]:
+    """Every tag on the list (the filter offers all of them, whatever is filtered now)."""
+    found: set[str] = set()
+    for row in kit.fetch_all(
+        connection, "SELECT tags FROM mk_subscribers WHERE tags <> '[]'"
+    ):
+        found.update(kit.loads(row["tags"], []))
+    return sorted(found)
 
 
 def import_subscribers(connection: sqlite3.Connection, text: str) -> dict[str, int]:
@@ -1714,6 +2092,302 @@ def queue_newsletter(
 
 
 # ---------------------------------------------------------------------------
+# the media kit: a creator's or business's public "work with me" page, with a rate card and sponsorship requests
+# ---------------------------------------------------------------------------
+
+MEDIA_KIT_DEFAULTS: dict[str, Any] = {
+    "headline": "",
+    "about": "",
+    "niche": "",
+    "audience": {},
+    "show_subscribers": True,
+    "open": True,
+    "thank_you": "",
+}
+PACKAGE_CAP = 20
+
+
+def media_kit(connection: sqlite3.Connection) -> dict[str, Any]:
+    stored = kit.get_setting(connection, APP, "media_kit", {}) or {}
+    out = {
+        **MEDIA_KIT_DEFAULTS,
+        **{key: value for key, value in stored.items() if key in MEDIA_KIT_DEFAULTS},
+    }
+    stored_audience = out.get("audience")
+    audience: dict[str, Any] = (
+        stored_audience if isinstance(stored_audience, dict) else {}
+    )
+    out["audience"] = {channel: int(audience.get(channel) or 0) for channel in CHANNELS}
+    return out
+
+
+def save_media_kit(
+    connection: sqlite3.Connection, raw: Mapping[str, Any]
+) -> dict[str, Any]:
+    current = media_kit(connection)
+    merged = {
+        **current,
+        **{key: value for key, value in raw.items() if key in MEDIA_KIT_DEFAULTS},
+    }
+    raw_audience = merged.get("audience")
+    given: dict[str, Any] = raw_audience if isinstance(raw_audience, dict) else {}
+    audience = {}
+    for channel in CHANNELS:
+        value = given.get(channel)
+        audience[channel] = kit.integer(
+            value if value not in (None, "") else 0,
+            f"the {CHANNELS[channel]['label']} audience",
+            default=0,
+            minimum=0,
+            maximum=10_000_000_000,
+        )
+    clean = {
+        "headline": kit.text(merged.get("headline"), "the headline", max_len=120),
+        "about": kit.text(
+            merged.get("about"), "the introduction", max_len=1500, multiline=True
+        ),
+        "niche": kit.text(
+            merged.get("niche"), "what you make content about", max_len=120
+        ),
+        "audience": audience,
+        "show_subscribers": kit.flag(merged.get("show_subscribers")),
+        "open": kit.flag(merged.get("open")),
+        "thank_you": kit.text(
+            merged.get("thank_you"),
+            "the thank-you message",
+            max_len=500,
+            multiline=True,
+        ),
+    }
+    kit.set_setting(connection, APP, "media_kit", clean)
+    connection.commit()
+    return media_kit(connection)
+
+
+def clean_package(
+    raw: Mapping[str, Any], current: Mapping[str, Any] | None = None
+) -> dict[str, Any]:
+    merged = _apply(raw, current)
+    return {
+        "name": kit.text(
+            merged.get("name"), "the package name", max_len=80, required=True
+        ),
+        "price_cents": money_field(merged.get("price_cents"), "the price"),
+        "details": kit.text(
+            merged.get("details"), "what is included", max_len=1000, multiline=True
+        ),
+        "days": kit.integer(
+            merged.get("days"), "the days to deliver", default=0, minimum=0, maximum=365
+        ),
+        "active": kit.flag(merged.get("active", True)),
+    }
+
+
+def list_packages(
+    connection: sqlite3.Connection, *, active_only: bool = False
+) -> list[dict[str, Any]]:
+    where = "WHERE active = 1" if active_only else ""
+    return store.all_rows(
+        connection,
+        f"SELECT * FROM mk_packages {where} ORDER BY position, created_at",  # noqa: S608 - fixed text
+    )
+
+
+def create_package(
+    connection: sqlite3.Connection, raw: Mapping[str, Any]
+) -> dict[str, Any]:
+    if store.count(connection, "SELECT COUNT(*) FROM mk_packages") >= PACKAGE_CAP:
+        raise ValueError(f"A rate card holds at most {PACKAGE_CAP} packages.")
+    values = clean_package(raw)
+    values["position"] = store.count(
+        connection, "SELECT COALESCE(MAX(position), -1) + 1 FROM mk_packages"
+    )
+    row_id = _insert(connection, "mk_packages", values)
+    connection.commit()
+    return store.get(connection, "mk_packages", row_id, "package")
+
+
+def update_package(
+    connection: sqlite3.Connection, package_id: str, raw: Mapping[str, Any]
+) -> dict[str, Any]:
+    current = store.get(connection, "mk_packages", package_id, "package")
+    _update(connection, "mk_packages", package_id, clean_package(raw, current))
+    connection.commit()
+    return store.get(connection, "mk_packages", package_id, "package")
+
+
+def delete_package(connection: sqlite3.Connection, package_id: str) -> None:
+    store.delete(connection, "mk_packages", package_id, "package")
+    connection.commit()
+
+
+def _reach(profile: Mapping[str, Any], subscribers: int) -> int:
+    return sum(int(v or 0) for v in profile["audience"].values()) + (
+        subscribers if profile["show_subscribers"] else 0
+    )
+
+
+def media_kit_view(connection: sqlite3.Connection) -> dict[str, Any]:
+    """What the owner edits: the profile, the packages and the numbers the page will show."""
+    profile = media_kit(connection)
+    subscribers = store.count(
+        connection, "SELECT COUNT(*) FROM mk_subscribers WHERE status = 'subscribed'"
+    )
+    sponsorships = kit.fetch_one(
+        connection,
+        """SELECT COUNT(*) AS n,
+        COALESCE(SUM(CASE WHEN paid_at IS NOT NULL THEN value_cents ELSE 0 END), 0) AS earned,
+        COALESCE(SUM(CASE WHEN status = 'new' THEN 1 ELSE 0 END), 0) AS waiting
+        FROM mk_submissions WHERE source = 'media_kit'""",
+    ) or {"n": 0, "earned": 0, "waiting": 0}
+    return {
+        "profile": profile,
+        "packages": list_packages(connection),
+        "subscribers": subscribers,
+        "reach": _reach(profile, subscribers),
+        "requests": int(sponsorships["n"] or 0),
+        "waiting": int(sponsorships["waiting"] or 0),
+        "earned_cents": int(sponsorships["earned"] or 0),
+        "channels": [
+            {"id": key, "label": value["label"]} for key, value in CHANNELS.items()
+        ],
+    }
+
+
+def public_media_kit(connection: sqlite3.Connection) -> dict[str, Any]:
+    """What a brand sees: who you are, your audience, your packages and prices. Never your leads or notes."""
+    profile = media_kit(connection)
+    bio = bio_profile(connection)
+    subscribers = store.count(
+        connection, "SELECT COUNT(*) FROM mk_subscribers WHERE status = 'subscribed'"
+    )
+    audience = [
+        {"label": CHANNELS[channel]["label"], "count": count}
+        for channel, count in profile["audience"].items()
+        if count > 0
+    ]
+    if profile["show_subscribers"] and subscribers:
+        audience.append({"label": "Email list", "count": subscribers})
+    return {
+        "title": bio["title"] or kit.business(connection)["name"],
+        "avatar_url": bio["avatar_url"],
+        "headline": profile["headline"],
+        "about": profile["about"],
+        "niche": profile["niche"],
+        "audience": audience,
+        "reach": sum(item["count"] for item in audience),
+        "packages": [
+            {
+                "id": package["id"],
+                "name": package["name"],
+                "price_cents": package["price_cents"],
+                "details": package["details"],
+                "days": package["days"],
+            }
+            for package in list_packages(connection, active_only=True)
+        ],
+        "open": bool(profile["open"]),
+    }
+
+
+def sponsorship_request(
+    connection: sqlite3.Connection, payload: Mapping[str, Any]
+) -> dict[str, Any]:
+    """A brand asks to work with you from the media kit page. It lands in the leads inbox as a sponsorship
+    with its budget as the value, and you get an email in the outbox. Prices are checked on the server."""
+    profile = media_kit(connection)
+    if not profile["open"]:
+        raise ValueError("Sponsorship requests are closed for now.")
+    thank_you = (
+        profile["thank_you"]
+        or "Thank you! We will reply by email within two working days."
+    )
+    if str(payload.get("website") or "").strip():
+        return {
+            "thank_you": thank_you,
+            "stored": False,
+        }  # a bot filled the hidden field
+    brand = kit.text(
+        payload.get("company"), "your brand or company", max_len=120, required=True
+    )
+    name = kit.text(payload.get("name"), "your name", max_len=120, required=True)
+    address = kit.email(payload.get("email"), "your email", required=True)
+    package_id = str(payload.get("package_id") or "").strip()
+    package: dict[str, Any] | None = None
+    if package_id:
+        row = kit.fetch_one(
+            connection,
+            "SELECT * FROM mk_packages WHERE id = ? AND active = 1",
+            (package_id,),
+        )
+        if not row:
+            raise ValueError("That package is no longer offered. Choose another one.")
+        package = store.decode(row)
+    budget = amount(payload.get("budget"), "your budget")
+    message = kit.text(
+        payload.get("message"), "your message", max_len=2000, multiline=True
+    )
+    dates = kit.text(payload.get("dates"), "the dates", max_len=120)
+    if not (package or budget or message):
+        raise ValueError(
+            "Choose a package, enter a budget or tell us what you have in mind."
+        )
+    value = budget or (int(package["price_cents"]) if package else 0)
+    submission_id = _insert(
+        connection,
+        "mk_submissions",
+        {
+            "form_id": "",
+            "source": "media_kit",
+            "name": name,
+            "email": address,
+            "company": brand,
+            "package": package["name"] if package else "",
+            "message": message,
+            "answer": dates,
+            "value_cents": value,
+            "status": "new",
+        },
+    )
+    kit.log(
+        connection,
+        APP,
+        "sponsorship",
+        f"{brand} asked about a sponsorship",
+        ref_type="submission",
+        ref_id=submission_id,
+        amount_cents=value,
+        public=True,
+    )
+    owner = kit.business(connection)
+    if owner.get("email"):
+        currency = owner.get("currency") or "USD"
+        lines = [
+            f"Brand: {brand}",
+            f"Name: {name}",
+            f"Email: {address}",
+            f"Package: {package['name'] if package else 'not chosen'}",
+            f"Budget: {kit.fmt_money(budget, currency) if budget else 'not given'}",
+        ]
+        if dates:
+            lines.append(f"Dates: {dates}")
+        if message:
+            lines += ["", message]
+        kit.queue_email(
+            connection,
+            APP,
+            "sponsorship_request",
+            to=owner["email"],
+            subject=f"Sponsorship request from {brand}"[:200],
+            body="A brand wants to work with you.\n\n" + "\n".join(lines),
+            ref_type="submission",
+            ref_id=submission_id,
+        )
+    connection.commit()
+    return {"thank_you": thank_you, "stored": True}
+
+
+# ---------------------------------------------------------------------------
 # the overview
 # ---------------------------------------------------------------------------
 
@@ -1783,7 +2457,7 @@ def overview(connection: sqlite3.Connection) -> dict[str, Any]:
         ),
         "form_views": views,
         "form_submissions": submissions,
-        "conversion_percent": round(submissions * 100 / views) if views else None,
+        "conversion_percent": conversion(submissions, views),
         "leads_month": store.count(
             connection,
             "SELECT COUNT(*) FROM mk_submissions WHERE created_at >= ?",
@@ -1809,8 +2483,100 @@ def overview(connection: sqlite3.Connection) -> dict[str, Any]:
             (kit.now(),),
         ),
         "recent_leads": list_submissions(connection, limit=6),
+        "earned_month_cents": store.count(
+            connection,
+            "SELECT COALESCE(SUM(value_cents), 0) FROM mk_submissions WHERE paid_at >= ?",
+            (month,),
+        ),
+        "customers_month": store.count(
+            connection,
+            "SELECT COUNT(*) FROM mk_submissions WHERE paid_at >= ?",
+            (month,),
+        ),
+        "open_value_cents": store.count(
+            connection,
+            "SELECT COALESCE(SUM(value_cents), 0) FROM mk_submissions WHERE paid_at IS NULL AND status IN ('new', 'contacted', 'won')",
+        ),
+        "follow_ups": list_submissions(connection, due=True, limit=8),
+        "follow_ups_due": store.count(
+            connection,
+            "SELECT COUNT(*) FROM mk_submissions WHERE follow_up_on <> '' AND follow_up_on <= ? AND status IN ('new', 'contacted')",
+            (kit.today(),),
+        ),
+        "due_posts": due_posts(connection),
         "channels": [{"id": key, **value} for key, value in CHANNELS.items()],
     }
+
+
+# ---------------------------------------------------------------------------
+# reminders: Aira does not post to social networks, so it tells you when a post is due
+# ---------------------------------------------------------------------------
+
+REMIND_WINDOW_DAYS = (
+    2  # a post more than this late gets no email (only the "Ready to post" list)
+)
+
+
+def due_posts(
+    connection: sqlite3.Connection, *, days: int = 14
+) -> list[dict[str, Any]]:
+    """Scheduled posts whose time has come (in the last ``days``) and that are not marked published yet."""
+    since = (kit.utcnow() - timedelta(days=days)).strftime("%Y-%m-%dT%H:%M:%SZ")
+    return store.all_rows(
+        connection,
+        "SELECT * FROM mk_posts WHERE status = 'scheduled' AND scheduled_at <> '' AND scheduled_at <= ? AND scheduled_at >= ? ORDER BY scheduled_at LIMIT 20",
+        (kit.now(), since),
+    )
+
+
+def remind_due_posts(connection: sqlite3.Connection) -> int:
+    """Queue one "time to post" email per due post (to the business's own address), once. Safe to run again:
+    a post is reminded only while ``reminded_at`` is empty. Returns how many reminders were written."""
+    since = (kit.utcnow() - timedelta(days=REMIND_WINDOW_DAYS)).strftime(
+        "%Y-%m-%dT%H:%M:%SZ"
+    )
+    rows = store.all_rows(
+        connection,
+        "SELECT * FROM mk_posts WHERE status = 'scheduled' AND scheduled_at <> '' AND scheduled_at <= ? AND scheduled_at >= ? AND reminded_at IS NULL ORDER BY scheduled_at LIMIT 50",
+        (kit.now(), since),
+    )
+    address = kit.business(connection).get("email") or ""
+    written = 0
+    for post in rows:
+        label = CHANNELS[post["channel"]]["label"]
+        if address:
+            text = "\n\n".join(
+                part for part in (post["body"], post["hashtags"]) if part
+            )
+            kit.queue_email(
+                connection,
+                APP,
+                "post_reminder",
+                to=address,
+                subject=f"Time to post on {label}: {post['title'] or post['body'][:60] or 'your post'}"[
+                    :200
+                ],
+                body=(
+                    f"Your {label} post is due now. Copy the text below, post it, then mark it published in "
+                    f"Marketing > Calendar so its link is kept.\n\n{text or '(no text yet)'}"
+                    + (
+                        f"\n\nImage or video: {post['media_url']}"
+                        if post["media_url"]
+                        else ""
+                    )
+                ),
+                ref_type="post",
+                ref_id=post["id"],
+            )
+            written += 1
+            # Only a reminder that was really written uses up the post's one reminder: with no business email
+            # yet, the post is reminded once one is added (while it is still inside the window).
+            connection.execute(
+                "UPDATE mk_posts SET reminded_at = ? WHERE id = ?",
+                (kit.now(), post["id"]),
+            )
+    connection.commit()
+    return written
 
 
 def checklist(connection: sqlite3.Connection) -> list[dict[str, Any]]:
@@ -1858,3 +2624,57 @@ def checklist(connection: sqlite3.Connection) -> list[dict[str, Any]]:
             "Keep your list warm",
         ),
     ]
+
+
+# ---------------------------------------------------------------------------
+# search (the search box across the top of the app)
+# ---------------------------------------------------------------------------
+
+# What each kind of record is matched on, newest first. Leads and subscribers (people) come first in the answer.
+_SEARCH: tuple[tuple[str, str, tuple[str, ...]], ...] = (
+    (
+        "submissions",
+        "mk_submissions",
+        ("name", "email", "phone", "company", "message", "notes"),
+    ),
+    ("subscribers", "mk_subscribers", ("email", "name")),
+    ("posts", "mk_posts", ("title", "body", "hashtags")),
+    ("campaigns", "mk_campaigns", ("name", "goal")),
+    ("forms", "mk_forms", ("title", "intro")),
+    ("links", "mk_links", ("title", "slug", "destination")),
+    ("newsletters", "mk_newsletters", ("subject", "body")),
+)
+
+
+def search(
+    connection: sqlite3.Connection, query: str, *, limit: int = 5
+) -> dict[str, list[dict[str, Any]]]:
+    """Up to ``limit`` records of each kind whose words contain ``query``, each shaped as its own list returns it
+    (so the page opens a found record with the same drawer as from its tab). An empty query finds nothing."""
+    text = str(query or "").strip()[:80]
+    limit = max(1, min(int(limit), 25))
+    found: dict[str, list[dict[str, Any]]] = {kind: [] for kind, _t, _c in _SEARCH}
+    if not text:
+        return found
+    pattern = f"%{text}%"
+    for kind, table, columns in _SEARCH:
+        where = " OR ".join(f"{column} LIKE ?" for column in columns)
+        if kind == "submissions":
+            found[kind] = list_submissions(connection, query=text, limit=limit)
+            continue
+        rows = store.all_rows(
+            connection,
+            f"SELECT * FROM {table} WHERE {where} ORDER BY created_at DESC LIMIT ?",  # noqa: S608 - constant names
+            (*([pattern] * len(columns)), limit),
+        )
+        if kind == "campaigns":
+            for row in rows:
+                row["results"] = campaign_results(connection, row)
+        elif kind == "links":
+            rows = [_link_view(connection, row) for row in rows]
+        elif kind == "forms":
+            rows = [_form_view(connection, row) for row in rows]
+        elif kind == "newsletters":
+            rows = [_newsletter_view(connection, row) for row in rows]
+        found[kind] = rows
+    return found

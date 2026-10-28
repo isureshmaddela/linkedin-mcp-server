@@ -10,17 +10,19 @@ from __future__ import annotations
 from typing import Any
 
 from aira.airaapi.http import Raw, Request, aira_route
-from aira.suite import kit, public
-from aira.suite.marketing import service, store
+from aira.suite import background, kit, public
+from aira.suite.marketing import access, service, store
 from aira.suite.marketing.store import APP
 
 BASE = "/api/marketing"
 ID = "([0-9a-f]{32})"
 BIO_REF = "bio"
+KIT_REF = "kit"
 
 
 def _connect(request: Request) -> Any:
     connection = request.connect()
+    access.require_grown_up(request, connection)
     store.ensure(connection)
     return connection
 
@@ -60,6 +62,18 @@ def overview(request: Request) -> tuple[int, dict[str, Any]]:
     return 200, data
 
 
+@aira_route("GET", f"{BASE}/search")
+def search(request: Request) -> tuple[int, dict[str, Any]]:
+    """The search box across the top of the app: a few of each kind of record that match ``q``."""
+    with _connect(request) as connection:
+        return 200, {
+            "query": request.q("q").strip()[:80],
+            "results": service.search(
+                connection, request.q("q"), limit=request.qint("limit", 5, 1, 25)
+            ),
+        }
+
+
 # ---------------------------------------------------------------------------
 # posts
 # ---------------------------------------------------------------------------
@@ -75,6 +89,8 @@ def posts_list(request: Request) -> tuple[int, dict[str, Any]]:
             status=request.q("status"),
             channel=request.q("channel"),
             campaign_id=request.q("campaign_id"),
+            unscheduled=request.q("unscheduled") in ("1", "true"),
+            query=request.q("q"),
         )
     return 200, {
         "posts": posts,
@@ -315,12 +331,16 @@ def submissions_list(request: Request) -> tuple[int, dict[str, Any]] | Raw:
             connection,
             form_id=request.q("form_id"),
             status=request.q("status"),
+            query=request.q("q"),
+            source=request.q("source"),
+            due=request.q("due") in ("1", "true"),
             limit=5000,
         )
     if request.q("format") == "csv":
         return _csv(rows, service.SUBMISSION_COLUMNS, "leads.csv")
     return 200, {
         "submissions": rows[:500],
+        "total": len(rows),
         "statuses": list(service.SUBMISSION_STATUSES),
     }
 
@@ -338,10 +358,57 @@ def submissions_update(request: Request) -> tuple[int, dict[str, Any]]:
 @aira_route("DELETE", f"{BASE}/submissions/{ID}")
 def submissions_delete(request: Request) -> tuple[int, dict[str, Any]]:
     with _connect(request) as connection:
-        store.delete(connection, "mk_submissions", request.match.group(1), "submission")
-        connection.commit()
+        service.delete_submission(connection, request.match.group(1))
     request.audit("marketing.submission_delete", "submission", request.match.group(1))
     return 200, {"deleted": True}
+
+
+@aira_route("GET", f"{BASE}/submissions/{ID}/reply")
+def submissions_reply_template(request: Request) -> tuple[int, dict[str, Any]]:
+    with _connect(request) as connection:
+        lead = service.get_submission(connection, request.match.group(1))
+        return 200, {"template": service.reply_template(connection, lead)}
+
+
+@aira_route("POST", f"{BASE}/submissions/{ID}/reply")
+def submissions_reply(request: Request) -> tuple[int, dict[str, Any]]:
+    with _connect(request) as connection:
+        result = service.reply_to_lead(
+            connection, request.match.group(1), request.payload
+        )
+    request.audit("marketing.lead_reply", "submission", request.match.group(1))
+    return 201, result
+
+
+@aira_route("POST", f"{BASE}/submissions/{ID}/payment-request")
+def submissions_payment_request(request: Request) -> tuple[int, dict[str, Any]]:
+    with _connect(request) as connection:
+        result = service.payment_request(
+            connection, request.match.group(1), request.payload
+        )
+    request.audit("marketing.payment_request", "submission", request.match.group(1))
+    return 201, result
+
+
+@aira_route("POST", f"{BASE}/submissions/{ID}/paid")
+def submissions_paid(request: Request) -> tuple[int, dict[str, Any]]:
+    with _connect(request) as connection:
+        lead = service.mark_paid(connection, request.match.group(1), request.payload)
+    request.audit(
+        "marketing.lead_paid",
+        "submission",
+        request.match.group(1),
+        {"amount_cents": lead["value_cents"]},
+    )
+    return 200, {"submission": lead}
+
+
+@aira_route("DELETE", f"{BASE}/submissions/{ID}/paid")
+def submissions_unpaid(request: Request) -> tuple[int, dict[str, Any]]:
+    with _connect(request) as connection:
+        lead = service.mark_unpaid(connection, request.match.group(1))
+    request.audit("marketing.lead_unpaid", "submission", request.match.group(1))
+    return 200, {"submission": lead}
 
 
 # ---------------------------------------------------------------------------
@@ -369,10 +436,15 @@ def subscribers_list(request: Request) -> tuple[int, dict[str, Any]] | Raw:
                 "SELECT COUNT(*) FROM mk_subscribers WHERE status = 'unsubscribed'",
             ),
         }
+        tags = service.all_tags(connection)
     if request.q("format") == "csv":
         return _csv(rows, service.SUBSCRIBER_COLUMNS, "subscribers.csv")
-    tags = sorted({tag for row in rows for tag in row["tags"]})
-    return 200, {"subscribers": rows[:1000], "counts": counts, "tags": tags}
+    return 200, {
+        "subscribers": rows[:1000],
+        "total": len(rows),
+        "counts": counts,
+        "tags": tags,
+    }
 
 
 @aira_route("POST", f"{BASE}/subscribers")
@@ -562,6 +634,71 @@ def newsletters_queue(request: Request) -> tuple[int, dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
+# the media kit
+# ---------------------------------------------------------------------------
+
+
+@aira_route("GET", f"{BASE}/media-kit")
+def media_kit_get(request: Request) -> tuple[int, dict[str, Any]]:
+    with _connect(request) as connection:
+        data = service.media_kit_view(connection)
+        data["public"] = public.link_for(connection, APP, "media_kit", KIT_REF)
+    return 200, data
+
+
+@aira_route("POST", f"{BASE}/media-kit")
+def media_kit_save(request: Request) -> tuple[int, dict[str, Any]]:
+    with _connect(request) as connection:
+        profile = service.save_media_kit(connection, request.payload)
+    request.audit("marketing.media_kit_save", "media_kit", KIT_REF)
+    return 200, {"profile": profile}
+
+
+@aira_route("POST", f"{BASE}/media-kit/packages")
+def packages_create(request: Request) -> tuple[int, dict[str, Any]]:
+    with _connect(request) as connection:
+        package = service.create_package(connection, request.payload)
+    request.audit("marketing.package_create", "package", package["id"])
+    return 201, {"package": package}
+
+
+@aira_route("PATCH", f"{BASE}/media-kit/packages/{ID}")
+def packages_update(request: Request) -> tuple[int, dict[str, Any]]:
+    with _connect(request) as connection:
+        return 200, {
+            "package": service.update_package(
+                connection, request.match.group(1), request.payload
+            )
+        }
+
+
+@aira_route("DELETE", f"{BASE}/media-kit/packages/{ID}")
+def packages_delete(request: Request) -> tuple[int, dict[str, Any]]:
+    with _connect(request) as connection:
+        service.delete_package(connection, request.match.group(1))
+    request.audit("marketing.package_delete", "package", request.match.group(1))
+    return 200, {"deleted": True}
+
+
+@aira_route("POST", f"{BASE}/media-kit/share")
+def media_kit_share(request: Request) -> tuple[int, dict[str, Any]]:
+    with _connect(request) as connection:
+        made = public.create_link(
+            connection, APP, "media_kit", KIT_REF, title="Work with me"
+        )
+        kit.log(connection, APP, "share", "Media kit shared", ref_type="media_kit")
+        connection.commit()
+    return 200, {"public": made}
+
+
+@aira_route("DELETE", f"{BASE}/media-kit/share")
+def media_kit_unshare(request: Request) -> tuple[int, dict[str, Any]]:
+    with _connect(request) as connection:
+        public.revoke(connection, APP, "media_kit", KIT_REF)
+    return 200, {"public": None}
+
+
+# ---------------------------------------------------------------------------
 # public pages
 # ---------------------------------------------------------------------------
 
@@ -652,6 +789,34 @@ def unsubscribe_action(
     return 200, {"subscribed": subscriber["status"] == "subscribed"}
 
 
+@public.page(APP, "media_kit")
+def media_kit_page(connection: Any, link: dict[str, Any]) -> dict[str, Any]:
+    store.ensure(connection)
+    return service.public_media_kit(connection)
+
+
+@public.action(APP, "media_kit", "request")
+def media_kit_request(
+    connection: Any,
+    link: dict[str, Any],
+    payload: dict[str, Any],
+    visitor: dict[str, Any],
+) -> tuple[int, dict[str, Any]]:
+    store.ensure(connection)
+    return 201, service.sponsorship_request(connection, payload)
+
+
+# ---------------------------------------------------------------------------
+# background work: a reminder when a scheduled post is due (Aira does not post for you)
+# ---------------------------------------------------------------------------
+
+
+@background.task(APP)
+def _tick(connection: Any) -> int:
+    store.ensure(connection)
+    return service.remind_due_posts(connection)
+
+
 # ---------------------------------------------------------------------------
 # the Business hub
 # ---------------------------------------------------------------------------
@@ -680,5 +845,13 @@ def _summary(connection: Any) -> dict[str, Any]:
                 "tone": "warn" if data["new_leads"] else "",
             },
             {"label": "Clicks this month", "value": data["clicks_month"]},
+            {
+                "label": "Paid by leads this month",
+                "value": kit.fmt_money(
+                    data["earned_month_cents"],
+                    kit.business(connection)["currency"],
+                ),
+                "tone": "good" if data["earned_month_cents"] else "",
+            },
         ]
     }

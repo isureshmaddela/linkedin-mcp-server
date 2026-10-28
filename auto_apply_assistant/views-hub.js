@@ -49,7 +49,7 @@
     const installed = data.apps.filter((app) => Aira.apps.state.enabled[app.id] !== false);
     parts.push(S.section("Your apps", h("div", { class: "suite-app-cards" }, ...installed.map((app) => h("article", { class: "suite-app-card" },
       h("header", {}, h("span", { class: "app-tile-icon" }, Aira.icon(app.id)), h("div", {}, h("strong", { text: app.name }), h("div", { class: "muted small", text: app.tagline }))),
-      app.cards.length ? S.kpis(app.cards.slice(0, 3)) : null,
+      app.cards.length ? S.kpis(app.cards.slice(0, 4)) : null,
       app.checklist.length && app.progress.done < app.progress.total ? S.checklist(app.checklist) : app.checklist.length ? h("p", { class: "muted small", text: "Set up. Keep it going." }) : h("p", { class: "muted small", text: app.industry }),
       h("div", { class: "btn-row" }, ...(app.sections && app.sections.length > 1 ? app.sections.map((section) => h("a", { class: "btn secondary sm", href: `#/${section.id}`, text: `Open ${APP_NAMES[section.id] || section.id}` })) : [h("a", { class: "btn secondary sm", href: `#/${app.home || app.id}`, text: `Open ${app.name}` })])))))));
     parts.push(S.section("Recent activity", S.activity(data.activity)));

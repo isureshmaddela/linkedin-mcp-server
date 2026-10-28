@@ -8,6 +8,8 @@ them (``HOSTED_RULES``) because the platform console does that work (``aira_clou
 
 from __future__ import annotations
 
+import base64
+import binascii
 from collections.abc import Iterator
 from contextlib import closing, contextmanager
 from typing import Any
@@ -20,6 +22,7 @@ from aira.suite.videos import db, media
 from aira.suite.videos import service as videos
 
 BASE = "/api/ads"
+LOW_BALANCE_DAYS = 3  # the hub warns when the balance lasts fewer days than this at the last week's spending
 ID = "([0-9a-f]{32})"
 
 # The hosted build answers these from the platform console instead (aira_cloud/policy.py reads this).
@@ -31,6 +34,7 @@ HOSTED_RULES = {
     "admin_close_month": "deny",
     "admin_clawback": "deny",
     "admin_payment": "deny",
+    "estimate": "read",  # a forecast: changes nothing, so auditors may run it too
 }
 
 
@@ -38,12 +42,30 @@ def _advertiser(connection: Any) -> str:
     return str(kit.business(connection).get("name") or "") or "Your business"
 
 
+class GrownUpOnly(PermissionError):
+    """A child's or a teen's household profile asked for Ads (the screen offers to switch person)."""
+
+    code = "grown_up_only"
+
+
+def _check_person(request: Request, connection: Any) -> None:
+    """Ads spends the account's prepaid money, so it is run by an adult whose profile is unlocked: a PIN-locked
+    profile is asked for its PIN (``profile_locked``, like everywhere else), and a child's or a teen's profile is
+    refused even though the account is the same."""
+    profile = videos.identity(request, connection)["profile"]
+    if profile.get("age_group") in ("child", "teen"):
+        raise GrownUpOnly(
+            "Ads spends your household's money, so only a grown-up's profile can use it. Switch to a grown-up's profile."
+        )
+
+
 @contextmanager
 def _open(request: Request) -> Iterator[tuple[Any, str, str]]:
-    """(videos connection, the advertiser's home, its name from the business profile)."""
+    """(videos connection, the advertiser's home, its name from the business profile), for an unlocked adult."""
     home = videos.home_of(request)
     with closing(request.connect()) as connection:
         kit.ensure_core(connection)
+        _check_person(request, connection)
         name = _advertiser(connection)
         if kit.get_setting(connection, APP, "home", "") != home:
             kit.set_setting(
@@ -84,9 +106,44 @@ def overview(request: Request) -> tuple[int, dict[str, Any]]:
 
 
 @aira_route("GET", f"{BASE}/campaigns")
-def campaigns(request: Request) -> tuple[int, dict[str, Any]]:
+def campaigns(request: Request) -> tuple[int, dict[str, Any]] | Raw:
     with _open(request) as (sc, home, _name):
+        if request.q("format") == "csv":
+            return Raw(
+                200,
+                service.campaigns_csv(sc, home),
+                "text/csv; charset=utf-8",
+                filename="ads-campaigns.csv",
+            )
         return 200, {"campaigns": service.campaigns(sc, home)}
+
+
+@aira_route("GET", f"{BASE}/creatives")
+def creatives(request: Request) -> tuple[int, dict[str, Any]]:
+    """The advertiser's ads with their campaign's name (no media): the search across the top looks through them."""
+    with _open(request) as (sc, home, _name):
+        return 200, {"creatives": service.creatives_index(sc, home)}
+
+
+@aira_route("POST", f"{BASE}/estimate")
+def estimate(request: Request) -> tuple[int, dict[str, Any]]:
+    """What a campaign can expect each day for its bid, budget and audience (``campaign_id`` for an existing one).
+
+    The form asks while a person types, so half-typed targeting ("I" on the way to "IN") is not an error: the answer
+    says what to fix in ``problem`` instead of failing the request."""
+    payload = dict(request.payload)
+    campaign_id = str(payload.pop("campaign_id", "") or "")
+    with _open(request) as (sc, home, _name):
+        balance = int(service.account(sc, home).get("balance_micros") or 0)
+        try:
+            found = service.estimate(sc, home, payload, campaign_id)
+        except ValueError as error:
+            return 200, {
+                "estimate": None,
+                "problem": str(error),
+                "balance_micros": balance,
+            }
+        return 200, {"estimate": found, "problem": "", "balance_micros": balance}
 
 
 @aira_route("POST", f"{BASE}/campaigns")
@@ -131,6 +188,49 @@ def campaign_status(request: Request) -> tuple[int, dict[str, Any]]:
         )
     request.audit(f"ads.campaign_{found['status']}", "campaign", found["id"])
     return 200, {"campaign": found}
+
+
+@aira_route("POST", f"{BASE}/campaigns/{ID}/duplicate")
+def campaign_duplicate(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, home, _name):
+        found = service.duplicate_campaign(sc, home, request.match.group(1))
+    request.audit("ads.campaign_duplicate", "campaign", found["id"])
+    return 201, {"campaign": found}
+
+
+@aira_route("GET", f"{BASE}/campaigns/{ID}/sales")
+def sales_list(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, home, _name):
+        return 200, {"sales": service.sales(sc, home, request.match.group(1))}
+
+
+@aira_route("POST", f"{BASE}/campaigns/{ID}/sales")
+def sale_add(request: Request) -> tuple[int, dict[str, Any]]:
+    by = str((getattr(request, "user", None) or {}).get("email") or "")
+    with _open(request) as (sc, home, _name):
+        sale = service.add_sale(sc, home, request.match.group(1), request.payload, by)
+        found = service.campaign(sc, home, sale["campaign_id"])
+    with closing(request.connect()) as connection:
+        kit.log(
+            connection,
+            APP,
+            "sale",
+            f"{sale['orders']} sale{'s' if sale['orders'] != 1 else ''} worth "
+            f"{service.dollars(sale['value_micros'])} from the campaign {found['name']}",
+            ref_type="campaign",
+            ref_id=found["id"],
+        )
+        connection.commit()
+    request.audit("ads.sale_add", "campaign", found["id"])
+    return 201, {"sale": sale, "campaign": found}
+
+
+@aira_route("DELETE", f"{BASE}/sales/{ID}")
+def sale_delete(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, home, _name):
+        service.delete_sale(sc, home, request.match.group(1))
+    request.audit("ads.sale_delete", "sale", request.match.group(1))
+    return 200, {"deleted": True}
 
 
 @aira_route("DELETE", f"{BASE}/campaigns/{ID}")
@@ -198,10 +298,34 @@ def upload_get(request: Request) -> tuple[int, dict[str, Any]]:
         }
 
 
+def _wrong_file(sc: Any, upload_id: str, owner: str, payload: Any) -> str:
+    """Why the first part of an upload is not the kind of file it was started as ('' when it is, or cannot be told
+    yet). Asked before the part is written so the browser hears it at once instead of retrying the part."""
+    if str(payload.get("offset")) != "0":
+        return ""
+    try:
+        head = base64.b64decode(str(payload.get("data") or "")[:88], validate=True)
+    except (ValueError, binascii.Error):
+        return ""  # writing the part says what is wrong with it
+    try:
+        media.sniff(head[:64], media.upload(sc, upload_id, owner)["kind"])
+    except ValueError as error:
+        return str(error)
+    return ""
+
+
 @aira_route("POST", f"{BASE}/uploads/{ID}/chunk")
 def upload_chunk(request: Request) -> tuple[int, dict[str, Any]]:
     with _open(request) as (sc, home, _name):
         payload = request.payload
+        wrong = _wrong_file(
+            sc, request.match.group(1), service.owner_key(home), payload
+        )
+        if wrong:
+            # 422, not 400: the shared uploader retries a 400 (a part that may have been cut short) but stops at once
+            # on any other refusal, and a wrong kind of file is never going to work
+            media.cancel(sc, request.match.group(1), service.owner_key(home))
+            return 422, {"error": wrong, "code": "wrong_file"}
         return 200, {
             "upload": media.append(
                 sc,
@@ -455,12 +579,17 @@ def _summary(connection: Any) -> dict[str, Any]:
     with closing(db.connect()) as sc:
         data = service.overview(sc, home)
     month = data["month"]
+    days = data["balance_days"]
     return {
         "cards": [
             {
                 "label": "Ad balance",
                 "value": service.dollars(data["balance_micros"]),
-                "tone": "warn" if data["balance_micros"] <= 0 else "",
+                "tone": "warn"
+                if data["balance_micros"] <= 0
+                or (days is not None and days < LOW_BALANCE_DAYS)
+                else "",
+                "hint": f"lasts about {days:g} days" if days is not None else "",
             },
             {
                 "label": "Ad spend this month",

@@ -50,6 +50,8 @@ METRIC_DEFINITIONS: dict[str, str] = {
     "offer_rate": "Submitted applications that reached Offer or Accepted, divided by submitted applications.",
     "source_conversion": "Per source: submitted applications divided by jobs discovered from that source.",
     "automation_success_rate": "Scheduled runs that finished without error, divided by all scheduled runs in the period.",
+    "interviews_scheduled": "Interviews booked in the period (not cancelled), whenever they take place.",
+    "recruiter_interactions": "Calls, messages, emails and notes logged with recruiters in the period.",
 }
 
 
@@ -107,11 +109,11 @@ def summary(
     job_where = " AND ".join(job_filters)
 
     discovered = connection.execute(
-        f"SELECT COUNT(*) FROM jobs WHERE {job_where} AND COALESCE(NULLIF(jobs.first_seen_at, ''), jobs.updated_at) BETWEEN ? AND ?",
+        f"SELECT COUNT(*) FROM jobs WHERE {job_where} AND datetime(COALESCE(NULLIF(jobs.first_seen_at, ''), jobs.updated_at)) BETWEEN ? AND ?",
         (*job_params, begin_ts, finish_ts),
     ).fetchone()[0]
     saved = connection.execute(
-        f"SELECT COUNT(*) FROM jobs WHERE {job_where} AND jobs.saved = 1 AND COALESCE(jobs.saved_at, jobs.updated_at) BETWEEN ? AND ?",
+        f"SELECT COUNT(*) FROM jobs WHERE {job_where} AND jobs.saved = 1 AND datetime(COALESCE(jobs.saved_at, jobs.updated_at)) BETWEEN ? AND ?",
         (*job_params, begin_ts, finish_ts),
     ).fetchone()[0]
 
@@ -185,15 +187,20 @@ def summary(
     run_total = sum(run_counts.values())
 
     recruiter_activity = connection.execute(
-        "SELECT COUNT(*) FROM recruiter_interactions WHERE occurred_at BETWEEN ? AND ?",
-        (begin.isoformat(), finish.isoformat()),
+        "SELECT COUNT(*) FROM recruiter_interactions WHERE datetime(occurred_at) BETWEEN ? AND ?",
+        (begin_ts, finish_ts),
     ).fetchone()[0]
     recruiter_count = connection.execute(
         "SELECT COUNT(*) FROM recruiters WHERE deleted_at IS NULL"
     ).fetchone()[0]
+    # Interviews booked in the period (an interview set up today for next week counts today).
     interviews_scheduled = connection.execute(
-        "SELECT COUNT(*) FROM interviews WHERE status != 'cancelled' AND start_at BETWEEN ? AND ?",
-        (begin.isoformat(), finish.isoformat()),
+        "SELECT COUNT(*) FROM interviews WHERE status != 'cancelled' AND datetime(created_at) BETWEEN ? AND ?",
+        (begin_ts, finish_ts),
+    ).fetchone()[0]
+    upcoming_interviews = connection.execute(
+        "SELECT COUNT(*) FROM interviews WHERE status NOT IN ('cancelled', 'completed') AND datetime(start_at) >= ?",
+        (_sql_ts(datetime.now(timezone.utc)),),
     ).fetchone()[0]
 
     resume_versions = [
@@ -231,6 +238,7 @@ def summary(
             "applications_prepared": len(prepared_jobs),
             "applications_submitted": len(submitted_jobs),
             "interviews_scheduled": interviews_scheduled,
+            "interviews_upcoming": upcoming_interviews,
             "interview_rate": _rate(len(interview_jobs), len(submitted_jobs)),
             "response_rate": _rate(len(response_jobs), len(submitted_jobs)),
             "offer_rate": _rate(len(offer_jobs), len(submitted_jobs)),
@@ -271,8 +279,10 @@ def summary(
 
 
 def timeline(connection: sqlite3.Connection, *, days: int = 30) -> list[dict[str, Any]]:
-    """Daily counts of discovered and applied events for charts."""
-    begin = datetime.now(timezone.utc) - timedelta(days=days)
+    """Daily counts of discovered, applied and interview events for charts: one point per day of the
+    period (days without events are zero, so a chart always has a line to draw)."""
+    now = datetime.now(timezone.utc)
+    begin = now - timedelta(days=days)
     rows = connection.execute(
         """SELECT date(occurred_at, 'unixepoch') AS day,
             SUM(CASE WHEN new_status = 'discovered' THEN 1 ELSE 0 END) AS discovered,
@@ -281,4 +291,12 @@ def timeline(connection: sqlite3.Connection, *, days: int = 30) -> list[dict[str
         FROM application_events WHERE occurred_at >= ? GROUP BY day ORDER BY day""",
         (int(begin.timestamp()),),
     ).fetchall()
-    return [dict(row) for row in rows]
+    found = {row["day"]: dict(row) for row in rows}
+    out = []
+    for offset in range(days, -1, -1):
+        day = (now - timedelta(days=offset)).date().isoformat()
+        out.append(
+            found.get(day)
+            or {"day": day, "discovered": 0, "applied": 0, "interviews": 0}
+        )
+    return out

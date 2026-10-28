@@ -1,0 +1,60 @@
+/* Styles for the studio app only. Loaded on every page: scope every selector to the app's own class names. */
+
+/* the deals board: a column per stage, scrolled sideways inside its own box (never the page) */
+.studio-board { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(230px, 1fr); gap: 12px; overflow-x: auto; padding-bottom: 6px; }
+.studio-lane { display: grid; gap: 8px; align-content: start; padding: 10px; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface-2); }
+.studio-lane header { display: grid; gap: 2px; }
+.studio-deal { display: grid; gap: 4px; cursor: pointer; }
+.studio-deal:focus-visible { outline: 3px solid var(--brand); outline-offset: 2px; }
+.studio-deal .btn-row { gap: 4px; }
+
+/* toolbars: the search box takes the room that is left, filters keep their own width */
+.studio-toolbar input[type="search"] { flex: 1 1 220px; width: auto; }
+.studio-toolbar select { flex: 0 1 auto; width: auto; max-width: 100%; }
+
+/* the earnings report */
+.studio-rank { display: grid; gap: 8px; margin: 0; padding: 0; list-style: none; }
+.studio-rank li { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 2px 12px; align-items: baseline; }
+.studio-rank .studio-share { grid-column: 1 / -1; height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; }
+.studio-rank .studio-share > span { display: block; height: 100%; background: var(--brand); border-radius: 3px; }
+.studio-rank .studio-low > span { background: var(--warning); }
+.studio-deposit { display: grid; gap: 6px; }
+
+/* the invoices list on a phone: the issue and due dates give way so Total and Still due fit (the invoice has them) */
+@media (max-width: 640px) {
+  .studio-invoices .suite-table th:nth-child(3), .studio-invoices .suite-table td:nth-child(3),
+  .studio-invoices .suite-table th:nth-child(4), .studio-invoices .suite-table td:nth-child(4) { display: none; }
+  .studio-invoices .suite-table th, .studio-invoices .suite-table td { padding-left: 6px; padding-right: 6px; }
+}
+
+/* In the Aira frame the left menu lists the tabs as folders (shell.js), so on a wide screen the page's own tab bar
+   would say it twice; phones and tablets, where the menu is a sheet, keep the bar. */
+@media (min-width: 901px) {
+  .studio-page > .tabs { display: none; }
+}
+
+/* toolbars on a phone: the search box takes a row of its own, the filter and buttons share the rows under it */
+@media (max-width: 600px) {
+  .studio-toolbar input[type="search"] { flex-basis: 100%; }
+  .studio-toolbar select { flex: 1 1 140px; }
+  .studio-toolbar .btn { flex: 1 1 auto; justify-content: center; }
+}
+
+/* numbers (INV-0001, PRO-0003) never break in the middle */
+.studio-invoices .suite-table td:first-child, .studio-results .suite-table td:first-child { white-space: nowrap; }
+
+/* search results on a phone: the quieter column(s) of each kind give way so the name, status and money fit */
+@media (max-width: 640px) {
+  .studio-results[data-kind="clients"] .suite-table :is(th, td):nth-child(n+3),
+  .studio-results[data-kind="deals"] .suite-table :is(th, td):nth-child(2),
+  .studio-results[data-kind="invoices"] .suite-table :is(th, td):nth-child(4),
+  .studio-results[data-kind="proposals"] .suite-table :is(th, td):nth-child(3),
+  .studio-results[data-kind="projects"] .suite-table :is(th, td):nth-child(4) { display: none; }
+}
+
+/* the clients, projects and deals lists on a phone: the columns their record's page repeats give way */
+@media (max-width: 640px) {
+  .studio-fit[data-list="clients"] .suite-table :is(th, td):is(:nth-child(3), :nth-child(4)),
+  .studio-fit[data-list="projects"] .suite-table :is(th, td):is(:nth-child(3), :nth-child(4), :nth-child(5), :nth-child(7)),
+  .studio-fit[data-list="deals"] .suite-table :is(th, td):is(:nth-child(2), :nth-child(5), :nth-child(6)) { display: none; }
+}

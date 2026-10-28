@@ -83,3 +83,5 @@ main.pub-wrap { padding-top: 20px; padding-bottom: 40px; display: grid; gap: 16p
 .lang-menu { position: fixed; z-index: 40; display: grid; gap: 4px; min-width: 190px; padding: 6px; border: 1px solid var(--pub-line); border-radius: 12px; background: var(--pub-surface); box-shadow: 0 12px 32px rgba(0, 0, 0, 0.16); }
 .lang-menu button { min-height: 42px; padding: 8px 12px; border: 0; border-radius: 8px; background: transparent; color: var(--pub-ink); font: inherit; text-align: left; cursor: pointer; }
 .lang-menu button[aria-checked="true"] { font-weight: 700; color: var(--pub-accent); }
+/* On a phone the language button sits in the page's flow at the top, so it never covers a card or a message. */
+@media (max-width: 640px) { .lang-corner { position: static; display: flex; justify-content: flex-end; padding: 8px 10px 0; } }

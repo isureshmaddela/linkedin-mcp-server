@@ -111,7 +111,7 @@
 
   // -------------------------------------------------------------------------
   async function renderIntegrations(content) {
-    const [sources, linkedin, status, settings, serp] = await Promise.all([api("/api/sources"), api("/api/linkedin/status"), api("/api/status"), api("/api/settings"), api("/api/airaapi/overview").catch(() => null)]);
+    const [sources, linkedin, status, settings, serp, resetMail] = await Promise.all([api("/api/sources"), api("/api/linkedin/status"), api("/api/status"), api("/api/settings"), api("/api/airaapi/overview").catch(() => null), Aira.cloud ? null : api("/api/settings/reset-mail", { silent: true }).catch(() => null)]);
     Aira.state.sources = sources.sources;
     const connectBtn = h("button", { type: "button", class: "btn", text: linkedin.state === "connected" ? "LinkedIn connected" : linkedin.state === "login" ? "Waiting for sign-in…" : "Connect LinkedIn", disabled: ["connected", "login", "starting"].includes(linkedin.state) });
     connectBtn.addEventListener("click", () => withBusy(connectBtn, async () => { const result = await api("/api/linkedin/connect", { method: "POST", body: {} }); toast(result.state === "login" ? "A LinkedIn sign-in window opened. Complete it in that browser." : "Resuming your saved LinkedIn session.", "success"); setTimeout(() => router.render(), 3000); }));
@@ -150,9 +150,55 @@
       h("div", { class: "card" }, h("h3", { text: "Ollama (local AI)" }), h("p", { class: "muted", text: status.ollama ? "Reachable. Fit reviews, drafts, and reply suggestions run locally." : "Not reachable. Start Ollama and pull a chat model (for example qwen3.5:4b)." }), h("div", { class: "btn-row" }, h("div", { class: "field", style: { minWidth: "220px" } }, h("label", { for: "defaultModel", text: "Default model" }), Object.assign(model, { id: "defaultModel" })), saveModel)),
       googleCard(serp, status),
       h("div", { class: "card" }, h("h3", { text: "Email & calendar" }), h("p", { class: "muted", text: "Mailbox sync (Gmail/Outlook OAuth) is not connected in this build. Import emails by paste or .eml, and add interviews to any calendar with .ics downloads or one-click links. The connector interface is in place for a future provider." })),
+      resetMail ? resetMailCard(resetMail) : null,
     );
     const table = h("div", { class: "panel", style: { marginTop: "16px" } }, h("div", { class: "panel-head" }, h("h3", { text: "Job sources" }), h("small", { class: "muted", text: `${sources.sources.filter((s) => s.status === "available").length} available` })), h("div", { class: "table-wrap" }, h("table", { class: "table" }, h("thead", {}, h("tr", {}, h("th", { text: "Source" }), h("th", { text: "Status" }), h("th", { text: "Access" }), h("th", { text: "Capabilities" }), h("th", { text: "Last run" }))), h("tbody", {}, ...sources.sources.map((s) => h("tr", {}, h("td", {}, h("strong", { text: s.label }), h("div", { class: "muted", style: { fontSize: "12px" }, text: s.identifier_label ? `${s.identifier_label}: ${s.identifier_help}` : "" })), h("td", {}, h("span", { class: `badge ${s.status === "available" ? (s.connected ? "stage applied" : "stage needs_review") : ""}`, text: s.status === "available" ? (s.connected ? "Connected" : "Needs setup") : "Planned" })), h("td", { text: s.status === "available" ? s.access_method : s.reason }), h("td", { text: Object.entries(s.capabilities).filter(([, v]) => v).map(([k]) => fmt.stage(k)).join(", ") || "—" }), h("td", { text: s.last_run ? `${s.last_run.status} · ${s.last_run.found} found · ${fmt.ago(s.last_run.finished_at)}` : "—" })))))));
     content.replaceChildren(cards, table);
+  }
+
+  // The mail server that emails password reset codes (one for this computer; the first account sets it).
+  // Gmail needs 2-Step Verification and an app password; the password is never sent back to the page.
+  function resetMailCard(mail) {
+    const intro = mail.configured
+      ? `Reset codes are emailed from ${mail.from_email} through ${mail.smtp_host}${mail.source === "env" ? " (set in .env)" : ""}.`
+      : "Not set up. Reset codes are only shown in the window where Aira is running.";
+    if (!mail.can_edit) return h("div", { class: "card" }, h("h3", { text: "Password reset email" }), h("p", { class: "muted", text: intro }), h("p", { class: "muted", style: { fontSize: "12px" }, text: "The first account on this computer sets this up." }));
+    const provider = ui.select([["gmail", "Gmail"], ["custom", "Another mail server (SMTP)"]], mail.provider || "gmail");
+    const username = h("input", { type: "email", value: mail.smtp_username || "", maxlength: 254, autocomplete: "off", placeholder: "you@gmail.com" });
+    const password = h("input", { type: "password", autocomplete: "new-password", maxlength: 1024, placeholder: mail.has_password ? "Saved. Leave blank to keep it." : "" });
+    const host = h("input", { type: "text", value: mail.provider === "custom" ? mail.smtp_host : "", maxlength: 253, placeholder: "smtp.example.com" });
+    const port = h("input", { type: "number", min: 1, max: 65535, value: mail.provider === "custom" ? mail.smtp_port : 587 });
+    const security = ui.select([["starttls", "STARTTLS"], ["ssl", "SSL/TLS"], ["none", "None"]], mail.provider === "custom" ? mail.smtp_security : "starttls");
+    const fromEmail = h("input", { type: "email", value: mail.from_email || "", maxlength: 254, placeholder: "Same as the sign-in address" });
+    const fromName = h("input", { type: "text", value: mail.from_name || "Aira", maxlength: 100 });
+    const usernameField = ui.field("Gmail address", username);
+    const passwordField = ui.field("App password", password, "");
+    const passwordHint = passwordField.querySelector(".hint") || passwordField.appendChild(h("span", { class: "hint" }));
+    const custom = h("div", { class: "form-grid" }, ui.field("SMTP host", host), ui.field("Port", port), ui.field("Security", security));
+    const sync = () => {
+      const gmail = provider.value === "gmail";
+      custom.hidden = gmail;
+      usernameField.querySelector("label").textContent = gmail ? "Gmail address" : "Username";
+      passwordField.querySelector("label").textContent = gmail ? "App password" : "Password";
+      passwordHint.replaceChildren(...(gmail ? ["16 letters from Google: turn on 2-Step Verification, then create one at ", h("a", { href: "https://myaccount.google.com/apppasswords", target: "_blank", rel: "noopener noreferrer", text: "myaccount.google.com/apppasswords" }), ". Your normal Gmail password does not work."] : ["Leave the username blank if the server needs no sign-in."]));
+    };
+    provider.addEventListener("change", sync);
+    sync();
+    const saveBtn = h("button", { type: "submit", class: "btn secondary sm", text: "Save mail settings" });
+    const testBtn = h("button", { type: "button", class: "btn ghost sm", text: "Send a test email", disabled: !mail.configured });
+    const clearBtn = mail.source === "saved" ? h("button", { type: "button", class: "btn ghost sm", text: "Remove" }) : null;
+    const form = h("form", { novalidate: true }, h("div", { class: "form-grid" }, ui.field("Send with", provider), usernameField, passwordField), custom, h("div", { class: "form-grid" }, ui.field("From address", fromEmail), ui.field("From name", fromName)), h("div", { class: "btn-row", style: { marginTop: "10px" } }, saveBtn, testBtn, clearBtn));
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      withBusy(saveBtn, async () => {
+        await api("/api/settings/reset-mail", { method: "POST", body: { provider: provider.value, smtp_username: username.value, password: password.value, smtp_host: host.value, smtp_port: Number(port.value), smtp_security: security.value, from_email: fromEmail.value, from_name: fromName.value } });
+        toast("Mail settings saved. Send a test email to check them.", "success");
+        router.render();
+      });
+    });
+    testBtn.addEventListener("click", () => withBusy(testBtn, async () => { const data = await api("/api/settings/reset-mail/test", { method: "POST", body: {} }); toast(`Test email sent to ${data.to}.`, "success"); }));
+    if (clearBtn) clearBtn.addEventListener("click", async () => { if (!(await Aira.confirm({ title: "Remove the mail settings?", message: "Reset codes will only be shown in the window where Aira is running.", confirmLabel: "Remove", danger: true }))) return; await withBusy(clearBtn, async () => { await api("/api/settings/reset-mail", { method: "DELETE" }); toast("Mail settings removed.", "success"); router.render(); }); });
+    return h("div", { class: "card" }, h("h3", { text: "Password reset email" }), h("p", { class: "muted", text: intro }), form);
   }
 
   // The SerpApi key behind Google Jobs. Its state comes from the API overview (the key may live in the app or in
@@ -235,6 +281,24 @@
     const retention = h("input", { type: "number", min: 30, max: 3650, value: settings.settings.retention_days });
     const saveRetention = h("button", { type: "button", class: "btn secondary sm", text: "Save retention" });
     saveRetention.addEventListener("click", () => withBusy(saveRetention, async () => { await api("/api/settings", { method: "POST", body: { retention_days: Number(retention.value) } }); toast("Retention saved.", "success"); }));
+    const currentPassword = h("input", { type: "password", autocomplete: "current-password", maxlength: 1024 });
+    const newPassword = h("input", { type: "password", autocomplete: "new-password", minlength: 12, maxlength: 1024 });
+    const confirmPassword = h("input", { type: "password", autocomplete: "new-password", minlength: 12, maxlength: 1024 });
+    const changeBtn = h("button", { type: "submit", class: "btn secondary", text: "Change password" });
+    const changeForm = h("form", { novalidate: true }, ui.field("Current password", currentPassword), ui.field("New password", newPassword, "At least 12 characters."), ui.field("Repeat new password", confirmPassword), h("div", { class: "btn-row", style: { marginTop: "10px" } }, changeBtn));
+    changeForm.addEventListener("submit", (event) => {
+      event.preventDefault();
+      if (newPassword.value.length < 12) { toast("Choose a new password of at least 12 characters.", "error"); newPassword.focus(); return; }
+      if (newPassword.value !== confirmPassword.value) { toast("The new passwords do not match.", "error"); confirmPassword.focus(); return; }
+      withBusy(changeBtn, async () => {
+        await api("/api/account/password", { method: "POST", body: { current_password: currentPassword.value, new_password: newPassword.value } });
+        changeForm.reset();
+        toast("Password changed. Other signed-in sessions were signed out.", "success");
+      });
+    });
+    const linked = Boolean(Aira.state.user && Aira.state.user.account && Aira.state.user.account.linked);
+    // The hosted build changes passwords in its own Security section.
+    const passwordCard = Aira.cloud ? null : h("div", { class: "card" }, h("h3", { text: "Password" }), linked ? h("p", { class: "muted", text: "This account signs in with your Aira account, so it has no password here." }) : changeForm);
     const password = h("input", { type: "password", autocomplete: "current-password", placeholder: "Your Aira password" });
     const deleteBtn = h("button", { type: "button", class: "btn danger", text: "Delete my account and data" });
     deleteBtn.addEventListener("click", async () => { if (!password.value) { toast("Enter your password to confirm.", "error"); return; } if (await Aira.confirm({ title: "Delete everything?", message: "Your jobs, applications, documents, interviews, recruiters, and LinkedIn session are permanently removed from this computer.", confirmLabel: "Delete permanently", danger: true })) await withBusy(deleteBtn, async () => { await api("/api/account/delete", { method: "POST", body: { password: password.value } }); toast("Account deleted.", "success"); setTimeout(() => location.reload(), 800); }); });
@@ -242,6 +306,7 @@
       h("div", { class: "grid cols-2" },
         h("div", { class: "card" }, h("h3", { text: "Where your data lives" }), h("p", { class: "muted", text: "Everything is stored in local SQLite databases and an encrypted document store on this computer. Aira binds to 127.0.0.1 only. Resume and job text go to your local Ollama only when you ask for a review or draft." }), ui.kv([["Schema version", String(settings.schema_version)], ["Uptime", `${Math.round(metrics.uptime_seconds / 60)} min`], ["Requests served", String(metrics.requests_total)]])),
         h("div", { class: "card" }, h("h3", { text: "Export & retention" }), h("div", { class: "btn-row" }, h("button", { type: "button", class: "btn secondary", text: "Export all data (JSON)", onclick: () => Aira.download("/api/account/export", "aira-export.json") })), h("div", { class: "form-grid", style: { marginTop: "12px" } }, ui.field("Document retention (days)", retention, "Expired documents are purged on the next cleanup.")), h("div", { class: "btn-row", style: { marginTop: "8px" } }, saveRetention)),
+        passwordCard,
         h("div", { class: "card" }, h("h3", { text: "Delete account" }), h("p", { class: "muted", text: "Irreversible. Export first if you want a copy." }), ui.field("Confirm password", password), h("div", { class: "btn-row", style: { marginTop: "10px" } }, deleteBtn)),
         h("div", { class: "card" }, h("h3", { text: "Health" }), ui.kv(Object.entries(metrics.integrations).map(([k, v]) => [fmt.title(k), `${v.ok ? "ok" : "down"} · ${fmt.ago(v.checked_at)}`])), h("p", { class: "muted", style: { fontSize: "12px", marginTop: "8px" }, text: "Liveness: /api/health · Readiness: /api/ready · Metrics: /api/metrics" })),
       ),

@@ -240,3 +240,10 @@
 .ld-nogap { margin: 8px 0; }
 
 .ld-followbtn { justify-self: start; }
+
+/* ---- the Leads tab's filters on a phone: the search box stays, the rest opens from "More filters" ---- */
+.ld-filter-toggle { display: none; }
+@media (max-width: 720px) {
+  .ld-filters .ld-filter-toggle { display: inline-flex; grid-column: 1 / -1; justify-self: start; }
+  .ld-filters:not(.open) > :not(input[type="search"]):not(.ld-filter-toggle) { display: none; }
+}

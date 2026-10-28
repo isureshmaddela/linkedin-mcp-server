@@ -65,10 +65,47 @@ const ICONS = {
   news: '<svg viewBox="0 0 24 24"><path d="M4 5h13v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M17 9h3v10a2 2 0 0 1-2 2"/><path d="M7 9h7M7 13h7M7 17h4"/></svg>',
   videos: '<svg viewBox="0 0 24 24"><rect x="2.5" y="5" width="19" height="14" rx="3"/><path d="m10 9 5 3-5 3z"/></svg>',
   ads: '<svg viewBox="0 0 24 24"><path d="M3 10v4a1 1 0 0 0 1 1h2l5 4V5L6 9H4a1 1 0 0 0-1 1z"/><path d="M15 9.5a3.5 3.5 0 0 1 0 5"/><circle cx="19" cy="7" r="2.2"/><path d="M19 6.2v1.6M18.2 7h1.6"/></svg>',
+  journey: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/><path d="m15.5 8.5 4-4M17 4.5h2.5V7"/></svg>',
+  ai: '<svg viewBox="0 0 24 24"><rect x="4" y="7" width="16" height="12" rx="3"/><path d="M12 7V4M9 3.5h6"/><circle cx="9" cy="12.5" r="1.2"/><circle cx="15" cy="12.5" r="1.2"/><path d="M9.5 16h5M2 12v3M22 12v3"/></svg>',
+  mic: '<svg viewBox="0 0 24 24"><rect x="9" y="3" width="6" height="11" rx="3"/><path d="M5 11a7 7 0 0 0 14 0M12 18v3M9 21h6"/></svg>',
+  stocks: '<svg viewBox="0 0 24 24"><path d="M3 20h18"/><path d="m4 15 5-5 4 4 7-8"/><path d="M15 6h5v5"/></svg>',
   today: '<svg viewBox="0 0 24 24"><path d="M3 11 12 4l9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-5h4v5"/></svg>',
   speaker: '<svg viewBox="0 0 24 24"><path d="M4 10v4h4l5 4V6L8 10z"/><path d="M16 9a4 4 0 0 1 0 6M18.5 6.5a8 8 0 0 1 0 11"/></svg>',
 };
+Aira.ICONS = ICONS; // shell.js draws the tab icon from them
 Aira.icon = (name) => h("span", { html: ICONS[name] || "", "aria-hidden": "true", style: { display: "contents" } });
+
+// Every password input gets a show/hide button, including ones screens add later. Submitting the form hides it again.
+const EYE_ICONS = '<svg class="pw-on" viewBox="0 0 24 24" aria-hidden="true"><path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/></svg>'
+  + '<svg class="pw-off" viewBox="0 0 24 24" aria-hidden="true"><path d="M3 3l18 18"/><path d="M10.6 5.1A10 10 0 0 1 12 5c6.4 0 10 7 10 7a17 17 0 0 1-3.2 4.1M6.6 6.6A17 17 0 0 0 2 12s3.6 7 10 7a9.7 9.7 0 0 0 5.4-1.6"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/></svg>';
+function setPasswordShown(input, button, shown) {
+  input.type = shown ? "text" : "password";
+  button.setAttribute("aria-pressed", String(shown));
+  button.setAttribute("aria-label", shown ? "Hide password" : "Show password");
+  button.title = shown ? "Hide password" : "Show password";
+}
+function addPasswordToggle(input) {
+  if (input.dataset.pwToggle || !input.parentNode) return;
+  input.dataset.pwToggle = "1";
+  if (!input.id) input.id = `pw-${Math.random().toString(36).slice(2, 10)}`;
+  const button = h("button", { type: "button", class: "pw-toggle", "aria-controls": input.id, html: EYE_ICONS });
+  setPasswordShown(input, button, false);
+  button.addEventListener("click", () => { setPasswordShown(input, button, input.type === "password"); input.focus(); });
+  const wrap = h("span", { class: "pw-wrap" });
+  input.parentNode.insertBefore(wrap, input);
+  wrap.append(input, button);
+  if (input.form) input.form.addEventListener("submit", () => setPasswordShown(input, button, false), true);
+}
+function enhancePasswordInputs(root) {
+  if (root.nodeType !== 1) return;
+  if (root.matches('input[type="password"]')) addPasswordToggle(root);
+  root.querySelectorAll('input[type="password"]').forEach(addPasswordToggle);
+}
+Aira.enhancePasswordInputs = enhancePasswordInputs;
+document.addEventListener("DOMContentLoaded", () => {
+  enhancePasswordInputs(document.body);
+  new MutationObserver((records) => { for (const record of records) record.addedNodes.forEach(enhancePasswordInputs); }).observe(document.body, { childList: true, subtree: true });
+});
 
 // ---------------------------------------------------------------------------
 // API client
@@ -156,7 +193,10 @@ const fmt = {
   title: (text) => (text || "").replace(/\b\w/g, (c) => c.toUpperCase()),
   date: (value) => {
     if (!value) return "—";
-    const date = typeof value === "number" ? new Date(value * 1000) : new Date(value);
+    // A calendar day ("2026-11-20") is that day wherever you are: new Date() would read it as UTC midnight,
+    // which is the evening before west of Greenwich.
+    const day = typeof value === "string" && /^\d{4}-\d{2}-\d{2}$/.test(value) ? value.split("-").map(Number) : null;
+    const date = day ? new Date(day[0], day[1] - 1, day[2]) : typeof value === "number" ? new Date(value * 1000) : new Date(value);
     if (Number.isNaN(date.getTime())) return String(value);
     return date.toLocaleDateString([], { month: "short", day: "numeric", year: date.getFullYear() === new Date().getFullYear() ? undefined : "numeric" });
   },
@@ -321,6 +361,11 @@ const ui = {
     for (const item of items) {
       bar.append(h("button", { type: "button", role: "tab", "aria-selected": item.id === active ? "true" : "false", text: item.label, onclick: () => onChange(item.id), onkeydown: (event) => { const buttons = [...bar.querySelectorAll("button")]; const index = buttons.indexOf(event.currentTarget); if (event.key === "ArrowRight") buttons[(index + 1) % buttons.length].focus(); if (event.key === "ArrowLeft") buttons[(index - 1 + buttons.length) % buttons.length].focus(); } }));
     }
+    // On a phone the bar scrolls sideways: keep the open tab in sight (scrollLeft, so the page itself stays put).
+    requestAnimationFrame(() => {
+      const open = bar.querySelector('[aria-selected="true"]');
+      if (open && bar.scrollWidth > bar.clientWidth) bar.scrollLeft = Math.max(0, open.offsetLeft - (bar.clientWidth - open.offsetWidth) / 2);
+    });
     return bar;
   },
 };
@@ -330,27 +375,31 @@ Aira.ui = ui;
 // Router
 // ---------------------------------------------------------------------------
 // One account, many apps (docs/apps.md). APPS mirrors aira/apps.py: the switcher lists them, `g` then the app's
-// key opens its home, and the sidebar shows only the current app's sections. GET /api/apps says which of them
+// key opens its home, and the sidebar shows only the current app's sections. `path` is the app's own address
+// (/stocks, like mail.google.com; shell.js). GET /api/apps says which of them
 // this account may open (the hosted build sells each one as a subscription).
 const APPS = [
-  { id: "careers", name: "Careers", tagline: "Find, apply and track", icon: "careers", home: "dashboard", key: "c" },
-  { id: "api", name: "Developers", tagline: "APIs, keys and connected apps", icon: "airaapi", home: "airaapi", key: "p", scope: "org" },
+  { id: "careers", name: "Careers", tagline: "Find, apply and track", icon: "careers", home: "dashboard", path: "careers", key: "c" },
+  { id: "api", name: "Developers", tagline: "APIs, keys and connected apps", icon: "airaapi", home: "airaapi", path: "developers", key: "p", scope: "org" },
   // Business apps (aira/suite), like the clouds of a CRM suite: data shared by the organization; one app can hold
   // several sections (Commerce is Shop and Bookings). `g` then a digit opens one.
-  { id: "studio", name: "Sales", tagline: "Clients, deals, proposals and invoices", icon: "studio", home: "studio", key: "1", category: "industry", scope: "org" },
-  { id: "marketing", name: "Marketing", tagline: "Leads, content, campaigns and forms", icon: "marketing", home: "marketing", key: "2", category: "industry", scope: "org" },
-  { id: "service", name: "Service", tagline: "Help your customers fast", icon: "service", home: "service", key: "3", category: "industry", scope: "org" },
-  { id: "commerce", name: "Commerce", tagline: "Sell products and appointments", icon: "commerce", home: "shop", key: "4", category: "industry", scope: "org" },
-  { id: "experiences", name: "Courses & Events", tagline: "Teach, sell tickets and check in", icon: "experiences", home: "academy", key: "5", category: "industry", scope: "org" },
-  { id: "ads", name: "Ads", tagline: "Advertise on videos, pay creators", icon: "ads", home: "ads", category: "industry", scope: "org" },
+  { id: "studio", name: "Sales", tagline: "Clients, deals, proposals and invoices", icon: "studio", home: "studio", path: "sales", key: "1", category: "industry", scope: "org" },
+  { id: "marketing", name: "Marketing", tagline: "Leads, content, campaigns and forms", icon: "marketing", home: "marketing", path: "marketing", key: "2", category: "industry", scope: "org" },
+  { id: "service", name: "Service", tagline: "Help your customers fast", icon: "service", home: "service", path: "service", key: "3", category: "industry", scope: "org" },
+  { id: "commerce", name: "Commerce", tagline: "Sell products and appointments", icon: "commerce", home: "shop", path: "commerce", key: "4", category: "industry", scope: "org" },
+  { id: "experiences", name: "Courses & Events", tagline: "Teach, sell tickets and check in", icon: "experiences", home: "academy", path: "courses", key: "5", category: "industry", scope: "org" },
+  { id: "ads", name: "Ads", tagline: "Advertise on videos, pay creators", icon: "ads", home: "ads", path: "ads", category: "industry", scope: "org" },
   // Everyday apps (aira/suite/life.py): every person, each with their own profile. Social holds Family too.
-  { id: "social", name: "Social", tagline: "Friends, family, chats and photos", icon: "social", home: "social", key: "6", category: "life", scope: "org" },
-  { id: "care", name: "Health", tagline: "Medicines, check-ups and wellbeing", icon: "care", home: "care", key: "7", category: "life", scope: "org" },
-  { id: "learn", name: "Learn", tagline: "Practise a little every day", icon: "learn", home: "learn", key: "8", category: "life", scope: "org" },
-  { id: "play", name: "Play", tagline: "Games, quizzes and things to watch", icon: "play", home: "play", key: "9", category: "life", scope: "org" },
-  { id: "planner", name: "Planner", tagline: "Chores, shopping and bills", icon: "planner", home: "planner", category: "life", scope: "org" },
-  { id: "news", name: "News", tagline: "Today's headlines in your language", icon: "news", home: "news", category: "life", scope: "org" },
-  { id: "videos", name: "Videos", tagline: "Watch, upload and earn", icon: "videos", home: "videos", category: "life", scope: "org" },
+  { id: "social", name: "Social", tagline: "Friends, family, chats and photos", icon: "social", home: "social", path: "social", key: "6", category: "life", scope: "org" },
+  { id: "care", name: "Health", tagline: "Medicines, check-ups and wellbeing", icon: "care", home: "care", path: "health", key: "7", category: "life", scope: "org" },
+  { id: "learn", name: "Learn", tagline: "Practise a little every day", icon: "learn", home: "learn", path: "learn", key: "8", category: "life", scope: "org" },
+  { id: "play", name: "Play", tagline: "Games, quizzes and things to watch", icon: "play", home: "play", path: "play", key: "9", category: "life", scope: "org" },
+  { id: "planner", name: "Planner", tagline: "Chores, shopping and bills", icon: "planner", home: "planner", path: "planner", category: "life", scope: "org" },
+  { id: "news", name: "News", tagline: "Today's headlines in your language", icon: "news", home: "news", path: "news", category: "life", scope: "org" },
+  { id: "videos", name: "Videos", tagline: "Watch, upload and earn", icon: "videos", home: "videos", path: "videos", category: "life", scope: "org" },
+  { id: "journey", name: "Life", tagline: "Goals, milestones and documents", icon: "journey", home: "journey", path: "life", category: "life", scope: "org" },
+  { id: "ai", name: "AI", tagline: "Chat with Aira and manage its agents", icon: "ai", home: "ai", path: "ai", category: "life", scope: "org" },
+  { id: "stocks", name: "Stocks", tagline: "Markets, predictions and your portfolio", icon: "stocks", home: "stocks", path: "stocks", category: "life", scope: "org" },
 ];
 // One list drives the sidebar, the phone bottom bar, the `g` then <key> chords and the shortcuts help.
 // `app` says which app a section belongs to; items in the Account group show under every app.
@@ -384,6 +433,9 @@ const NAV = [
   { id: "planner", label: "Planner", icon: "planner", app: "planner", group: "Planner", quick: true },
   { id: "news", label: "News", icon: "news", app: "news", group: "News", quick: true },
   { id: "videos", label: "Videos", icon: "videos", app: "videos", group: "Videos", quick: true },
+  { id: "journey", label: "Life", icon: "journey", app: "journey", group: "Life", quick: true },
+  { id: "ai", label: "AI", icon: "ai", app: "ai", group: "AI", quick: true },
+  { id: "stocks", label: "Stocks", icon: "stocks", app: "stocks", group: "Stocks", quick: true },
   // Today is each person's day across the life apps: medicines due, chores, events, messages, birthdays.
   { id: "today", label: "Today", icon: "today", app: "account", group: "Account" },
   { id: "display", label: "Display and reading", icon: "speaker", app: "account", group: "Account" },
@@ -432,6 +484,7 @@ const apps = (Aira.apps = {
     const section = Router.current && Router.current.path[0];
     const owner = section ? apps.appOf(section) : null;
     if (owner) Aira.state.currentApp = owner;
+    else if (section === "today" && apps.pseudo.home) Aira.state.currentApp = "home";
     const id = Aira.state.currentApp || (NAV.find((entry) => entry.group !== "Account") || {}).app || APPS[0].id;
     return apps.describe(id);
   },
@@ -519,11 +572,15 @@ const Router = {
     const clean = Object.fromEntries(Object.entries(query).filter(([, v]) => v !== "" && v !== null && v !== undefined));
     const qs = new URLSearchParams(clean).toString();
     const target = `#/${path.map(encodeURIComponent).join("/")}${qs ? `?${qs}` : ""}`;
-    if (replace) history.replaceState(null, "", target); else location.hash = target;
+    if (replace) history.replaceState(null, "", target);
+    else if (location.hash === target) { Router.render(); return; } // a link to where you are draws the page again
+    else location.hash = target;
     if (replace) Router.render();
   },
   current: null,
+  renders: 0, // counts page draws: polling a page started (Aira.suite.live) stops when the page is drawn again
   async render() {
+    Router.renders += 1;
     const route = Router.parse();
     if (!route.path.length) { Router.go([(Aira.startPage && Aira.startPage(false)) || "dashboard"], {}, { replace: true }); return; }
     const section = route.path[0];
@@ -536,6 +593,7 @@ const Router = {
     const before = Aira.state.currentApp;
     const app = apps.current();
     if (app.id !== before || !document.querySelector(`#primaryNav a[data-section="${CSS.escape(section)}"]`)) renderNav();
+    if (Aira.shell) Aira.shell.update(app);
     for (const link of document.querySelectorAll("#primaryNav a, #bottomNav a")) link.setAttribute("aria-current", link.dataset.section === section ? "page" : "false");
     // A section that is not in the bottom bar lives behind More, so More shows as the current place.
     const more = document.querySelector('#bottomNav a[data-section="more"]');
@@ -605,10 +663,12 @@ function renderNav(counts = {}) {
   // The app's own groups first, the Account group (shown under every app) last.
   const groups = [...new Set(items.map((item) => item.group))].sort((a, b) => (a === "Account") - (b === "Account"));
   const head = h("div", { class: "nav-apphead", id: "navAppHead" }, Aira.icon(app.icon || "dashboard"), h("div", {}, h("strong", { text: app.name || "Aira" }), app.tagline ? h("span", { class: "muted", text: app.tagline }) : null));
-  $("primaryNav").replaceChildren(head, ...groups.map((group) => {
+  const extra = Aira.shell ? Aira.shell.navExtras(app) : { before: [], after: [] };
+  $("primaryNav").replaceChildren(head, ...extra.before, ...groups.map((group) => {
     const labelId = `navGroup${group.replace(/\W+/g, "")}`;
     return h("div", { class: "nav-group", role: "group", "aria-labelledby": labelId }, h("span", { class: "nav-label", id: labelId, text: group }), ...items.filter((item) => item.group === group).map(link));
-  }));
+  }), ...extra.after);
+  if (Aira.shell) Aira.shell.afterNav();
   const bottom = $("bottomNav");
   const more = h("a", { href: "#", dataset: { section: "more" }, role: "button", "aria-controls": "sidebar", "aria-expanded": String($("sidebar").classList.contains("open")), "aria-current": current && items.some((item) => item.id === current && !item.quick) ? "page" : "false", onclick: (event) => { event.preventDefault(); setSidebarOpen(!$("sidebar").classList.contains("open")); } }, Aira.icon("more"), h("span", { text: "More" }));
   const hidden = items.filter((item) => !item.quick).reduce((sum, item) => sum + (Number(shown[item.id]) || 0), 0);
@@ -677,9 +737,12 @@ function appTile(entry) {
   const disabled = entry.enabled === false;
   const attrs = { class: `app-tile ${disabled ? "disabled" : ""} ${entry.kind === "account" ? "account" : ""}`, role: "menuitem", tabindex: "-1", dataset: { app: entry.id } };
   if (disabled) { attrs["aria-disabled"] = "true"; attrs.title = entry.reason || "Not available"; }
+  const own = !entry.href && entry.path && !disabled ? `/${entry.path}#/${apps.homeOf(entry.id)}` : "";
   const node = entry.href
     ? h("a", { ...attrs, href: entry.href, ...(entry.external ? { target: "_blank", rel: "noopener noreferrer" } : {}) })
-    : h("button", { ...attrs, type: "button", onclick: (event) => { event.preventDefault(); if (disabled) return; closeMenus(); apps.open(entry.id); } });
+    : own
+      ? h("a", { ...attrs, href: own, onclick: (event) => { if (event.ctrlKey || event.metaKey || event.shiftKey || event.button) return; event.preventDefault(); closeMenus(); apps.open(entry.id); } })
+      : h("button", { ...attrs, type: "button", onclick: (event) => { event.preventDefault(); if (disabled) return; closeMenus(); apps.open(entry.id); } });
   node.append(h("span", { class: "app-tile-icon" }, Aira.icon(entry.icon || "dashboard")), h("span", { class: "app-tile-name", text: entry.name }), h("span", { class: "app-tile-tag", text: disabled && entry.reason ? entry.reason : entry.tagline || "" }));
   return node;
 }
@@ -701,6 +764,7 @@ function renderSwitcher(panel) {
   panel.replaceChildren(
     ...[
       h("div", { class: "popover-title", text: "Aira apps" }),
+      Aira.shell ? Aira.shell.homeTile() : null,
       core.length ? h("div", { class: "app-grid" }, ...core.map(tile)) : null,
       everyday.length ? h("div", { class: "popover-subtitle", text: "Everyday" }) : null,
       everyday.length ? h("div", { class: "app-grid" }, ...everyday.map(tile)) : null,
@@ -761,15 +825,28 @@ function applyTheme(theme) {
   Aira.remember("theme", theme || "");
 }
 
+// Sign-in modes: login, register, forgot (ask for a reset code) and reset (code + new password).
+const AUTH_MODES = {
+  login: { title: "Sign in", submit: "Sign in", switchText: "New to Aira?", switchLabel: "Create an account", password: "Aira password", autocomplete: "current-password", hint: "" },
+  register: { title: "Create your workspace", submit: "Create account", switchText: "Already registered?", switchLabel: "Sign in", password: "Aira password", autocomplete: "new-password", hint: "Use at least 12 characters. This password protects your local workspace." },
+  forgot: { title: "Reset your password", submit: "Get a reset code", switchText: "Remembered it?", switchLabel: "Sign in", intro: "Enter your account email. Aira emails you a one-time code when a mail server is set up, and always shows it in the window where Aira is running." },
+  reset: { title: "Choose a new password", submit: "Set new password", switchText: "Remembered it?", switchLabel: "Sign in", password: "New Aira password", autocomplete: "new-password", hint: "At least 12 characters. Every other signed-in session is signed out.", intro: "Enter the code from your email or the window where Aira is running, then a new password." },
+};
+const AUTH_INTRO = "Your workspace stays on this computer. LinkedIn sign-in happens separately in your own browser session.";
 function setAuthMode(mode) {
   Aira.state.authMode = mode;
-  const register = mode === "register";
-  $("authTitle").textContent = register ? "Create your workspace" : "Sign in";
-  $("authSubmit").textContent = register ? "Create account" : "Sign in";
-  $("authSwitchText").textContent = register ? "Already registered?" : "New to Aira?";
-  $("authSwitch").textContent = register ? "Sign in" : "Create an account";
-  $("authPassword").autocomplete = register ? "new-password" : "current-password";
-  $("authHint").textContent = register ? "Use at least 12 characters. This password protects your local workspace." : "";
+  const config = AUTH_MODES[mode];
+  $("authTitle").textContent = config.title;
+  $("authIntro").textContent = config.intro || AUTH_INTRO;
+  $("authSubmit").textContent = config.submit;
+  $("authSwitchText").textContent = config.switchText;
+  $("authSwitch").textContent = config.switchLabel;
+  $("authPasswordField").hidden = mode === "forgot";
+  if (config.password) $("authPasswordLabel").textContent = config.password;
+  if (config.autocomplete) $("authPassword").autocomplete = config.autocomplete;
+  $("authHint").textContent = config.hint || "";
+  $("authCodeField").hidden = mode !== "reset";
+  $("authForgotRow").hidden = mode !== "login";
   $("authNotice").textContent = "";
 }
 Aira.showAuth = () => { $("boot").hidden = true; $("app").hidden = true; $("authScreen").hidden = false; $("authEmail").focus(); };
@@ -807,7 +884,8 @@ async function loadApp() {
   if (Aira.afterSignIn) { try { await Aira.afterSignIn(Aira.state.user); } catch (error) { console.warn("afterSignIn", error); } }
   const preferred = Aira.startPage ? Aira.startPage(true) : null; // the person's own start page (Today in easy mode)
   const landing = (Aira.cloud && Aira.cloud.landing ? Aira.cloud.landing(workspace) : null) || (preferred ? [preferred] : null);
-  if (!location.hash || location.hash === "#/" || location.hash === "#") Router.go(landing || (Aira.state.profile && Aira.state.profile.resume_hash ? ["dashboard"] : ["settings", "resume"]), {}, { replace: true });
+  const addressed = Aira.shell ? Aira.shell.fromAddress() : null; // /stocks opens Stocks, /home opens Today
+  if (!location.hash || location.hash === "#/" || location.hash === "#") Router.go(addressed || landing || (Aira.state.profile && Aira.state.profile.resume_hash ? ["dashboard"] : ["settings", "resume"]), {}, { replace: true });
   else Router.render();
   if (!Aira.state.statusTimer) Aira.state.statusTimer = setInterval(() => { if (Aira.state.workspaceLoaded) refreshStatus(); }, 60000);
 }
@@ -842,7 +920,7 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   if (typing) return;
-  if (event.key === "/") { const search = document.querySelector("#main input[type='search'], #main input[data-search]"); if (search) { event.preventDefault(); search.focus(); } return; }
+  if (event.key === "/") { const search = $("appSearchInput") && $("appSearchInput").offsetParent ? $("appSearchInput") : document.querySelector("#main input[type='search'], #main input[data-search]"); if (search) { event.preventDefault(); search.focus(); } return; }
   if (event.key === "?") { showShortcuts(); return; }
   if (chord === "g") {
     // A section's chord first (inside any app), then an app's key, which opens that app's home.
@@ -890,19 +968,36 @@ document.addEventListener("DOMContentLoaded", () => {
   // The app switcher opens from the top bar (desktop) or the More sheet (phones); the account menu from the avatar.
   Aira.switcherMenu = popover([$("appSwitcherBtn"), $("appSwitcherSideBtn")], $("appSwitcher"), { render: renderSwitcher, onClose: () => { if (window.innerWidth <= 900) setSidebarOpen(false); } });
   Aira.accountMenu = popover([$("accountBtn")], $("accountMenu"), { render: renderAccount });
-  $("authSwitch").addEventListener("click", () => setAuthMode(Aira.state.authMode === "login" ? "register" : "login"));
+  $("authSwitch").addEventListener("click", () => setAuthMode(Aira.state.authMode === "register" ? "login" : Aira.state.authMode === "login" ? "register" : "login"));
+  $("authForgot").addEventListener("click", () => { setAuthMode("forgot"); $("authEmail").focus(); });
   $("authForm").addEventListener("submit", async (event) => {
     event.preventDefault();
+    const mode = Aira.state.authMode;
     const submit = $("authSubmit");
-    $("authNotice").textContent = Aira.state.authMode === "register" ? "Creating your workspace…" : "Signing in…";
+    const notice = $("authNotice");
+    notice.textContent = { register: "Creating your workspace…", forgot: "Asking for a reset code…", reset: "Setting your new password…" }[mode] || "Signing in…";
+    let codeSent = "";
     await withBusy(submit, async () => {
       try {
-        await api(`/api/auth/${Aira.state.authMode}`, { method: "POST", body: { email: $("authEmail").value, password: $("authPassword").value } });
+        if (mode === "forgot") {
+          codeSent = (await api("/api/auth/password/forgot", { method: "POST", body: { email: $("authEmail").value }, silent: true })).message;
+          return;
+        }
+        if (mode === "reset") {
+          await api("/api/auth/password/reset", { method: "POST", body: { email: $("authEmail").value, code: $("authCode").value, password: $("authPassword").value }, silent: true });
+          $("authCode").value = "";
+          toast("Password updated. You are signed in.", "success");
+        } else {
+          await api(`/api/auth/${mode}`, { method: "POST", body: { email: $("authEmail").value, password: $("authPassword").value } });
+        }
         $("authPassword").value = "";
-        $("authNotice").textContent = "";
+        notice.textContent = "";
+        setAuthMode("login");
         await loadApp();
-      } catch (error) { $("authNotice").textContent = error.message; }
+      } catch (error) { notice.textContent = error.message; }
     });
+    // withBusy puts the old button label back when it ends, so the next mode is set after it.
+    if (codeSent) { setAuthMode("reset"); notice.textContent = codeSent; $("authCode").focus(); }
   });
   setAuthMode("login");
   loadApp();

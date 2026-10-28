@@ -46,7 +46,12 @@ def _parse(value: str) -> datetime:
 
 def local_label(value: str, tz: ZoneInfo) -> str:
     moment = _parse(value).astimezone(tz)
-    return moment.strftime("%A %d %B %Y at %H:%M").replace(" 0", " ", 1)
+    return f"{moment:%A} {moment.day} {moment:%B %Y at %H:%M}"
+
+
+def local_today(connection: sqlite3.Connection, now: datetime | None = None) -> str:
+    """Today in the business's time zone (the calendar's first day when none is asked for)."""
+    return (now or kit.utcnow()).astimezone(store.zone(connection)).date().isoformat()
 
 
 def _local_day_bounds(day: date, tz: ZoneInfo) -> tuple[datetime, datetime]:
@@ -109,9 +114,11 @@ def slots_for_day(
     now: datetime | None = None,
     exclude_booking: str = "",
     customer_rules: bool = True,
+    ignore_bookings: bool = False,
 ) -> list[dict[str, Any]]:
     """Free start times for a service on a local day: inside someone's hours, not on their time off, clear of
-    their other bookings (including buffers). ``customer_rules`` adds the minimum notice and the horizon."""
+    their other bookings (including buffers). ``customer_rules`` adds the minimum notice and the horizon;
+    ``ignore_bookings`` gives the times the day would have if nothing were booked (is it full, or closed?)."""
     store.ensure(connection)
     service = store.get_service(connection, service_id)
     if customer_rules and not service["active"]:
@@ -146,12 +153,16 @@ def slots_for_day(
         )
         if not ranges:
             continue
-        busy = _busy(
-            connection,
-            person["id"],
-            day_start - timedelta(days=1),
-            day_end + timedelta(days=1),
-            exclude_booking,
+        busy = (
+            []
+            if ignore_bookings
+            else _busy(
+                connection,
+                person["id"],
+                day_start - timedelta(days=1),
+                day_end + timedelta(days=1),
+                exclude_booking,
+            )
         )
         for hours in ranges:
             cursor = local_at(local_day, hours["start"], tz)
@@ -196,6 +207,57 @@ def slots_for_days(
         }
         for offset in range(max(1, min(int(days), 14)))
     ]
+
+
+DAY_STATES = ("open", "full", "closed", "past", "not_yet")
+
+
+def day_states(
+    connection: sqlite3.Connection,
+    service_id: str,
+    first_day: str,
+    days: int = 7,
+    *,
+    staff_id: str = "",
+    now: datetime | None = None,
+    exclude_booking: str = "",
+) -> list[dict[str, Any]]:
+    """The days customers see, each with its free times and a ``state``: ``open`` (times to book), ``full``
+    (it has times, all booked: the waiting list), ``closed`` (nobody works then, or its times are over or too
+    soon), ``past``, or ``not_yet`` (beyond how far ahead customers may book)."""
+    rules = store.get_rules(connection)
+    today = date.fromisoformat(local_today(connection, now))
+    horizon = today + timedelta(days=int(rules["max_days_ahead"]))
+    out = []
+    for entry in slots_for_days(
+        connection,
+        service_id,
+        first_day,
+        days,
+        staff_id=staff_id,
+        now=now,
+        exclude_booking=exclude_booking,
+    ):
+        day = date.fromisoformat(entry["day"])
+        if entry["slots"]:
+            state = "open"
+        elif day < today:
+            state = "past"
+        elif day > horizon:
+            state = "not_yet"
+        elif slots_for_day(
+            connection,
+            service_id,
+            entry["day"],
+            staff_id=staff_id,
+            now=now,
+            ignore_bookings=True,
+        ):
+            state = "full"
+        else:
+            state = "closed"
+        out.append({**entry, "state": state})
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -257,6 +319,21 @@ _CUSTOMER_STATS = """SELECT c.*,
     (SELECT MAX(b.start_at) FROM bk_bookings b WHERE b.customer_id = c.id AND b.status = 'completed') AS last_visit,
     (SELECT MIN(b.start_at) FROM bk_bookings b WHERE b.customer_id = c.id AND b.status IN ('booked', 'confirmed') AND b.start_at > ?) AS next_booking
     FROM bk_customers c"""
+
+
+def phone_key(value: Any) -> str:
+    """A phone number as its digits, so "+1 555 0199" and "+15550199" are the same customer."""
+    return "".join(ch for ch in str(value or "") if ch.isdigit())
+
+
+def _same_person(
+    row: Mapping[str, Any], email: str, phone: str, *, fields: tuple[str, str]
+) -> bool:
+    email_field, phone_field = fields
+    if email and str(row[email_field] or "").lower() == email.lower():
+        return True
+    key = phone_key(phone)
+    return bool(key) and phone_key(row[phone_field]) == key
 
 
 def _customer_out(row: dict[str, Any]) -> dict[str, Any]:
@@ -464,11 +541,21 @@ def book(
             "Enter an email address or a phone number so the business can reach you."
         )
     rules = store.get_rules(connection)
-    if source == "public" and email:
-        active = kit.count(
+    if source == "public":
+        # The same person by email or by phone, however the number is written (a customer who gives only a
+        # phone number is limited too).
+        rows = kit.fetch_all(
             connection,
-            "SELECT COUNT(*) FROM bk_bookings WHERE customer_email = ? AND status IN ('booked', 'confirmed') AND start_at > ?",
-            (email, kit.iso(now or kit.utcnow())),
+            "SELECT customer_email, customer_phone FROM bk_bookings WHERE status IN ('booked', 'confirmed')"
+            " AND start_at > ? AND ((? != '' AND customer_email = ?) OR customer_phone != '')",
+            (kit.iso(now or kit.utcnow()), email, email),
+        )
+        active = sum(
+            1
+            for row in rows
+            if _same_person(
+                row, email, phone, fields=("customer_email", "customer_phone")
+            )
         )
         if active >= int(rules["max_active_per_customer"]):
             raise ValueError(
@@ -548,6 +635,15 @@ def book(
             ref_id=booking_id,
             public=source == "public",
         )
+        _waitlist_booked(
+            connection,
+            {
+                "service_id": service_id,
+                "start_at": kit.iso(start_at),
+                "customer_email": email,
+                "customer_phone": phone,
+            },
+        )
         connection.commit()
     except BaseException:
         connection.rollback()
@@ -622,6 +718,7 @@ def cancel(
     by: str = "business",
     reason: str = "",
     now: datetime | None = None,
+    origin: Any = None,
 ) -> dict[str, Any]:
     """Cancel a booking. A customer may cancel until the cancellation notice; the business always may."""
     booking = get_booking(connection, booking_id)
@@ -667,6 +764,7 @@ def cancel(
             )
     else:
         _message(connection, updated, "booking_cancelled", None, None)
+    _offer_opening(connection, booking, origin, now=now)
     connection.commit()
     return updated
 
@@ -741,6 +839,8 @@ def reschedule(
     updated = get_booking(connection, booking_id)
     _message(connection, updated, "booking_rescheduled", link, origin)
     _queue_reminder(connection, updated, link, origin, now=now)
+    if booking["start_at"] != updated["start_at"]:
+        _offer_opening(connection, booking, origin, now=now)
     connection.commit()
     return updated
 
@@ -1218,8 +1318,10 @@ def _message(
             f"Hi {first},",
             "",
             f"Your {booking['service_name']} on {booking['local_start']} ({booking['reference']}) is cancelled.",
-            "Reply to this email if you would like a new time.",
         ]
+        if booking.get("cancel_reason"):
+            lines.append(f"Reason: {booking['cancel_reason']}")
+        lines.append("Reply to this email if you would like a new time.")
         manage = ""
     else:
         return
@@ -1296,6 +1398,441 @@ def _review_request(connection: sqlite3.Connection, booking: Mapping[str, Any]) 
 
 
 # ---------------------------------------------------------------------------
+# the waiting list: a full day, and a message when a time opens
+# ---------------------------------------------------------------------------
+
+MAX_WAITING_PER_CUSTOMER = 5
+
+
+def day_open(
+    connection: sqlite3.Connection,
+    service: Mapping[str, Any],
+    day: str,
+    *,
+    staff_id: str = "",
+) -> bool:
+    """Someone who offers the service works that day (it may still be fully booked)."""
+    weekday = date.fromisoformat(day).weekday()
+    for person in eligible_staff(connection, service):
+        if staff_id and person["id"] != staff_id:
+            continue
+        if _off(connection, person["id"], day):
+            continue
+        if kit.count(
+            connection,
+            "SELECT COUNT(*) FROM bk_hours WHERE staff_id = ? AND weekday = ?",
+            (person["id"], weekday),
+        ):
+            return True
+    return False
+
+
+def join_waitlist(
+    connection: sqlite3.Connection,
+    *,
+    service_id: str,
+    day: str,
+    customer: Mapping[str, Any],
+    staff_id: str = "",
+    note: str = "",
+    now: datetime | None = None,
+) -> dict[str, Any]:
+    """A customer asks to be told when a time opens on a day (a booking there is cancelled or moved)."""
+    store.ensure(connection)
+    service = store.get_service(connection, service_id)
+    if not service["active"]:
+        raise ValueError("That service is not available to book.")
+    rules = store.get_rules(connection)
+    wanted = kit.day(day, "the day", required=True)
+    today = date.fromisoformat(local_today(connection, now))
+    if date.fromisoformat(wanted) < today:
+        raise ValueError("That day has passed. Pick another day.")
+    if date.fromisoformat(wanted) > today + timedelta(
+        days=int(rules["max_days_ahead"])
+    ):
+        raise ValueError("That day is too far ahead to book yet.")
+    if staff_id:
+        if not any(p["id"] == staff_id for p in eligible_staff(connection, service)):
+            raise ValueError("That person does not offer this service.")
+    if not day_open(connection, service, wanted, staff_id=staff_id):
+        raise ValueError("We are closed that day. Pick another day.")
+    if not slots_for_day(
+        connection, service_id, wanted, staff_id=staff_id, now=now, ignore_bookings=True
+    ):
+        # Its times are over, or too soon to book: no cancellation could ever free one for this customer.
+        raise ValueError("No more times can be booked that day. Pick another day.")
+    name = kit.text(customer.get("name"), "your name", max_len=120, required=True)
+    email = kit.email(customer.get("email"))
+    phone = kit.phone(customer.get("phone"))
+    if not (email or phone):
+        raise ValueError(
+            "Enter an email address or a phone number so we can tell you when a time opens."
+        )
+    mine = [
+        row
+        for row in kit.fetch_all(
+            connection,
+            "SELECT * FROM bk_waitlist WHERE status = 'waiting' AND day >= ? ORDER BY created_at",
+            (today.isoformat(),),
+        )
+        if _same_person(row, email, phone, fields=("email", "phone"))
+    ]
+    existing = next(
+        (
+            row
+            for row in mine
+            if row["service_id"] == service_id and row["day"] == wanted
+        ),
+        None,
+    )
+    if existing:
+        return existing
+    held = len(mine)
+    if held >= MAX_WAITING_PER_CUSTOMER:
+        raise ValueError(
+            "You are already on the waiting list for several days. We will be in touch."
+        )
+    entry = {
+        "id": kit.new_id(),
+        "service_id": service_id,
+        "staff_id": staff_id,
+        "day": wanted,
+        "name": name,
+        "email": email,
+        "phone": phone,
+        "note": kit.text(note, "a note", max_len=500, multiline=True),
+        "status": "waiting",
+        "created_at": kit.now(),
+    }
+    connection.execute(
+        """INSERT INTO bk_waitlist (id, service_id, staff_id, day, name, email, phone, note, status, created_at)
+        VALUES (:id, :service_id, :staff_id, :day, :name, :email, :phone, :note, :status, :created_at)""",
+        entry,
+    )
+    kit.log(
+        connection,
+        APP,
+        "waitlist",
+        f"{name} joined the waiting list for {service['name']}",
+        detail=f"{date.fromisoformat(wanted):%A} {date.fromisoformat(wanted).day} {date.fromisoformat(wanted):%B}",
+        ref_type="waitlist",
+        ref_id=entry["id"],
+        public=True,
+    )
+    connection.commit()
+    return entry
+
+
+def list_waitlist(
+    connection: sqlite3.Connection,
+    *,
+    status: str = "",
+    upcoming: bool = True,
+    now: datetime | None = None,
+) -> list[dict[str, Any]]:
+    """The waiting list with the service name, and whether a time is free that day right now."""
+    clauses, params = [], []
+    if status:
+        clauses.append("w.status = ?")
+        params.append(kit.choice(status, "the status", store.WAITLIST_STATUSES))
+    else:
+        clauses.append("w.status != 'removed'")
+    if upcoming:
+        clauses.append("w.day >= ?")
+        params.append(local_today(connection, now))
+    rows = kit.fetch_all(
+        connection,
+        f"""SELECT w.*, s.name AS service_name, st.name AS staff_name FROM bk_waitlist w
+        LEFT JOIN bk_services s ON s.id = w.service_id LEFT JOIN bk_staff st ON st.id = w.staff_id
+        WHERE {" AND ".join(clauses)} ORDER BY w.day, w.created_at LIMIT 500""",  # noqa: S608
+        params,
+    )
+    for row in rows[:200]:
+        row["free_now"] = False
+        if row["status"] in ("waiting", "notified"):
+            try:
+                row["free_now"] = bool(
+                    slots_for_day(
+                        connection,
+                        row["service_id"],
+                        row["day"],
+                        staff_id=row["staff_id"],
+                        now=now,
+                        customer_rules=False,
+                    )
+                )
+            except (LookupError, ValueError):
+                row["free_now"] = False
+    return rows
+
+
+def set_waitlist_status(
+    connection: sqlite3.Connection, entry_id: str, status: str
+) -> dict[str, Any]:
+    kit.require_row(connection, "bk_waitlist", entry_id, "waiting list entry")
+    connection.execute(
+        "UPDATE bk_waitlist SET status = ? WHERE id = ?",
+        (kit.choice(status, "the status", store.WAITLIST_STATUSES), entry_id),
+    )
+    connection.commit()
+    return kit.require_row(connection, "bk_waitlist", entry_id, "waiting list entry")
+
+
+def _offer_opening(
+    connection: sqlite3.Connection,
+    freed: Mapping[str, Any],
+    origin: Any = None,
+    *,
+    now: datetime | None = None,
+) -> int:
+    """A booking was cancelled or moved away: tell the people waiting for that day (by email) that a time is
+    free, with the booking page. That is everyone whose service now has a free time with the person whose
+    booking it was (a freed hour may fit a shorter service too). First come, first served; each is told once.
+    Returns how many were told."""
+    moment = (now or kit.utcnow()).astimezone(UTC)
+    start = _parse(freed["start_at"])
+    if start <= moment:
+        return 0
+    tz = store.zone(connection)
+    day = start.astimezone(tz).date().isoformat()
+    waiting = kit.fetch_all(
+        connection,
+        """SELECT w.*, s.name AS service_name FROM bk_waitlist w JOIN bk_services s ON s.id = w.service_id
+        WHERE w.day = ? AND w.status = 'waiting' AND (w.staff_id = '' OR w.staff_id = ?) ORDER BY w.created_at""",
+        (day, freed["staff_id"]),
+    )
+    if not waiting:
+        return 0
+    business = kit.business(connection)
+    page = public.link_for(connection, APP, PAGE_KIND, PAGE_REF)
+    url = _url(page, origin)
+    label = f"{start.astimezone(tz):%A} {start.astimezone(tz).day} {start.astimezone(tz):%B}"
+    free: dict[str, list[dict[str, Any]]] = {}
+    told = 0
+    for entry in waiting:
+        if not entry["email"]:
+            continue  # phone only: the business sees "a time is free" on its waiting list and calls
+        if entry["service_id"] not in free:
+            try:
+                free[entry["service_id"]] = slots_for_day(
+                    connection,
+                    entry["service_id"],
+                    day,
+                    staff_id=freed["staff_id"],
+                    now=moment,
+                )
+            except (LookupError, ValueError):
+                free[entry["service_id"]] = []
+        times = free[entry["service_id"]]
+        if not times:
+            continue  # the freed time is too short (or too soon) for what this person wants
+        shown = ", ".join(slot["local"] for slot in times[:3])
+        first = entry["name"].split(" ")[0]
+        lines = [
+            f"Hi {first},",
+            "",
+            f"Good news: a time just opened for {entry['service_name']} on {label} "
+            f"({shown}). It goes to whoever books first.",
+        ]
+        if url:
+            lines += ["", f"Book it here: {url}"]
+        else:
+            lines += ["", "Reply to this email to take it."]
+        lines += ["", business["name"] or ""]
+        kit.queue_email(
+            connection,
+            APP,
+            "waitlist_opening",
+            to=entry["email"],
+            subject=f"A time opened: {entry['service_name']} on {label}",
+            body="\n".join(lines).rstrip(),
+            ref_type="waitlist",
+            ref_id=entry["id"],
+        )
+        connection.execute(
+            "UPDATE bk_waitlist SET status = 'notified', notified_at = ? WHERE id = ?",
+            (kit.now(), entry["id"]),
+        )
+        told += 1
+    if told:
+        kit.log(
+            connection,
+            APP,
+            "waitlist_opening",
+            f"A time opened on {label}: {told} waiting customer{'s' if told != 1 else ''} told",
+            detail=f"{freed['service_name']} with {freed['staff_name']} was freed",
+            ref_type="booking",
+            ref_id=str(freed["id"]),
+        )
+    return told
+
+
+def _waitlist_booked(
+    connection: sqlite3.Connection, booking: Mapping[str, Any]
+) -> None:
+    """Someone on the waiting list booked that day: they are off the list."""
+    day = _parse(booking["start_at"]).astimezone(store.zone(connection)).date()
+    email, phone = booking["customer_email"], booking["customer_phone"]
+    for row in kit.fetch_all(
+        connection,
+        "SELECT id, email, phone FROM bk_waitlist WHERE service_id = ? AND day = ? AND status IN ('waiting', 'notified')",
+        (booking["service_id"], day.isoformat()),
+    ):
+        if _same_person(row, email, phone, fields=("email", "phone")):
+            connection.execute(
+                "UPDATE bk_waitlist SET status = 'booked' WHERE id = ?", (row["id"],)
+            )
+
+
+# ---------------------------------------------------------------------------
+# team pay: what each person brought in and their commission
+# ---------------------------------------------------------------------------
+
+
+def _month_bounds(connection: sqlite3.Connection) -> tuple[str, str]:
+    today = date.fromisoformat(local_today(connection))
+    first = today.replace(day=1)
+    following = (first + timedelta(days=32)).replace(day=1)
+    return first.isoformat(), (following - timedelta(days=1)).isoformat()
+
+
+def earnings(
+    connection: sqlite3.Connection, from_day: str = "", to_day: str = ""
+) -> dict[str, Any]:
+    """Completed appointments between two local days, per person: takings (money recorded for them, and a
+    package session at its share of the package price) and the commission owed at each person's rate."""
+    default_from, default_to = _month_bounds(connection)
+    first = kit.day(from_day, "the first day") or default_from
+    last = kit.day(to_day, "the last day") or default_to
+    if last < first:
+        raise ValueError("The last day must be on or after the first day.")
+    if (date.fromisoformat(last) - date.fromisoformat(first)).days > 366:
+        raise ValueError("Pick at most a year at a time.")
+    tz = store.zone(connection)
+    # Every completed appointment and no-show in the range (no row limit: a year's payroll must be complete).
+    rows = kit.fetch_all(
+        connection,
+        """SELECT * FROM bk_bookings WHERE status IN ('completed', 'no_show') AND start_at >= ? AND start_at < ?
+        ORDER BY start_at""",
+        (
+            kit.iso(_local_day_bounds(date.fromisoformat(first), tz)[0]),
+            kit.iso(_local_day_bounds(date.fromisoformat(last), tz)[1]),
+        ),
+    )
+    rates = store.commission_rates(connection)
+    package_price = {
+        row["id"]: (int(row["price_cents"]), max(1, int(row["sessions_total"])))
+        for row in kit.fetch_all(
+            connection,
+            "SELECT id, price_cents, sessions_total FROM bk_customer_packages",
+        )
+    }
+    staff = {
+        row["id"]: row
+        for row in kit.fetch_all(
+            connection, "SELECT id, name, color, active FROM bk_staff ORDER BY name"
+        )
+    }
+    people: dict[str, dict[str, Any]] = {}
+    lines: list[dict[str, Any]] = []
+    for row in rows:
+        row["local_start"] = local_label(row["start_at"], tz)
+        person = people.setdefault(
+            row["staff_id"],
+            {
+                "staff_id": row["staff_id"],
+                "name": (staff.get(row["staff_id"]) or {}).get("name")
+                or row["staff_name"],
+                "color": (staff.get(row["staff_id"]) or {}).get("color") or "",
+                "appointments": 0,
+                "no_shows": 0,
+                "takings_cents": 0,
+                "commission_bp": store.commission_bp(connection, row["staff_id"]),
+            },
+        )
+        if row["status"] == "no_show":
+            person["no_shows"] += 1
+            continue
+        if row["payment_kind"] == "package" and row["customer_package_id"]:
+            price, sessions = package_price.get(row["customer_package_id"], (0, 1))
+            takings = round(price / sessions)
+        else:
+            takings = int(row["paid_cents"] or 0)
+        # The rate that applied when the appointment took place (a later change does not rewrite it).
+        rate = store.rate_at(
+            rates.get(row["staff_id"], []), row["start_at"], person["commission_bp"]
+        )
+        commission = kit.percent_of(takings, rate)
+        person["appointments"] += 1
+        person["takings_cents"] += takings
+        lines.append(
+            {
+                "day": row["local_start"],
+                "staff_id": row["staff_id"],
+                "staff_name": person["name"],
+                "customer_name": row["customer_name"],
+                "service_name": row["service_name"],
+                "reference": row["reference"],
+                "payment_kind": row["payment_kind"] or "unpaid",
+                "takings_cents": takings,
+                "commission_percent": rate / 100,
+                "commission_cents": commission,
+            }
+        )
+    team = []
+    for person in people.values():
+        person["commission_percent"] = person["commission_bp"] / 100
+        # The rates these appointments were paid at (more than one: the rate changed within these days).
+        person["rates"] = list(
+            dict.fromkeys(
+                line["commission_percent"]
+                for line in lines
+                if line["staff_id"] == person["staff_id"]
+            )
+        )  # in the order they applied
+        person["commission_cents"] = sum(
+            line["commission_cents"]
+            for line in lines
+            if line["staff_id"] == person["staff_id"]
+        )
+        team.append(person)
+    team.sort(key=lambda item: (-item["takings_cents"], item["name"].lower()))
+    return {
+        "from": first,
+        "to": last,
+        "team": team,
+        "lines": lines,
+        "totals": {
+            "appointments": sum(p["appointments"] for p in team),
+            "no_shows": sum(p["no_shows"] for p in team),
+            "takings_cents": sum(p["takings_cents"] for p in team),
+            "commission_cents": sum(p["commission_cents"] for p in team),
+        },
+        "currency": kit.business(connection)["currency"],
+    }
+
+
+def earnings_csv(
+    connection: sqlite3.Connection, from_day: str = "", to_day: str = ""
+) -> bytes:
+    report = earnings(connection, from_day, to_day)
+    return kit.csv_bytes(
+        report["lines"],
+        (
+            "day",
+            "staff_name",
+            "customer_name",
+            "service_name",
+            "reference",
+            "payment_kind",
+            "takings_cents",
+            "commission_percent",
+            "commission_cents",
+        ),
+    )
+
+
+# ---------------------------------------------------------------------------
 # the overview and the hub
 # ---------------------------------------------------------------------------
 
@@ -1336,9 +1873,10 @@ def overview(
         "SELECT COUNT(*) FROM bk_bookings WHERE status = 'booked' AND start_at >= ?",
         (kit.iso(moment),),
     )
+    # Completed visits that still owe money: nothing paid, or only the deposit.
     unpaid = kit.count(
         connection,
-        "SELECT COUNT(*) FROM bk_bookings WHERE status = 'completed' AND paid_cents = 0 AND payment_kind != 'package' AND price_cents > 0",
+        "SELECT COUNT(*) FROM bk_bookings WHERE status = 'completed' AND paid_cents < price_cents AND payment_kind != 'package' AND price_cents > 0",
     )
     busiest = kit.fetch_all(
         connection,
@@ -1348,7 +1886,13 @@ def overview(
     upcoming = list_bookings(connection, when="upcoming", limit=10)
     upcoming = [row for row in upcoming if row["status"] in ACTIVE_STATUSES]
     revenue = kit.revenue(connection, app=APP, moment=moment)
+    waiting = kit.count(
+        connection,
+        "SELECT COUNT(*) FROM bk_waitlist WHERE status = 'waiting' AND day >= ?",
+        (today.isoformat(),),
+    )
     return {
+        "waiting": waiting,
         "today": today.isoformat(),
         "timezone": store.zone_name(connection),
         "today_bookings": today_rows,
@@ -1407,7 +1951,7 @@ def checklist(connection: sqlite3.Connection) -> list[dict[str, Any]]:
 def summary(connection: sqlite3.Connection) -> dict[str, Any]:
     data = overview(connection)
     rate = data["no_show_rate"]
-    return {
+    cards = {
         "cards": [
             {"label": "Bookings this week", "value": data["bookings_this_week"]},
             {
@@ -1423,6 +1967,11 @@ def summary(connection: sqlite3.Connection) -> dict[str, Any]:
             },
         ]
     }
+    if data["waiting"]:
+        cards["cards"].append(
+            {"label": "On the waiting list", "value": data["waiting"], "tone": "warn"}
+        )
+    return cards
 
 
 # ---------------------------------------------------------------------------
@@ -1452,6 +2001,10 @@ def public_booking(
         "paid_by_package": booking["payment_kind"] == "package",
         "note": booking["note"],
         "can_change": may_change,
+        # the reason the business gave when it cancelled (the cancel form says the customer sees it)
+        "cancel_reason": booking["cancel_reason"]
+        if booking["status"] == "cancelled"
+        else "",
         "change_until": kit.iso(_deadline(connection, booking)),
     }
 

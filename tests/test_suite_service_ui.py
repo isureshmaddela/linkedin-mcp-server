@@ -159,3 +159,133 @@ def test_service_in_the_browser(browser, env):
         p for p in problems if "console.error" in p and "status of 4" not in p
     ] == [], problems
     context.close()
+
+
+def no_null_text(page, selector):
+    """Element.append(null) writes the word "null" on the page: it must never show."""
+    text = page.locator(selector).inner_text()
+    return not any(line.strip() == "null" for line in text.splitlines())
+
+
+def test_paid_help_answers_and_fixes_in_the_browser(browser, env):
+    kit.forget_schema()
+    public.set_index(local._public_link_index)
+    context, page, problems = signed_in_page(browser, env)
+    post(
+        context,
+        env,
+        "/api/suite/business",
+        {
+            "name": "Corner Shop",
+            "timezone": "UTC",
+            "payment_link": "https://pay.example/corner",
+        },
+    )
+    post(
+        context,
+        env,
+        "/api/service/articles",
+        {
+            "title": "When will my order arrive?",
+            "body": "Orders arrive in three working days.",
+            "status": "published",
+        },
+    )
+
+    # Regression: the Help centre and Live chat tabs showed the word "null" when a part was missing.
+    for tab in ("help", "chat", "inbox"):
+        go(page, env, f"service?tab={tab}")
+        page.wait_for_selector("#main [role='tablist']")
+        page.wait_for_timeout(300)
+        assert no_null_text(page, "#main"), tab
+
+    # A paid service, made in the Paid help tab.
+    go(page, env, "service?tab=paid")
+    page.click("button:has-text('New paid service')")
+    page.fill(".modal [name=title]", "One-hour setup call")
+    page.fill(".modal [name=price_cents]", "45")
+    page.locator(".modal .actions button").last.click()
+    page.wait_for_selector("td:has-text('$45.00')")
+    go(page, env, "service?tab=help")
+    help_url = share_url(page)
+
+    # A customer on a phone: suggestions while writing, then asking for the paid service.
+    visitor = browser.new_context(viewport={"width": 390, "height": 844})
+    help_page = visitor.new_page()
+    help_page.goto(help_url)
+    help_page.wait_for_selector("h2:has-text('Paid help')")
+    assert no_null_text(help_page, "#pubMain")
+    help_page.get_by_label("Subject").fill("Where is my order")
+    help_page.get_by_label("How can we help?").fill("It has not arrived yet")
+    help_page.wait_for_selector("text=These answers might help:")
+    help_page.click("button:has-text('Ask for this')")
+    help_page.locator(".pub-item input[type=email]").fill("ana@example.com")
+    help_page.click("button:has-text('Ask for it')")
+    help_page.wait_for_selector("text=Your request page shows how to pay.")
+    case_path = help_page.locator("a:has-text('Follow your request')").get_attribute(
+        "href"
+    )
+    assert not help_page.evaluate(
+        "() => document.documentElement.scrollWidth > window.innerWidth + 2"
+    )
+    case_page = visitor.new_page()
+    case_page.goto(env.base + case_path)
+    case_page.wait_for_selector("text=Total due: $45.00")
+    assert (
+        case_page.locator("a.pub-btn:has-text('Pay $45.00')").get_attribute("href")
+        == "https://pay.example/corner"
+    )
+
+    # The team marks it paid from the case; the customer's page and the revenue follow.
+    go(page, env, "service")
+    page.click("tr.suite-row:has-text('One-hour setup call')")
+    page.click(".drawer button:has-text('Mark paid')")
+    page.wait_for_selector(".drawer .sv-charges .suite-pill:has-text('paid')")
+    case_page.reload()
+    case_page.wait_for_selector("text=Everything is paid. Thank you.")
+    revenue = context.request.get(env.base + "/api/suite/revenue").json()
+    assert revenue["summary"]["by_app"]["service"] == 4500
+
+    # Regression: an error notice stayed on the chat page after the chat started; and the visitor saw the team
+    # member's own email address instead of the business name.
+    go(page, env, "service?tab=chat")
+    chat_url = share_url(page)
+    chat_page = visitor.new_page()
+    chat_page.goto(chat_url)
+    chat_page.click("button:has-text('Start chat')")
+    chat_page.wait_for_selector(".pub-notice.bad")
+    chat_page.get_by_label("Your name").fill("Ben")
+    chat_page.get_by_label("Your email").fill("ben@example.com")
+    chat_page.get_by_label("Your question").fill("Are you open on Sunday?")
+    chat_page.click("button:has-text('Start chat')")
+    chat_page.wait_for_selector("text=Waiting for someone to answer")
+    assert chat_page.locator(".pub-notice.bad").count() == 0
+    page.wait_for_selector(".sv-chat-item:has-text('Ben')", timeout=10000)
+    page.click(".sv-chat-item:has-text('Ben')")
+    page.fill(".sv-chat-pane textarea", "Yes, from 10 to 4.")
+    page.click(".sv-chat-pane button:has-text('Send')")
+    chat_page.wait_for_selector("text=Yes, from 10 to 4.", timeout=10000)
+    assert "Corner Shop" in chat_page.locator("#pubMain").inner_text()
+    assert "leads-ui@example.com" not in chat_page.locator("#pubMain").inner_text()
+    visitor.close()
+
+    # Regression: due times are typed in hours; a blank one is explained in hours, not minutes.
+    go(page, env, "service?tab=settings")
+    page.fill("input[aria-label='Urgent: first reply within (hours)']", "")
+    page.click("button:has-text('Save settings')")
+    page.wait_for_selector(
+        "text=Enter the urgent first reply time in hours, at least 0.1."
+    )
+
+    # Customers and reports show the paying customer.
+    go(page, env, "service?tab=customers")
+    page.wait_for_selector("tr.suite-row:has-text('ana@example.com')")
+    go(page, env, "service?tab=reports")
+    page.wait_for_selector(
+        ".suite-kpi:has-text('Paid help this month'):has-text('$45.00')"
+    )
+    assert [p for p in problems if "pageerror" in p or "Uncaught" in p] == []
+    assert [
+        p for p in problems if "console.error" in p and "status of 4" not in p
+    ] == [], problems
+    context.close()

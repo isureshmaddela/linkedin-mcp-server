@@ -7,7 +7,15 @@ from typing import Any
 
 from aira.airaapi.http import Raw, Request, aira_route
 from aira.suite import kit, public
-from aira.suite.academy import service, store
+from aira.suite.academy import (
+    catalog,
+    earnings,
+    household,
+    partners,
+    search,
+    service,
+    store,
+)
 from aira.suite.academy.store import APP
 
 BASE = "/api/academy"
@@ -15,7 +23,7 @@ ID = "([0-9a-f]{32})"
 
 
 def _open(request: Request) -> Any:
-    connection = request.connect()
+    connection = household.connect(request)  # a child's household profile is refused
     store.ensure(connection)
     return connection
 
@@ -36,6 +44,20 @@ def overview(request: Request) -> tuple[int, dict[str, Any]]:
         data["checklist"] = _checklist(connection)
         data["activity"] = kit.activity(connection, app=APP, limit=15)
     return 200, data
+
+
+# ---------------------------------------------------------------------------
+# search (the box at the top of the app: courses, events, students, ticket orders and partners)
+# ---------------------------------------------------------------------------
+
+
+@aira_route("GET", f"{BASE}/search")
+def search_all(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as connection:
+        found = search.search(
+            connection, request.q("q"), limit=request.qint("limit", 5, 1, 50)
+        )
+    return 200, found
 
 
 # ---------------------------------------------------------------------------
@@ -420,14 +442,231 @@ def announcements_create(request: Request) -> tuple[int, dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
+# reviews
+# ---------------------------------------------------------------------------
+
+
+@aira_route("GET", f"{BASE}/reviews")
+def reviews_list(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as connection:
+        rows = service.reviews(
+            connection, course_id=request.q("course_id"), status=request.q("status")
+        )
+    return 200, {"reviews": rows}
+
+
+@aira_route("POST", f"{BASE}/reviews/{ID}/status")
+def review_status(request: Request) -> tuple[int, dict[str, Any]]:
+    """Hide a review from the course page (or show it again)."""
+    with _open(request) as connection:
+        review = service.set_review_status(
+            connection, request.match.group(1), request.payload.get("status")
+        )
+    request.audit(f"academy.review_{review['status']}", "review", review["id"])
+    return 200, {"review": review}
+
+
+# ---------------------------------------------------------------------------
+# referral partners (shared by Courses and Events)
+# ---------------------------------------------------------------------------
+
+PARTNER_COLUMNS = (
+    "name",
+    "email",
+    "code",
+    "commission_percent",
+    "active",
+    "referrals",
+    "sales",
+    "waiting",
+    "owed",
+    "paid",
+    "created_at",
+)
+
+
+def _partner_csv_rows(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Money as 2000.00 (like the earnings download) and Yes/No, so a spreadsheet reads it right."""
+
+    def money(cents: Any) -> str:
+        return f"{int(cents or 0) / 100:.2f}"
+
+    return [
+        {
+            **row,
+            "active": "Yes" if row["active"] else "No",
+            "sales": money(row["sales_cents"]),
+            "waiting": money(row["pending_cents"]),
+            "owed": money(row["owed_cents"]),
+            "paid": money(row["paid_cents"]),
+        }
+        for row in rows
+    ]
+
+
+@aira_route("GET", f"{BASE}/partners")
+def partners_list(request: Request) -> tuple[int, dict[str, Any]] | Raw:
+    with _open(request) as connection:
+        rows = partners.partners(connection, q=request.q("q"))
+        totals = partners.summary(connection)
+        links = partners.share_links(connection)
+    if request.q("format") == "csv":
+        return Raw(
+            200,
+            kit.csv_bytes(_partner_csv_rows(rows), PARTNER_COLUMNS),
+            "text/csv; charset=utf-8",
+            filename="partners.csv",
+        )
+    return 200, {"partners": rows, "totals": totals, "share_links": links}
+
+
+@aira_route("POST", f"{BASE}/partners")
+def partners_create(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as connection:
+        found = partners.create_partner(connection, request.payload)
+    request.audit("academy.partner_create", "partner", found["id"])
+    return 201, {"partner": found}
+
+
+@aira_route("GET", f"{BASE}/partners/{ID}")
+def partner_get(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as connection:
+        return 200, partners.detail(connection, request.match.group(1))
+
+
+@aira_route("PATCH", f"{BASE}/partners/{ID}")
+def partner_update(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as connection:
+        found = partners.update_partner(
+            connection, request.match.group(1), request.payload
+        )
+    request.audit("academy.partner_update", "partner", found["id"])
+    return 200, {"partner": found}
+
+
+@aira_route("DELETE", f"{BASE}/partners/{ID}")
+def partner_delete(request: Request) -> tuple[int, dict[str, Any]]:
+    partner_id = request.match.group(1)
+    with _open(request) as connection:
+        result = partners.delete_partner(connection, partner_id)
+    request.audit("academy.partner_delete", "partner", partner_id)
+    return 200, result
+
+
+@aira_route("POST", f"{BASE}/partners/{ID}/payout")
+def partner_payout(request: Request) -> tuple[int, dict[str, Any]]:
+    partner_id = request.match.group(1)
+    with _open(request) as connection:
+        payout = partners.pay_out(
+            connection, partner_id, request.payload.get("note"), via=request
+        )
+    request.audit(
+        "academy.partner_payout",
+        "partner",
+        partner_id,
+        {"amount_cents": payout["amount_cents"]},
+    )
+    return 200, {"payout": payout}
+
+
+@aira_route("POST", f"{BASE}/partners/{ID}/link")
+def partner_link(request: Request) -> tuple[int, dict[str, Any]]:
+    partner_id = request.match.group(1)
+    with _open(request) as connection:
+        found = partners.partner(connection, partner_id)
+        if not found["active"]:
+            raise ValueError("This partner is switched off. Switch them on first.")
+        link = public.create_link(
+            connection, APP, "partner", partner_id, title=f"Partner: {found['name']}"
+        )
+    request.audit("academy.partner_share", "partner", partner_id)
+    return 200, {"link": link}
+
+
+@aira_route("DELETE", f"{BASE}/partners/{ID}/link")
+def partner_link_revoke(request: Request) -> tuple[int, dict[str, Any]]:
+    partner_id = request.match.group(1)
+    with _open(request) as connection:
+        partners.partner(connection, partner_id)
+        revoked = public.revoke(connection, APP, "partner", partner_id)
+    request.audit("academy.partner_unshare", "partner", partner_id)
+    return 200, {"revoked": revoked}
+
+
+@aira_route("POST", f"{BASE}/partners/{ID}/invite")
+def partner_invite(request: Request) -> tuple[int, dict[str, Any]]:
+    """Make the partner's page and email it to them (it waits in the outbox like every message)."""
+    partner_id = request.match.group(1)
+    with _open(request) as connection:
+        link = partners.invite(connection, partner_id, via=request)
+    request.audit("academy.partner_invite", "partner", partner_id)
+    return 200, {"link": link, "queued": True}
+
+
+# ---------------------------------------------------------------------------
+# earnings and the catalog page (both sections)
+# ---------------------------------------------------------------------------
+
+
+@aira_route("GET", f"{BASE}/earnings")
+def earnings_report(request: Request) -> tuple[int, dict[str, Any]] | Raw:
+    with _open(request) as connection:
+        if request.q("format") == "csv":
+            return Raw(
+                200,
+                kit.csv_bytes(earnings.csv_rows(connection), earnings.CSV_COLUMNS),
+                "text/csv; charset=utf-8",
+                filename="earnings.csv",
+            )
+        return 200, earnings.report(connection)
+
+
+@aira_route("GET", f"{BASE}/catalog")
+def catalog_get(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as connection:
+        return 200, {"link": catalog.link(connection), **catalog.page(connection)}
+
+
+@aira_route("POST", f"{BASE}/catalog/link")
+def catalog_link(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as connection:
+        link = catalog.create(connection)
+    request.audit("academy.catalog_share", "catalog", "catalog")
+    return 200, {"link": link}
+
+
+@aira_route("DELETE", f"{BASE}/catalog/link")
+def catalog_link_revoke(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as connection:
+        revoked = public.revoke(connection, APP, catalog.KIND, catalog.REF)
+    request.audit("academy.catalog_unshare", "catalog", "catalog")
+    return 200, {"revoked": revoked}
+
+
+# ---------------------------------------------------------------------------
 # public pages
 # ---------------------------------------------------------------------------
+
+
+@public.page(APP, "catalog")
+def _catalog_page(connection: Any, link: dict[str, Any]) -> dict[str, Any]:
+    store.ensure(connection)
+    return {**catalog.page(connection), "ref_scope": partners.ref_scope(connection)}
+
+
+@public.page(APP, "partner")
+def _partner_page(connection: Any, link: dict[str, Any]) -> dict[str, Any]:
+    store.ensure(connection)
+    return partners.partner_page(connection, link["ref_id"])
 
 
 @public.page(APP, "course")
 def _course_page(connection: Any, link: dict[str, Any]) -> dict[str, Any]:
     store.ensure(connection)
-    return service.course_page(connection, link["ref_id"])
+    return {
+        **service.course_page(connection, link["ref_id"]),
+        "ref_scope": partners.ref_scope(connection),
+    }
 
 
 @public.action(APP, "course", "enrol")
@@ -439,7 +678,9 @@ def _course_enrol(
 ) -> tuple[int, dict[str, Any]]:
     store.ensure(connection)
     service.course_page(connection, link["ref_id"])  # 404 once unpublished
-    fields = {key: payload.get(key) for key in ("name", "email", "code", "cohort_id")}
+    fields = {
+        key: payload.get(key) for key in ("name", "email", "code", "cohort_id", "ref")
+    }
     try:
         result = service.enrol(
             connection, link["ref_id"], fields, source="public", via=visitor
@@ -496,6 +737,28 @@ def _student_quiz(
         payload.get("answers"),
         via=visitor,
     )
+
+
+@public.action(APP, "student", "review")
+def _student_review(
+    connection: Any,
+    link: dict[str, Any],
+    payload: dict[str, Any],
+    visitor: dict[str, Any],
+) -> tuple[int, dict[str, Any]]:
+    store.ensure(connection)
+    review = service.submit_review(
+        connection,
+        link["ref_id"],
+        {"rating": payload.get("rating"), "comment": payload.get("comment")},
+    )
+    return 200, {
+        "review": {
+            "rating": review["rating"],
+            "comment": review["comment"],
+            "status": review["status"],
+        }
+    }
 
 
 @public.page(APP, "certificate")

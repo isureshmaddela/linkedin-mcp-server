@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import sqlite3
+from collections.abc import Iterator
 from typing import Any
 
 from aira.suite import kit, life
@@ -125,13 +126,66 @@ SCHEMA = (
     "CREATE INDEX IF NOT EXISTS ln_reading_person ON ln_reading (profile_id, day)",
 )
 
+# Selling a deck: a buyer's request, paid through the seller's own payment link and confirmed by the seller.
+SCHEMA_V2 = (
+    """CREATE TABLE IF NOT EXISTS ln_sales (
+        id TEXT PRIMARY KEY,
+        deck_id TEXT NOT NULL,
+        owner_id TEXT NOT NULL,
+        buyer_name TEXT NOT NULL,
+        buyer_email TEXT NOT NULL,
+        amount_cents INTEGER NOT NULL,
+        currency TEXT NOT NULL,
+        reference TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'pending',
+        code_hash TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        paid_at TEXT,
+        cancelled_at TEXT
+    )""",
+    "CREATE INDEX IF NOT EXISTS ln_sales_owner ON ln_sales (owner_id, created_at)",
+    "CREATE INDEX IF NOT EXISTS ln_sales_deck ON ln_sales (deck_id, status)",
+    "CREATE UNIQUE INDEX IF NOT EXISTS ln_sales_reference ON ln_sales (reference)",
+)
+
+# How each seller is paid: their own payment link or instructions (hosted, the organization's are not theirs).
+SCHEMA_V3 = (
+    """CREATE TABLE IF NOT EXISTS ln_sellers (
+        profile_id TEXT PRIMARY KEY,
+        payment_link TEXT NOT NULL DEFAULT '',
+        payment_instructions TEXT NOT NULL DEFAULT '',
+        updated_at TEXT NOT NULL
+    )""",
+)
+
+# Columns added after a table first shipped: (table, column, definition).
+COLUMNS = (
+    ("ln_decks", "price_cents", "INTEGER NOT NULL DEFAULT 0"),
+    ("ln_decks", "preview_count", "INTEGER NOT NULL DEFAULT 5"),
+    # Whose deck a copy was made from (a copy of someone else's deck is not the copier's to sell).
+    ("ln_decks", "copied_from", "TEXT NOT NULL DEFAULT ''"),
+    # An extra practice answer on a card that was not due yet (it does not move the card's schedule).
+    ("ln_reviews", "practice", "INTEGER NOT NULL DEFAULT 0"),
+)
+
 GOAL_KINDS = ("cards", "minutes")
 AGE_TAGS = ("all", "child", "teen", "adult", "senior")
+
+
+def _added_columns(connection: sqlite3.Connection) -> Iterator[str]:
+    """The ALTER statements an older database still needs (worked out lazily, when kit.ensure runs them)."""
+    for table, column, definition in COLUMNS:
+        have = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}  # noqa: S608 - fixed names
+        if column not in have:
+            yield f"ALTER TABLE {table} ADD COLUMN {column} {definition}"
 
 
 def ensure(connection: sqlite3.Connection) -> None:
     life.ensure(connection)
     kit.ensure(connection, "learn.v1", SCHEMA)
+    kit.ensure(connection, "learn.v2", SCHEMA_V2)
+    kit.ensure(connection, "learn.v3", SCHEMA_V3)
+    kit.ensure(connection, "learn.v2.columns", _added_columns(connection))
 
 
 # ---------------------------------------------------------------------------
@@ -421,3 +475,82 @@ def decks_for(
         row["shared"] = bool(row["shared"])
         row["mine"] = row["owner_id"] == profile["id"]
     return rows
+
+
+def _words(text: Any) -> list[str]:
+    return str(text or "").casefold().split()
+
+
+def _hits(words: list[str], *fields: Any) -> bool:
+    hay = " ".join(str(field or "") for field in fields).casefold()
+    return all(word in hay for word in words)
+
+
+def search(
+    connection: sqlite3.Connection, profile: dict[str, Any], query: str, limit: int = 20
+) -> dict[str, list[dict[str, Any]]]:
+    """The decks, cards and books this person can see that hold every word of ``query`` (any case), ``limit`` of
+    each: the search box across the top of the app. Cards whose question matches come first."""
+    words = _words(query)
+    if not words:
+        return {"decks": [], "cards": [], "books": []}
+    visible = decks_for(connection, profile)
+    names = {profile["id"]: profile["name"]}
+    for row in visible:
+        if row["owner_id"] not in names:
+            names[row["owner_id"]] = life.name_of(connection, row["owner_id"])
+    decks = [
+        {
+            "id": row["id"],
+            "title": row["title"],
+            "emoji": row["emoji"],
+            "description": row["description"],
+            "mine": row["mine"],
+            "owner_name": names[row["owner_id"]],
+            "card_count": row["card_count"],
+        }
+        for row in visible
+        if _hits(words, row["title"], row["description"], names[row["owner_id"]])
+    ][:limit]
+    by_id = {row["id"]: row for row in visible}
+    found: list[tuple[bool, dict[str, Any]]] = []
+    if by_id:
+        marks = ",".join("?" * len(by_id))
+        for row in kit.fetch_all(
+            connection,
+            f"SELECT id, deck_id, front, back, hint, example FROM ln_cards WHERE deck_id IN ({marks}) "
+            "ORDER BY deck_id, position, created_at",
+            tuple(by_id),
+        ):
+            if _hits(words, row["front"], row["back"], row["hint"], row["example"]):
+                owner = by_id[row["deck_id"]]
+                found.append(
+                    (
+                        not _hits(words, row["front"]),
+                        {
+                            "id": row["id"],
+                            "deck_id": row["deck_id"],
+                            "deck_title": owner["title"],
+                            "deck_emoji": owner["emoji"],
+                            "front": row["front"],
+                            "back": row["back"],
+                        },
+                    )
+                )
+    found.sort(
+        key=lambda pair: pair[0]
+    )  # stable: the deck's own order within each group
+    books = [
+        {k: row[k] for k in ("id", "title", "author", "status")}
+        for row in kit.fetch_all(
+            connection,
+            "SELECT id, title, author, status FROM ln_books WHERE profile_id = ? ORDER BY status = 'finished', created_at DESC",
+            (profile["id"],),
+        )
+        if _hits(words, row["title"], row["author"])
+    ][:limit]
+    return {
+        "decks": decks,
+        "cards": [card for _, card in found[:limit]],
+        "books": books,
+    }

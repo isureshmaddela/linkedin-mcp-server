@@ -8,6 +8,12 @@
 * **Scores**: personal bests, a play streak and family leaderboards.
 * **Live family trivia**: a person hosts a room with a four-letter code; the household joins (relatives too, through
   a public link); questions run on the server's clock and answers after the time are refused.
+* **Challenges**: "beat my score" sends the very same puzzle (same seed) to people in the household; the result
+  settles itself when they finish.
+* **Quizzes people write** (``quizzes.py``): 3 to 30 questions, suggested by the writing model or the quiz book,
+  played alone or live; the answers stay with the writer.
+* **Quiz nights**: a grown-up hosts live trivia with an entry fee; guests pay the business directly and the host
+  marks them paid, which records the money once in the business ledger (``kit.record_revenue``).
 * **Watch and read list**: films, shows, books, podcasts and games the household wants to enjoy, each person's own
   status and rating, and "watch together" plans that appear on Today.
 """

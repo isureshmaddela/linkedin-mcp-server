@@ -104,8 +104,12 @@ def test_totals_apply_discount_then_tax_rounding_half_up():
         "subtotal_cents": 14330,
         "discount_cents": 1330,
         "tax_cents": 975,
+        "credit_cents": 0,
         "total_cents": 13975,
     }
+    # a deposit already invoiced (tax included) comes off last, never below zero
+    assert service.totals(items, 1330, 750, 3975)["total_cents"] == 10000
+    assert service.totals(items, 1330, 750, 10**9)["total_cents"] == 0
     assert (
         service.totals(items, 10**9, 750)["total_cents"] == 0
     )  # a discount never makes it negative

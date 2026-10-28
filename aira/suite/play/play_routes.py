@@ -9,13 +9,19 @@ from __future__ import annotations
 from datetime import timedelta
 from typing import Any
 
-from aira.airaapi.http import Request, aira_route
+from aira.airaapi.http import Raw, Request, aira_route
 from aira.suite import kit, life, public
-from aira.suite.play import service, store
+from aira.suite.play import quizzes, service, store
 from aira.suite.play.store import APP
 
 BASE = "/api/play"
 ID = "([0-9a-f]{32})"
+
+
+def _csv(rows: list[dict[str, Any]], columns: tuple[str, ...], name: str) -> Raw:
+    return Raw(
+        200, kit.csv_bytes(rows, columns), "text/csv; charset=utf-8", filename=name
+    )
 
 
 def _open(request: Request) -> tuple[Any, dict[str, Any]]:
@@ -35,6 +41,15 @@ def games_list(request: Request) -> tuple[int, dict[str, Any]]:
     connection, me = _open(request)
     with connection:
         return 200, service.catalog(connection, me)
+
+
+@aira_route("GET", f"{BASE}/search")
+def search(request: Request) -> tuple[int, dict[str, Any]]:
+    """Games, quizzes, the watch list and live games that match ``q`` (the search box across the top)."""
+    connection, me = _open(request)
+    with connection:
+        limit = request.qint("limit", 8, 1, 50)
+        return 200, service.search(connection, me, request.q("q"), limit=limit)
 
 
 @aira_route("POST", f"{BASE}/sessions")
@@ -81,10 +96,114 @@ def daily(request: Request) -> tuple[int, dict[str, Any]]:
 
 
 @aira_route("GET", f"{BASE}/scores")
-def scores(request: Request) -> tuple[int, dict[str, Any]]:
+def scores(request: Request) -> tuple[int, dict[str, Any]] | Raw:
+    """My scores (``?format=csv``: every game I finished, as a spreadsheet)."""
     connection, me = _open(request)
     with connection:
+        if request.q("format") == "csv":
+            return _csv(
+                service.history_rows(connection, me),
+                service.HISTORY_COLUMNS,
+                "my-games.csv",
+            )
         return 200, service.scores(connection, me, game=request.q("game"))
+
+
+# ---------------------------------------------------------------------------
+# challenges ("beat my score" on the same puzzle)
+# ---------------------------------------------------------------------------
+
+
+@aira_route("GET", f"{BASE}/challenges")
+def challenges_list(request: Request) -> tuple[int, dict[str, Any]]:
+    connection, me = _open(request)
+    with connection:
+        return 200, service.challenges(connection, me)
+
+
+@aira_route("POST", f"{BASE}/challenges")
+def challenges_create(request: Request) -> tuple[int, dict[str, Any]]:
+    connection, me = _open(request)
+    with connection:
+        return 201, {"challenges": service.challenge(connection, me, request.payload)}
+
+
+@aira_route("POST", f"{BASE}/challenges/{ID}/play")
+def challenges_play(request: Request) -> tuple[int, dict[str, Any]]:
+    connection, me = _open(request)
+    with connection:
+        return 200, {
+            "session": service.play_challenge(connection, me, request.match.group(1))
+        }
+
+
+@aira_route("DELETE", f"{BASE}/challenges/{ID}")
+def challenges_delete(request: Request) -> tuple[int, dict[str, Any]]:
+    connection, me = _open(request)
+    with connection:
+        service.decline_challenge(connection, me, request.match.group(1))
+    return 200, {"deleted": True}
+
+
+# ---------------------------------------------------------------------------
+# quizzes people write
+# ---------------------------------------------------------------------------
+
+
+@aira_route("GET", f"{BASE}/quizzes")
+def quizzes_list(request: Request) -> tuple[int, dict[str, Any]]:
+    connection, me = _open(request)
+    with connection:
+        return 200, {"quizzes": quizzes.list_quizzes(connection, me)}
+
+
+@aira_route("POST", f"{BASE}/quizzes")
+def quizzes_create(request: Request) -> tuple[int, dict[str, Any]]:
+    connection, me = _open(request)
+    with connection:
+        quiz = quizzes.create(connection, me, request.payload)
+    request.audit("play.quiz_create", "quiz", quiz["id"])
+    return 201, {"quiz": quiz}
+
+
+@aira_route("POST", f"{BASE}/quizzes/draft")
+def quizzes_draft(request: Request) -> tuple[int, dict[str, Any]]:
+    """Suggested questions on a topic (nothing is saved)."""
+    connection, me = _open(request)
+    with connection:
+        return 200, quizzes.draft(connection, me, request.payload)
+
+
+@aira_route("GET", f"{BASE}/quizzes/{ID}")
+def quizzes_get(request: Request) -> tuple[int, dict[str, Any]]:
+    connection, me = _open(request)
+    with connection:
+        return 200, {"quiz": quizzes.get_quiz(connection, me, request.match.group(1))}
+
+
+@aira_route("GET", f"{BASE}/quizzes/{ID}/board")
+def quizzes_board(request: Request) -> tuple[int, dict[str, Any]]:
+    connection, me = _open(request)
+    with connection:
+        return 200, {"board": quizzes.board(connection, me, request.match.group(1))}
+
+
+@aira_route("PATCH", f"{BASE}/quizzes/{ID}")
+def quizzes_update(request: Request) -> tuple[int, dict[str, Any]]:
+    connection, me = _open(request)
+    with connection:
+        quiz = quizzes.update(connection, me, request.match.group(1), request.payload)
+    request.audit("play.quiz_update", "quiz", quiz["id"])
+    return 200, {"quiz": quiz}
+
+
+@aira_route("DELETE", f"{BASE}/quizzes/{ID}")
+def quizzes_delete(request: Request) -> tuple[int, dict[str, Any]]:
+    connection, me = _open(request)
+    with connection:
+        quizzes.delete(connection, me, request.match.group(1))
+    request.audit("play.quiz_delete", "quiz", request.match.group(1))
+    return 200, {"deleted": True}
 
 
 # ---------------------------------------------------------------------------
@@ -173,6 +292,42 @@ def rooms_answer(request: Request) -> tuple[int, dict[str, Any]]:
         }
 
 
+@aira_route("POST", f"{BASE}/rooms/{ID}/players/{ID}/paid")
+def rooms_paid(request: Request) -> tuple[int, dict[str, Any]]:
+    """The host marks a guest's entry fee as received (``{"paid": true}``) or takes the mark back."""
+    connection, me = _open(request)
+    paid = request.payload.get("paid", True)
+    with connection:
+        room = service.mark_paid(
+            connection,
+            me,
+            request.match.group(1),
+            request.match.group(2),
+            paid if isinstance(paid, bool) else kit.flag(paid),
+        )
+    request.audit("play.entry_paid", "room", room["id"])
+    return 200, {"room": room}
+
+
+@aira_route("GET", f"{BASE}/rooms/{ID}/entries")
+def rooms_entries(request: Request) -> tuple[int, dict[str, Any]] | Raw:
+    """Who played and who paid (the host only; ``?format=csv`` for a spreadsheet)."""
+    connection, me = _open(request)
+    with connection:
+        rows = service.entry_rows(connection, me, request.match.group(1))
+    if request.q("format") == "csv":
+        return _csv(rows, service.ENTRY_COLUMNS, "quiz-night-entries.csv")
+    return 200, {"entries": rows}
+
+
+@aira_route("GET", f"{BASE}/nights")
+def nights(request: Request) -> tuple[int, dict[str, Any]]:
+    """The quiz nights I hosted with an entry fee and what each one took."""
+    connection, me = _open(request)
+    with connection:
+        return 200, service.nights(connection, me)
+
+
 @aira_route("POST", f"{BASE}/rooms/{ID}/link")
 def rooms_link(request: Request) -> tuple[int, dict[str, Any]]:
     """A link relatives without an account can use to join this room (the host, not a child)."""
@@ -218,7 +373,10 @@ def trivia_room_join(
 ) -> tuple[int, dict[str, Any]]:
     store.ensure(connection)
     token, state = service.join_guest(
-        connection, link["ref_id"], str(payload.get("name") or "")
+        connection,
+        link["ref_id"],
+        str(payload.get("name") or ""),
+        client=str(visitor.get("client") or ""),
     )
     return 201, {"token": token, "room": state}
 
@@ -264,7 +422,7 @@ def trivia_room_answer(
 
 
 @aira_route("GET", f"{BASE}/watch")
-def watch_list(request: Request) -> tuple[int, dict[str, Any]]:
+def watch_list(request: Request) -> tuple[int, dict[str, Any]] | Raw:
     connection, me = _open(request)
     with connection:
         items = service.watch_list(
@@ -274,11 +432,30 @@ def watch_list(request: Request) -> tuple[int, dict[str, Any]]:
             status=request.q("status"),
             query=request.q("q"),
         )
+        if request.q("format") == "csv":
+            return _csv(
+                service.watch_rows(items), service.WATCH_COLUMNS, "watch-list.csv"
+            )
         people = [life.public(p) for p in life.profiles(connection)]
         return 200, {
             "items": items,
             "people": people,
             "kinds": list(service.WATCH_KINDS),
+        }
+
+
+@aira_route("GET", f"{BASE}/watch/pick")
+def watch_pick(request: Request) -> tuple[int, dict[str, Any]]:
+    """Something to enjoy tonight, picked at random from the list (``together=1``: nobody has finished it)."""
+    connection, me = _open(request)
+    with connection:
+        return 200, {
+            "item": service.pick(
+                connection,
+                me,
+                kind=request.q("kind"),
+                together=kit.flag(request.q("together")),
+            )
         }
 
 
@@ -356,11 +533,26 @@ def _today(connection: Any, me: dict[str, Any]) -> list[dict[str, Any]]:
                 "done": True,
             }
         )
+    elif day["mine"]:
+        lines.append(
+            {
+                "text": f"Today's challenge: {day['name']}",
+                "sub": "You have started it. Open Play to carry on.",
+            }
+        )
     else:
         lines.append(
             {
                 "text": f"Today's challenge: {day['name']}",
                 "sub": "One try for everyone. Open Play to have a go.",
+            }
+        )
+    waiting = service.challenges(connection, me)["incoming"]
+    for item in waiting[:3]:
+        lines.append(
+            {
+                "text": f"{item['who']} challenged you to {item['name']}",
+                "sub": f"Beat {item['target']} points. Open Play to take it on.",
             }
         )
     for plan in service.plans_today(connection, me):
@@ -395,7 +587,7 @@ def _today(connection: Any, me: dict[str, Any]) -> list[dict[str, Any]]:
             APP,
             "Play",
             lines=lines,
-            link="#/play?tab=daily",
+            link="#/play" if waiting else "#/play?tab=daily",
             tone="good" if day["mine"] else "",
         )
     ]
@@ -420,4 +612,8 @@ def _pulse(connection: Any, me: dict[str, Any], since: str) -> dict[str, Any]:
         and room["host_id"] != me["id"]
         and room["created_at"] >= fresh
     ]
-    return {"badge": len(open_rooms), "alerts": alerts}
+    waiting, challenge_alerts = service.challenges_pulse(connection, me)
+    return {
+        "badge": len(open_rooms) + waiting,
+        "alerts": alerts + challenge_alerts,
+    }

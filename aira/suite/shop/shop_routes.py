@@ -11,7 +11,7 @@ from typing import Any
 
 from aira.airaapi.http import Raw, Request, aira_route
 from aira.suite import kit, public
-from aira.suite.shop import service, store
+from aira.suite.shop import access, service, store
 from aira.suite.shop.store import APP
 
 BASE = "/api/shop"
@@ -49,7 +49,22 @@ ORDER_COLUMNS = (
     "payment_status",
     "fulfilment_status",
     "source",
+    "items_summary",
+    "address",
+    "note",
 )
+REFERRER_COLUMNS = (
+    "name",
+    "email",
+    "code",
+    "friends",
+    "sales_cents",
+    "rewards",
+    "rewards_cents",
+    "rewards_used",
+    "created_at",
+)
+ALERT_COLUMNS = ("product_name", "option", "email", "name", "created_at", "notified_at")
 CUSTOMER_COLUMNS = (
     "name",
     "email",
@@ -62,7 +77,9 @@ CUSTOMER_COLUMNS = (
 
 
 def _open(request: Request) -> Any:
-    connection = request.connect()
+    connection = access.connect(
+        request
+    )  # a child's or a teen's household profile is refused
     store.ensure(connection)
     return connection
 
@@ -102,6 +119,10 @@ def settings_save(request: Request) -> tuple[int, dict[str, Any]]:
     with _open(request) as connection:
         payload = dict(request.payload)
         saved = store.save_settings(connection, payload)
+        if saved["referrals_enabled"]:
+            service.backfill_referrers(
+                connection
+            )  # customers who paid before it was on
         kit.log(
             connection, APP, "settings", "Shop settings updated", actor=_actor(request)
         )
@@ -163,8 +184,10 @@ def products_list(request: Request) -> tuple[int, dict[str, Any]] | Raw:
         )
         if request.q("format") == "csv":
             return _csv(rows, PRODUCT_COLUMNS, "products.csv")
+        waiting = service.waiting_counts(connection)
         for row in rows:
             row["low"] = service.is_low(row)
+            row["waiting"] = waiting.get(row["id"], 0)
         return 200, {"products": rows, "categories": store.categories(connection)}
 
 
@@ -186,6 +209,7 @@ def products_get(request: Request) -> tuple[int, dict[str, Any]]:
     with _open(request) as connection:
         product = store.get_product(connection, request.match.group(1))
         product["low"] = service.is_low(product)
+        product["alerts"] = service.restock_alerts(connection, product["id"])
         return 200, {"product": product}
 
 
@@ -193,7 +217,10 @@ def products_get(request: Request) -> tuple[int, dict[str, Any]]:
 def products_update(request: Request) -> tuple[int, dict[str, Any]]:
     with _open(request) as connection:
         product = service.update_product(
-            connection, request.match.group(1), request.payload
+            connection,
+            request.match.group(1),
+            request.payload,
+            origin=request.base_url(),
         )
     request.audit("shop.product_update", "product", product["id"])
     return 200, {"product": product}
@@ -230,6 +257,11 @@ def orders_list(request: Request) -> tuple[int, dict[str, Any]] | Raw:
             open_only=request.q("open") == "1",
         )
         if request.q("format") == "csv":
+            for row in rows:
+                row["items_summary"] = "; ".join(
+                    f"{line['quantity']} x {line['name']}{f' ({line["option"]})' if line.get('option') else ''}"
+                    for line in row["items"]
+                )
             return _csv(rows, ORDER_COLUMNS, "orders.csv")
         return 200, {"orders": rows}
 
@@ -407,6 +439,35 @@ def discounts_delete(request: Request) -> tuple[int, dict[str, Any]]:
     return 200, {"deleted": True}
 
 
+@aira_route("GET", f"{BASE}/alerts")
+def alerts_list(request: Request) -> tuple[int, dict[str, Any]] | Raw:
+    """Customers waiting for something sold out to come back (and the ones already told)."""
+    with _open(request) as connection:
+        rows = service.restock_alerts(connection, request.q("product_id"))
+        if request.q("format") == "csv":
+            return _csv(rows, ALERT_COLUMNS, "back-in-stock.csv")
+        return 200, {"alerts": rows}
+
+
+@aira_route("DELETE", f"{BASE}/alerts/{ID}")
+def alerts_delete(request: Request) -> tuple[int, dict[str, Any]]:
+    alert_id = request.match.group(1)
+    with _open(request) as connection:
+        service.delete_restock_alert(connection, alert_id)
+    request.audit("shop.alert_delete", "restock_alert", alert_id)
+    return 200, {"deleted": True}
+
+
+@aira_route("GET", f"{BASE}/referrals")
+def referrals_report(request: Request) -> tuple[int, dict[str, Any]] | Raw:
+    """Share and earn: who shared their code, the friends they brought and the rewards they earned."""
+    with _open(request) as connection:
+        report = service.referrals(connection)
+        if request.q("format") == "csv":
+            return _csv(report["referrers"], REFERRER_COLUMNS, "referrals.csv")
+        return 200, report
+
+
 @aira_route("GET", f"{BASE}/customers")
 def customers_list(request: Request) -> tuple[int, dict[str, Any]] | Raw:
     with _open(request) as connection:
@@ -414,6 +475,22 @@ def customers_list(request: Request) -> tuple[int, dict[str, Any]] | Raw:
         if request.q("format") == "csv":
             return _csv(rows, CUSTOMER_COLUMNS, "customers.csv")
         return 200, {"customers": rows}
+
+
+@aira_route("GET", f"{BASE}/search")
+def search(request: Request) -> tuple[int, dict[str, Any]]:
+    """The search box across the top of Commerce: a few products and orders matching the words (name, SKU,
+    category; customer name, email, phone or #number), newest orders first. Nothing for an empty query."""
+    with _open(request) as connection:
+        q = request.q("q")[:100]
+        limit = request.qint("limit", 6, 1, 50)
+        if not q:
+            return 200, {"q": "", "products": [], "orders": []}
+        return 200, {
+            "q": q,
+            "products": store.list_products(connection, q=q, limit=limit),
+            "orders": store.list_orders(connection, q=q, limit=limit),
+        }
 
 
 # ---------------------------------------------------------------------------
@@ -428,7 +505,11 @@ def storefront_page(connection: Any, link: dict[str, Any]) -> dict[str, Any]:
 
 
 def _quote_view(quote: dict[str, Any]) -> dict[str, Any]:
-    return {key: value for key, value in quote.items() if key != "discount_id"}
+    return {
+        key: value
+        for key, value in quote.items()
+        if key not in ("discount_id", "referrer_id")
+    }
 
 
 @public.action(APP, "storefront", "quote")
@@ -475,10 +556,31 @@ def storefront_order(
     return 201, {"order": service.public_order(order), "link": order["link"]["path"]}
 
 
+@public.action(APP, "storefront", "notify_me")
+def storefront_notify_me(
+    connection: Any,
+    link: dict[str, Any],
+    payload: dict[str, Any],
+    visitor: dict[str, Any],
+) -> tuple[int, dict[str, Any]]:
+    """A customer asks to be emailed when a sold-out product is back."""
+    store.ensure(connection)
+    allowed = {"product_id", "option", "email", "name"}
+    result = service.ask_restock_alert(
+        connection, {k: v for k, v in payload.items() if k in allowed}
+    )
+    return 200, result
+
+
+def _public_order(connection: Any, order_id: str) -> dict[str, Any]:
+    order = store.get_order(connection, order_id)
+    return service.public_order(order, service.order_referral(connection, order))
+
+
 @public.page(APP, "order")
 def order_page(connection: Any, link: dict[str, Any]) -> dict[str, Any]:
     store.ensure(connection)
-    return service.public_order(store.get_order(connection, link["ref_id"]))
+    return _public_order(connection, link["ref_id"])
 
 
 @public.action(APP, "order", "notify_paid")
@@ -489,8 +591,8 @@ def order_notify_paid(
     visitor: dict[str, Any],
 ) -> tuple[int, dict[str, Any]]:
     store.ensure(connection)
-    order = service.customer_says_paid(connection, link["ref_id"], payload)
-    return 200, {"order": service.public_order(order)}
+    service.customer_says_paid(connection, link["ref_id"], payload)
+    return 200, {"order": _public_order(connection, link["ref_id"])}
 
 
 # ---------------------------------------------------------------------------
@@ -547,7 +649,7 @@ def _summary(connection: Any) -> dict[str, Any]:
     store.ensure(connection)
     data = service.overview(connection)
     code = data["revenue"]["currency"]
-    return {
+    summary: dict[str, Any] = {
         "cards": [
             {
                 "label": "Revenue this month",
@@ -565,6 +667,12 @@ def _summary(connection: Any) -> dict[str, Any]:
             },
         ]
     }
+    waiting = sum(item["waiting"] for item in data["wanted"])
+    if waiting:
+        summary["cards"].append(
+            {"label": "Waiting for stock", "value": waiting, "tone": "warn"}
+        )
+    return summary
 
 
 def _actor(request: Request) -> str:

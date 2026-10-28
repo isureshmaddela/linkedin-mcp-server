@@ -2,13 +2,18 @@
 
 A feed is refreshed when it is older than 30 minutes (on read, and by the background task for every feed someone
 follows). A failed refresh keeps the earlier articles. Children are in child-safe mode by default (and cannot turn
-it off): only the Science, Technology, Sports and Entertainment sections, and no headline with a blocklisted word.
+it off): only the Science, Technology, Sports and Entertainment sections, no headline or summary with a blocklisted
+word, and no sources of their own. In child-safe mode the words a person follows and what they search for are
+looked up only in those safe sections (never a search of all the news). The same story reached through two feeds
+(two topics, a topic and a keyword) shows once. A person can hide a source they do not want to read, and search any
+news without following it. The newsletter a person can earn from is in :mod:`.letter`.
 """
 
 from __future__ import annotations
 
 import sqlite3
-from collections.abc import Callable, Iterable
+import unicodedata
+from collections.abc import Callable, Iterable, Sequence
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -19,6 +24,8 @@ STALE = timedelta(minutes=30)
 KEEP_DAYS = 14
 MAX_KEYWORDS = 10
 MAX_SOURCES = 15
+MAX_MUTED = 50
+SEARCH_MAX = 60
 MAX_TOPICS = len(feeds.TOPICS)
 REFRESH_ERROR = "Could not refresh; showing earlier news."
 NO_NEWS_ERROR = "Could not load the news right now. Try again in a few minutes."
@@ -130,6 +137,15 @@ def settings_view(connection: sqlite3.Connection, me: dict[str, Any]) -> dict[st
         "can_turn_off_child_safe": not _is_child(me),
         "keywords": keywords(connection, me),
         "sources": sources(connection, me),
+        "muted": muted(connection, me),
+        "can_add_sources": not _is_child(me),
+        "can_publish": life.is_adult(me),
+        "has_newsletter": bool(
+            life.is_adult(me)
+            and kit.fetch_one(
+                connection, "SELECT id FROM nw_letters WHERE owner_id = ?", (me["id"],)
+            )
+        ),
         "languages": [
             {
                 "code": code,
@@ -344,16 +360,25 @@ def feeds_for(
             raise LookupError("That source was not found.")
         return [row]
     if topic == "foryou":
+        if child:  # the words are looked up in the safe sections only
+            return _safe_feeds(connection, mine) if keywords(connection, me) else []
         return [
             keyword_feed(connection, k["query"], lang, region)
             for k in keywords(connection, me)
         ]
     if topic == "all":
         out = _topic_feeds(connection, mine["topics"], lang, region)
-        out += [
-            keyword_feed(connection, k["query"], lang, region)
-            for k in keywords(connection, me)
-        ]
+        if child:
+            if keywords(connection, me):
+                known = {f["id"] for f in out}
+                out += [
+                    f for f in _safe_feeds(connection, mine) if f["id"] not in known
+                ]
+        else:
+            out += [
+                keyword_feed(connection, k["query"], lang, region)
+                for k in keywords(connection, me)
+            ]
         out += kit.fetch_all(
             connection,
             "SELECT f.* FROM nw_sources s JOIN nw_feeds f ON f.id = s.feed_id WHERE s.profile_id = ?",
@@ -368,6 +393,23 @@ def feeds_for(
             connection, mine["topics"], lang, region
         )  # a child's front page is their safe topics
     return [topic_feed(connection, code, lang, region)]
+
+
+def _safe_feeds(
+    connection: sqlite3.Connection, mine: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """In child-safe mode, where followed words and searches are looked up: the safe sections, never all the news."""
+    return _topic_feeds(connection, feeds.CHILD_TOPICS, mine["lang"], mine["region"])
+
+
+def _matches(row: dict[str, Any], words: Sequence[str]) -> bool:
+    """The headline or summary has every word of one of ``words`` (a followed word or a search)."""
+    text = f"{row['title']} {row['summary'] or ''}".casefold()
+    return any(
+        all(part in text for part in phrase.casefold().split())
+        for phrase in words
+        if phrase.strip()
+    )
 
 
 def _saved_links(connection: sqlite3.Connection, me: dict[str, Any]) -> set[str]:
@@ -386,6 +428,32 @@ def _read_links(connection: sqlite3.Connection, me: dict[str, Any]) -> set[str]:
         (me["id"],),
     )
     return {r["link"] for r in rows}
+
+
+def muted(connection: sqlite3.Connection, me: dict[str, Any]) -> list[dict[str, Any]]:
+    """The sources the person hid, by name."""
+    return kit.fetch_all(
+        connection,
+        "SELECT id, source, created_at FROM nw_muted WHERE profile_id = ? ORDER BY source COLLATE NOCASE",
+        (me["id"],),
+    )
+
+
+def _muted_names(connection: sqlite3.Connection, me: dict[str, Any]) -> set[str]:
+    return {r["source"].casefold() for r in muted(connection, me)}
+
+
+def _story_key(title: str) -> str:
+    """Headlines that differ only in case, spaces or punctuation are the same story.
+
+    Letters, digits and combining marks are kept: Python's word pattern does not match the vowel signs (matras) of Hindi
+    and Telugu, and dropping them would make different headlines ("दिल की बात", "दाल की बात") the same.
+    """
+    kept = "".join(
+        ch if unicodedata.category(ch)[0] in "LNM" else " "
+        for ch in unicodedata.normalize("NFC", title.casefold())
+    )
+    return " ".join(kept.split())
 
 
 def _view(row: dict[str, Any], saved: set[str], read: set[str]) -> dict[str, Any]:
@@ -412,7 +480,11 @@ def _articles(
     since: str = "",
     limit: int = 40,
     child_safe: bool = False,
+    words: Sequence[str] | None = None,
 ) -> list[dict[str, Any]]:
+    """``words``: keep only articles about one of them (child-safe mode looks words up in the safe sections)."""
+    if words is not None and not any(w.strip() for w in words):
+        return []
     ids = [f["id"] for f in feed_rows if f.get("id")]
     if not ids:
         return []
@@ -429,14 +501,25 @@ def _articles(
         params,
     )
     saved, read = _saved_links(connection, me), _read_links(connection, me)
+    hidden = _muted_names(connection, me)
     seen: set[str] = set()
+    stories: set[str] = set()
     out = []
     for row in rows:
-        if row["link"] in seen:
+        story = _story_key(row["title"])
+        if row["link"] in seen or (story and story in stories):
+            continue  # the same story through another feed
+        if child_safe and not (
+            feeds.child_safe_title(row["title"])
+            and feeds.child_safe_title(row["summary"])
+        ):
             continue
-        if child_safe and not feeds.child_safe_title(row["title"]):
+        if row["source"] and row["source"].casefold() in hidden:
+            continue
+        if words is not None and not _matches(row, words):
             continue
         seen.add(row["link"])
+        stories.add(story)
         out.append(_view(row, saved, read))
         if len(out) >= limit:
             break
@@ -466,6 +549,11 @@ def articles(
             or f
             for f in feed_rows
         ]
+    words = (
+        [k["query"] for k in keywords(connection, me)]
+        if mine["child_safe"] and (topic or "top") == "foryou"
+        else None
+    )
     items = _articles(
         connection,
         me,
@@ -473,6 +561,7 @@ def articles(
         since=since,
         limit=limit,
         child_safe=mine["child_safe"],
+        words=words,
     )
     error = ""
     if failed:
@@ -568,6 +657,8 @@ def add_source(
     *,
     reader: Reader | None = None,
 ) -> dict[str, Any]:
+    if _is_child(me):
+        raise PermissionError("Ask an adult to add a news source.")
     url = kit.url(raw.get("url"), "the feed address", required=True)
     if not url.lower().startswith("https://") and not feeds._allow_local():
         raise ValueError("A news feed address starts with https://.")
@@ -627,6 +718,93 @@ def remove_source(
         raise LookupError("That source was not found.")
     connection.execute("DELETE FROM nw_sources WHERE id = ?", (source_id,))
     connection.commit()
+
+
+def search(
+    connection: sqlite3.Connection,
+    me: dict[str, Any],
+    query: Any,
+    *,
+    reader: Reader | None = None,
+) -> dict[str, Any]:
+    """Any news about ``query`` (in the person's language and country) without following it.
+
+    A search is a feed like a keyword's (kept 30 minutes, shared by everyone who searched the same words); one
+    nobody follows is dropped by the background task after a day.
+    """
+    words = " ".join(
+        kit.text(query, "what to search for", max_len=60, required=True).split()
+    )
+    mine = settings(connection, me)
+    if mine["child_safe"]:
+        # Child-safe mode: only the safe sections are searched (a search of all the news would get around them).
+        scope = _safe_feeds(connection, mine)
+        ok = all([refresh(connection, f, reader=reader)["ok"] for f in scope])
+        scope = [
+            kit.fetch_one(connection, "SELECT * FROM nw_feeds WHERE id = ?", (f["id"],))
+            or f
+            for f in scope
+        ]
+        items = _articles(
+            connection, me, scope, limit=SEARCH_MAX, child_safe=True, words=[words]
+        )
+    else:
+        feed = keyword_feed(connection, words, mine["lang"], mine["region"])
+        ok = refresh(connection, feed, reader=reader)["ok"]
+        feed = (
+            kit.fetch_one(
+                connection, "SELECT * FROM nw_feeds WHERE id = ?", (feed["id"],)
+            )
+            or feed
+        )
+        items = _articles(connection, me, [feed], limit=SEARCH_MAX, child_safe=False)
+    error = ""
+    if not ok:
+        error = REFRESH_ERROR if items else NO_NEWS_ERROR
+    following = any(
+        k["query"].casefold() == words.casefold() for k in keywords(connection, me)
+    )
+    return {
+        "query": words,
+        "articles": items,
+        "error": error,
+        "following": following,
+        "child_safe": mine["child_safe"],
+    }
+
+
+def mute(
+    connection: sqlite3.Connection, me: dict[str, Any], raw: dict[str, Any]
+) -> dict[str, Any]:
+    """Hide every headline from a source (by its name, as the cards show it). Hiding it again changes nothing."""
+    name = kit.text(raw.get("source"), "the source to hide", max_len=120, required=True)
+    existing = kit.fetch_one(
+        connection,
+        "SELECT id, source, created_at FROM nw_muted WHERE profile_id = ? AND lower(source) = lower(?)",
+        (me["id"], name),
+    )
+    if existing:
+        return existing
+    if len(muted(connection, me)) >= MAX_MUTED:
+        raise ValueError(
+            f"You can hide up to {MAX_MUTED} sources. Show one again first."
+        )
+    row = {"id": kit.new_id(), "source": name, "created_at": kit.now()}
+    connection.execute(
+        "INSERT INTO nw_muted (id, profile_id, source, created_at) VALUES (?, ?, ?, ?)",
+        (row["id"], me["id"], name, row["created_at"]),
+    )
+    connection.commit()
+    return row
+
+
+def unmute(connection: sqlite3.Connection, me: dict[str, Any], muted_id: str) -> None:
+    removed = connection.execute(
+        "DELETE FROM nw_muted WHERE id = ? AND profile_id = ?", (muted_id, me["id"])
+    ).rowcount
+    connection.commit()
+    if not removed:
+        raise LookupError("That hidden source was not found.")
 
 
 # ---------------------------------------------------------------------------
@@ -695,6 +873,22 @@ def saved(connection: sqlite3.Connection, me: dict[str, Any]) -> list[dict[str, 
             seen.add(row["link"])
             out.append(_view(row, saved_links, read_links))
     return out
+
+
+SAVED_COLUMNS = ("title", "source", "link", "published_at", "saved_at", "summary")
+
+
+def saved_rows(
+    connection: sqlite3.Connection, me: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """The person's saved articles for a CSV download (with when each was saved)."""
+    return kit.fetch_all(
+        connection,
+        """SELECT a.title, a.source, a.link, COALESCE(NULLIF(a.published_at, ''), a.fetched_at) AS published_at,
+        s.saved_at, a.summary FROM nw_saved s JOIN nw_articles a ON a.id = s.article_id
+        WHERE s.profile_id = ? ORDER BY s.saved_at DESC""",
+        (me["id"],),
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -769,9 +963,21 @@ def keyword_alerts(
     for keyword in keywords(connection, me):
         if not keyword["alert"]:
             continue
-        feed = keyword_feed(connection, keyword["query"], mine["lang"], mine["region"])
+        if mine["child_safe"]:
+            scope, words = _safe_feeds(connection, mine), [keyword["query"]]
+        else:
+            scope = [
+                keyword_feed(connection, keyword["query"], mine["lang"], mine["region"])
+            ]
+            words = None
         for article in _articles(
-            connection, me, [feed], since=since, limit=3, child_safe=mine["child_safe"]
+            connection,
+            me,
+            scope,
+            since=since,
+            limit=3,
+            child_safe=mine["child_safe"],
+            words=words,
         ):
             if article["read"]:
                 continue
@@ -798,16 +1004,23 @@ def today_lines(
     """Five headlines for Today. Uses the cache; fetches only feeds that were never fetched (a first visit)."""
     mine = settings(connection, me)
     feed_rows = feeds_for(connection, me, "all")
+    failed = False
     for feed in feed_rows:
-        if not feed.get("last_fetched"):
-            refresh(connection, feed, reader=reader)
+        if (
+            not feed.get("last_fetched")
+            and not refresh(connection, feed, reader=reader)["ok"]
+        ):
+            failed = True
     feed_rows = [
         kit.fetch_one(connection, "SELECT * FROM nw_feeds WHERE id = ?", (f["id"],))
         or f
         for f in feed_rows
     ]
     items = _articles(connection, me, feed_rows, limit=5, child_safe=mine["child_safe"])
-    return {"articles": items, "error": "" if items else NO_NEWS_ERROR}
+    broken = failed or any(
+        f.get("last_error") and not f.get("last_ok") for f in feed_rows
+    )
+    return {"articles": items, "error": NO_NEWS_ERROR if broken and not items else ""}
 
 
 # ---------------------------------------------------------------------------
@@ -841,6 +1054,25 @@ def background_refresh(
         "DELETE FROM nw_articles WHERE fetched_at < ? AND id NOT IN (SELECT article_id FROM nw_saved)",
         (cutoff,),
     ).rowcount
+    # One-off searches nobody follows: drop the feed (and its articles nobody saved) after a day.
+    old_search = kit.iso(kit.utcnow() - timedelta(days=1))
+    for row in kit.fetch_all(
+        connection,
+        "SELECT id FROM nw_feeds WHERE kind = 'search' AND created_at < ?",
+        (old_search,),
+    ):
+        if row["id"] in wanted:
+            continue
+        pruned += connection.execute(
+            "DELETE FROM nw_articles WHERE feed_id = ? AND id NOT IN (SELECT article_id FROM nw_saved)",
+            (row["id"],),
+        ).rowcount
+        if not kit.count(
+            connection,
+            "SELECT COUNT(*) FROM nw_articles WHERE feed_id = ?",
+            (row["id"],),
+        ):
+            connection.execute("DELETE FROM nw_feeds WHERE id = ?", (row["id"],))
     connection.execute(
         "DELETE FROM nw_read WHERE article_id NOT IN (SELECT id FROM nw_articles)"
     )

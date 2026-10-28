@@ -29,8 +29,10 @@ TABS = (
     "history",
     "locations",
     "monitors",
-    "account",
+    "rank",
     "keys",
+    "earnings",
+    "account",
     "docs",
     "status",
 )

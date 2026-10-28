@@ -120,9 +120,28 @@ SCHEMA = (
 )
 
 
+# Added later: students rate a course (one review each); the business may hide a review.
+REVIEW_SCHEMA = (
+    """CREATE TABLE IF NOT EXISTS ac_reviews (
+        id TEXT PRIMARY KEY,
+        course_id TEXT NOT NULL,
+        enrolment_id TEXT NOT NULL UNIQUE,
+        name TEXT NOT NULL DEFAULT '',
+        rating INTEGER NOT NULL,
+        comment TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'published',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS ac_reviews_course ON ac_reviews (course_id, status, created_at)",
+)
+REVIEW_STATUSES = ("published", "hidden")
+
+
 def ensure(connection: sqlite3.Connection) -> None:
     kit.ensure_core(connection)
     kit.ensure(connection, "academy.v1", SCHEMA)
+    kit.ensure(connection, "academy.reviews.v1", REVIEW_SCHEMA)
 
 
 # ---------------------------------------------------------------------------
@@ -151,7 +170,9 @@ def courses(
             (SELECT COUNT(*) FROM ac_lessons l WHERE l.course_id = c.id) AS lessons,
             (SELECT COUNT(*) FROM ac_enrolments e WHERE e.course_id = c.id AND e.status IN ('active', 'completed')) AS students,
             (SELECT COUNT(*) FROM ac_enrolments e WHERE e.course_id = c.id AND e.status = 'pending_payment') AS pending,
-            (SELECT COUNT(*) FROM ac_enrolments e WHERE e.course_id = c.id AND e.status = 'completed') AS completed
+            (SELECT COUNT(*) FROM ac_enrolments e WHERE e.course_id = c.id AND e.status = 'completed') AS completed,
+            (SELECT ROUND(AVG(r.rating), 1) FROM ac_reviews r WHERE r.course_id = c.id AND r.status = 'published') AS rating,
+            (SELECT COUNT(*) FROM ac_reviews r WHERE r.course_id = c.id AND r.status = 'published') AS reviews
         FROM ac_courses c {where} ORDER BY c.updated_at DESC""",  # noqa: S608 - clauses are fixed strings
         params,
     )
@@ -277,3 +298,13 @@ def seats_taken(
         "SELECT COUNT(*) FROM ac_enrolments WHERE course_id = ? AND status != 'refunded'",
         (course_id,),
     )
+
+
+def rating(connection: sqlite3.Connection, course_id: str) -> dict[str, Any]:
+    """The average of a course's published reviews (``None`` when it has none) and how many there are."""
+    row = connection.execute(
+        "SELECT AVG(rating), COUNT(*) FROM ac_reviews WHERE course_id = ? AND status = 'published'",
+        (course_id,),
+    ).fetchone()
+    count = int(row[1] or 0)
+    return {"average": round(float(row[0]), 1) if count else None, "count": count}

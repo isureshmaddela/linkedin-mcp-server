@@ -17,7 +17,7 @@ from datetime import date, datetime, timezone
 from typing import Any
 
 from aira import __version__ as AIRA_VERSION
-from aira.airaapi import catalog, compat, service, store
+from aira.airaapi import catalog, compat, earnings, rank, service, store
 from aira.airaapi.client import SerpApiClient, SerpApiError
 from aira.airaapi.http import Raw, Request, aira_route
 from aira.audit import notify
@@ -77,6 +77,36 @@ def _bound(text: str, *, end: bool) -> str:
             "Dates must look like 2026-10-22 or 2026-10-22T14:30:00Z."
         ) from None
     return store.to_iso(moment)
+
+
+ADULT_ONLY_MESSAGE = (
+    "Only an adult on this account can manage API keys, client prices, rank tracking and earnings. "
+    "Switch to your own profile to do this."
+)
+
+
+class AdultOnly(PermissionError):
+    """A household profile that is not an adult opened a page about money (403 ``adult_only``)."""
+
+    code = "adult_only"
+
+
+def _require_adult(request: Request, connection: sqlite3.Connection) -> None:
+    """Keys handed to clients, their prices and what they owe are the account holder's business.
+
+    In the single-user build a household shares one sign-in, so a child or teen profile picked in the
+    browser (``X-Aira-Profile``) is refused here. A request that names no profile on an account with
+    several is asked to choose one (``profile_required``), like the everyday apps. In the hosted build
+    the organization's roles decide (aira_cloud.policy), so nothing is checked here.
+    """
+    from aira import suite
+    from aira.suite import life
+
+    if suite.actor():
+        return
+    me = life.current(request, connection)
+    if not (life.is_adult(me) or me.get("owner")):
+        raise AdultOnly(ADULT_ONLY_MESSAGE)
 
 
 def _body(payload: dict[str, Any], name: str) -> dict[str, Any]:
@@ -141,6 +171,7 @@ def set_key(request: Request) -> tuple[int, dict[str, Any]]:
         raise ValueError("Send the SerpApi key as api_key.")
     now = _now()
     with request.connect() as connection:
+        _require_adult(request, connection)
         account_info = service.set_app_key(
             connection, request.secret_store, make_client, candidate, now
         )
@@ -159,6 +190,7 @@ def set_key(request: Request) -> tuple[int, dict[str, Any]]:
 @aira_route("DELETE", r"/api/airaapi/key")
 def remove_key(request: Request) -> tuple[int, dict[str, Any]]:
     with request.connect() as connection:
+        _require_adult(request, connection)
         removed = service.remove_app_key(connection, request.secret_store)
         resolved = _resolved(request, connection)
     if not removed:
@@ -506,18 +538,21 @@ def monitors_run(request: Request) -> tuple[int, dict[str, Any]]:
 @aira_route("GET", r"/api/airaapi/keys")
 def keys_list(request: Request) -> tuple[int, dict[str, Any]]:
     with request.connect() as connection:
+        _require_adult(request, connection)
         return 200, {"keys": compat.list_keys(connection, _now())}
 
 
 @aira_route("POST", r"/api/airaapi/keys")
 def keys_create(request: Request) -> tuple[int, dict[str, Any]]:
     with request.connect() as connection:
+        _require_adult(request, connection)
         created = compat.create_key(
             connection,
             request.key_index,
             str(request.payload.get("name", "")),
             request.payload.get("hourly_limit"),
             _now(),
+            terms=request.payload,
         )
     request.audit(
         "airaapi.apikey.create",
@@ -531,11 +566,157 @@ def keys_create(request: Request) -> tuple[int, dict[str, Any]]:
 @aira_route("DELETE", r"/api/airaapi/keys/([0-9a-f]{32})")
 def keys_revoke(request: Request) -> tuple[int, dict[str, Any]]:
     with request.connect() as connection:
+        _require_adult(request, connection)
         revoked = compat.revoke_key(
             connection, request.key_index, request.match.group(1), _now()
         )
     request.audit("airaapi.apikey.revoke", "airaapi_api_key", revoked["id"])
     return 200, {"ok": True, "key": revoked}
+
+
+@aira_route("PATCH", r"/api/airaapi/keys/([0-9a-f]{32})")
+def keys_update(request: Request) -> tuple[int, dict[str, Any]]:
+    with request.connect() as connection:
+        _require_adult(request, connection)
+        updated = compat.update_key(
+            connection, request.match.group(1), request.payload, _now()
+        )
+    request.audit(
+        "airaapi.apikey.update",
+        "airaapi_api_key",
+        updated["id"],
+        {
+            name: request.payload[name]
+            for name in sorted(request.payload)
+            if name in store.KEY_TERMS
+        },
+    )
+    return 200, {"key": updated}
+
+
+# ---------------------------------------------------------------------------
+# Earnings: client keys and rank-tracking fees against what the searches cost
+# ---------------------------------------------------------------------------
+
+
+@aira_route("GET", r"/api/airaapi/earnings")
+def earnings_report(request: Request) -> tuple[int, dict[str, Any]]:
+    with request.connect() as connection:
+        _require_adult(request, connection)
+        return 200, earnings.month_report(connection, request.q("month"), now=_now())
+
+
+@aira_route("PUT", r"/api/airaapi/earnings/settings")
+def earnings_settings(request: Request) -> tuple[int, dict[str, Any]]:
+    with request.connect() as connection:
+        _require_adult(request, connection)
+        saved = earnings.save_settings(connection, request.payload)
+    request.audit("airaapi.earnings.settings", "airaapi_prefs", earnings.PREF)
+    return 200, {"settings": saved}
+
+
+@aira_route("GET", r"/api/airaapi/earnings/statement/([0-9a-f]{32})")
+def earnings_statement(request: Request) -> Raw:
+    with request.connect() as connection:
+        _require_adult(request, connection)
+        body, content_type, filename = earnings.statement(
+            connection,
+            request.match.group(1),
+            request.q("month"),
+            request.q("format", "csv"),
+            now=_now(),
+        )
+    return Raw(200, body, content_type, filename)
+
+
+# ---------------------------------------------------------------------------
+# Rank tracker
+# ---------------------------------------------------------------------------
+
+
+@aira_route("GET", r"/api/airaapi/rank")
+def rank_list(request: Request) -> tuple[int, dict[str, Any]]:
+    with request.connect() as connection:
+        _require_adult(request, connection)
+        projects = rank.list_projects(connection)
+    return 200, {
+        "projects": projects,
+        "limits": {
+            "projects": rank.MAX_PROJECTS,
+            "keywords_per_project": rank.MAX_KEYWORDS_PER_PROJECT,
+            "keywords_total": rank.MAX_KEYWORDS_TOTAL,
+        },
+    }
+
+
+@aira_route("POST", r"/api/airaapi/rank")
+def rank_create(request: Request) -> tuple[int, dict[str, Any]]:
+    with request.connect() as connection:
+        _require_adult(request, connection)
+        project = rank.create_project(connection, request.payload, now=_now())
+    request.audit(
+        "airaapi.rank.create",
+        "airaapi_rank_project",
+        project["id"],
+        {"domain": project["domain"]},
+    )
+    return 201, project
+
+
+@aira_route("GET", r"/api/airaapi/rank/([0-9a-f]{32})")
+def rank_detail(request: Request) -> tuple[int, dict[str, Any]]:
+    with request.connect() as connection:
+        _require_adult(request, connection)
+        return 200, rank.get_project(connection, request.match.group(1))
+
+
+@aira_route("PATCH", r"/api/airaapi/rank/([0-9a-f]{32})")
+def rank_update(request: Request) -> tuple[int, dict[str, Any]]:
+    with request.connect() as connection:
+        _require_adult(request, connection)
+        return 200, rank.update_project(
+            connection, request.match.group(1), request.payload, now=_now()
+        )
+
+
+@aira_route("DELETE", r"/api/airaapi/rank/([0-9a-f]{32})")
+def rank_delete(request: Request) -> tuple[int, dict[str, Any]]:
+    with request.connect() as connection:
+        _require_adult(request, connection)
+        rank.delete_project(connection, request.match.group(1), now=_now())
+    request.audit("airaapi.rank.delete", "airaapi_rank_project", request.match.group(1))
+    return 200, {"ok": True}
+
+
+@aira_route("POST", r"/api/airaapi/rank/([0-9a-f]{32})/run")
+def rank_run(request: Request) -> tuple[int, dict[str, Any]]:
+    with request.connect() as connection:
+        _require_adult(request, connection)
+        client = _client(request, connection)
+        return 200, rank.run_project(
+            connection,
+            client,
+            request.match.group(1),
+            keyword_id=str(request.payload.get("keyword_id") or ""),
+            notify=compat.make_notifier(request.connect, notify),
+            limits=_limits(request),
+            now=_now(),
+        )
+
+
+@aira_route("GET", r"/api/airaapi/rank/([0-9a-f]{32})/report")
+def rank_report(request: Request) -> Raw:
+    with request.connect() as connection:
+        _require_adult(request, connection)
+        prepared_by = earnings.settings(connection)["business_name"]
+        body, content_type, filename = rank.report(
+            connection,
+            request.match.group(1),
+            request.q("format", "html"),
+            prepared_by=prepared_by,
+            now=_now(),
+        )
+    return Raw(200, body, content_type, filename)
 
 
 @aira_route("GET", r"/api/airaapi/docs")
@@ -599,9 +780,11 @@ def v1_search(request: Request) -> tuple[int, dict[str, Any]] | Raw:
 
 @aira_route("GET", r"(?:/v1)?/account(?:\.json)?", auth="api_key")
 def v1_account(request: Request) -> tuple[int, dict[str, Any]]:
-    _api_key(request)
+    key = _api_key(request)
     now = _now()
     with request.connect() as connection:
+        if compat.is_client_key(key):
+            return 200, compat.v1_client_account(connection, key, now)
         resolved = _resolved(request, connection)
         if not resolved.configured:
             raise SerpApiError("not_configured", resolved.error or NOT_CONFIGURED)
@@ -675,7 +858,7 @@ def v1_locations(request: Request) -> tuple[int, list[Any]]:
 
 @aira_route("GET", r"/v1/searches\.json", auth="api_key")
 def v1_searches(request: Request) -> tuple[int, dict[str, Any]]:
-    _api_key(request)
+    key = _api_key(request)
     with request.connect() as connection:
         return 200, service.list_searches(
             connection,
@@ -684,6 +867,7 @@ def v1_searches(request: Request) -> tuple[int, dict[str, Any]]:
             source=request.q("source"),
             limit=request.qint("limit", 25, 1, 200),
             offset=request.qint("offset", 0, 0, 1_000_000),
+            api_key_id=compat.search_scope(key),
         )
 
 
@@ -693,7 +877,7 @@ def v1_searches(request: Request) -> tuple[int, dict[str, Any]]:
     auth="api_key",
 )
 def v1_search_detail(request: Request) -> tuple[int, dict[str, Any]] | Raw:
-    _api_key(request)
+    key = _api_key(request)
     fmt = request.match.group(2) or (
         "html" if request.q("output") == "html" else "json"
     )
@@ -706,6 +890,7 @@ def v1_search_detail(request: Request) -> tuple[int, dict[str, Any]] | Raw:
             fmt,
             _now(),
             base_url=request.base_url(),
+            api_key_id=compat.search_scope(key),
         )
 
 

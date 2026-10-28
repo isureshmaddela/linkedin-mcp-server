@@ -63,6 +63,7 @@ STATUS_FOR_CODE = {
     "invalid_aira_key": 401,
     "out_of_searches": 402,
     "forbidden": 403,
+    "engine_not_allowed": 403,
     "not_found": 404,
     "not_configured": 409,
     "conflict": 409,
@@ -70,6 +71,7 @@ STATUS_FOR_CODE = {
     "rate_limited": 429,
     "local_rate_limit": 429,
     "busy": 429,
+    "quota_exceeded": 429,
 }
 _sleep = time.sleep
 

@@ -247,7 +247,12 @@ def cents(
         raise ValueError(
             f"{name[:1].upper()}{name[1:]} must be a number like 12.50."
         ) from None
-    result = int((amount * 100).quantize(Decimal("1")))
+    if not amount.is_finite():  # "Infinity", "NaN", "sNaN"
+        raise ValueError(f"{name[:1].upper()}{name[1:]} must be a number like 12.50.")
+    try:
+        result = int((amount * 100).quantize(Decimal("1")))
+    except ArithmeticError:  # "1e999999"
+        raise ValueError(f"{name[:1].upper()}{name[1:]} is too large.") from None
     if result < minimum:
         raise ValueError(
             f"{name[:1].upper()}{name[1:]} cannot be below {minimum / 100:.2f}."
@@ -599,7 +604,9 @@ def public_business(connection: sqlite3.Connection) -> dict[str, Any]:
 _event_listener: Callable[[str, str, dict[str, Any]], None] | None = None
 
 
-def set_event_listener(listener: Callable[[str, str, dict[str, Any]], None] | None) -> None:
+def set_event_listener(
+    listener: Callable[[str, str, dict[str, Any]], None] | None,
+) -> None:
     global _event_listener
     _event_listener = listener
 
@@ -638,8 +645,18 @@ def log(
     )
     if _event_listener is not None:
         try:
-            _event_listener(app, kind[:40], {"title": title[:200], "detail": detail[:500], "ref_type": ref_type[:40],
-                                             "ref_id": ref_id[:64], "amount_cents": int(amount_cents), "public": public})
+            _event_listener(
+                app,
+                kind[:40],
+                {
+                    "title": title[:200],
+                    "detail": detail[:500],
+                    "ref_type": ref_type[:40],
+                    "ref_id": ref_id[:64],
+                    "amount_cents": int(amount_cents),
+                    "public": public,
+                },
+            )
         except Exception:  # noqa: BLE001 - a listener (webhooks) never fails the app's own work
             suite.logger.exception("The activity listener failed")
 
@@ -686,7 +703,9 @@ def record_revenue(
         """INSERT INTO suite_revenue (id, app, source_type, source_id, label, customer, amount_cents, currency, at, voided_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
         ON CONFLICT(app, source_type, source_id) DO UPDATE SET amount_cents = excluded.amount_cents,
-        label = excluded.label, customer = excluded.customer, currency = excluded.currency, voided_at = NULL""",
+        label = excluded.label, customer = excluded.customer, currency = excluded.currency,
+        at = CASE WHEN ? <> '' OR suite_revenue.voided_at IS NOT NULL THEN excluded.at ELSE suite_revenue.at END,
+        voided_at = NULL""",
         (
             new_id(),
             app,
@@ -697,6 +716,7 @@ def record_revenue(
             int(amount_cents),
             code,
             at or now(),
+            at,  # a payment recorded again with its own date, or after a void, moves to that date
         ),
     )
 
@@ -1127,8 +1147,8 @@ def draft(prompt: str, fallback: Mapping[str, Any]) -> dict[str, Any]:
     except Exception:  # noqa: BLE001 - writing help is optional
         suite.logger.info("The writing model was not available", exc_info=True)
     data = loads(reply, None) if reply else None
-    if isinstance(data, dict):
-        merged = {key: data.get(key, value) for key, value in fallback.items()}
+    if isinstance(data, dict) and all(key in data for key in fallback):
+        merged = {key: data[key] for key in fallback}
         if all(isinstance(merged[key], type(value)) for key, value in fallback.items()):
             return {**merged, "source": "model"}
     return {**dict(fallback), "source": "template"}

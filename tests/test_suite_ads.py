@@ -497,8 +497,13 @@ def test_clicks_go_through_a_signed_redirect_and_cpc_is_charged_once(sc, clock):
     signature = served["click_url"].split("s=")[1]
     with pytest.raises(LookupError):
         ads.click(sc, impression_id, "0" * 32)
-    assert ads.click(sc, impression_id, signature) == "https://spices.example/sale"
-    assert ads.click(sc, impression_id, signature) == "https://spices.example/sale"
+    # the page gets tracking tags, so the shop's own analytics see the visit came from this campaign
+    assert ads.click(sc, impression_id, signature) == (
+        "https://spices.example/sale?utm_source=aira&utm_medium=video_ad&utm_campaign=spices&utm_content=banner"
+    )
+    assert ads.click(sc, impression_id, signature).startswith(
+        "https://spices.example/sale?"
+    )
     assert ads.account(sc, ADVERTISER)["balance_micros"] == 10 * MICROS - 50 * CENT
     assert (
         ads.earnings(sc, creator)["balances"]["estimated_micros"]
@@ -737,7 +742,7 @@ def test_an_ad_on_this_computer_from_campaign_to_payout(env, api, monkeypatch):
     )
     assert _redirect_status(viewer, served["click_url"]) == (
         302,
-        "https://spices.example",
+        "https://spices.example/?utm_source=aira&utm_medium=video_ad&utm_campaign=autumn&utm_content=preroll",
     )
     assert (
         creator.get("/api/videos/earnings")["today_micros"] == 5_500
@@ -907,7 +912,9 @@ def test_hosted_ads_top_up_through_billing_and_operators_run_the_money(
         is True
     )
     status, _body = vic.call("GET", served["click_url"], None, raw=True)
-    assert status == 302 and vic.header("Location") == "https://spices.example"
+    assert status == 302 and vic.header("Location").startswith(
+        "https://spices.example/?utm_source=aira"
+    )
     assert cara.call("GET", "/api/videos/earnings")[1]["today_micros"] == 5_500
     # support reads the books but cannot change the money; a platform admin can
     overview = support.call("GET", "/api/platform/ads/overview")[1]

@@ -1,8 +1,11 @@
-/* Aira — Play: the live trivia page relatives open from a link (aira/suite/play, kind "trivia_room").
+/* Aira — Play: the live trivia page relatives (and quiz-night guests) open from a link (aira/suite/play, kind
+ * "trivia_room").
  *
  * A visitor types their name to join (the server gives this browser a token that lets it answer), then the page
  * asks for the room every 2.5 seconds: waiting room, the question with big answer buttons, the right answer, and
- * the final scores. Answers after the time are refused by the server. Text only, no HTML from the server.
+ * the final scores. Answers after the time are refused by the server. A quiz night has an entry fee: the page shows
+ * the fee, the prize and the business's own ways to pay, and answers count once the host has marked the guest as
+ * paid. Text only, no HTML from the server.
  */
 "use strict";
 (() => {
@@ -19,7 +22,9 @@
     let version = "";
     const big = { minHeight: "54px", fontSize: "18px", width: "100%", justifyContent: "flex-start", textAlign: "left", whiteSpace: "normal" };
     const box = h("div", { class: "pub-card", "aria-live": "polite" });
-    root.append(h("h1", { text: state.title || "Live trivia" }), h("p", { class: "pub-muted", text: `Hosted by ${state.host}. Room code ${state.code}.` }), box);
+    const fee = () => (state.entry_cents ? ctx.money(state.entry_cents) : "");
+    const terms = () => [state.entry_cents ? `Entry ${fee()}` : "", state.prize ? `Prize: ${state.prize}` : ""].filter(Boolean).join(" · ");
+    root.append(...[h("h1", { text: state.title || "Live trivia" }), h("p", { class: "pub-muted", text: `Hosted by ${state.host}. Room code ${state.code}.` }), terms() ? h("p", { class: "pub-badge", text: terms() }) : null, box].filter(Boolean));
 
     const answer = async (choice) => {
       try {
@@ -30,6 +35,12 @@
     };
 
     const scores = () => h("ol", {}, ...(state.players || []).map((p) => h("li", { text: `${p.name}${p.guest ? " (guest)" : ""}: ${p.score}` })));
+    // A guest who has not paid yet sees how to pay; household members and free games skip this.
+    const unpaid = () => !!(state.entry_cents && state.me && state.me.paid === false);
+    const payment = () => (unpaid() ? [
+      h("p", { class: "pub-notice", text: `Please pay the ${fee()} entry fee to the host. Your answers count once the host marks you as paid.` }),
+      ctx.paymentBox(state.entry_cents, state.me.reference),
+    ].filter(Boolean) : []);
 
     function draw() {
       version = state.version || "";
@@ -48,24 +59,30 @@
           draw();
           start();
         });
-        box.replaceChildren(h("h2", { text: "Join the family quiz" }), h("div", { class: "pub-form" }, ctx.field("Your name", name, "So everyone knows who is playing."), join));
+        name.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); join.click(); } });
+        box.replaceChildren(
+          h("h2", { text: state.entry_cents ? "Join the quiz night" : "Join the family quiz" }),
+          state.entry_cents ? h("p", { text: `The entry fee is ${fee()}. After you join, you will see how to pay.` }) : null,
+          h("div", { class: "pub-form" }, ctx.field("Your name", name, "So everyone knows who is playing."), join));
         name.focus();
         return;
       }
       if (state.phase === "lobby") {
-        box.replaceChildren(h("h2", { text: "You're in!" }), h("p", { text: "Waiting for the host to start…" }), h("h3", { text: "Players" }), scores());
+        box.replaceChildren(...[h("h2", { text: "You're in!" }), ...payment(), h("p", { text: "Waiting for the host to start…" }), h("h3", { text: "Players" }), scores()].filter(Boolean));
         return;
       }
       if (state.phase === "question" || state.phase === "reveal") {
         const q = state.question;
         const mine = me ? me.choice : null;
+        const locked = unpaid();
         box.replaceChildren(...[
-          h("p", { class: "pub-muted", text: `Question ${state.index + 1} of ${state.total} · ${q.category}` }),
+          ...payment(),
+          h("p", { class: "pub-muted", text: `Question ${state.index + 1} of ${state.total}${q.category ? ` · ${q.category}` : ""}` }),
           h("h2", { style: { fontSize: "22px" }, text: q.text }),
           h("p", { class: "pub-muted", text: state.phase === "question" ? `${state.seconds_left} seconds left` : "Time's up" }),
           h("div", { class: "pub-form" }, ...q.choices.map((choice, c) => {
             const right = state.phase === "reveal" && state.answer === c;
-            const node = h("button", { type: "button", class: `pub-btn ${mine === c ? "" : "secondary"}`, style: { ...big, outline: right ? "3px solid var(--pub-good)" : "" }, disabled: state.phase !== "question" || mine !== null, text: `${"ABCD"[c]}. ${choice}${right ? "  ✓" : ""}` });
+            const node = h("button", { type: "button", class: `pub-btn ${mine === c ? "" : "secondary"}`, style: { ...big, outline: right ? "3px solid var(--pub-good)" : "" }, disabled: state.phase !== "question" || mine !== null || locked, text: `${"ABCD"[c]}. ${choice}${right ? "  ✓" : ""}` });
             node.addEventListener("click", () => answer(c));
             return node;
           })),
@@ -75,7 +92,12 @@
         return;
       }
       const winner = (state.players || [])[0];
-      box.replaceChildren(h("h2", { text: state.phase === "expired" ? "This game has closed." : winner ? `🏆 ${winner.name} wins!` : "The game is over." }), h("h3", { text: "Scores" }), scores());
+      const won = winner && winner.score > 0 && state.phase !== "expired";
+      box.replaceChildren(...[
+        h("h2", { text: state.phase === "expired" ? "This game has closed." : won ? `🏆 ${winner.name} wins!` : "The game is over." }),
+        won && state.prize ? h("p", { text: `${winner.name} wins the prize: ${state.prize}` }) : null,
+        h("h3", { text: "Scores" }), scores(),
+      ].filter(Boolean));
       if (timer) { clearInterval(timer); timer = 0; }
     }
 

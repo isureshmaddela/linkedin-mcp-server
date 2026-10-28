@@ -1,9 +1,8 @@
-/* Aira — sign in with your Aira account (the single-user build opened from the hosted account).
+/* Aira — opening this installation from the Aira account (the hosted build).
  *
- * Self-contained: it adds one button to the local sign-in screen when this installation is linked to an account
- * (GET /api/auth/account-link says so), and it finishes a launch when the page opens at #/launch?token=... by
- * posting the one-time token to POST /api/auth/launch and reloading into the app. In the hosted build the
- * account-link route is not available, so nothing here runs.
+ * Self-contained: when the page opens at #/launch?token=... (the account's app launcher sends people here) it
+ * posts the one-time token to POST /api/auth/launch and reloads into the app. The local sign-in screen offers
+ * only the email and password sign-in. In the hosted build nothing here runs.
  */
 "use strict";
 (() => {
@@ -32,31 +31,6 @@
     if (target) target.textContent = text;
   }
 
-  function launchUrl(accountUrl) {
-    const back = encodeURIComponent(`${location.origin}/`);
-    return `${accountUrl.replace(/\/+$/, "")}/api/launch/local?return=${back}`;
-  }
-
-  function addButton(info) {
-    const form = $("authForm");
-    if (!form || $("accountLinkBtn")) return;
-    const button = document.createElement("button");
-    button.id = "accountLinkBtn";
-    button.type = "button";
-    button.className = "btn secondary";
-    button.style.width = "100%";
-    button.style.marginTop = "10px";
-    button.textContent = "Sign in with your Aira account";
-    button.addEventListener("click", () => { location.href = launchUrl(info.url); });
-    const hint = document.createElement("p");
-    hint.className = "muted";
-    hint.id = "accountLinkHint";
-    hint.style.margin = "8px 0 0";
-    hint.textContent = `Your Aira account at ${info.url} opens this installation without a second password.`;
-    const anchor = $("authSubmit");
-    if (anchor && anchor.parentNode === form) { form.insertBefore(button, anchor.nextSibling); form.insertBefore(hint, button.nextSibling); } else { form.append(button, hint); }
-  }
-
   async function finishLaunch() {
     const found = LAUNCH.exec(location.hash || "");
     if (!found) return false;
@@ -78,9 +52,6 @@
 
   document.addEventListener("DOMContentLoaded", async () => {
     if (typeof Aira !== "undefined" && Aira.cloud) return; // the hosted build is the account itself: nothing to add
-    let info = { available: false, url: "" };
-    try { info = await call("/api/auth/account-link"); } catch { return; }
-    if (info.available && info.url) addButton(info);
     await finishLaunch();
   });
 })();

@@ -1,0 +1,85 @@
+/* Styles for the service app only. Loaded on every page: scope every selector to the app's own class names. */
+
+/* Inbox: view chips, filters, tags, bulk actions */
+.sv-views .btn:not(.secondary) .sv-count { color: inherit; opacity: 0.85; }
+.sv-views .btn.secondary .sv-count { color: var(--muted); }
+.sv-filters { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 180px) minmax(0, 180px) auto; gap: 8px; align-items: center; }
+.sv-filters > input, .sv-filters > select { width: 100%; min-width: 0; }
+.sv-subject { display: inline-flex; flex-wrap: wrap; gap: 4px 6px; align-items: center; }
+.sv-tag { border: 1px solid var(--line); background: var(--surface); color: var(--muted); border-radius: 999px; padding: 1px 8px; font: inherit; font-size: 12px; cursor: pointer; }
+.sv-tag:hover, .sv-tag:focus-visible { color: var(--ink); border-color: var(--brand); }
+.sv-bulk { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; padding: 8px 12px; border: 1px solid var(--brand); border-radius: 12px; background: var(--brand-soft); }
+.sv-bulk[hidden] { display: none; }
+
+/* A case: the conversation and its parts */
+.sv-thread { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; max-height: 52vh; overflow: auto; }
+.sv-msg { padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); min-width: 0; }
+.sv-msg.agent { background: var(--brand-soft); border-color: transparent; }
+.sv-msg.internal { background: var(--warning-soft); border-style: dashed; }
+.sv-msg.system { background: transparent; border-style: dashed; color: var(--muted); font-size: 13px; }
+.sv-msg-head { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; }
+.sv-msg-head strong { overflow-wrap: anywhere; }
+.sv-msg-body { margin: 6px 0 0; white-space: pre-wrap; overflow-wrap: anywhere; }
+.sv-msg a { overflow-wrap: anywhere; }
+.sv-reply-tools { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr) auto; gap: 8px; align-items: center; }
+.sv-reply-tools select { width: 100%; min-width: 0; }
+.sv-answers { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; }
+.sv-charges, .sv-history, .sv-ratings, .sv-categories { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.sv-charges li { display: grid; grid-template-columns: minmax(0, 1fr) auto auto; gap: 6px 10px; align-items: center; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.sv-charges li .btn-row { grid-column: 1 / -1; }
+.sv-charge-amount { font-weight: 700; font-variant-numeric: tabular-nums; }
+.sv-charge-label { min-width: 0; overflow-wrap: anywhere; }
+.sv-history li, .sv-categories li { display: flex; flex-wrap: wrap; gap: 6px; align-items: center; justify-content: space-between; }
+.sv-link { border: 0; background: none; padding: 0; font: inherit; color: var(--ink); text-align: left; cursor: pointer; overflow-wrap: anywhere; }
+.sv-link:hover strong, .sv-link:focus-visible strong { text-decoration: underline; }
+.sv-person { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.sv-stars { color: #b7791f; letter-spacing: 1px; }
+.sv-quote { margin: 4px 0 0; color: var(--muted); white-space: pre-wrap; overflow-wrap: anywhere; }
+.sv-ratings li { padding-bottom: 8px; border-bottom: 1px solid var(--line); }
+.sv-sla th[scope="row"] { font-weight: 600; text-align: left; }
+.sv-sla input { width: 100%; min-width: 4.5em; }
+
+/* Live chat */
+.sv-chat { display: grid; grid-template-columns: minmax(200px, 280px) minmax(0, 1fr); gap: 14px; align-items: start; }
+.sv-chat-list { display: grid; gap: 6px; }
+.sv-chat-item { display: grid; gap: 4px; justify-items: start; text-align: left; padding: 10px 12px; border: 1px solid var(--line); border-radius: 10px; background: var(--surface); color: var(--ink); font: inherit; cursor: pointer; min-width: 0; }
+.sv-chat-item > span:last-child { overflow-wrap: anywhere; }
+.sv-chat-item.active { border-color: var(--brand); background: var(--brand-soft); }
+.sv-chat-pane { min-width: 0; display: grid; gap: 10px; }
+
+@media (max-width: 760px) {
+  .sv-chat { grid-template-columns: 1fr; }
+  .sv-filters { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+  .sv-filters > input { grid-column: 1 / -1; }
+  .sv-reply-tools { grid-template-columns: minmax(0, 1fr); }
+  .sv-sla input { min-width: 3.5em; }
+}
+
+/* In the Aira frame: the page head names the open tab; "+ New" above the menu makes a case on a wide screen, so the
+   page's own New case shows only where that menu is folded away (phones and narrow windows). */
+@media (min-width: 901px) { .sv-phone-new { display: none; } }
+.sv-filters.sv-filters-short { grid-template-columns: minmax(0, 1fr) auto; }
+.sv-results { margin: 0; color: var(--muted); overflow-wrap: anywhere; }
+.sv-results strong { color: var(--ink); }
+.sv-empty-actions { justify-content: center; }
+.sv-case-meta { display: none; flex-basis: 100%; }
+
+/* Live chat: framed like a mail app's list and reading pane; with no chats only the list's message shows. */
+.sv-chat-list, .sv-chat-pane { min-height: 220px; padding: 10px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); align-content: start; }
+.sv-chat.is-empty { grid-template-columns: 1fr; }
+.sv-chat.is-empty .sv-chat-pane { display: none; }
+
+/* Phones: the lists keep the columns that matter and fold the rest under the title. */
+@media (max-width: 600px) {
+  .sv-cases th:nth-child(2), .sv-cases td:nth-child(2),
+  .sv-cases th:nth-child(4), .sv-cases td:nth-child(4),
+  .sv-cases th:nth-child(7), .sv-cases td:nth-child(7),
+  .sv-cases th:nth-child(8), .sv-cases td:nth-child(8) { display: none; }
+  .sv-case-meta { display: block; }
+  .sv-customers th:nth-child(4), .sv-customers td:nth-child(4),
+  .sv-customers th:nth-child(5), .sv-customers td:nth-child(5) { display: none; }
+  .sv-articles th:nth-child(2), .sv-articles td:nth-child(2),
+  .sv-articles th:nth-child(4), .sv-articles td:nth-child(4),
+  .sv-articles th:nth-child(5), .sv-articles td:nth-child(5) { display: none; }
+}
+@media (max-width: 760px) { .sv-filters.sv-filters-short > input { grid-column: auto; } }

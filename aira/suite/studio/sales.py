@@ -492,6 +492,17 @@ def convert_deal(
     if deal["stage"] != "won":
         raise ValueError("Only a won deal can become a project and an invoice.")
     project_id, invoice_id = deal["project_id"], deal["invoice_id"]
+    # A project deleted, or an invoice deleted or voided, since: make it again.
+    if project_id and not kit.fetch_one(
+        connection, "SELECT id FROM st_projects WHERE id = ?", (project_id,)
+    ):
+        project_id = ""
+    if invoice_id and not kit.fetch_one(
+        connection,
+        "SELECT id FROM st_invoices WHERE id = ? AND state != 'void'",
+        (invoice_id,),
+    ):
+        invoice_id = ""
     if not project_id or not invoice_id:
         if deal["proposal_id"]:
             proposal = store.get(

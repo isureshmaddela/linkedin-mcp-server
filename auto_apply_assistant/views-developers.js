@@ -12,13 +12,28 @@
   const h = window.h;
   const S = Aira.suite;
   const TABS = [
-    { id: "start", label: "Get started" },
-    { id: "apps", label: "Apps" },
-    { id: "tokens", label: "Access tokens" },
-    { id: "webhooks", label: "Webhooks" },
-    { id: "connected", label: "Connected apps" },
-    { id: "reference", label: "API reference" },
+    { id: "start", label: "Get started", icon: "aa-book" },
+    { id: "apps", label: "Apps", icon: "dashboard" },
+    { id: "tokens", label: "Access tokens", icon: "aa-key" },
+    { id: "webhooks", label: "Webhooks", icon: "aa-pulse" },
+    { id: "connected", label: "Connected apps", icon: "settings" },
+    { id: "reference", label: "API reference", icon: "documents" },
   ];
+  // "+ New" links here with ?new=<kind> (views-airaapi.js): the tab that owns it opens its form once, then the address
+  // drops ?new= so Back or a reload does not open it again.
+  const NEW_BUTTONS = { token: "devNewToken", app: "devNewApp", webhook: "devNewWebhook" };
+  function openNew(route, holder) {
+    const kind = route.query.new;
+    if (!kind) return;
+    const query = { ...route.query };
+    delete query.new;
+    history.replaceState(null, "", `#/developers?${new URLSearchParams(query)}`);
+    if (Aira.router.current) Aira.router.current.query = query;
+    delete route.query.new;
+    const button = NEW_BUTTONS[kind] && holder.querySelector(`#${NEW_BUTTONS[kind]}`);
+    if (button) button.click();
+  }
+  const withId = (node, id) => { node.id = id; return node; };
   const code = (text) => h("pre", { class: "suite-pre", translate: "no" }, h("code", { text }));
   const copyable = (label, value) => h("div", { class: "dev-secret" }, h("strong", { text: label }), h("code", { translate: "no", text: value }), S.button("Copy", () => S.copy(value), { kind: "secondary sm" }));
   const once = (title, pairs) => Aira.modal({ title, body: h("div", {}, h("p", { class: "cloud-banner warning", text: "Copy this now. For your safety it will not be shown again." }), ...pairs.map(([label, value]) => copyable(label, value))), actions: [{ label: "I have copied it", kind: "primary" }] });
@@ -87,7 +102,7 @@
       ] });
     };
     body.append(S.section("Apps", h("p", { class: "muted", text: "Apps that can ask people in your organization for access with OAuth 2.0." }),
-      data.can_manage ? h("div", { class: "btn-row" }, S.button("Register an app", register)) : null,
+      data.can_manage ? h("div", { class: "btn-row" }, withId(S.button("Register an app", register), "devNewApp")) : null,
       S.table({ columns: [
         { key: "name", label: "App" },
         { key: "client_id", label: "Client ID", render: (c) => h("code", { translate: "no", text: c.client_id }) },
@@ -112,7 +127,7 @@
       ] });
     };
     body.append(S.section("Personal access tokens", h("p", { class: "muted", text: "A token acts as you, with only the access you give it. Keep it secret like a password." }),
-      h("div", { class: "btn-row" }, S.button("New token", create)),
+      h("div", { class: "btn-row" }, withId(S.button("New token", create), "devNewToken")),
       S.table({ columns: [
         { key: "name", label: "Name" },
         { key: "scopes", label: "Scopes", render: (t) => h("span", { translate: "no", class: "small", text: t.scopes.join(" ") }) },
@@ -142,7 +157,7 @@
       Aira.modal({ title: "Recent deliveries", wide: true, body: S.table({ columns: [{ key: "created_at", label: "When", render: (d) => Aira.fmt.ago(d.created_at) }, { key: "event", label: "Event", render: (d) => h("code", { translate: "no", text: d.event }) }, { key: "status", label: "Status", render: (d) => S.pill(d.status, { delivered: "good", failed: "bad", pending: "warn" }) }, { key: "attempts", label: "Tries", num: true }, { key: "last_error", label: "Error" }], rows, empty: "Nothing sent yet" }), actions: [{ label: "Close", kind: "secondary" }] });
     };
     body.append(S.section("Webhooks", h("p", { class: "muted", text: "Aira posts each event to your address, signed with your secret, and tries again if it fails." }),
-      data.can_manage ? h("div", { class: "btn-row" }, S.button("Add a webhook", add)) : null,
+      data.can_manage ? h("div", { class: "btn-row" }, withId(S.button("Add a webhook", add), "devNewWebhook")) : null,
       S.table({ columns: [
         { key: "url", label: "Address", render: (e) => h("code", { translate: "no", text: e.url }) },
         { key: "events", label: "Events", render: (e) => h("span", { translate: "no", class: "small", text: e.events.join(" ") }) },
@@ -169,13 +184,17 @@
   }
 
   Aira.views.developers = async (main, route) => {
-    const body = S.page(main, { title: "Developers", subtitle: "Connect other apps to Aira safely: OAuth 2.0, access tokens and webhooks." });
-    const hostedOnly = "Connecting other apps with OAuth, tokens and webhooks is part of the hosted Aira, where other systems can reach it safely.";
+    const body = S.page(main, { title: "Connected apps", subtitle: "Let other apps use your Aira data safely: OAuth 2.0, access tokens and webhooks." });
+    const hostedOnly = "Connecting other apps with OAuth, tokens and webhooks is part of the hosted Aira, where other systems can reach it safely. On this computer, your scripts and tools call Aira through the API console's /v1 endpoint with an API key.";
+    // What a script can use here instead: the API console and its keys.
+    const instead = () => h("div", { class: "btn-row" },
+      h("a", { class: "btn", href: "#/airaapi?tab=keys&new=key", text: "Create an API key" }),
+      h("a", { class: "btn secondary", href: "#/airaapi?tab=docs", text: "Read the API docs" }));
     // The single-user build has no developer platform: say so without asking a server that does not have it.
-    if (!Aira.cloud) { body.append(Aira.ui.empty("Available in the hosted Aira", hostedOnly)); return; }
+    if (!Aira.cloud) { body.append(Aira.ui.empty("Available in the hosted Aira", hostedOnly, instead())); return; }
     let data;
     try { data = await Aira.api("/api/developers/overview", { silent: true }); } catch (error) {
-      body.append(Aira.ui.empty("Available in the hosted Aira", error.status === 404 ? hostedOnly : error.message));
+      body.append(Aira.ui.empty("Available in the hosted Aira", error.status === 404 ? hostedOnly : error.message, error.status === 404 ? instead() : null));
       return;
     }
     const tab = S.tabs(body, route, "developers", TABS);
@@ -193,6 +212,7 @@
         else if (tab === "reference") await reference(holder);
         else await start(holder, data);
         panel.replaceChildren(holder);
+        openNew(route, holder);
       } catch (error) { panel.replaceChildren(Aira.ui.error(error, render)); }
     };
     await render();

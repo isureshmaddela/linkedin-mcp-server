@@ -1162,6 +1162,13 @@ def test_aira_keys_show_the_secret_once_and_store_only_a_hash(env, api, caplog):
         "revoked_at",
         "hourly_limit",
         "used_this_hour",
+        # client terms (reselling): none of them is secret
+        "client_name",
+        "price_per_1000",
+        "monthly_quota",
+        "allowed_engines",
+        "used_this_month",
+        "quota_left",
     }
     listing = api.ok("GET", "/api/airaapi/keys")["keys"]
     assert [item["id"] for item in listing] == [key["id"]]

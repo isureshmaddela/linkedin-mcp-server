@@ -109,6 +109,12 @@ class ProfileLocked(PermissionError):
     code = "profile_locked"
 
 
+class GrownUpsOnly(PermissionError):
+    """A child's or a teen's profile asked for something only the household's adults may open (money, customers)."""
+
+    code = "adult_only"
+
+
 def ensure(connection: sqlite3.Connection) -> None:
     kit.ensure_core(connection)
     kit.ensure(connection, "life.v1", SCHEMA)
@@ -186,6 +192,28 @@ def name_of(connection: sqlite3.Connection, profile_id: str) -> str:
 
 def is_adult(profile: dict[str, Any]) -> bool:
     return profile.get("age_group") in ("adult", "senior")
+
+
+def require_grown_up(
+    request: Any,
+    connection: sqlite3.Connection,
+    message: str = "This is for the grown-ups in your household. Ask one of them to open it.",
+) -> None:
+    """Refuse a child's or a teen's household profile (the single-user build: business apps, the Business hub).
+
+    Hosted members are adults (their organization decides what they may do), and a request that names no profile is
+    the account itself, so both pass."""
+    if suite.actor() is not None:
+        return
+    header = (
+        str(request.header("X-Aira-Profile") or "").strip()
+        if hasattr(request, "header")
+        else ""
+    )
+    if not header:
+        return
+    if not is_adult(current(request, connection)):
+        raise GrownUpsOnly(message)
 
 
 def can_manage_household(profile: dict[str, Any]) -> bool:

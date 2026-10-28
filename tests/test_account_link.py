@@ -166,6 +166,9 @@ def test_a_launch_token_creates_a_local_account_with_no_password_and_signs_in(
         "planner",
         "news",
         "videos",
+        "journey",
+        "ai",
+        "stocks",
     ]
     # the account row holds no password and remembers where it came from
     user = env.user()
@@ -326,6 +329,7 @@ def test_a_candidate_signed_in_to_the_account_opens_the_local_installation(
     import subprocess
     import sys
     import urllib.error
+    import urllib.parse
     import urllib.request
 
     patchright = pytest.importorskip("patchright.sync_api")
@@ -417,16 +421,18 @@ def test_a_candidate_signed_in_to_the_account_opens_the_local_installation(
                     else None
                 ),
             )
-            # the local sign-in screen offers the account
+            # the local sign-in screen offers only email and password
             page.goto(env.base + "/")
-            page.wait_for_selector("#accountLinkBtn")
-            assert (
-                "Sign in with your Aira account"
-                in page.locator("#accountLinkBtn").inner_text()
+            page.wait_for_selector("#authScreen:not([hidden])")
+            assert page.locator("#accountLinkBtn").count() == 0
+            assert "Sign in with your Aira account" not in page.inner_text("#authForm")
+            # the account's app launcher opens the installation: it redirects back with a token, and the local
+            # build signs the person in
+            page.goto(
+                hosted_base
+                + "/api/launch/local?return="
+                + urllib.parse.quote(env.base + "/", safe="")
             )
-            assert page.locator("#accountLinkBtn").is_visible()
-            page.click("#accountLinkBtn")
-            # ... which redirects back with a token, and the local build signs the person in
             page.wait_for_url(
                 lambda url: url.startswith(env.base) and "#/launch" not in url,
                 timeout=60_000,

@@ -17,7 +17,7 @@ from aira.airaapi.http import Raw, Request, aira_route
 from aira.suite import background, kit, life, public
 from aira.suite.ads import service as ads
 from aira.suite.ads.store import CENT
-from aira.suite.videos import db, media, service, store
+from aira.suite.videos import creator, db, deals, media, members, service, store
 from aira.suite.videos.store import APP
 
 BASE = "/api/videos"
@@ -77,6 +77,9 @@ def me_get(request: Request) -> tuple[int, dict[str, Any]]:
             "genres": list(service.GENRES),
             "kinds": list(service.KINDS),
             "report_reasons": list(service.REPORT_REASONS),
+            # the upload form offers "Only for my members" only when people can join
+            "members_plan_on": service.adult(me)
+            and service.member_plan_on(sc, me["id"]),
             "limits": {
                 "chunk_bytes": media.CHUNK_BYTES,
                 "video_bytes": media.max_bytes("video"),
@@ -103,7 +106,17 @@ def me_update(request: Request) -> tuple[int, dict[str, Any]]:
 @aira_route("GET", f"{BASE}/home")
 def home(request: Request) -> tuple[int, dict[str, Any]]:
     with _open(request) as (sc, me):
-        return 200, service.home(sc, me, request.q("category"))
+        data = service.home(sc, me, request.q("category"))
+        data["continue"] = (
+            [] if request.q("category") else service.continue_watching(sc, me, 8)
+        )
+        return 200, data
+
+
+@aira_route("GET", f"{BASE}/continue")
+def continue_watching(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        return 200, {"videos": service.continue_watching(sc, me)}
 
 
 @aira_route("GET", f"{BASE}/search")
@@ -128,7 +141,10 @@ def films(request: Request) -> tuple[int, dict[str, Any]]:
 @aira_route("GET", f"{BASE}/channels/{ID}")
 def channel_get(request: Request) -> tuple[int, dict[str, Any]]:
     with _open(request) as (sc, me):
-        return 200, service.channel_page(sc, me, _id(request))
+        data = service.channel_page(sc, me, _id(request))
+        data["support"] = creator.support_for_viewer(sc, me, _id(request))
+        data["membership"] = members.for_viewer(sc, me, _id(request))
+        return 200, data
 
 
 @aira_route("POST", f"{BASE}/channels/{ID}/subscribe")
@@ -147,7 +163,11 @@ def subscriptions(request: Request) -> tuple[int, dict[str, Any]]:
 def video_get(request: Request) -> tuple[int, dict[str, Any]]:
     with _open(request) as (sc, me):
         video = service.visible_video(sc, me, _id(request))
-        return 200, {"video": service.video_view(sc, me, video, full=True)}
+        return 200, {
+            "video": service.video_view(sc, me, video, full=True),
+            "support": creator.support_for_viewer(sc, me, video["channel_id"]),
+            "membership": members.for_viewer(sc, me, video["channel_id"]),
+        }
 
 
 @aira_route("POST", f"{BASE}/videos/{ID}/progress")
@@ -275,6 +295,7 @@ def playlist_remove(request: Request) -> tuple[int, dict[str, Any]]:
 def upload_start(request: Request) -> tuple[int, dict[str, Any]]:
     with _open(request) as (sc, me):
         service._active(me)
+        media.sweep_orphans(sc)
         payload = request.payload
         upload = media.start(
             sc,
@@ -317,6 +338,13 @@ def upload_cancel(request: Request) -> tuple[int, dict[str, Any]]:
     return 200, {"cancelled": True}
 
 
+@aira_route("POST", f"{BASE}/videos/check")
+def video_check(request: Request) -> tuple[int, dict[str, Any]]:
+    """The upload form's details checked before the file goes up (400 with the reason, like creating it)."""
+    with _open(request) as (sc, me):
+        return 200, service.check_video(sc, me, request.payload)
+
+
 @aira_route("POST", f"{BASE}/videos")
 def video_create(request: Request) -> tuple[int, dict[str, Any]]:
     with _open(request) as (sc, me):
@@ -329,7 +357,12 @@ def video_create(request: Request) -> tuple[int, dict[str, Any]]:
 def video_edit(request: Request) -> tuple[int, dict[str, Any]]:
     with _open(request) as (sc, me):
         video = service.edit_video(sc, me, _id(request), request.payload)
-        if video["visibility"] == "private" or video["rating"] == "mature":
+        if (
+            video["visibility"] == "private"
+            or video["rating"] == "mature"
+            or video["members_only"]
+            or video.get("scheduled")
+        ):
             with closing(request.connect()) as connection:
                 public.revoke(connection, APP, "video", video["id"])
     return 200, {"video": video}
@@ -346,10 +379,27 @@ def video_delete(request: Request) -> tuple[int, dict[str, Any]]:
 
 
 @aira_route("GET", f"{BASE}/studio")
-def studio(request: Request) -> tuple[int, dict[str, Any]]:
+def studio(request: Request) -> tuple[int, dict[str, Any]] | Raw:
+    """The creator's own videos (``q`` searches, ``show`` filters; ``format=csv`` for a spreadsheet)."""
     with _open(request) as (sc, me):
+        if request.q("format") == "csv":
+            return Raw(
+                200,
+                creator.videos_csv(sc, me, request.q("q"), request.q("show")),
+                "text/csv; charset=utf-8",
+                filename="your-videos.csv",
+            )
         return 200, {
-            "videos": service.my_videos(sc, me),
+            "videos": service.my_videos(sc, me, request.q("q"), request.q("show")),
+            "total": int(
+                store.scalar(
+                    sc,
+                    "SELECT COUNT(*) FROM vi_videos WHERE channel_id = ? AND deleted_at IS NULL",
+                    (me["id"],),
+                )
+                or 0
+            ),
+            "filters": list(service.MY_FILTERS),
             "notices": service.my_notices(sc, me),
             "strikes": service.strikes(sc, me["id"]),
             "subscribers": service.subscriber_count(sc, me["id"]),
@@ -374,6 +424,10 @@ def video_link_create(request: Request) -> tuple[int, dict[str, Any]]:
             raise PermissionError("Make the video public or unlisted first.")
         if video["rating"] == "mature":
             raise PermissionError("Videos rated mature are not shared on public pages.")
+        if video.get("members_only"):
+            raise PermissionError("Videos for members are not shared on public pages.")
+        if service.scheduled(video):
+            raise PermissionError("Share the video once it is out.")
         if service.blocked_reason(sc, video):
             raise PermissionError("This video cannot be shared right now.")
     with closing(request.connect()) as connection:
@@ -534,6 +588,8 @@ def ads_serve(request: Request) -> tuple[int, dict[str, Any]]:
         video = service.visible_video(
             sc, me, str(request.payload.get("video_id") or "")
         )
+        if service.locked(sc, me, video):
+            return 200, {"ad": None}
         return 200, {
             "ad": ads.serve(sc, me, video, str(request.payload.get("slot") or ""))
         }
@@ -558,9 +614,65 @@ def ads_go(request: Request) -> Raw:
 # ---------------------------------------------------------------------------
 
 
+# The Business hub is the account's: every profile of the household can open it, children included. So only the
+# household owner's earnings join it (another adult's earnings are their own, like a member's in the hosted build),
+# and its lines never name a member, a supporter or a brand: those stay on the creator's own Earnings page.
+GENERIC_LABELS = {
+    "creator_tip": ("Support from a viewer (Videos)", "A viewer"),
+    "creator_membership": ("Channel membership (Videos)", "A member"),
+    "creator_deal": ("Brand deal (Videos)", "A brand"),
+}
+SOURCE_TABLES = {
+    "creator_tip": "vi_tips",
+    "creator_membership": "vi_member_payments",
+    "creator_deal": "vi_deals",
+}
+
+
+def _owner_channel(connection: Any, sc: Any) -> str:
+    """The household owner's channel id ("" when they have none yet)."""
+    try:
+        found = kit.fetch_one(
+            connection,
+            "SELECT id, member_ref FROM life_profiles WHERE owner = 1 AND archived_at IS NULL ORDER BY created_at LIMIT 1",
+        )
+    except Exception:  # noqa: BLE001 - an account without profiles yet
+        return ""
+    if not found:
+        return ""
+    channel = store.row(
+        sc,
+        "SELECT id FROM vi_channels WHERE person_key = ?",
+        (service.person_key(found),),
+    )
+    return channel["id"] if channel else ""
+
+
+def _tidy_revenue(connection: Any, sc: Any, owner_channel: str) -> None:
+    """Lines recorded before these rules: names come out of the labels; another person's earnings stop counting."""
+    for source_type, (label, customer) in GENERIC_LABELS.items():
+        connection.execute(
+            "UPDATE suite_revenue SET label = ?, customer = ? WHERE app = ? AND source_type = ? AND label != ?",
+            (label, customer, APP, source_type, label),
+        )
+    for line in kit.fetch_all(
+        connection,
+        "SELECT source_type, source_id FROM suite_revenue WHERE app = ? AND voided_at IS NULL AND source_type IN (?, ?, ?)",
+        (APP, *SOURCE_TABLES),
+    ):
+        table = SOURCE_TABLES[line["source_type"]]
+        found = store.row(
+            sc,
+            f"SELECT channel_id FROM {table} WHERE id = ?",  # noqa: S608 - our own table names
+            (line["source_id"],),
+        )
+        if not found or found["channel_id"] != owner_channel:
+            kit.void_revenue(connection, APP, line["source_type"], line["source_id"])
+
+
 def _sync_revenue(request: Request, sc: Any, home: str) -> None:
-    """On a person's own computer a creator payout is money the account received: it joins the Business hub's
-    revenue. (Hosted, a member's payout is their own, not the organization's.)"""
+    """On a person's own computer the household owner's creator payouts are money the account received: they join
+    the Business hub's revenue. (Hosted, a member's payout is their own, not the organization's.)"""
     if not home.startswith("local:"):
         return
     with closing(request.connect()) as connection:
@@ -568,8 +680,15 @@ def _sync_revenue(request: Request, sc: Any, home: str) -> None:
 
 
 def record_payouts(connection: Any, sc: Any, home: str) -> int:
-    paid = ads.paid_payouts(sc, home)
-    for item in paid:
+    kit.ensure_core(connection)
+    owner_channel = _owner_channel(connection, sc)
+    _tidy_revenue(connection, sc, owner_channel)
+    paid = []
+    for item in ads.paid_payouts(sc, home):
+        if item["channel_id"] != owner_channel:
+            kit.void_revenue(connection, APP, "creator_payout", item["id"])
+            continue
+        paid.append(item)
         kit.record_revenue(
             connection,
             APP,
@@ -619,6 +738,296 @@ def earnings_payout(request: Request) -> tuple[int, dict[str, Any]]:
         {"amount_micros": payout["amount_micros"]},
     )
     return 201, {"payout": payout}
+
+
+# ---------------------------------------------------------------------------
+# analytics and support from viewers (aira/suite/videos/creator.py)
+# ---------------------------------------------------------------------------
+
+
+@aira_route("GET", f"{BASE}/analytics")
+def analytics(request: Request) -> tuple[int, dict[str, Any]] | Raw:
+    with _open(request) as (sc, me):
+        days = request.q("days") or "28"
+        if request.q("format") == "csv":
+            return Raw(
+                200,
+                creator.analytics_csv(sc, me, days),
+                "text/csv; charset=utf-8",
+                filename=f"videos-analytics-{creator._period(days)}-days.csv",
+            )
+        return 200, creator.analytics(sc, me, days)
+
+
+@aira_route("GET", f"{BASE}/support")
+def support_get(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        return 200, {
+            "settings": creator.support_settings(sc, me),
+            **creator.received_tips(sc, me, request.q("status")),
+        }
+
+
+@aira_route("PUT", f"{BASE}/support")
+def support_save(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        settings = creator.save_support(sc, me, request.payload)
+    request.audit(
+        "videos.support_settings", "channel", me["id"], {"enabled": settings["enabled"]}
+    )
+    return 200, {"settings": settings}
+
+
+def _record_tip(request: Request, home: str, tip: dict[str, Any]) -> None:
+    """Support that arrived is the household owner's money (see :data:`GENERIC_LABELS`)."""
+    _record_money(
+        request,
+        home,
+        "creator_tip",
+        tip["id"],
+        {"amount_cents": tip["amount_cents"], "currency": tip["currency"]}
+        if tip["status"] == "received"
+        else None,
+    )
+
+
+@aira_route("POST", f"{BASE}/support/{ID}")
+def support_decide(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        tip = creator.decide_tip(
+            sc, me, _id(request), str(request.payload.get("action") or "")
+        )
+    _record_tip(request, me["home"], tip)
+    request.audit(
+        f"videos.support_{tip['status']}",
+        "tip",
+        tip["id"],
+        {"amount_cents": tip["amount_cents"]},
+    )
+    return 200, {"tip": tip}
+
+
+@aira_route("POST", f"{BASE}/channels/{ID}/support")
+def support_pledge(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        result = creator.pledge(sc, me, _id(request), request.payload)
+    request.audit(
+        "videos.support_pledge",
+        "tip",
+        result["tip"]["id"],
+        {"amount_cents": result["tip"]["amount_cents"]},
+    )
+    return 201, result
+
+
+@aira_route("GET", f"{BASE}/support/given")
+def support_given(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        return 200, {"tips": creator.my_tips(sc, me)}
+
+
+@aira_route("DELETE", f"{BASE}/support/given/{ID}")
+def support_withdraw(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        return 200, {"tip": creator.cancel_tip(sc, me, _id(request))}
+
+
+# ---------------------------------------------------------------------------
+# all income, memberships and brand deals (creator.income, members.py, deals.py)
+# ---------------------------------------------------------------------------
+
+
+@aira_route("GET", f"{BASE}/income")
+def income(request: Request) -> tuple[int, dict[str, Any]] | Raw:
+    """Every way the channel earned (ads, support, memberships, brand deals) by month, a log, and this month's
+    outlook; ``format=csv`` for the log as a spreadsheet."""
+    with _open(request) as (sc, me):
+        _sync_revenue(request, sc, me["home"])
+        if request.q("format") == "csv":
+            return Raw(
+                200,
+                creator.income_csv(sc, me),
+                "text/csv; charset=utf-8",
+                filename="videos-income.csv",
+            )
+        return 200, creator.income(sc, me)
+
+
+def _record_money(
+    request: Request,
+    home: str,
+    source_type: str,
+    item_id: str,
+    money: dict[str, Any] | None,
+) -> None:
+    """On a person's own computer money the household owner received as a creator joins the Business hub's
+    revenue, under a label that names nobody (``money`` has amount_cents, currency and, optionally, ``at``; None
+    takes it out again). Another profile's earnings stay their own; hosted, a member's earnings are their own, not
+    the organization's (like support and creator payouts)."""
+    if not home.startswith("local:"):
+        return
+    with closing(request.connect()) as connection:
+        owner = False
+        if money:
+            try:
+                owner = bool(life.current(request, connection).get("owner"))
+            except Exception:  # noqa: BLE001 - no profile: not the owner
+                owner = False
+        if money and owner:
+            label, customer = GENERIC_LABELS[source_type]
+            kit.record_revenue(
+                connection,
+                APP,
+                source_type=source_type,
+                source_id=item_id,
+                amount_cents=int(money["amount_cents"]),
+                currency_code=money["currency"],
+                label=label,
+                customer=customer,
+                at=money.get("at") or "",
+            )
+            if money.get("at"):
+                # recording a line again keeps its first date: a deal whose paid day was changed moves with it
+                connection.execute(
+                    "UPDATE suite_revenue SET at = ? WHERE app = ? AND source_type = ? AND source_id = ?",
+                    (money["at"], APP, source_type, item_id),
+                )
+        else:
+            kit.void_revenue(connection, APP, source_type, item_id)
+        connection.commit()
+
+
+@aira_route("GET", f"{BASE}/memberships")
+def memberships(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        return 200, members.creator_view(sc, me, request.q("status"))
+
+
+@aira_route("PUT", f"{BASE}/memberships")
+def memberships_save(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        plan = members.save_plan(sc, me, request.payload)
+    request.audit(
+        "videos.membership_plan",
+        "channel",
+        me["id"],
+        {"enabled": plan["enabled"], "price_cents": plan["price_cents"]},
+    )
+    return 200, {"plan": plan}
+
+
+@aira_route("GET", f"{BASE}/memberships/mine")
+def memberships_mine(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        return 200, {"memberships": members.my_memberships(sc, me)}
+
+
+@aira_route("POST", f"{BASE}/memberships/{ID}")
+def memberships_decide(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        payment = members.decide(
+            sc, me, _id(request), str(request.payload.get("action") or "")
+        )
+    _record_money(
+        request,
+        me["home"],
+        "creator_membership",
+        payment["id"],
+        {"amount_cents": payment["amount_cents"], "currency": payment["currency"]}
+        if payment["status"] == "received"
+        else None,
+    )
+    request.audit(
+        f"videos.membership_{payment['status']}",
+        "membership_payment",
+        payment["id"],
+        {"amount_cents": payment["amount_cents"]},
+    )
+    return 200, {"payment": payment}
+
+
+@aira_route("DELETE", f"{BASE}/memberships/payments/{ID}")
+def memberships_withdraw(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        return 200, {"payment": members.withdraw(sc, me, _id(request))}
+
+
+@aira_route("POST", f"{BASE}/channels/{ID}/join")
+def channel_join(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        result = members.join(sc, me, _id(request), request.payload)
+    request.audit(
+        "videos.membership_join",
+        "membership_payment",
+        result["payment"]["id"],
+        {"amount_cents": result["payment"]["amount_cents"]},
+    )
+    return 201, result
+
+
+@aira_route("GET", f"{BASE}/deals")
+def deals_list(request: Request) -> tuple[int, dict[str, Any]] | Raw:
+    with _open(request) as (sc, me):
+        if request.q("format") == "csv":
+            return Raw(
+                200,
+                deals.as_csv(sc, me, request.q("status"), request.q("q")),
+                "text/csv; charset=utf-8",
+                filename="brand-deals.csv",
+            )
+        return 200, deals.listing(sc, me, request.q("status"), request.q("q"))
+
+
+def _hub_moment(value: str | None) -> str:
+    """A Videos stamp (with microseconds) the way the Business hub writes its moments (to the second, with Z)."""
+    return str(value or "")[:19] + "Z" if value else ""
+
+
+def _deal_money(request: Request, home: str, deal: dict[str, Any]) -> None:
+    """A paid deal is in the account's revenue; any other status (or a deleted deal) is not."""
+    _record_money(
+        request,
+        home,
+        "creator_deal",
+        deal["id"],
+        {
+            "amount_cents": deal["amount_cents"],
+            "currency": deal["currency"],
+            "at": _hub_moment(deal["paid_at"]),
+        }
+        if deal["status"] == "paid"
+        else None,
+    )
+
+
+@aira_route("POST", f"{BASE}/deals")
+def deals_create(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        deal = deals.create(sc, me, request.payload)
+    if deal["status"] == "paid":
+        _deal_money(request, me["home"], deal)
+    request.audit("videos.deal_create", "deal", deal["id"])
+    return 201, {"deal": deal}
+
+
+@aira_route("PATCH", f"{BASE}/deals/{ID}")
+def deals_update(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        deal, before = deals.update(sc, me, _id(request), request.payload)
+    if "paid" in (before, deal["status"]):
+        _deal_money(request, me["home"], deal)
+    request.audit("videos.deal_update", "deal", deal["id"], {"status": deal["status"]})
+    return 200, {"deal": deal}
+
+
+@aira_route("DELETE", f"{BASE}/deals/{ID}")
+def deals_delete(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        found = deals.delete(sc, me, _id(request))
+    if found["status"] == "paid":
+        _record_money(request, me["home"], "creator_deal", found["id"], None)
+    request.audit("videos.deal_delete", "deal", found["id"])
+    return 200, {"deleted": True}
 
 
 # ---------------------------------------------------------------------------
@@ -705,6 +1114,41 @@ def _person_channel(sc: Any, profile: dict[str, Any]) -> dict[str, Any] | None:
     return service.viewer_of(service._channel(found) or {}) if found else None
 
 
+def _money_lines(sc: Any, me: dict[str, Any]) -> list[dict[str, Any]]:
+    """For a creator: members waiting for their payment to be confirmed, brand deals due."""
+    lines: list[dict[str, Any]] = []
+    for deal in deals.due_lines(sc, me):
+        today = deal["due_on"] == store.day()
+        lines.append(
+            {
+                "text": f"Brand deal with {deal['brand']} is due {'today' if today else 'and late'}",
+                "sub": "Earnings > Brand deals",
+            }
+        )
+    joining = members.waiting_count(sc, me["id"])
+    if joining:
+        lines.append(
+            {
+                "text": "A new member is paying to join your channel"
+                if joining == 1
+                else f"{joining} members are paying to join your channel",
+                "sub": "Mark it received under Earnings > Memberships when the money arrives.",
+            }
+        )
+    return lines
+
+
+def _renew_lines(sc: Any, me: dict[str, Any]) -> list[dict[str, Any]]:
+    """For a member: memberships that end in the next few days."""
+    return [
+        {
+            "text": f"Your membership of {item['name']} ends on {str(item['paid_until'])[:10]}",
+            "sub": "Renew it on their channel to keep watching their videos for members.",
+        }
+        for item in members.ending_soon(sc, me)
+    ]
+
+
 @life.today(APP)
 def _today(connection: Any, profile: dict[str, Any]) -> list[dict[str, Any]]:
     with closing(db.connect()) as sc:
@@ -713,6 +1157,29 @@ def _today(connection: Any, profile: dict[str, Any]) -> list[dict[str, Any]]:
             return []
         me["ratings"] = service.allowed_ratings(me, profile.get("prefs"))
         lines = service.today_lines(sc, me)
+        started = service.continue_watching(sc, me, 1)
+        if started:
+            lines.insert(
+                0,
+                {
+                    "text": f"Carry on watching: {started[0]['title']}",
+                    "sub": f"You stopped at {service.clock(started[0]['position'])}",
+                },
+            )
+        if service.adult(me):
+            lines[:0] = _money_lines(sc, me)
+            lines.extend(_renew_lines(sc, me))
+        waiting = creator.waiting_count(sc, me["id"]) if service.adult(me) else 0
+        if waiting:
+            lines.insert(
+                0,
+                {
+                    "text": "Support is on its way to you"
+                    if waiting == 1
+                    else f"{waiting} supporters are sending you money",
+                    "sub": "Mark it received on the Earnings page when it arrives.",
+                },
+            )
         if me.get("monetized"):
             data = ads.earnings(sc, me)
             lines.insert(
@@ -722,6 +1189,17 @@ def _today(connection: Any, profile: dict[str, Any]) -> list[dict[str, Any]]:
                     "sub": f"This month: {ads.dollars(data['month_micros'])} (estimated)",
                 },
             )
+            payable = int(data["balances"]["payable_micros"])
+            if payable >= int(data["settings"]["min_payout_micros"]) and not any(
+                item["status"] == "requested" for item in data["payouts"]
+            ):
+                lines.insert(
+                    1,
+                    {
+                        "text": f"{ads.dollars(payable)} is ready to be paid to you",
+                        "sub": "Ask to be paid on the Earnings page.",
+                    },
+                )
         if not lines:
             return []
         return [
@@ -750,6 +1228,7 @@ def _tick(connection: Any) -> dict[str, Any]:
     bring creator payouts into the account's revenue."""
     with closing(db.connect()) as sc:
         result = ads.tick(sc)
+        result["orphan_files"] = media.sweep_orphans(sc)
         home = str(kit.get_setting(connection, APP, "home", "") or "")
         if home.startswith("local:"):
             result["payouts"] = record_payouts(connection, sc, home)

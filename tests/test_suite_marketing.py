@@ -567,7 +567,7 @@ def test_a_business_captures_leads_tracks_clicks_and_sends_a_newsletter(
     ) as response:
         csv_text = response.read().decode()
     assert (
-        csv_text.startswith("created_at,form_title,name")
+        csv_text.startswith("created_at,source_label,form_title,name")
         and "ana@example.com" in csv_text
     )
 

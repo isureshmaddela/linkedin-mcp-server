@@ -10,6 +10,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from aira.suite import kit, public
+from aira.suite.academy import partners
 from aira.suite.events import store
 from aira.suite.events.store import APP
 
@@ -760,6 +761,8 @@ def place_order(
         else ""
     )
     staff = source != "public"
+    if staff and not comp:
+        partners.check_code(connection, raw.get("ref"), buyer_email)
     connection.commit()
     connection.execute("BEGIN IMMEDIATE")
     try:
@@ -846,6 +849,19 @@ def place_order(
         amount_cents=priced["total_cents"],
         public=source == "public",
     )
+    if not comp:
+        partners.record(
+            connection,
+            raw.get("ref"),
+            source_type="order",
+            source_id=order_id,
+            item_type="event",
+            item_id=event_id,
+            label=event["title"],
+            customer=buyer_name,
+            customer_email=buyer_email,
+            amount_cents=priced["total_cents"],
+        )
     if free:
         _confirmation_messages(connection, event, order, link["path"], via, moment)
     else:
@@ -971,6 +987,8 @@ def mark_paid(
     order = store.get_order(connection, order_id)
     if order["status"] in ("cancelled", "refunded"):
         raise ValueError("This order was cancelled. Create a new order instead.")
+    if int(order["total_cents"]) <= 0:
+        raise ValueError("This order is free; there is nothing to mark paid.")
     event = store.get_event(connection, order["event_id"])
     already = bool(order["paid_at"])
     now = kit.now()
@@ -990,6 +1008,7 @@ def mark_paid(
             label=f"{event['title']} ({order['reference']})",
             customer=order["buyer_name"],
         )
+        partners.earn(connection, "order", order_id, int(order["total_cents"]))
     if not already:
         kit.log(
             connection,
@@ -1056,6 +1075,7 @@ def cancel_order(
             (order["promo_id"],),
         )
     kit.void_revenue(connection, APP, "order", order_id)
+    partners.void(connection, "order", order_id)
     _cancel_reminders(connection, [order_id])
     event = store.get_event(connection, order["event_id"])
     kit.log(

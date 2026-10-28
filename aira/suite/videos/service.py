@@ -10,6 +10,9 @@ Who sees what, in one place:
   anyone who turned on restricted mode see ``everyone`` and ``teen``; adults see everything.
 * A video hidden by a moderator, taken down after a copyright notice, or from a suspended channel plays for nobody but
   its channel (who sees why).
+* A **scheduled** video (its ``created_at``, the moment it goes out, is still to come) is like a private one until then.
+* A **members-only** video is listed like any other, but plays only for the channel's members (whose membership is paid
+  up) and its channel; everyone else sees its picture, title and how to join.
 * Children upload only private videos and do not comment; nobody's own views count.
 
 A **view** counts once per viewer per day after a meaningful watch: 30 seconds, or 30% of a shorter video, measured
@@ -84,6 +87,7 @@ LIMITS = {
     "comment": (60, "hour"),
     "report": (30, "hour"),
     "copyright": (10, "hour"),
+    "tip": (20, "day"),
 }
 DEFAULT_BLOCKLIST = ("fuck", "shit", "bitch", "bastard", "cunt", "motherfucker")
 LANGUAGE = re.compile(r"^[a-z]{2}$")
@@ -401,6 +405,11 @@ def blocked_reason(sc: sqlite3.Connection, video: dict[str, Any]) -> str:
     return ""
 
 
+def scheduled(video: dict[str, Any]) -> bool:
+    """The video goes out later (its time is still to come)."""
+    return str(video.get("created_at") or "") > stamp()
+
+
 def can_watch(
     sc: sqlite3.Connection, me_: dict[str, Any], video: dict[str, Any]
 ) -> bool:
@@ -410,9 +419,39 @@ def can_watch(
         return True
     if blocked_reason(sc, video):
         return False
-    if video["visibility"] == "private":
+    if video["visibility"] == "private" or scheduled(video):
         return False
     return video["rating"] in me_["ratings"]
+
+
+def is_member(sc: sqlite3.Connection, channel_id: str, viewer_id: str) -> bool:
+    """Whether this person's membership of the channel is paid up."""
+    return bool(
+        row(
+            sc,
+            "SELECT 1 AS x FROM vi_members WHERE channel_id = ? AND member_id = ? AND paid_until > ?",
+            (channel_id, viewer_id, stamp()),
+        )
+    )
+
+
+def locked(sc: sqlite3.Connection, me_: dict[str, Any], video: dict[str, Any]) -> bool:
+    """A members-only video that this person may see listed but not play (they are not a member)."""
+    if not video.get("members_only") or video["channel_id"] == me_["id"]:
+        return False
+    return not is_member(sc, video["channel_id"], me_["id"])
+
+
+def playable_video(
+    sc: sqlite3.Connection, me_: dict[str, Any], video_id: str
+) -> dict[str, Any]:
+    """A video the person may watch and play (not a members-only one they have not joined for)."""
+    found = visible_video(sc, me_, video_id)
+    if locked(sc, me_, found):
+        raise PermissionError(
+            "This video is for the channel's members. Join to watch it."
+        )
+    return found
 
 
 def visible_video(
@@ -430,10 +469,10 @@ def _listable(ratings: Iterable[str], alias: str = "v") -> tuple[str, list[Any]]
     marks = ", ".join("?" for _ in chosen)
     sql = (
         f"{alias}.deleted_at IS NULL AND {alias}.hidden_at IS NULL AND {alias}.takedown_at IS NULL "
-        f"AND {alias}.visibility = 'public' AND {alias}.rating IN ({marks}) "
+        f"AND {alias}.visibility = 'public' AND {alias}.rating IN ({marks}) AND {alias}.created_at <= ? "
         f"AND {alias}.channel_id IN (SELECT id FROM vi_channels WHERE suspended_at IS NULL)"
     )
-    return sql, chosen
+    return sql, [*chosen, stamp()]
 
 
 def video_view(
@@ -471,7 +510,12 @@ def video_view(
         "channel": mini(owner),
         "thumb_url": media.signed_url(sc, video["thumb_file_id"]),
         "mine": mine,
+        "members_only": bool(video.get("members_only")),
+        "paid_promotion": bool(video.get("paid_promotion")),
     }
+    shut = me_ is not None and locked(sc, me_, video)
+    if shut:
+        out["locked"] = True
     if full:
         file_row = (
             row(sc, "SELECT mime FROM vi_files WHERE id = ?", (video["file_id"],)) or {}
@@ -481,14 +525,18 @@ def video_view(
                 "description": video["description"],
                 "tags": store.loads(video["tags"], []),
                 "credits": store.loads(video["credits"], []),
-                "stream_url": media.signed_url(sc, video["file_id"]),
-                "captions_url": media.signed_url(sc, video["captions_file_id"]),
+                "stream_url": "" if shut else media.signed_url(sc, video["file_id"]),
+                "captions_url": ""
+                if shut
+                else media.signed_url(sc, video["captions_file_id"]),
                 "mime": file_row.get("mime", ""),
                 "playback": media.PLAYBACK.get(file_row.get("mime", ""), ""),
                 "ads_enabled": bool(video["ads_enabled"]),
             }
         )
+        out["chapters"] = chapters(video["description"], float(video["duration"] or 0))
         if me_ is not None:
+            out["position"] = resume_at(sc, me_, video)
             out.update(
                 {
                     "liked": bool(
@@ -520,6 +568,7 @@ def video_view(
     if mine:
         out["blocked"] = blocked_reason(sc, video)
         out["hidden_reason"] = video["hidden_reason"]
+        out["scheduled"] = scheduled(video)
     return out
 
 
@@ -591,21 +640,123 @@ def _fields(
         "ads_enabled": 0
         if "ads_enabled" in merged and not kit.flag(merged.get("ads_enabled"))
         else 1,
+        "members_only": 1 if kit.flag(merged.get("members_only")) else 0,
+        "paid_promotion": 1 if kit.flag(merged.get("paid_promotion")) else 0,
     }
     if values["for_kids"] and values["rating"] != "everyone":
         raise ValueError("A video made for children must be rated for everyone.")
     return values
 
 
-def create_video(
+SCHEDULE_DAYS = 365
+
+
+# A chosen time this close to now (a few minutes ago, or within the next minute) means "now": the form took a
+# moment to fill in. Earlier than that is a slip (a wrong date, AM for PM) and is refused, never published at once.
+ABOUT_NOW_BEFORE = timedelta(minutes=5)
+ABOUT_NOW_AFTER = timedelta(minutes=1)
+
+
+def _publish_at(value: Any) -> str:
+    """When a video goes out: "" (now) or a moment from a minute to a year ahead, as a store stamp. A time that
+    has already passed is refused (it would send out a video the creator meant to hold back)."""
+    cleaned = kit.moment(value, "when it goes out")
+    if not cleaned:
+        return ""
+    moment = store.parse(cleaned)
+    now = store.utcnow()
+    if moment <= now + ABOUT_NOW_AFTER:
+        if moment >= now - ABOUT_NOW_BEFORE:
+            return ""  # about now
+        raise ValueError(
+            "That time has already passed. Choose a later time, or choose Now."
+        )
+    if moment > now + timedelta(days=SCHEDULE_DAYS):
+        raise ValueError("Choose a time within the next year.")
+    return stamp(moment)
+
+
+def member_plan_on(sc: sqlite3.Connection, channel_id: str) -> bool:
+    found = row(
+        sc, "SELECT enabled FROM vi_member_plans WHERE channel_id = ?", (channel_id,)
+    )
+    return bool(found and found["enabled"])
+
+
+def _check_extras(
+    sc: sqlite3.Connection,
+    ch: dict[str, Any],
+    kind: str,
+    values: dict[str, Any],
+    *,
+    was_members_only: bool = False,
+) -> None:
+    """Members-only rules that need the channel (a video that already was for members stays so, even if the
+    channel turned memberships off since: its members keep watching it)."""
+    if values.get("members_only"):
+        if kind == "reel":
+            raise ValueError(
+                "Reels are for everyone: only videos and short films can be for members."
+            )
+        if values.get("for_kids"):
+            raise ValueError("A video made for children cannot be for members only.")
+        if not adult(ch):
+            raise PermissionError("Memberships are for adults.")
+        if not was_members_only and not member_plan_on(sc, ch["id"]):
+            raise ValueError(
+                "Turn on memberships first (Earnings > Memberships), so people can join to watch."
+            )
+
+
+def _precheck(
     sc: sqlite3.Connection, ch: dict[str, Any], raw: dict[str, Any]
-) -> dict[str, Any]:
+) -> tuple[str, dict[str, Any], str]:
+    """Everything about a new video that does not need its file: (kind, values, publish_at)."""
     _active(ch)
     if strikes(sc, ch["id"]) >= STRIKES_TO_BLOCK:
         raise PermissionError(
             "Your channel has three copyright strikes, so it cannot upload until one of them ends."
         )
     kind = kit.choice(raw.get("kind"), "the kind of video", KINDS, default="video")
+    values = _fields(raw)
+    if ch.get("age_group") == "child":
+        values["visibility"] = "private"  # children's videos stay with them
+    _check_extras(sc, ch, kind, values)
+    return kind, values, _publish_at(raw.get("publish_at"))
+
+
+def _check_shape(kind: str, duration: float, width: int, height: int) -> None:
+    if kind == "reel":
+        if duration and duration > REEL_SECONDS + 0.5:
+            raise ValueError(f"A reel is at most {REEL_SECONDS} seconds long.")
+        if width and height and height <= width:
+            raise ValueError("A reel is a tall (portrait) video.")
+    if kind == "short" and duration and duration > SHORT_FILM_SECONDS:
+        raise ValueError("A short film is at most an hour long.")
+
+
+def check_video(
+    sc: sqlite3.Connection, ch: dict[str, Any], raw: dict[str, Any]
+) -> dict[str, Any]:
+    """The upload form asks this before sending the file: the same checks as :func:`create_video` (members only,
+    the time it goes out, a reel's shape...), so a mistake is found before a large file goes up, not after."""
+    kind, _values, publish_at = _precheck(sc, ch, raw)
+    _check_shape(
+        kind,
+        _number(raw.get("duration"), "the length", 0, 24 * 3600),
+        int(_number(raw.get("width"), "the width", 0, 20000)),
+        int(_number(raw.get("height"), "the height", 0, 20000)),
+    )
+    if kind == "short":
+        kit.choice(raw.get("genre"), "the genre", GENRES, default="other")
+        _credits(raw.get("credits"))
+    return {"ok": True, "scheduled": bool(publish_at), "publish_at": publish_at}
+
+
+def create_video(
+    sc: sqlite3.Connection, ch: dict[str, Any], raw: dict[str, Any]
+) -> dict[str, Any]:
+    kind, values, publish_at = _precheck(sc, ch, raw)
     found = media.owned_file(sc, str(raw.get("file_id") or ""), ch["id"], "video")
     if row(
         sc,
@@ -613,9 +764,6 @@ def create_video(
         (found["id"],),
     ):
         raise ValueError("That file is already a video.")
-    values = _fields(raw)
-    if ch.get("age_group") == "child":
-        values["visibility"] = "private"  # children's videos stay with them
     duration = float(found["duration"] or 0) or _number(
         raw.get("duration"), "the length", 0, 24 * 3600
     )
@@ -625,17 +773,11 @@ def create_video(
     height = int(found["height"] or 0) or int(
         _number(raw.get("height"), "the height", 0, 20000)
     )
+    _check_shape(kind, duration, width, height)
     genre, credits = "", []
-    if kind == "reel":
-        if duration and duration > REEL_SECONDS + 0.5:
-            raise ValueError(f"A reel is at most {REEL_SECONDS} seconds long.")
-        if width and height and height <= width:
-            raise ValueError("A reel is a tall (portrait) video.")
     if kind == "short":
         genre = kit.choice(raw.get("genre"), "the genre", GENRES, default="other")
         credits = _credits(raw.get("credits"))
-        if duration and duration > SHORT_FILM_SECONDS:
-            raise ValueError("A short film is at most an hour long.")
     thumb = str(raw.get("thumb_file_id") or "")
     if thumb:
         media.owned_file(sc, thumb, ch["id"], "image")
@@ -670,9 +812,18 @@ def create_video(
             thumb,
             captions,
             values["ads_enabled"],
-            moment,
+            publish_at or moment,
             moment,
         ),
+    )
+    store.update(
+        sc,
+        "vi_videos",
+        video_id,
+        {
+            "members_only": values["members_only"],
+            "paid_promotion": values["paid_promotion"],
+        },
     )
     sc.commit()
     return video_view(sc, viewer_of(ch), _video_row(sc, video_id), full=True)
@@ -712,6 +863,23 @@ def edit_video(
     values = _fields(raw, current)
     if ch.get("age_group") == "child":
         values["visibility"] = "private"
+    _check_extras(
+        sc,
+        ch,
+        found["kind"],
+        values,
+        was_members_only=bool(found.get("members_only")),
+    )
+    if "publish_at" in raw:
+        # Only a video that has not gone out yet can be moved (or sent out now); one that is out keeps its date.
+        if scheduled(found):
+            values["created_at"] = _publish_at(raw.get("publish_at")) or stamp()
+        else:
+            cleaned = kit.moment(raw.get("publish_at"), "when it goes out")
+            if cleaned and store.parse(cleaned) > store.utcnow() + ABOUT_NOW_AFTER:
+                raise ValueError(
+                    "This video is already out, so it cannot be scheduled."
+                )
     if "thumb_file_id" in raw:
         thumb = str(raw.get("thumb_file_id") or "")
         if thumb:
@@ -764,14 +932,40 @@ def _remove_video(sc: sqlite3.Connection, found: dict[str, Any]) -> None:
         sc.execute(statement, (found["id"],))
 
 
-def my_videos(sc: sqlite3.Connection, ch: dict[str, Any]) -> list[dict[str, Any]]:
+MY_FILTERS = {
+    "public": "visibility = 'public'",
+    "unlisted": "visibility = 'unlisted'",
+    "private": "visibility = 'private'",
+    "scheduled": "created_at > ?",
+    "members": "members_only = 1",
+    "promoted": "paid_promotion = 1",
+    "problems": "(hidden_at IS NOT NULL OR takedown_at IS NOT NULL)",
+}
+
+
+def my_videos(
+    sc: sqlite3.Connection, ch: dict[str, Any], q: str = "", show: str = ""
+) -> list[dict[str, Any]]:
+    """The channel's own videos, newest first; ``q`` searches titles, descriptions and tags, ``show`` is one of
+    MY_FILTERS (who can watch, scheduled, for members, paid promotion, hidden or taken down)."""
     me_ = viewer_of(ch)
+    where, params = "channel_id = ? AND deleted_at IS NULL", [ch["id"]]
+    if show:
+        kit.choice(show, "what to show", tuple(MY_FILTERS))
+        where += f" AND {MY_FILTERS[show]}"
+        if "?" in MY_FILTERS[show]:
+            params.append(stamp())
+    text = kit.text(q, "what to search for", max_len=100)
+    if text:
+        like = "%" + re.sub(r"([!%_])", r"!\1", text.lower()) + "%"
+        where += " AND (lower(title) LIKE ? ESCAPE '!' OR lower(description) LIKE ? ESCAPE '!' OR lower(tags) LIKE ? ESCAPE '!')"
+        params += [like, like, like]
     return [
         video_view(sc, me_, item)
         for item in rows(
             sc,
-            "SELECT * FROM vi_videos WHERE channel_id = ? AND deleted_at IS NULL ORDER BY created_at DESC LIMIT 500",
-            (ch["id"],),
+            f"SELECT * FROM vi_videos WHERE {where} ORDER BY created_at DESC LIMIT 500",  # noqa: S608 - fragments are ours
+            tuple(params),
         )
     ]
 
@@ -883,18 +1077,19 @@ def search(
         where, params = "v.kind = ?", (kind,)
     if not text:
         return {"videos": [], "channels": []}
-    like = f"%{text.lower()}%"
+    like = "%" + re.sub(r"([!%_])", r"!\1", text.lower()) + "%"
     found = _list(
         sc,
         me_,
-        f"{where} AND (lower(v.title) LIKE ? OR lower(v.description) LIKE ? OR lower(v.tags) LIKE ? "
-        "OR v.channel_id IN (SELECT id FROM vi_channels WHERE lower(name) LIKE ?))",
+        f"{where} AND (lower(v.title) LIKE ? ESCAPE '!' OR lower(v.description) LIKE ? ESCAPE '!' "
+        "OR lower(v.tags) LIKE ? ESCAPE '!' "
+        "OR v.channel_id IN (SELECT id FROM vi_channels WHERE lower(name) LIKE ? ESCAPE '!'))",
         (*params, like, like, like, like),
         limit=60,
     )
     channels = rows(
         sc,
-        """SELECT * FROM vi_channels WHERE suspended_at IS NULL AND lower(name) LIKE ? AND age_group != 'child'
+        """SELECT * FROM vi_channels WHERE suspended_at IS NULL AND lower(name) LIKE ? ESCAPE '!' AND age_group != 'child'
         AND id IN (SELECT channel_id FROM vi_videos WHERE visibility = 'public' AND deleted_at IS NULL) LIMIT 10""",
         (like,),
     )
@@ -998,7 +1193,7 @@ def progress(
     sc: sqlite3.Connection, me_: dict[str, Any], video_id: str, raw: dict[str, Any]
 ) -> dict[str, Any]:
     """Remember where the person is in a video and count a view after a meaningful watch."""
-    video = visible_video(sc, me_, video_id)
+    video = playable_video(sc, me_, video_id)
     position = _number(raw.get("position"), "the position", 0, 24 * 3600)
     watched = _number(raw.get("watched"), "the time watched", 0, 24 * 3600)
     moment = store.utcnow()
@@ -1020,6 +1215,16 @@ def progress(
     else:
         started = store.parse(found["started_at"])
         elapsed = (moment - started).total_seconds()
+        # The page reports the time watched since it opened; a page opened again starts from 0. Only the new part
+        # counts, and never more than the time since the last report.
+        reported = min(watched, elapsed + 1)
+        before = float(found["seconds"] or 0)
+        gained = reported - before if reported >= before else reported
+        gained = min(
+            gained, (moment - store.parse(found["last_at"])).total_seconds() + 1
+        )
+        if gained > 0 and video["channel_id"] != me_["id"]:
+            log_watch(sc, video["id"], gained)
         sc.execute(
             "UPDATE vi_watch SET position = ?, seconds = ?, last_at = ?, cleared = 0 WHERE viewer_id = ? AND video_id = ?",
             (
@@ -1038,6 +1243,95 @@ def progress(
         counted = count_view(sc, video, me_["id"])
     sc.commit()
     return {"counted": counted, "views": _video_row(sc, video["id"])["views"]}
+
+
+def log_watch(sc: sqlite3.Connection, video_id: str, seconds: float) -> None:
+    """Add seconds really watched to today's total for the video (the creator's watch time)."""
+    sc.execute(
+        """INSERT INTO vi_watch_days (video_id, day, seconds) VALUES (?, ?, ?)
+        ON CONFLICT(video_id, day) DO UPDATE SET seconds = seconds + excluded.seconds""",
+        (video_id, store.day(), round(float(seconds), 2)),
+    )
+
+
+RESUME_MIN_SECONDS = 5
+CHAPTER = re.compile(r"^\s*(?:(\d{1,2}):)?(\d{1,2}):(\d{2})\s*[-–—:]?\s+(\S.{0,79})$")
+
+
+def resume_at(
+    sc: sqlite3.Connection, me_: dict[str, Any], video: dict[str, Any]
+) -> float:
+    """Where the person stopped last time (0 when they finished it, barely started, or cleared it from history)."""
+    found = row(
+        sc,
+        "SELECT position FROM vi_watch WHERE viewer_id = ? AND video_id = ? AND cleared = 0",
+        (me_["id"], video["id"]),
+    )
+    position = float(found["position"] or 0) if found else 0.0
+    duration = float(video.get("duration") or 0)
+    if position < RESUME_MIN_SECONDS or (
+        duration and position > duration - RESUME_MIN_SECONDS
+    ):
+        return 0.0
+    return round(position, 1)
+
+
+def chapters(description: str, duration: float = 0) -> list[dict[str, Any]]:
+    """Chapters written in the description, one per line ("0:00 Intro", "1:05:30 The end"): the first at 0:00, at
+    least two, each later than the one before (and inside the video). Anything else is not chapters."""
+    found: list[dict[str, Any]] = []
+    for line in str(description or "").splitlines():
+        match = CHAPTER.match(line)
+        if not match:
+            continue
+        hours, minutes, seconds = (
+            int(match.group(1) or 0),
+            int(match.group(2)),
+            int(match.group(3)),
+        )
+        if seconds > 59 or (match.group(1) and minutes > 59):
+            continue
+        at = hours * 3600 + minutes * 60 + seconds
+        if found and at <= found[-1]["at"]:
+            return []
+        if duration and at >= duration:
+            break
+        found.append({"at": at, "title": match.group(4).strip()})
+    if len(found) < 2 or found[0]["at"] != 0:
+        return []
+    return found[:100]
+
+
+def continue_watching(
+    sc: sqlite3.Connection, me_: dict[str, Any], limit: int = 12
+) -> list[dict[str, Any]]:
+    """Videos the person started and did not finish (newest first), with where they stopped."""
+    out = []
+    for item in rows(
+        sc,
+        f"SELECT * FROM vi_watch WHERE viewer_id = ? AND cleared = 0 AND position >= {RESUME_MIN_SECONDS} "  # noqa: S608
+        "ORDER BY last_at DESC LIMIT 60",
+        (me_["id"],),
+    ):
+        try:
+            video = visible_video(sc, me_, item["video_id"])
+        except LookupError:
+            continue
+        if video["kind"] == "reel":
+            continue
+        at = resume_at(sc, me_, video)
+        if not at:
+            continue
+        out.append(
+            {
+                **video_view(sc, me_, video),
+                "position": at,
+                "watched_at": item["last_at"],
+            }
+        )
+        if len(out) >= limit:
+            break
+    return out
 
 
 def count_view(sc: sqlite3.Connection, video: dict[str, Any], viewer_key: str) -> bool:
@@ -1099,7 +1393,7 @@ def clear_history(
 def like(
     sc: sqlite3.Connection, me_: dict[str, Any], video_id: str, on: bool
 ) -> dict[str, Any]:
-    video = visible_video(sc, me_, video_id)
+    video = playable_video(sc, me_, video_id)
     if on:
         changed = sc.execute(
             "INSERT OR IGNORE INTO vi_likes (video_id, viewer_id, at) VALUES (?, ?, ?)",
@@ -1340,7 +1634,7 @@ def playlist_item(
 def comments(
     sc: sqlite3.Connection, me_: dict[str, Any], video_id: str
 ) -> list[dict[str, Any]]:
-    video = visible_video(sc, me_, video_id)
+    video = playable_video(sc, me_, video_id)
     out = []
     for item in rows(
         sc,
@@ -1372,7 +1666,7 @@ def comment(
     _active(me_)
     if me_.get("age_group") == "child":
         raise PermissionError("Children cannot comment on videos.")
-    video = visible_video(sc, me_, video_id)
+    video = playable_video(sc, me_, video_id)
     if video["visibility"] == "private" and video["channel_id"] != me_["id"]:
         raise LookupError("That video was not found.")
     text = filtered(
@@ -1998,6 +2292,46 @@ def export_channel(sc: sqlite3.Connection, channel_id: str) -> dict[str, Any]:
             "SELECT id, amount_micros, status, reference, requested_at, decided_at FROM ad_payouts WHERE channel_id = ?",
             (channel_id,),
         ),
+        "support": row(
+            sc,
+            "SELECT enabled, link, upi, note, currency, updated_at FROM vi_support WHERE channel_id = ?",
+            (channel_id,),
+        ),
+        "support_received": rows(
+            sc,
+            "SELECT id, amount_cents, currency, status, reference, created_at, decided_at FROM vi_tips WHERE channel_id = ?",
+            (channel_id,),
+        ),
+        "support_given": rows(
+            sc,
+            "SELECT id, channel_id, amount_cents, currency, message, status, reference, created_at FROM vi_tips WHERE supporter_id = ?",
+            (channel_id,),
+        ),
+        "membership_plan": row(
+            sc,
+            "SELECT enabled, price_cents, currency, perks, updated_at FROM vi_member_plans WHERE channel_id = ?",
+            (channel_id,),
+        ),
+        "membership_payments_received": rows(
+            sc,
+            "SELECT id, months, amount_cents, currency, reference, status, created_at, decided_at FROM vi_member_payments WHERE channel_id = ?",
+            (channel_id,),
+        ),
+        "memberships": rows(
+            sc,
+            "SELECT channel_id, paid_until, created_at FROM vi_members WHERE member_id = ?",
+            (channel_id,),
+        ),
+        "membership_payments_made": rows(
+            sc,
+            "SELECT id, channel_id, months, amount_cents, currency, reference, status, created_at FROM vi_member_payments WHERE member_id = ?",
+            (channel_id,),
+        ),
+        "brand_deals": rows(
+            sc,
+            "SELECT id, brand, contact, amount_cents, currency, video_id, status, due_on, notes, paid_at, created_at FROM vi_deals WHERE channel_id = ?",
+            (channel_id,),
+        ),
     }
 
 
@@ -2012,6 +2346,7 @@ def erase_channels(sc: sqlite3.Connection, channel_ids: Iterable[str]) -> int:
         ):
             _remove_video(sc, video)
             sc.execute("DELETE FROM vi_views WHERE video_id = ?", (video["id"],))
+            sc.execute("DELETE FROM vi_watch_days WHERE video_id = ?", (video["id"],))
             sc.execute(
                 "DELETE FROM vi_reports WHERE target_type = 'video' AND target_id = ?",
                 (video["id"],),
@@ -2040,6 +2375,16 @@ def erase_channels(sc: sqlite3.Connection, channel_ids: Iterable[str]) -> int:
             "DELETE FROM vi_notifications WHERE channel_id = ?",
             "DELETE FROM vi_reports WHERE reporter_id = ? OR (target_type = 'channel' AND target_id = ?)",
             "DELETE FROM vi_rate WHERE key = ?",
+            "DELETE FROM vi_support WHERE channel_id = ?",
+            # pledges to them end; what they gave others stays with the creator, without their name
+            "DELETE FROM vi_tips WHERE channel_id = ? OR (supporter_id = ? AND status = 'pledged')",
+            "UPDATE vi_tips SET supporter_id = '', show_name = 0, message = '' WHERE supporter_id = ?",
+            # their memberships and plan end; payments they made that arrived stay with the creator, without them
+            "DELETE FROM vi_member_plans WHERE channel_id = ?",
+            "DELETE FROM vi_members WHERE channel_id = ? OR member_id = ?",
+            "DELETE FROM vi_member_payments WHERE channel_id = ? OR (member_id = ? AND status = 'pledged')",
+            "UPDATE vi_member_payments SET member_id = '' WHERE member_id = ?",
+            "DELETE FROM vi_deals WHERE channel_id = ?",
             "UPDATE ad_impressions SET earning_status = CASE WHEN earning_status = 'estimated' THEN 'clawed' ELSE earning_status END, channel_id = '', viewer_key = CASE WHEN viewer_key = ? THEN '' ELSE viewer_key END WHERE channel_id = ?",
             "UPDATE ad_payouts SET status = CASE WHEN status = 'requested' THEN 'rejected' ELSE status END, note = CASE WHEN status = 'requested' THEN 'The account was removed.' ELSE note END, channel_id = '' WHERE channel_id = ?",
             "DELETE FROM vi_channels WHERE id = ?",
@@ -2052,6 +2397,12 @@ def erase_channels(sc: sqlite3.Connection, channel_ids: Iterable[str]) -> int:
 # ---------------------------------------------------------------------------
 # Today and pulse
 # ---------------------------------------------------------------------------
+
+
+def clock(seconds: float) -> str:
+    total = max(0, round(float(seconds or 0)))
+    hours, minutes, secs = total // 3600, (total % 3600) // 60, total % 60
+    return f"{hours}:{minutes:02d}:{secs:02d}" if hours else f"{minutes}:{secs:02d}"
 
 
 def today_lines(sc: sqlite3.Connection, me_: dict[str, Any]) -> list[dict[str, Any]]:
@@ -2071,13 +2422,29 @@ def today_lines(sc: sqlite3.Connection, me_: dict[str, Any]) -> list[dict[str, A
             (me_["id"],),
         )
     }
-    return [
-        {
+    saved = {
+        item["video_id"]
+        for item in rows(
+            sc, "SELECT video_id FROM vi_later WHERE viewer_id = ?", (me_["id"],)
+        )
+    }
+    out = []
+    for item in found:
+        line: dict[str, Any] = {
             "text": item["title"],
             "sub": f"New from {channels.get(item['channel_id'], {}).get('name', 'a channel')}",
+            "done": False,  # saved is not watched: no tick, no line through it
         }
-        for item in found
-    ]
+        if item["id"] in saved:
+            line["sub"] += " · saved to watch later"
+        else:  # saved from Today with one press (the route is idempotent)
+            line["action"] = life.action(
+                "Watch later",
+                f"/api/videos/videos/{item['id']}/later",
+                body={"on": True},
+            )
+        out.append(line)
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -2094,8 +2461,11 @@ def public_video(sc: sqlite3.Connection, video_id: str, token: str) -> dict[str,
         blocked_reason(sc, video)
         or video["visibility"] == "private"
         or video["rating"] == "mature"
+        or video.get("members_only")
     ):
         return {"available": False, "title": "This video is not available."}
+    if scheduled(video):
+        return {"available": False, "title": "This video is not out yet."}
     owner = (
         row(sc, "SELECT * FROM vi_channels WHERE id = ?", (video["channel_id"],)) or {}
     )
@@ -2114,12 +2484,14 @@ def public_video(sc: sqlite3.Connection, video_id: str, token: str) -> dict[str,
             "rating": video["rating"],
             "genre": video["genre"],
             "credits": store.loads(video["credits"], []),
+            "chapters": chapters(video["description"], float(video["duration"] or 0)),
             "duration": video["duration"],
             "width": video["width"],
             "height": video["height"],
             "views": video["views"],
             "likes": video["likes"],
             "created_at": video["created_at"],
+            "paid_promotion": bool(video.get("paid_promotion")),
             "channel": {
                 "name": owner.get("name", ""),
                 "avatar": owner.get("avatar", "🙂"),

@@ -1,0 +1,122 @@
+/* Styles for the play app only. Loaded on every page: scope every selector to the app's own class names. */
+
+/* Game tiles */
+.play-app .play-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 220px), 1fr)); gap: 12px; }
+.play-app .play-tile { display: grid; gap: 6px; justify-items: start; align-content: start; padding: 18px; border: 1px solid var(--line); border-radius: 18px; background: var(--surface); color: var(--ink); text-align: left; cursor: pointer; font: inherit; text-decoration: none; min-height: 44px; }
+.play-app .play-tile:hover { border-color: var(--line-strong); }
+.play-app .play-tile:focus-visible { outline: 3px solid var(--brand, currentColor); outline-offset: 2px; }
+.play-app .play-tile-icon { font-size: 40px; line-height: 1.1; }
+.play-app .play-tile-name { font-size: 18px; }
+
+/* Lists of rows (challenges, rooms) */
+.play-app .play-list { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.play-app .play-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; }
+.play-app .play-row-main { flex: 1 1 220px; min-width: 0; overflow-wrap: anywhere; }
+.play-app .play-h3 { font-size: 16px; margin: 14px 0 8px; }
+.play-app .play-head { display: flex; flex-wrap: wrap; gap: 10px; align-items: baseline; justify-content: space-between; }
+.play-app .play-toolbar { display: flex; flex-wrap: wrap; gap: 10px; justify-content: space-between; align-items: center; margin-bottom: 12px; }
+.play-app .play-toolbar > p { flex: 1 1 140px; margin: 0; }
+.play-app .play-filters { align-items: center; }
+.play-app .play-search { min-height: 44px; max-width: 100%; width: 260px; }
+.play-app .play-banner { margin: 0; padding: 10px 14px; border-radius: 12px; background: var(--brand-soft); color: var(--ink); font-weight: 600; overflow-wrap: anywhere; }
+.play-app .play-join { display: flex; flex-wrap: wrap; gap: 10px; align-items: center; justify-content: space-between; margin: 0 0 12px; }
+.play-app .play-join p { margin: 0; }
+
+/* Choosing a level */
+.play-app .play-field { display: grid; gap: 6px; }
+.play-app .play-choices { display: flex; flex-wrap: wrap; gap: 8px; }
+.play-app .play-choices .btn { white-space: normal; text-align: left; }
+
+/* Playing */
+.play-app .play-area { display: grid; gap: 14px; min-width: 0; }
+.play-app .play-score { font-size: 44px; font-weight: 800; margin: 0; }
+.play-app .play-question { font-size: 22px; font-weight: 700; margin: 0; overflow-wrap: anywhere; }
+.play-app .play-options { display: grid; gap: 10px; max-width: 640px; }
+.play-app .play-option { min-height: 52px; font-size: 17px; justify-content: flex-start; white-space: normal; text-align: left; }
+.play-app .play-option.right { outline: 3px solid var(--good); }
+.play-app .play-review { margin: 0; padding-left: 22px; display: grid; gap: 4px; overflow-wrap: anywhere; }
+.play-app .play-review li.wrong { color: var(--ink); }
+.play-app .play-review li.right { color: var(--ink); }
+
+.play-app .play-sums { display: grid; gap: 12px; padding-left: 22px; margin: 0; }
+.play-app .play-sum { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+.play-app .play-sum-text { font-size: 22px; font-weight: 700; min-width: 170px; }
+.play-app .play-sum-text.letters { letter-spacing: 0.08em; }
+.play-app .play-answer { max-width: 220px; width: 100%; }
+
+.play-app .play-memory { display: grid; gap: 10px; max-width: 620px; }
+.play-app .play-card { aspect-ratio: 1; width: 100%; min-width: 0; min-height: 56px; padding: 0; font-size: clamp(24px, 6vw, 44px); border-radius: 14px; border: 2px solid var(--line-strong); background: var(--brand-soft); color: var(--ink); cursor: pointer; }
+.play-app .play-card.up { background: var(--surface); }
+.play-app .play-card.found { border-color: var(--good); cursor: default; }
+
+.play-app .play-sudoku { display: grid; border: 3px solid var(--line-strong); width: 100%; }
+.play-app .play-cell { width: 100%; aspect-ratio: 1; min-height: 0; min-width: 0; padding: 0; text-align: center; font-size: clamp(16px, 4vw, 24px); font-weight: 500; border: 1px solid var(--line); border-radius: 0; background: var(--surface); color: var(--ink); }
+.play-app .play-cell.small { font-size: 28px; }
+.play-app .play-cell.given { font-weight: 800; background: var(--surface-2); }
+
+.play-app .play-word { display: grid; gap: 8px; }
+.play-app .play-word-row { display: flex; gap: 6px; }
+.play-app .play-letter { display: grid; place-items: center; width: 52px; height: 52px; max-width: calc((100vw - 90px) / 5); max-height: calc((100vw - 90px) / 5); border-radius: 8px; border: 2px solid var(--line-strong); font-size: 24px; font-weight: 800; color: var(--ink); background: var(--surface); }
+.play-app .play-letter.correct { background: var(--good); color: #fff; }
+.play-app .play-letter.present { background: var(--warning); color: #fff; }
+.play-app .play-letter.absent { background: var(--muted); color: #fff; }
+.play-app .play-guess { max-width: 200px; text-transform: uppercase; letter-spacing: 0.2em; font-size: 22px; }
+.play-app .play-code { max-width: 140px; text-transform: uppercase; letter-spacing: 0.2em; }
+
+/* Live rooms */
+.play-app .play-players { margin: 0; padding-left: 22px; display: grid; gap: 6px; font-size: 17px; }
+.play-app .play-players li > span:first-child { margin-right: 8px; overflow-wrap: anywhere; }
+.play-app .play-players li { overflow-wrap: anywhere; }
+.play-app .play-paid { display: inline-flex; gap: 6px; align-items: center; }
+.play-app .play-winner { font-size: 26px; font-weight: 800; margin: 0; }
+
+/* Cards (quizzes, the watch list) */
+.play-app .play-cards { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 320px), 1fr)); gap: 12px; }
+.play-app .play-quiz, .play-app .play-watch { display: grid; gap: 8px; align-content: start; min-width: 0; overflow-wrap: anywhere; }
+.play-app .play-quiz-title { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; }
+.play-app .play-quiz-title strong { font-size: 18px; }
+.play-app .play-stars { display: flex; gap: 4px; flex-wrap: wrap; }
+.play-app .play-star { min-width: 44px; min-height: 44px; font-size: 24px; border: none; background: transparent; cursor: pointer; color: var(--line-strong); }
+.play-app .play-star.on { color: var(--warning); }
+.play-app .play-plan { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+
+/* The quiz editor */
+.play-app .play-questions { display: grid; gap: 12px; }
+.play-app .play-question-edit { border: 1px solid var(--line); border-radius: 14px; padding: 12px 14px; margin: 0; display: grid; gap: 10px; min-width: 0; }
+.play-app .play-question-edit legend { font-weight: 700; padding: 0 6px; }
+.play-app .play-question-edit textarea { width: 100%; }
+.play-app .play-answers { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 240px), 1fr)); gap: 8px; }
+.play-app .play-answer-edit { display: flex; gap: 8px; align-items: center; min-width: 0; }
+.play-app .play-answer-edit input[type=radio] { width: 24px; height: 24px; flex: none; margin: 0; }
+.play-app .play-answer-edit input[type=text] { flex: 1 1 auto; min-width: 0; min-height: 44px; }
+.play-app .play-suggest { display: grid; gap: 8px; padding: 12px 14px; border: 1px dashed var(--line-strong); border-radius: 14px; }
+.play-app .play-suggest p { margin: 0; }
+.play-app .play-suggest-row { display: flex; flex-wrap: wrap; gap: 10px; align-items: flex-end; }
+.play-app .play-suggest-row .field { flex: 1 1 200px; margin: 0; }
+.play-app .play-suggest-row .field:nth-child(2) { flex: 0 0 110px; }
+
+/* Search results (?tab=search) and the record the search box chose */
+.play-app .play-results { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; }
+.play-app .play-result { display: flex; gap: 12px; align-items: center; padding: 10px 12px; border-radius: 12px; color: var(--ink); text-decoration: none; min-height: 48px; }
+.play-app .play-result:hover { background: var(--brand-soft); }
+.play-app .play-result:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+.play-app .play-result-icon { flex: 0 0 auto; display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; background: var(--brand-soft); color: var(--brand); }
+.play-app .play-result-icon svg { width: 20px; height: 20px; fill: none; stroke: currentColor; stroke-width: 2; stroke-linecap: round; stroke-linejoin: round; }
+.play-app .play-result-text { display: grid; gap: 2px; min-width: 0; overflow-wrap: anywhere; }
+.play-app .empty .btn-row { justify-content: center; }
+.play-app .play-found, .play-app .play-found:focus-visible { outline: 3px solid var(--brand); outline-offset: 3px; }
+
+/* Pick for tonight (in a dialog, outside .play-app) */
+.play-pick { display: grid; gap: 6px; overflow-wrap: anywhere; }
+
+@media (max-width: 480px) {
+  /* Two game tiles across on a phone, so the games fit on one screen */
+  .play-app .play-tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; }
+  .play-app .play-tile { padding: 14px; border-radius: 16px; overflow-wrap: anywhere; }
+  .play-app .play-tile-icon { font-size: 32px; }
+  .play-app .play-tile-name { font-size: 16px; }
+  .play-app .play-sum-text { min-width: 0; flex: 1 1 100%; }
+  .play-app .play-answer { max-width: 100%; }
+  .play-app .play-score { font-size: 36px; }
+  .play-app .play-search { width: 100%; }
+}

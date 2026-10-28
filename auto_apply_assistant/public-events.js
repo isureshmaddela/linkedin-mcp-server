@@ -3,7 +3,8 @@
  * event    the event page: details, tickets with live availability, promo code, buyer details, order; a waitlist
  *          form when it is sold out. A free order is confirmed at once; a paid one shows how to pay.
  * tickets  a buyer's tickets: large check-in codes, status, add to calendar, how to pay and "I have paid".
- * Built with textContent only (ctx.h); every limit is re-checked by the server.
+ * A partner's code in the address (?ref=CODE) goes with the order. Errors show next to the form they belong to
+ * and clear on the next try. Built with textContent only (ctx.h); every limit is re-checked by the server.
  */
 "use strict";
 (() => {
@@ -21,6 +22,33 @@
     return end ? `${start} – ${end}` : start;
   };
   const PHASE_TEXT = { draft: "Tickets are not on sale yet.", cancelled: "This event has been cancelled.", ended: "This event has ended." };
+
+  // A partner's code from the address (?ref=CODE), kept for this visit and for this business only: every hosted
+  // business shares one web address, so the saved code is keyed by the business's own scope from the page.
+  const referral = (scope) => {
+    let code = "";
+    try { code = new URLSearchParams(location.search).get("ref") || ""; } catch { code = ""; }
+    code = code.replace(/[^A-Za-z0-9_-]/g, "").slice(0, 30);
+    const key = /^[0-9a-f]{8,64}$/.test(String(scope || "")) ? `aira.ref.${scope}` : "";
+    try {
+      if (key && code) sessionStorage.setItem(key, code);
+      else if (key) code = sessionStorage.getItem(key) || "";
+    } catch { /* storage unavailable */ }
+    return code;
+  };
+  // A form's own message line, replaced on every try (errors no longer pile up at the top of the page).
+  const messageLine = (h) => {
+    const node = h("p", { class: "pub-notice bad", role: "alert", hidden: true });
+    return {
+      node,
+      show(text, tone = "bad") { node.className = `pub-notice ${tone}`; node.setAttribute("role", tone === "bad" ? "alert" : "status"); node.textContent = text; node.hidden = false; },
+      clear() { node.hidden = true; node.textContent = ""; },
+    };
+  };
+  const guarded = (line, fn) => async (event) => {
+    line.clear();
+    try { await fn(event); } catch (error) { line.show(error && error.message ? error.message : String(error)); }
+  };
 
   function header(h, page) {
     const e = page.event;
@@ -48,7 +76,10 @@
 
     const quantities = {};
     const totals = h("div", { class: "pub-card" });
-    const promo = h("input", { type: "text", autocomplete: "off", placeholder: "Code" });
+    const promo = h("input", { type: "text", autocomplete: "off", placeholder: "Code", maxLength: 30 });
+    const promoLine = messageLine(h);
+    const orderLine = messageLine(h);
+    const ref = referral(page.ref_scope);
     let applied = "";
     const typeCards = page.types.map((type) => {
       const max = Math.max(0, type.remaining === null ? type.max_per_order : Math.min(type.max_per_order, type.remaining));
@@ -74,7 +105,9 @@
       }
     };
 
+    let lastError = "";
     async function refresh() {
+      lastError = "";
       renderHolders();
       const items = chosen();
       if (!items.length) { totals.replaceChildren(h("p", { class: "pub-muted", text: "Choose your tickets above." })); submit.disabled = true; return; }
@@ -89,7 +122,8 @@
         submit.textContent = quote.total_cents ? `Order ${count()} ticket${count() === 1 ? "" : "s"} · ${ctx.money(quote.total_cents)}` : `Get ${count()} free ticket${count() === 1 ? "" : "s"}`;
         submit.disabled = false;
       } catch (error) {
-        totals.replaceChildren(h("p", { class: "pub-notice bad", text: error.message }));
+        lastError = error.message;
+        totals.replaceChildren(h("p", { class: "pub-notice bad", role: "alert", text: error.message }));
         submit.disabled = true;
       }
     }
@@ -97,19 +131,27 @@
     const name = h("input", { type: "text", autocomplete: "name", required: true, maxLength: 120 });
     const email = h("input", { type: "email", autocomplete: "email", required: true, maxLength: 254 });
     const phone = h("input", { type: "tel", autocomplete: "tel", maxLength: 30 });
-    const submit = ctx.button("Choose tickets", async () => {
-      if (!name.value.trim() || !email.value.trim()) { ctx.notice("Enter your name and email so we can send your tickets.", "bad"); return; }
+    const submit = ctx.button("Choose tickets", guarded(orderLine, async () => {
+      if (!name.value.trim()) { name.focus(); throw new Error("Enter your name so we can put it on your tickets."); }
+      if (!email.value.trim() || !email.checkValidity()) { email.focus(); throw new Error("Enter your email address, like name@example.com, so we can send your tickets."); }
       const holders = [...holdersBox.querySelectorAll("input[data-holder]")].map((input) => input.value.trim());
-      const result = await ctx.action("order", { items: chosen(), promo_code: applied, name: name.value.trim(), email: email.value.trim(), phone: phone.value.trim(), holders });
+      const result = await ctx.action("order", { items: chosen(), promo_code: applied, name: name.value.trim(), email: email.value.trim(), phone: phone.value.trim(), holders, ref });
       location.assign(result.tickets_path);
-    });
+    }));
     submit.disabled = true;
 
     root.append(
       h("section", { class: "pub-card" }, h("h2", { text: "Tickets" }), h("div", { class: "pub-grid" }, ...typeCards)),
-      page.promo_codes ? h("section", { class: "pub-card" }, ctx.field("Promo code", promo), ctx.button("Apply", async () => { applied = promo.value.trim(); await refresh(); if (applied && !submit.disabled) ctx.notice("Promo code applied.", "good"); }, "secondary")) : null,
+      page.promo_codes ? h("section", { class: "pub-card" }, ctx.field("Promo code", promo), promoLine.node, ctx.button("Apply", guarded(promoLine, async () => {
+        const wanted = promo.value.trim();
+        if (!chosen().length) throw new Error("Choose your tickets first, then apply the code.");
+        applied = wanted;
+        await refresh();
+        if (submit.disabled && applied) { const reason = lastError; applied = ""; await refresh(); throw new Error(reason || "That promo code cannot be used."); }
+        if (applied) promoLine.show(`Promo code ${applied.toUpperCase()} applied.`, "good");
+      }), "secondary")) : null,
       totals,
-      h("section", { class: "pub-card pub-form" }, h("h2", { text: "Your details" }), ctx.field("Name", name), ctx.field("Email", email, "Your tickets are sent here."), ctx.field("Phone", phone), holdersBox, submit),
+      h("section", { class: "pub-card pub-form" }, h("h2", { text: "Your details" }), ctx.field("Name", name), ctx.field("Email", email, "Your tickets are sent here."), ctx.field("Phone", phone), holdersBox, orderLine.node, submit),
     );
     refresh();
   });
@@ -118,11 +160,14 @@
     const name = h("input", { type: "text", autocomplete: "name", maxLength: 120 });
     const email = h("input", { type: "email", autocomplete: "email", maxLength: 254 });
     const quantity = h("select", {}, ...[1, 2, 3, 4, 5, 6].map((n) => h("option", { value: String(n), text: String(n) })));
-    const box = h("section", { class: "pub-card pub-form" }, h("h2", { text: "Join the waitlist" }), h("p", { class: "pub-muted", text: "We will email you if tickets become available." }), ctx.field("Name", name), ctx.field("Email", email), ctx.field("Tickets wanted", quantity));
-    box.append(ctx.button("Join the waitlist", async () => {
+    const line = messageLine(h);
+    const box = h("section", { class: "pub-card pub-form" }, h("h2", { text: "Join the waitlist" }), h("p", { class: "pub-muted", text: "We will email you if tickets become available." }), ctx.field("Name", name), ctx.field("Email", email), ctx.field("Tickets wanted", quantity), line.node);
+    box.append(ctx.button("Join the waitlist", guarded(line, async () => {
+      if (!name.value.trim()) { name.focus(); throw new Error("Enter your name."); }
+      if (!email.value.trim() || !email.checkValidity()) { email.focus(); throw new Error("Enter your email address, like name@example.com."); }
       await ctx.action("join_waitlist", { name: name.value.trim(), email: email.value.trim(), quantity: Number(quantity.value) });
-      box.replaceChildren(h("p", { class: "pub-notice good", text: "You are on the waitlist. We will email you if seats free up." }));
-    }));
+      box.replaceChildren(h("p", { class: "pub-notice good", role: "status", text: "You are on the waitlist. We will email you if seats free up." }));
+    })));
     return box;
   }
 
@@ -149,7 +194,8 @@
       const box = ctx.paymentBox(order.total_cents, order.reference);
       if (box) root.append(box);
       const claim = h("section", { class: "pub-card" });
-      const render = (claimed) => claim.replaceChildren(claimed ? h("p", { class: "pub-notice good", text: "Thanks! We will confirm your tickets as soon as we see your payment." }) : h("div", { class: "pub-btn-row" }, h("span", { class: "pub-muted", text: "Paid already?" }), ctx.button("I have paid", async () => { await ctx.action("notify_paid", {}); render(true); }, "secondary")));
+      const line = messageLine(h);
+      const render = (claimed) => claim.replaceChildren(claimed ? h("p", { class: "pub-notice good", role: "status", text: "Thanks! We will confirm your tickets as soon as we see your payment." }) : h("div", { class: "pub-btn-row" }, h("span", { class: "pub-muted", text: "Paid already?" }), ctx.button("I have paid", guarded(line, async () => { await ctx.action("notify_paid", {}); render(true); }), "secondary"), line.node));
       render(order.payment_claimed);
       root.append(claim);
     }
