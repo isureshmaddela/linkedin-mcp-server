@@ -297,7 +297,7 @@ def test_registering_a_handler_name_twice_is_rejected():
 
     duplicate.__module__ = "aira.airaapi.routes"
     duplicate.__name__ = "search"
-    with pytest.raises(RuntimeError, match="Duplicate Aira route handler"):
+    with pytest.raises(RuntimeError, match="Duplicate Monosage route handler"):
         airaapi_http.aira_route("GET", r"/x")(duplicate)
 
 

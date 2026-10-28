@@ -558,10 +558,10 @@ def test_webhooks_are_signed_retried_and_safe(cloud, org, monkeypatch):
         event = json.loads(body)
         assert (
             event["type"].startswith("studio.")
-            and headers["Aira-Event"] == event["type"]
+            and headers["Monosage-Event"] == event["type"]
         )
         timestamp, mac = (
-            part.split("=", 1)[1] for part in headers["Aira-Signature"].split(",")
+            part.split("=", 1)[1] for part in headers["Monosage-Signature"].split(",")
         )
         expected = hmac.new(
             secret.encode(), f"{timestamp}.".encode() + body, hashlib.sha256

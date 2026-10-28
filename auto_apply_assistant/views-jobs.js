@@ -213,7 +213,7 @@
       if (!importUrl.value.trim()) { toast("Paste a job URL first.", "error"); return; }
       const data = await api("/api/jobs/import", { method: "POST", body: { url: importUrl.value } });
       importUrl.value = "";
-      toast(`Imported from ${data.source.replaceAll("_", " ")}.`, "success");
+      toast(`Imported from ${Aira.fmt.source(data.source)}.`, "success");
       onResults({ jobs: [data.job], imported: data.job, needs_details: data.needs_details });
     }));
     return panel;
@@ -271,7 +271,7 @@
     let timer;
     q.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(apply, 350); });
     // A link from Analytics can narrow the list to one source; a chip shows it and clears it.
-    const sourceChip = filters.source ? h("div", { class: "btn-row careers-filter-chip" }, h("span", { class: "badge source", text: `Source: ${(filters.source === "manual" ? "added by you" : filters.source).replaceAll("_", " ")}` }), h("button", { type: "button", class: "btn ghost sm", text: "Show every source", onclick: () => { filters.source = ""; apply(); } })) : null;
+    const sourceChip = filters.source ? h("div", { class: "btn-row careers-filter-chip" }, h("span", { class: "badge source", text: `Source: ${Aira.fmt.source((filters.source === "manual" ? "added by you" : filters.source))}` }), h("button", { type: "button", class: "btn ghost sm", text: "Show every source", onclick: () => { filters.source = ""; apply(); } })) : null;
     const filterBar = h("div", { class: "filters careers-compact-filters", role: "search" }, h("div", { class: "field grow" }, h("label", { for: "jobFilterQ", text: "Filter" }), Object.assign(q, { id: "jobFilterQ" })), ui.field("Status", stage), ui.field("Match", classification), ui.field("Score", minScore), ui.field("Workplace", workplace), ui.field("Sort", sort), h("button", { type: "button", class: "btn ghost sm", text: "Clear", onclick: () => { Aira.remember(`filters.jobs.${tab.id}`, {}); router.go(["jobs", tab.id], {}, { replace: true }); } }));
 
     const head = h("div", { class: "page-head" }, h("div", {}, h("h1", { text: "Jobs" }), h("p", { text: "Search every connected source, import postings by URL, and keep one deduplicated pipeline. Scores are explainable and never guess at missing facts." })), h("div", { class: "page-actions" }, h("button", { type: "button", class: "btn sm", text: "+ Add a job", onclick: addJob }), h("button", { type: "button", class: "btn secondary sm", text: "Rescore all", onclick: (event) => withBusy(event.currentTarget, async () => { const data = await api("/api/jobs/rescore", { method: "POST", body: {} }); toast(`${fmt.plural(data.scored, "job")} rescored.`, "success"); load(); }) })));
@@ -315,7 +315,7 @@
       const turn = (page) => { filters.page = String(page); router.go(["jobs", tab.id], current(filters.page), { replace: true }); };
       const pager = h("div", { class: "pager" }, h("span", { text: `${data.total} ${data.total === 1 ? "job" : "jobs"} · page ${data.page} of ${data.pages}` }), h("div", { class: "btn-row" }, h("button", { type: "button", class: "btn ghost sm", text: "Previous", disabled: data.page <= 1, onclick: () => turn(data.page - 1) }), h("button", { type: "button", class: "btn ghost sm", text: "Next", disabled: data.page >= data.pages, onclick: () => turn(data.page + 1) })));
       const heading = q.value ? `${tab.id === "all" ? "Jobs" : tab.label} matching “${q.value}”` : tab.label;
-      listBox.replaceChildren(h("div", { class: "panel-head" }, h("h3", { text: heading }), h("small", { class: "muted", text: data.facets && data.facets.sources.length ? data.facets.sources.map((s) => `${s.source === "manual" ? "added by you" : s.source.replaceAll("_", " ")} ${s.count}`).join(" · ") : "" })), list, pager);
+      listBox.replaceChildren(h("div", { class: "panel-head" }, h("h3", { text: heading }), h("small", { class: "muted", text: data.facets && data.facets.sources.length ? data.facets.sources.map((s) => `${s.source === "manual" ? "added by you" : Aira.fmt.source(s.source)} ${s.count}`).join(" · ") : "" })), list, pager);
     }
     Aira.state.views.jobsReload = load;
     if (making === "job") addJob();
@@ -375,7 +375,7 @@
       catch (error) { Aira.reportError(error); stageSelect.value = job.stage; }
     });
     const facts = ui.kv([
-      ["Source", (job.source_records || []).map((r) => (r.source === "manual" ? "Added by you" : `${r.source.replaceAll("_", " ")} · ${r.external_id}`)).join(", ")],
+      ["Source", (job.source_records || []).map((r) => (r.source === "manual" ? "Added by you" : `${Aira.fmt.source(r.source)} · ${r.external_id}`)).join(", ")],
       ["Workplace", job.workplace_type ? fmt.stage(job.workplace_type) : null],
       ["Employment", job.employment_type ? fmt.stage(job.employment_type) : null],
       ["Seniority", job.seniority || null],

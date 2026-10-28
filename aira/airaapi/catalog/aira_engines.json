@@ -2,18 +2,18 @@
   "engines": [
     {
       "id": "aira_jobs",
-      "name": "Aira Jobs",
+      "name": "Jobs",
       "provider": "aira",
       "category": "jobs",
-      "family": "Aira",
-      "description": "Aira's own job search: open roles from free, public job-board APIs (Himalayas, The Muse, Remotive, Jobicy, Arbeitnow), searched by Aira itself. No SerpApi key and no credits. Results use the Google Jobs shape (jobs_results with title, company_name, location, via, description, apply_options), so Careers, the Jobs tab and alerts work on them unchanged. Every result credits its board and links back to it.",
+      "family": "Monosage",
+      "description": "Monosage's own job search: open roles from free, public job-board APIs (Himalayas, The Muse, Remotive, Jobicy, Arbeitnow), searched by Monosage itself. No SerpApi key and no credits. Results use the Google Jobs shape (jobs_results with title, company_name, location, via, description, apply_options), so Careers, the Jobs tab and alerts work on them unchanged. Every result credits its board and links back to it.",
       "docs_url": "https://himalayas.app/docs/remote-jobs-api",
       "endpoint": "local",
       "requires_any_of": [["q"]],
       "pagination": {
         "kind": "none",
         "page_size": 100,
-        "notes": "One page of up to num results, newest first. Each board is cached on Aira's side to respect its terms, so repeating a search within hours costs the boards nothing."
+        "notes": "One page of up to num results, newest first. Each board is cached on Monosage's side to respect its terms, so repeating a search within hours costs the boards nothing."
       },
       "result_keys": ["jobs_results", "search_information"],
       "result_item_fields": {
@@ -34,7 +34,7 @@
         ],
         "apply_options": ["title", "link"]
       },
-      "aira_use": "Find open roles without a SerpApi key: the free source behind Jobs > Aira Jobs, Careers without a key and Auto-apply plans.",
+      "aira_use": "Find open roles without a SerpApi key: the free source behind the Jobs page, Careers without a key and Auto-apply plans.",
       "verified": "live",
       "params": [
         {

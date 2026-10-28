@@ -227,7 +227,7 @@ def test_the_console_changes_a_price_and_switches_an_app_off_in_a_real_browser(s
             card.wait_for(timeout=30000)
             assert (
                 "Paused" in card.inner_text()
-                and "Switched off by Aira" in card.inner_text()
+                and "Switched off by Monosage" in card.inner_text()
             )
             assert card.locator("button[data-action]").count() == 0
             assert not problems, problems

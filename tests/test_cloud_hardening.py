@@ -240,7 +240,7 @@ def test_siem_stream_is_enterprise_only_cursor_based_and_can_speak_cef(cloud):
     )
     first = cef.decode().splitlines()[0]
     assert (
-        first.startswith("CEF:0|Aira|Career Copilot|1.0|")
+        first.startswith("CEF:0|Monosage|Career Copilot|1.0|")
         and " suser=" in first
         and " externalId=" in first
     )

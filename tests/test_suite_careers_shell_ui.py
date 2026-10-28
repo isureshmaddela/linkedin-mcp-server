@@ -313,7 +313,7 @@ def test_the_left_menu_shows_the_folders_and_each_opens_its_tab(browser, env):
 
     # Jobs keeps its tabs in the address path; the folder link #/jobs?tab=saved opens the same tab.
     page.click("#primaryNav a[data-section='jobs']")
-    assert folders(page, "jobs")[:3] == ["All Jobs", "LinkedIn", "Aira Jobs"]
+    assert folders(page, "jobs")[:3] == ["All Jobs", "LinkedIn", "Jobs"]
     page.locator(".shell-subnav[data-section='jobs'] a", has_text="Saved").click()
     page.wait_for_url(re.compile(r"#/jobs\?tab=saved"))
     until(

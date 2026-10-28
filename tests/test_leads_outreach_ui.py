@@ -161,7 +161,7 @@ def test_find_services_people_asking_and_gaps(browser, env):
     assert page.locator("#ldWhere-reddit").is_checked()
     assert page.locator("#ldWhere-web").is_checked()
     assert not page.locator("#ldWhere-quora").is_checked()
-    assert "Aira never replies for you" in page.locator("#ldRequestNote").inner_text()
+    assert "Monosage never replies for you" in page.locator("#ldRequestNote").inner_text()
     shot(page, "o-01-find-requests-form")
     page.click("#ldSearchBtn")
     dialog = page.locator(".modal")
@@ -175,7 +175,7 @@ def test_find_services_people_asking_and_gaps(browser, env):
     assert "Budget mentioned" in table and "Urgent" in table
     assert "Looking for a web designer for my bakery" in table
     assert (
-        "Aira never posts or messages for you"
+        "Monosage never posts or messages for you"
         in page.locator("#ldResults").inner_text()
     )
     link = page.locator("#ldResults .ld-requests a[href*='reddit.com']").first
@@ -201,7 +201,7 @@ def test_find_services_people_asking_and_gaps(browser, env):
     page.locator(".ld-open").first.click()
     page.wait_for_selector(".ld-drawer")
     drawer = page.locator(".ld-drawer").inner_text()
-    assert "The post" in drawer and "Aira has no way to post, email or call" in drawer
+    assert "The post" in drawer and "Monosage has no way to post, email or call" in drawer
     assert page.locator("#ldCall").count() == 0, "a post has no phone to call"
     assert page.locator("#ldEmail").count() == 0
     shot(page, "o-03-request-drawer")
@@ -505,7 +505,7 @@ def test_the_drawer_prepares_a_call_but_never_places_one(browser, env, site, smt
         .is_disabled()
     )
     call = page.locator("#ldCall")
-    assert "Aira never dials. You place the call." in call.inner_text()
+    assert "Monosage never dials. You place the call." in call.inner_text()
     page.wait_for_selector("#ldCallNumber")
     assert "555-0111" in page.locator("#ldCallNumber").inner_text()
     voice = call.get_by_role("link", name=re.compile("Open in Google Voice"))

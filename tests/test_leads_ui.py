@@ -435,7 +435,7 @@ def test_a_missing_key_explains_setup_and_the_other_sources_still_work(browser, 
     go(page, env, "leads?tab=find")
     page.wait_for_selector(".ld-setup")
     assert "Connect SerpApi" in page.locator(".ld-setup").inner_text()
-    assert page.locator(".ld-setup a[href='#/airaapi?tab=account']").count() == 1
+    assert page.locator(".ld-setup a[href='#/api?tab=account']").count() == 1
     assert page.locator("#ldSearchBtn").is_disabled()
     page.click("#ldSource-csv")
     assert page.locator("#ldCsvImport").is_enabled()

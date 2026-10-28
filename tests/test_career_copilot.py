@@ -194,7 +194,7 @@ def test_health_security_headers_and_auth_gate(server):
     status, body, _ = server.call("GET", "/api/dashboard")
     assert status == 401
     status, payload, _ = server.call("GET", "/static/app.js", raw=True)
-    assert status == 200 and b"Aira" in payload
+    assert status == 200 and b"Monosage" in payload
     status, _, _ = server.call("GET", "/static/missing.js", raw=True)
     assert status == 404
 

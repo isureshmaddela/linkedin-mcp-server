@@ -333,7 +333,7 @@ def test_the_left_menu_shows_the_life_folders_and_each_opens_its_tab(browser, en
         assert (
             page.locator(f"{SUBNAV}[aria-current='page']").inner_text().strip() == label
         )
-    assert page.title() == "Habits · Life · Aira"
+    assert page.title() == "Habits · Life · Monosage"
 
     # "All goals" shows the finished ones too (an empty filter value used to fall back to the active ones).
     page.locator(SUBNAV, has_text="Goals").click()

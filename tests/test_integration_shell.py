@@ -130,7 +130,7 @@ def test_every_nav_section_has_a_registered_view() -> None:
         for path in [*STATIC.glob("views-*.js"), STATIC / "life.js"]
     )
     for item in _nav():
-        assert re.search(rf"Aira\.views\.{item['id']}\s*=", scripts), item["id"]
+        assert re.search(rf"Monosage\.views\.{item['id']}\s*=", scripts), item["id"]
 
 
 def test_script_order_and_every_script_exists() -> None:
@@ -167,7 +167,7 @@ def test_widgets_build_nodes_without_innerhtml_or_storage() -> None:
 
 def test_jobs_view_refreshes_sources_and_links_to_the_key_page() -> None:
     assert "sourcesLoad = null;" in JOBS
-    assert "#/airaapi?tab=account" in JOBS
+    assert "#/api?tab=account" in JOBS
     assert "Google Jobs needs a SerpApi key" in JOBS
 
 

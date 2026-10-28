@@ -483,7 +483,7 @@ def test_a_live_chat_round_trip_on_the_local_build(env, api, local_index):
         env.base + f"/api/public/{token}/messages?chat_id={started['chat_id']}&after=0"
     )
     asked.add_header("X-Requested-With", "aira")
-    asked.add_header("Aira-Secret", started["secret"])
+    asked.add_header("Monosage-Secret", started["secret"])
     with urllib.request.urlopen(asked, timeout=30) as response:
         queried = json.loads(response.read())
     assert len(queried["messages"]) == 2 and queried["status"] == "active"

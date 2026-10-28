@@ -131,4 +131,4 @@ def test_coverage_page_lists_parameters_apis_and_errors_with_known_statuses() ->
 
 def test_usage_can_be_exported_and_google_jobs_records_can_be_saved_to_aira() -> None:
     assert "aira-api-usage-30-days.csv" in SOURCE
-    assert "/records/${record.id}/jobs" in SOURCE and "Save jobs to Aira" in SOURCE
+    assert "/records/${record.id}/jobs" in SOURCE and "Save jobs to Monosage" in SOURCE

@@ -204,7 +204,7 @@ def test_ai_new_search_and_folders_in_the_frame(browser, env):
         ".suite-section:has-text('Activity') >> text=Add milk, bread to the shopping list"
     )
     assert (
-        page.locator("a.btn:has-text('Ask Aira: “milk”')").get_attribute("href")
+        page.locator("a.btn:has-text('Ask Monosage: “milk”')").get_attribute("href")
         == "#/ai?tab=chat&ask=milk"
     )
     page.locator(".ai-hits .ai-hit").first.click()

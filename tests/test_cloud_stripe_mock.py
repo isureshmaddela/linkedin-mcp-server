@@ -147,7 +147,7 @@ def test_plan_change_cancel_portal_and_invoice_item_validate(stripe):
     assert stripe.portal_url("cus_123", "https://aira.example/billing").startswith(
         "https://"
     )
-    assert stripe.add_invoice_item("cus_123", 4000, "Aira overage 2026-09", "usd")
+    assert stripe.add_invoice_item("cus_123", 4000, "Monosage overage 2026-09", "usd")
 
 
 def test_the_adapter_reads_the_shapes_stripe_actually_returns(stripe, mock_url):

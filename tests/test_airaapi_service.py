@@ -1025,7 +1025,7 @@ def test_monitor_baseline_then_change_notifies_once(db, fake):
     assert changed["diff"]["counts"]["added"] == 2 and len(sent) == 1
     title, body, link = sent[0]
     assert title == "Monitor changed: Watch" and "2 added" in body
-    assert link == f"#/airaapi?tab=history&search={changed['record']['id']}"
+    assert link == f"#/api?tab=history&search={changed['record']['id']}"
     current = service.list_monitors(db)[0]
     assert current["last_run_at"] == "2026-10-22T13:30:00Z"
     assert current["next_run_at"] == "2026-10-22T14:00:00Z"

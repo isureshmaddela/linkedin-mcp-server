@@ -205,7 +205,7 @@ def test_a_linked_account_has_no_password_sign_in(env, account):
         "/api/auth/login",
         {"email": "linked.person@example.test", "password": PASSWORD},
     )
-    assert status == 403 and "Sign in with your Aira account" in body["error"]
+    assert status == 403 and "Sign in with your Monosage account" in body["error"]
     status, body = other.call(
         "POST",
         "/api/auth/register",
@@ -213,7 +213,7 @@ def test_a_linked_account_has_no_password_sign_in(env, account):
     )
     assert status == 400 and "already exists" in body["error"]
     status, body = api.call("POST", "/api/account/delete", {"password": ""})
-    assert status == 400 and "signs in with your Aira account" in body["error"]
+    assert status == 400 and "signs in with your Monosage account" in body["error"]
     assert api.get("/api/auth/me")["email"] == "linked.person@example.test", (
         "the account is still there"
     )
@@ -425,7 +425,7 @@ def test_a_candidate_signed_in_to_the_account_opens_the_local_installation(
             page.goto(env.base + "/")
             page.wait_for_selector("#authScreen:not([hidden])")
             assert page.locator("#accountLinkBtn").count() == 0
-            assert "Sign in with your Aira account" not in page.inner_text("#authForm")
+            assert "Sign in with your Monosage account" not in page.inner_text("#authForm")
             # the account's app launcher opens the installation: it redirects back with a token, and the local
             # build signs the person in
             page.goto(
@@ -466,7 +466,7 @@ def test_a_candidate_signed_in_to_the_account_opens_the_local_installation(
             "/api/auth/login",
             {"email": "cam.cole@northwind.test", "password": PASSWORD},
         )
-        assert status == 403 and "Sign in with your Aira account" in body["error"]
+        assert status == 403 and "Sign in with your Monosage account" in body["error"]
     finally:
         server.terminate()
         try:

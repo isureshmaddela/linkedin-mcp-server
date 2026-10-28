@@ -585,7 +585,7 @@ def test_search_hide_export_and_a_paid_newsletter_on_the_local_build(
             env,
             "GET",
             f"/api/public/{token}/issues",
-            headers={"Aira-Secret": "AAAAA-AAAAA"},
+            headers={"Monosage-Secret": "AAAAA-AAAAA"},
         )[0]
         == 403
     )
@@ -602,7 +602,7 @@ def test_search_hide_export_and_a_paid_newsletter_on_the_local_build(
     )
     paid = pat.post(f"/api/news/newsletter/subscribers/{reader['id']}/paid")
     status, full = _public(
-        env, "GET", f"/api/public/{token}/issues", headers={"Aira-Secret": paid["code"]}
+        env, "GET", f"/api/public/{token}/issues", headers={"Monosage-Secret": paid["code"]}
     )
     assert status == 200 and len(full["issues"][0]["stories"]) == 3
     status, sheet = pat.call(
@@ -711,7 +711,7 @@ def test_hosted_members_each_run_their_own_newsletter(cloud, news):
     )
     assert status == 200, paid
     status, full = visitor.call(
-        "GET", f"/api/public/{token}/issues", headers={"Aira-Secret": paid["code"]}
+        "GET", f"/api/public/{token}/issues", headers={"Monosage-Secret": paid["code"]}
     )
     assert status == 200 and full["issues"][0]["stories"], full
     # Another organization sees nothing of this one.

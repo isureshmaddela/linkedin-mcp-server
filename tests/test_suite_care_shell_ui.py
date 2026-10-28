@@ -320,7 +320,7 @@ def test_the_left_menu_shows_the_health_folders_and_each_opens_its_tab(browser, 
             .strip()
             == label
         )
-    assert page.title() == "Care work · Health · Aira"
+    assert page.title() == "Care work · Health · Monosage"
     shot(page, "06-folders-work")
     assert not problems, problems
     context.close()

@@ -111,7 +111,7 @@ def test_a_hosted_members_deck_sale_is_their_own_not_the_organizations(cloud):
         and f"/p/{token}" in (paid["message"]["body"])
     )
     status, full = visitor.call(
-        "GET", f"/api/public/{token}/cards", headers={"Aira-Secret": paid["code"]}
+        "GET", f"/api/public/{token}/cards", headers={"Monosage-Secret": paid["code"]}
     )
     assert status == 200 and len(full["cards"]) == 4
     # The member's earnings are counted for them in Earn...

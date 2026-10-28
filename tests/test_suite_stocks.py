@@ -1461,7 +1461,7 @@ def test_the_analyst_page_works_for_a_visitor_without_an_account(env, api, local
             env,
             "GET",
             f"/api/public/{link['token']}/paid?email=ravi%40example.com",
-            headers={"Aira-Secret": "WRONG-CODE"},
+            headers={"Monosage-Secret": "WRONG-CODE"},
         )[0]
         == 403
     )
@@ -1469,7 +1469,7 @@ def test_the_analyst_page_works_for_a_visitor_without_an_account(env, api, local
         env,
         "GET",
         f"/api/public/{link['token']}/paid?email=ravi%40example.com",
-        headers={"Aira-Secret": code},
+        headers={"Monosage-Secret": code},
     )
     assert status == 200 and [i["id"] for i in opened["ideas"]] == [paid["id"]]
     assert pat.get("/api/suite/home")["revenue"]["total_cents"] == 4_99
@@ -1608,7 +1608,7 @@ def test_hosted_stocks_needs_the_app_and_keeps_each_member_private(cloud):
     status, _ = visitor.call(
         "GET",
         f"/api/public/{made['link']['token']}/paid?email=vi%40example.com",
-        headers={"Aira-Secret": paid["code"]},
+        headers={"Monosage-Secret": paid["code"]},
     )
     assert status == 200
     # another organization sees none of it

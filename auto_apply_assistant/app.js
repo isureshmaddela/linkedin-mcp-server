@@ -191,6 +191,8 @@ Aira.fileToBase64 = fileToBase64;
 const fmt = {
   stage: (stage) => (stage || "discovered").replaceAll("_", " "),
   title: (text) => (text || "").replace(/\b\w/g, (c) => c.toUpperCase()),
+  // A job source id as people read it: aira_jobs is the free job boards, shown as "Jobs".
+  source: (id) => ({ aira_jobs: "Jobs" })[id] || String(id || "").replaceAll("_", " "),
   date: (value) => {
     if (!value) return "—";
     // A calendar day ("2026-11-20") is that day wherever you are: new Date() would read it as UTC midnight,
@@ -661,15 +663,16 @@ function renderNav(counts = {}) {
   const current = Router.current && Router.current.path[0];
   const app = apps.current();
   const items = visibleNav();
+  const menuItems = items.filter((item) => item.group !== "Account");
   $("brandApp").textContent = app.name || "Monosage";
   const link = (item) => h("a", { href: `#/${item.id}`, dataset: { section: item.id }, "aria-current": current === item.id ? "page" : "false", "aria-keyshortcuts": `g ${item.key}`, onclick: () => { if (window.innerWidth <= 900) setSidebarOpen(false); } }, Aira.icon(item.icon), h("span", { text: item.label }), shown[item.id] ? h("span", { class: "count", text: shown[item.id] }) : null);
   // The app's own groups first, the Account group (shown under every app) last.
-  const groups = [...new Set(items.map((item) => item.group))].sort((a, b) => (a === "Account") - (b === "Account"));
+  const groups = [...new Set(menuItems.map((item) => item.group))];
   const head = h("div", { class: "nav-apphead", id: "navAppHead" }, Aira.icon(app.icon || "dashboard"), h("div", {}, h("strong", { text: app.name || "Monosage" }), app.tagline ? h("span", { class: "muted", text: app.tagline }) : null));
   const extra = Aira.shell ? Aira.shell.navExtras(app) : { before: [], after: [] };
   $("primaryNav").replaceChildren(head, ...extra.before, ...groups.map((group) => {
     const labelId = `navGroup${group.replace(/\W+/g, "")}`;
-    return h("div", { class: "nav-group", role: "group", "aria-labelledby": labelId }, h("span", { class: "nav-label", id: labelId, text: group }), ...items.filter((item) => item.group === group).map(link));
+    return h("div", { class: "nav-group", role: "group", "aria-labelledby": labelId }, h("span", { class: "nav-label", id: labelId, text: group }), ...menuItems.filter((item) => item.group === group).map(link));
   }), ...extra.after);
   if (Aira.shell) Aira.shell.afterNav();
   const bottom = $("bottomNav");
@@ -759,7 +762,7 @@ function renderSwitcher(panel) {
   const industry = entries.filter((entry) => entry.category === "industry");
   const links = [];
   const local = apps.state.installation === "local";
-  if (local && apps.state.accountUrl) links.push(h("a", { class: "menu-item", role: "menuitem", tabindex: "-1", href: `${apps.state.accountUrl}/#/org`, target: "_blank", rel: "noopener noreferrer" }, Aira.icon("settings"), h("span", { text: "Manage your account" })));
+  if (local && apps.state.accountUrl) links.push(h("a", { class: "menu-item", role: "menuitem", tabindex: "-1", href: `${apps.state.accountUrl}/#/org`, target: "_blank", rel: "noopener noreferrer" }, Aira.icon("recruiters"), h("span", { text: "Your organization online" })));
   if (!local && apps.state.localUrl) links.push(h("a", { class: "menu-item", role: "menuitem", tabindex: "-1", href: apps.state.localUrl, target: "_blank", rel: "noopener noreferrer" }, Aira.icon("dashboard"), h("span", { text: "Local workspace" })));
   const can = Aira.cloud && Aira.cloud.can;
   if (!local && can && (can("billing.manage") || can("org.settings"))) links.push(h("a", { class: "menu-item", role: "menuitem", tabindex: "-1", href: "#/org/apps" }, Aira.icon("more"), h("span", { text: "More apps" })));
@@ -793,16 +796,19 @@ function renderAccount() {
   const cloud = Aira.cloud || null;
   const me = cloud && cloud.me;
   const links = [];
-  if (me && me.kind === "member") {
-    if (cloud.isStaff && cloud.isStaff()) links.push({ label: "Manage your account", href: "#/org", icon: "settings" });
-    else links.push({ label: "Account settings", href: "#/settings", icon: "settings" });
-    if (Array.isArray(me.orgs) && me.orgs.length > 1) links.push({ label: "Switch organization", href: "#/switch-org", icon: "recruiters" });
-  } else if (!me && apps.state.installation === "local" && apps.state.accountUrl) {
-    links.push({ label: "Manage your account", href: `${apps.state.accountUrl}/#/org`, icon: "settings", external: true });
-  }
-  for (const extra of Aira.accountLinks) if (!extra.when || extra.when(user)) links.push(extra);
-  $("accountLinks").replaceChildren(...links.map((entry) => h("a", { class: "menu-item", role: "menuitem", tabindex: "-1", href: entry.href, ...(entry.external ? { target: "_blank", rel: "noopener noreferrer" } : {}) }, Aira.icon(entry.icon || "settings"), h("span", { text: entry.label }))));
-  $("accountLinks").hidden = !links.length;
+  // Everything about the account is here, like a Google account menu: the left menu keeps only the open app.
+  const pages = visibleNav().filter((item) => item.group === "Account");
+  const settings = pages.find((item) => item.id === "settings");
+  if (me && me.kind === "member" && cloud.isStaff && cloud.isStaff()) links.push({ label: "Organization settings", href: "#/org", icon: "recruiters" });
+  for (const item of pages) if (item !== settings) links.push({ label: item.label, href: `#/${item.id}`, icon: item.icon, section: item.id });
+  if (me && me.kind === "member" && Array.isArray(me.orgs) && me.orgs.length > 1) links.push({ label: "Switch organization", href: "#/switch-org", icon: "recruiters" });
+  // A build's own entries (Display and reading from life.js) once each; the online account stays in the launcher.
+  for (const extra of Aira.accountLinks) if ((!extra.when || extra.when(user)) && !links.some((entry) => entry.href === extra.href)) links.push(extra);
+  const current = Router.current && Router.current.path[0];
+  const item = (entry) => h("a", { class: "menu-item", role: "menuitem", tabindex: "-1", href: entry.href, ...(entry.section && entry.section === current ? { "aria-current": "page" } : {}), ...(entry.external ? { target: "_blank", rel: "noopener noreferrer" } : {}) }, Aira.icon(entry.icon || "settings"), h("span", { text: entry.label }));
+  const manage = h("a", { class: "btn secondary account-manage", role: "menuitem", tabindex: "-1", href: settings ? "#/settings" : "#/security", dataset: { section: settings ? "settings" : "security" } }, h("span", { text: "Manage your account" }));
+  $("accountLinks").replaceChildren(manage, ...links.map(item));
+  $("accountLinks").hidden = false;
 }
 Aira.renderAccount = renderAccount;
 
@@ -823,10 +829,25 @@ async function refreshStatus() {
 }
 Aira.refreshStatus = refreshStatus;
 
+const darkQuery = window.matchMedia("(prefers-color-scheme: dark)");
 function applyTheme(theme) {
   if (theme) document.documentElement.setAttribute("data-theme", theme); else document.documentElement.removeAttribute("data-theme");
   Aira.remember("theme", theme || "");
+  paintThemeButton();
 }
+// The button shows where a click takes you: a moon in the light theme, a sun in the dark one.
+function paintThemeButton() {
+  const button = $("themeToggle");
+  if (!button) return;
+  const current = document.documentElement.getAttribute("data-theme");
+  const dark = current ? current === "dark" : darkQuery.matches;
+  const label = dark ? "Switch to the light theme" : "Switch to the dark theme";
+  button.setAttribute("aria-label", label);
+  button.title = dark ? "Light theme" : "Dark theme";
+  button.setAttribute("aria-pressed", String(dark));
+  button.dataset.mode = dark ? "dark" : "light";
+}
+darkQuery.addEventListener("change", paintThemeButton);
 
 // Sign-in modes: login, register, forgot (ask for a reset code) and reset (code + new password).
 const AUTH_MODES = {

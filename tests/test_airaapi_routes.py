@@ -1013,7 +1013,7 @@ def test_saved_searches_and_monitor_endpoints(env, connected):
     )
     notifications = connected.ok("GET", "/api/notifications")["notifications"]
     assert [item["title"] for item in notifications] == ["Monitor changed: Renamed"]
-    assert notifications[0]["link"].startswith("#/airaapi?tab=history&search=")
+    assert notifications[0]["link"].startswith("#/api?tab=history&search=")
     connected.ok("DELETE", f"/api/airaapi/monitors/{monitor['id']}")
     connected.ok("DELETE", f"/api/airaapi/saved/{saved['id']}")
     status, _, _ = connected.call("DELETE", f"/api/airaapi/saved/{saved['id']}")
@@ -1652,7 +1652,7 @@ def test_a_decompression_bomb_in_a_stored_result_is_refused_not_inflated(
     db.close()
     started = time.monotonic()
     status, body, _ = connected.get(f"/api/airaapi/searches/{record['id']}")
-    assert status == 400 and "larger than Aira stores" in body["error"]
+    assert status == 400 and "larger than Monosage stores" in body["error"]
     assert time.monotonic() - started < 10
     assert connected.get("/api/airaapi/overview")[0] == 200  # the server is fine
     status, _, _ = connected.get(

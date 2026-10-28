@@ -720,7 +720,7 @@ def test_dial_info_gives_a_number_to_dial_and_warns_about_the_do_not_contact_lis
         == "https://voice.google.com/u/0/calls?a=nc,%2B15125550100"
     )
     assert info["calling_from"] == "+1 512 555 0199" and info["blocked"] == ""
-    assert any("Aira never dials" in line for line in info["reminders"])
+    assert any("Monosage never dials" in line for line in info["reminders"])
     mail.add_suppression(db, "(512) 555-0100", "asked not to be called")
     assert "do-not-contact" in calls.dial_info(db, lead, settings, NOW)["blocked"]
     assert calls.dial_info(db, {"phone": ""}, settings)["tel_url"] == ""

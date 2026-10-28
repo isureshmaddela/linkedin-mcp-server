@@ -842,7 +842,7 @@
     const facts = factList([
       ["Monosage id", monoCopy(record.id, "Copy Monosage id")],
       ["SerpApi id", record.serpapi_id ? monoCopy(record.serpapi_id, "Copy SerpApi search id") : "none (served locally or failed before reaching SerpApi)"],
-      ["Source", fmt.title(String(record.source).replaceAll("_", " "))],
+      ["Source", fmt.title(Aira.fmt.source(record.source))],
       ["HTTP status", record.http_status || "–"],
       ["Duration", record.cache_hit ? "0 ms (cache)" : ms(record.duration_ms)],
       ["Results", record.result_count === undefined ? "–" : num(record.result_count) + (record.main_result_key ? ` in ${record.main_result_key}` : "")],

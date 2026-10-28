@@ -40,7 +40,7 @@ def _ask_for_code(env, caplog, email=EMAIL) -> tuple[int, dict, str | None]:
 def test_a_reset_code_sets_a_new_password_and_signs_out_everywhere(env, caplog):
     old_session = _register(env)
     status, body, code = _ask_for_code(env, caplog)
-    assert status == 200 and "window where Aira is running" in body["message"]
+    assert status == 200 and "window where Monosage is running" in body["message"]
     assert code, "the code is shown in the console"
     with sqlite3.connect(env.tmp_path / "accounts.sqlite3") as connection:
         stored = connection.execute("SELECT code_hash FROM password_resets").fetchone()[
@@ -247,7 +247,7 @@ def _custom_mail(smtp, **extra):
         "smtp_username": "sender@example.com",
         "password": "mail-secret",
         "from_email": "sender@example.com",
-        "from_name": "Aira at home",
+        "from_name": "Monosage at home",
         **extra,
     }
 
@@ -347,7 +347,7 @@ def test_the_reset_code_is_emailed_when_a_mail_server_is_set(
     messages = _wait_for(smtp, 2)
     assert len(messages) == 2
     mail = smtp.parsed(-1)
-    assert mail["To"] == EMAIL and "Aira at home" in mail["From"]
+    assert mail["To"] == EMAIL and "Monosage at home" in mail["From"]
     assert code in mail.get_payload(decode=True).decode()
     status, _body = env.api().call(
         "POST",

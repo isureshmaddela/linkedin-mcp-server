@@ -19,6 +19,15 @@ I18N = ROOT / "auto_apply_assistant" / "i18n"
 PLACEHOLDER = re.compile(r"\{\d+\}")
 
 
+def menu_text(page, href: str) -> str:
+    """The text of a profile-menu link (the account's pages live there, not in the left menu)."""
+    page.click("#accountBtn")
+    page.wait_for_selector("#accountMenu:not([hidden])")
+    text = page.locator(f"#accountMenu a[href='{href}']").inner_text().strip()
+    page.keyboard.press("Escape")
+    return text
+
+
 def test_languages_and_normalizing():
     assert i18n.CODES == ("en", "te", "hi")
     assert i18n.normalize("te-IN") == "te" and i18n.normalize("HI") == "hi"
@@ -113,17 +122,11 @@ def test_the_screens_follow_the_chosen_language(browser, env):
     )
     page.goto(env.base + "/#/today")
     page.wait_for_selector(".life-hero h1", timeout=20000)
-    assert (
-        page.locator("#primaryNav a[data-section='today']").inner_text().strip()
-        == "Today"
-    )
+    assert menu_text(page, "#/today") == "Today"
     page.click("#langBtn")
     page.click(".lang-menu button[lang='te']")
     page.wait_for_function("document.documentElement.lang === 'te'")
-    assert (
-        page.locator("#primaryNav a[data-section='today']").inner_text().strip()
-        == "ఈరోజు"
-    )
+    assert menu_text(page, "#/today") == "ఈరోజు"
     assert page.locator("#langBtn .lang-name").inner_text() == "తెలుగు"
     # patterns put the number (and a known word) into the translation; unknown text stays as written
     assert (
@@ -177,9 +180,6 @@ def test_the_screens_follow_the_chosen_language(browser, env):
     page.click("#langBtn")
     page.click(".lang-menu button[lang='en']")
     page.wait_for_function("document.documentElement.lang === 'en'")
-    assert (
-        page.locator("#primaryNav a[data-section='today']").inner_text().strip()
-        == "Today"
-    )
+    assert menu_text(page, "#/today") == "Today"
     assert not [p for p in problems if "status of 401" not in p], problems
     context.close()

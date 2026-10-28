@@ -36,9 +36,10 @@ CAREERS_SECTIONS = [
     "analytics",
     "careers",
 ]
-# The Account group shows under every app: Today and Display and reading (each person's everyday pages), the
-# Business hub (industry apps) and Settings.
-ACCOUNT_SECTIONS = ["today", "display", "hub", "settings"]
+# The Account pages (Today, Display and reading, the Business hub, Settings) live in the profile menu at the top
+# right, like a Google account: the left menu shows only the open app.
+ACCOUNT_SECTIONS: list[str] = []
+ACCOUNT_MENU = ["today", "display", "hub"]
 
 
 def shot(page, name: str) -> None:
@@ -123,7 +124,7 @@ def test_the_switcher_lists_the_apps_and_each_app_shows_only_its_sections(browse
         == "careers"
     )
     assert switcher.locator(".app-tile.disabled").count() == 0
-    assert switcher.locator(".popover-title").text_content() == "Aira apps"
+    assert switcher.locator(".popover-title").text_content() == "apps"
     shot(page, "02-switcher")
 
     # Marketing holds Leads: two sections, and the account group stays.
@@ -149,16 +150,22 @@ def test_the_switcher_lists_the_apps_and_each_app_shows_only_its_sections(browse
 
     # Developers: the API console is its own app.
     open_switcher(page).locator(".app-tile[data-app='api']").click()
-    page.wait_for_url(re.compile(r"#/airaapi"))
+    page.wait_for_url(re.compile(r"#/api"))
     page.wait_for_selector("#primaryNav a[data-section='airaapi']")
     assert sections(page)[0] == "airaapi"
-    assert sections(page)[-len(ACCOUNT_SECTIONS) :] == ACCOUNT_SECTIONS
+    assert not {"today", "display", "hub", "settings"} & set(sections(page))
     api_sections = sections(page)
     assert page.locator("#brandApp").inner_text() == "Developers"
     shot(page, "04-api")
 
-    # Settings belongs to the account: opening it keeps the app you were in.
-    page.click("#primaryNav a[data-section='settings']")
+    # Settings belongs to the account (Manage your account): opening it keeps the app you were in.
+    page.click("#accountBtn")
+    page.wait_for_selector("#accountMenu:not([hidden])")
+    menu_sections = page.locator("#accountMenu a.menu-item").evaluate_all(
+        "(links) => links.map((a) => a.getAttribute('href').replace(/^#\//, ''))"
+    )
+    assert menu_sections == ACCOUNT_MENU
+    page.click("#accountMenu a.account-manage")
     page.wait_for_url(re.compile(r"#/settings"))
     until(page, lambda: "Settings" in page.locator(".crumbs").inner_text())
     assert sections(page) == api_sections
@@ -199,7 +206,7 @@ def test_deep_links_land_inside_the_right_app_and_chords_open_apps(browser, env)
     page.wait_for_url(re.compile(r"#/marketing"))
     page.keyboard.press("g")
     page.keyboard.press("p")
-    page.wait_for_url(re.compile(r"#/airaapi"))
+    page.wait_for_url(re.compile(r"#/api"))
     page.keyboard.press("g")
     page.keyboard.press("c")
     page.wait_for_url(re.compile(r"#/dashboard"))
@@ -266,7 +273,7 @@ def test_the_switcher_works_from_the_keyboard(browser, env):
     page.keyboard.press("ArrowRight")
     page.keyboard.press("ArrowRight")
     page.keyboard.press("Enter")
-    page.wait_for_url(re.compile(r"/developers#/airaapi"))
+    page.wait_for_url(re.compile(r"/developers#/api"))
     page.wait_for_selector("#primaryNav a[data-section='airaapi']")
     # An outside click closes an open menu.
     open_switcher(page)
@@ -287,10 +294,12 @@ def test_the_account_menu_names_the_person_and_signs_out(browser, env, account_u
     menu = page.locator("#accountMenu")
     assert menu.get_attribute("role") == "menu"
     assert menu.locator("#accountEmail").inner_text() == "leads-ui@example.com"
-    manage = menu.locator("a.menu-item", has_text="Manage your account")
-    assert manage.get_attribute("href") == f"{account_url}/#/org"
-    assert manage.get_attribute("rel") == "noopener noreferrer"
-    assert menu.locator("#themeToggle").is_visible()
+    # Manage your account opens Settings here; the online account is only in the launcher.
+    manage = menu.locator("a.account-manage")
+    assert manage.inner_text().strip() == "Manage your account"
+    assert manage.get_attribute("href") == "#/settings"
+    assert menu.locator(f"a[href^='{account_url}']").count() == 0
+    assert page.locator("#themeToggle").is_visible()
     assert menu.locator("#shortcutsBtn").is_visible()
     assert menu.locator("#logoutBtn").is_visible()
     assert menu.locator("a.menu-item", has_text="Switch organization").count() == 0
@@ -298,15 +307,20 @@ def test_the_account_menu_names_the_person_and_signs_out(browser, env, account_u
     # The switcher also offers the account for a local installation that knows where it lives.
     page.keyboard.press("Escape")
     switcher = open_switcher(page)
-    link = switcher.locator("a.menu-item", has_text="Manage your account")
+    link = switcher.locator("a.menu-item", has_text="Your organization online")
     assert link.get_attribute("href") == f"{account_url}/#/org"
     page.keyboard.press("Escape")
-    # Theme toggles from the menu; sign out ends the session.
-    page.click("#accountBtn")
-    page.wait_for_selector("#accountMenu:not([hidden])")
+    # The sun and moon in the top bar switch the theme; sign out ends the session.
+    before = page.get_attribute("#themeToggle", "title")
     page.click("#themeToggle")
     theme = page.evaluate("document.documentElement.getAttribute('data-theme')")
     assert theme in ("dark", "light")
+    assert page.get_attribute("#themeToggle", "title") == (
+        "Light theme" if theme == "dark" else "Dark theme"
+    )
+    assert page.get_attribute("#themeToggle", "title") != before
+    page.click("#accountBtn")
+    page.wait_for_selector("#accountMenu:not([hidden])")
     assert not problems, problems
     page.click("#logoutBtn")
     page.wait_for_selector("#authScreen:not([hidden])")
@@ -320,9 +334,14 @@ def test_without_an_account_url_the_menu_has_no_account_link(browser, env):
     page.wait_for_selector("#primaryNav a[data-section='leads']")
     page.click("#accountBtn")
     page.wait_for_selector("#accountMenu:not([hidden])")
-    # No link to an account; the person's own Display and reading is the only entry.
+    # No link to an online account: Manage your account and the account's own pages, all here.
     labels = page.locator("#accountMenu a.menu-item").all_inner_texts()
-    assert labels == ["Display and reading"], labels
+    assert "Display and reading" in labels, labels
+    assert page.locator("#accountMenu a[target='_blank']").count() == 0
+    assert (
+        page.locator("#accountMenu a.account-manage").get_attribute("href")
+        == "#/settings"
+    )
     assert not problems, problems
     context.close()
 

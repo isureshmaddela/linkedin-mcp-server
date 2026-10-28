@@ -2692,7 +2692,7 @@ body.less-motion .ai-typing span { animation: none; opacity: .7; }
   .app { grid-template-columns: var(--sidebar) minmax(0, 1fr); grid-template-rows: var(--topbar) minmax(0, 1fr); }
   .app > .main { display: contents; }
   .topbar { grid-column: 1 / -1; grid-row: 1; gap: 14px; height: var(--topbar); padding: 0 18px 0 14px; border-bottom: 1px solid var(--line); background: var(--surface); backdrop-filter: none; }
-  .app-brand { width: calc(var(--sidebar) - 28px); }
+  .app-brand { width: auto; min-width: calc(var(--sidebar) - 28px); max-width: 360px; flex: none; }
   .sidebar { grid-column: 1; grid-row: 2; top: var(--topbar); height: calc(100vh - var(--topbar)); padding: 14px 12px 12px 10px; border-right: 0; background: transparent; }
   .sidebar > .brand, .nav-apphead { display: none; }
   .nav-apphead + .nav-group { padding-top: 0; border-top: 0; }
@@ -2728,3 +2728,13 @@ body.less-motion .ai-typing span { animation: none; opacity: .7; }
 .nav a.shell-has-subnav:not(.shell-folded):not([aria-current="page"]) + .shell-subnav { display: none; }
 /* On a phone the search box needs the room: the LinkedIn, Ollama and SerpApi pills wait for a wider screen. */
 @media (max-width: 600px) { .status-strip { display: none; } }
+
+/* Sun and moon in the top bar: the icon shows the theme a click switches to. */
+.theme-btn svg { width: 20px; height: 20px; stroke: currentColor; fill: none; stroke-width: 1.9; stroke-linecap: round; stroke-linejoin: round; }
+.theme-btn .theme-sun, .theme-btn[data-mode="dark"] .theme-moon { display: none; }
+.theme-btn[data-mode="dark"] .theme-sun { display: block; }
+
+/* The profile menu holds the account: Manage your account, then every account page. */
+.account-menu { width: 320px; }
+.account-manage { display: flex; justify-content: center; margin: 2px 8px 8px; border-radius: 999px; }
+.account-menu a.menu-item[aria-current="page"] { background: var(--app-soft); color: var(--app-ink); }

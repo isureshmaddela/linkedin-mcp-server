@@ -302,7 +302,7 @@ def test_the_left_menu_shows_the_play_folders_and_each_opens_its_tab(browser, en
             .strip()
             == label
         )
-    assert page.title() == "Games · Play · Aira"
+    assert page.title() == "Games · Play · Monosage"
 
     # The folder you are on, in the middle of a game, goes back to the games.
     page.click(".play-tile:has-text('Quick maths')")

@@ -628,7 +628,7 @@ def test_selling_a_deck_on_the_local_build(env, api, local_index):
             env,
             "GET",
             f"/api/public/{token}/cards",
-            headers={"Aira-Secret": "WRONG-CODE1"},
+            headers={"Monosage-Secret": "WRONG-CODE1"},
         )[0]
         == 403
     )
@@ -646,7 +646,7 @@ def test_selling_a_deck_on_the_local_build(env, api, local_index):
     )
     paid = pat.post(f"/api/learn/sales/{listed['sales'][0]['id']}/paid", {})
     status, full = _public(
-        env, "GET", f"/api/public/{token}/cards", headers={"Aira-Secret": paid["code"]}
+        env, "GET", f"/api/public/{token}/cards", headers={"Monosage-Secret": paid["code"]}
     )
     assert status == 200 and len(full["cards"]) == 10
     assert pat.get("/api/learn/sales?status=paid")["summary"]["earned_cents"] == 350
@@ -765,7 +765,7 @@ def test_hosted_members_sell_their_own_decks_and_organizations_stay_apart(cloud)
     status, paid = coach.call("POST", f"/api/learn/sales/{sale_id}/paid", {})
     assert status == 200, paid
     status, full = visitor.call(
-        "GET", f"/api/public/{token}/cards", headers={"Aira-Secret": paid["code"]}
+        "GET", f"/api/public/{token}/cards", headers={"Monosage-Secret": paid["code"]}
     )
     assert status == 200 and len(full["cards"]) == 4
     assert coach.call("GET", "/api/learn/stats")[0] == 200

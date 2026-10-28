@@ -405,3 +405,18 @@ app working end to end with one account, tests per app, more features where they
   walk's Upload click (patchright `.last` with one match never resolves).
 - **Not applied:** hiding every page's own tab bar on desktop (about 30 browser tests click it; Sales, Social and
   Careers hide it themselves); shared `link/mail/history/image` icons (Marketing ships its own).
+
+## Monosage name, account menu, sun/moon (2026-10-27, night)
+- **Name:** the product is now called Monosage in everything people read: the logo (top bar "Monosage <app>", sign-in
+  and menu brand "MONOSAGE" with an "M" mark), page titles, sentences, emails, server messages and the te/hi tables
+  (keys and values renamed together). "Aira Jobs" is "Jobs", "Aira apps" is "Apps", the API console's address is
+  `#/api` (`Router.parse` maps it to the `airaapi` view; old `#/airaapi` links are rewritten). The code name stays:
+  `window.Aira`, `AIRA_*` settings, `aira_*` ids and error codes, `/api/airaapi/*`, the `aira` package, `X-Aira-*`
+  headers, the database and its folder, so existing data, keys and scripts keep working. Saved records written
+  before the rename (old run messages) keep their wording. Docs under `docs/` still say Aira.
+- **Account menu (top right):** "Manage your account" opens Settings here (it used to open the online account at
+  AIRA_ACCOUNT_URL); under it every Account page (Today, Display and reading, Business hub; hosted: Security, Activity,
+  My workspace, Organization settings for staff). The left menu shows only the open app. The online account link
+  stays in the launcher as "Your organization online".
+- **Theme:** a sun/moon button in the top bar (moon in the light theme, sun in the dark one) replaces the "Theme" menu
+  item; it follows the system theme until clicked.
