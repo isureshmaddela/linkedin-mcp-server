@@ -39,7 +39,7 @@
   // ---------------------------------------------------------------------------
   // Sections and navigation
   // ---------------------------------------------------------------------------
-  const WORKSPACE_IDS = ["dashboard", "jobs", "applications", "interviews", "recruiters", "documents", "analytics", "careers", "settings"]; // Leads is the business's (Marketing), not a candidate's
+  const WORKSPACE_IDS = ["dashboard", "jobs", "autopilot", "needs", "applications", "interviews", "recruiters", "emails", "offers", "profile", "documents", "analytics", "careers", "settings"]; // Leads is the business's (Marketing), not a candidate's
   const LOCAL_NAV = Aira.NAV.map((item) => ({ ...item }));
   // The app a registered section belongs to when its definition does not say: the candidate's own sections are
   // Careers, organization administration is the Account app, coaching is its own app-like group.

@@ -15,7 +15,7 @@
     const stepNode = (state, title, text, action) => h("div", { class: `step ${state}` }, h("div", {}, h("strong", { text: title }), h("span", { text })), action || h("span"));
 
     // Step 1 profile
-    steps.append(stepNode(profileReady ? "done" : "active", "Complete your profile", profileReady ? "Contact details and preferences are ready." : `Missing: ${(Aira.state.profile && Aira.state.profile.completeness ? Aira.state.profile.completeness.missing_required : []).join(", ") || "profile"}.`, profileReady ? null : h("a", { class: "btn secondary sm", href: "#/settings/profile", text: "Open profile" })));
+    steps.append(stepNode(profileReady ? "done" : "active", "Complete your profile", profileReady ? "Contact details and preferences are ready." : `Missing: ${(Aira.state.profile && Aira.state.profile.completeness ? Aira.state.profile.completeness.missing_required : []).join(", ") || "profile"}.`, profileReady ? null : h("a", { class: "btn secondary sm", href: "#/profile?tab=profile", text: "Open profile" })));
     // Step 2 documents
     // Once the application is sent (here or another way) the preparation steps are no longer to-dos.
     const sentText = "Not needed: this application has been sent.";
@@ -279,36 +279,68 @@
     { id: "closed", label: "Closed", stages: ["rejected", "withdrawn", "failed"] },
   ];
 
-  const APP_TABS = [
-    { id: "pipeline", label: "Pipeline", icon: "applications" },
-    { id: "queue", label: "Queue & review", icon: "careers-check" },
-    { id: "offers", label: "Offers", icon: "careers-coin" },
-    { id: "email", label: "Email updates", icon: "careers-mail" },
-  ];
-
-  Aira.views.applications = async (main, route) => {
-    const asked = route.query.tab || Aira.recall("applications.tab", "pipeline");
-    const tab = APP_TABS.some((item) => item.id === asked) ? asked : "pipeline";
-    Aira.remember("applications.tab", tab);
-    Aira.careersFolders("applications", APP_TABS, tab);
+  // Applications is the pipeline. What waits for you is Needs you (Apply); Email updates and Offers are under
+  // Follow up. Each is its own page, drawn by the same helper.
+  async function careersPage(main, { title, about, actions = [], draw }) {
     const content = h("div", {});
-    main.replaceChildren(
-      h("div", { class: "page-head" }, h("div", {}, h("h1", { text: "Applications" }), h("p", { text: "Every status change is recorded with who, when, and why. Move cards only through allowed transitions." })), h("div", { class: "page-actions" }, h("button", { type: "button", class: "btn secondary sm", text: "Download job search log", title: "Every application as a spreadsheet (CSV): dates, employers, how you applied. Many unemployment offices ask for this.", onclick: (event) => withBusy(event.currentTarget, () => Aira.download("/api/jobs?format=csv&scope=applications", `aira-job-search-log-${new Date().toISOString().slice(0, 10)}.csv`)) }), h("a", { class: "btn secondary sm", href: "#/applications?tab=email", text: "Update from email" }))),
-      Aira.careersStrip(ui.tabs(APP_TABS, tab, (id) => router.go(["applications"], { tab: id }, { replace: true }))),
-      content,
-    );
-    if (route.path[1]) Aira.openJob(route.path[1], { tab: "apply" });
+    main.replaceChildren(h("div", { class: "page-head" }, h("div", {}, h("h1", { text: title }), h("p", { text: about })), actions.length ? h("div", { class: "page-actions" }, ...actions) : null), content);
     const load = async () => {
       content.replaceChildren(ui.skeleton(5));
-      try {
-        if (tab === "pipeline") await renderPipeline(content, route);
-        else if (tab === "queue") await renderQueue(content);
-        else if (tab === "offers") await renderOffers(content);
-        else await renderEmail(content, route);
-      } catch (error) { content.replaceChildren(ui.error(error, load)); }
+      try { await draw(content); } catch (error) { content.replaceChildren(ui.error(error, load)); }
     };
     Aira.state.views.applicationsReload = load;
     await load();
+  }
+
+  Aira.views.applications = async (main, route) => {
+    if (route.path[1]) Aira.openJob(route.path[1], { tab: "apply" });
+    await careersPage(main, {
+      title: "Applications",
+      about: "Every status change is recorded with who, when, and why. Move cards only through allowed transitions.",
+      actions: [h("button", { type: "button", class: "btn secondary sm", text: "Download job search log", title: "Every application as a spreadsheet (CSV): dates, employers, how you applied. Many unemployment offices ask for this.", onclick: (event) => withBusy(event.currentTarget, () => Aira.download("/api/jobs?format=csv&scope=applications", `aira-job-search-log-${new Date().toISOString().slice(0, 10)}.csv`)) }), h("a", { class: "btn secondary sm", href: "#/emails", text: "Update from email" })],
+      draw: (content) => renderPipeline(content, route),
+    });
+  };
+
+  Aira.views.offers = async (main) => {
+    await careersPage(main, { title: "Offers", about: "Compare what employers offered with the pay you want, and ask for more.", draw: renderOffers });
+  };
+
+  Aira.views.emails = async (main, route) => {
+    await careersPage(main, { title: "Email updates", about: "Paste or import an employer's email: Monosage reads the dates, links and next steps and updates the job.", draw: (content) => renderEmail(content, route) });
+  };
+
+  // Needs you: one place for everything that waits for the person. Auto-apply's held runs come first (their
+  // questions, with the AI's drafts, or a filled form waiting for a click), then the review queue (packets to review,
+  // approved applications to send, applications opened and not yet recorded). A job held by Auto-apply is not
+  // listed twice.
+  Aira.views.needs = async (main) => {
+    const held = h("div", {});
+    const queue = h("div", {});
+    main.replaceChildren(
+      h("div", { class: "page-head" }, h("div", {}, h("h1", { text: "Needs you" }), h("p", { text: "Questions Monosage could not answer, forms waiting for your click and applications to review or send. Answer once and the application goes on." })), h("div", { class: "page-actions" }, h("a", { class: "btn secondary sm", href: "#/autopilot", text: "Open Auto-apply" }))),
+      held,
+      queue,
+    );
+    let heldJobs = new Set();
+    let firstQueue = true;
+    const drawQueue = async () => {
+      if (firstQueue) queue.replaceChildren(ui.skeleton(4));
+      firstQueue = false;
+      try { await renderQueue(queue, { skip: heldJobs }); } catch (error) { queue.replaceChildren(ui.error(error, drawQueue)); }
+      Aira.careersNeeds({ force: true });
+    };
+    Aira.state.views.applicationsReload = drawQueue;
+    await Aira.renderAutopilot(held, {
+      part: "needs",
+      onData: (data) => {
+        const jobs = new Set(data.open.map((run) => run.job_id));
+        const changed = jobs.size !== heldJobs.size || [...jobs].some((id) => !heldJobs.has(id));
+        heldJobs = jobs;
+        if (changed || firstQueue) drawQueue();
+      },
+    });
+    if (firstQueue) await drawQueue();
   };
 
   // -------------------------------------------------------------------------
@@ -368,7 +400,7 @@
       return h("div", { class: "row cas-row", "data-job": item.job_id },
         h("div", {}, h("span", { class: "title", text: item.title || item.job_id }), h("span", { class: "sub", text: meta }), item.bucket === "failed" && item.run_error ? h("span", { class: "sub cas-error", text: item.run_error }) : null),
         h("div", { class: "btn-row" }, ui.stage(item.stage), item.interview ? h("span", { class: "badge stage recruiter_screen", text: "Interview" }) : null,
-          item.bucket === "needs_you" && item.run_id ? h("a", { class: "btn sm", href: "#/jobs/autopilot", text: "Answer" }) : null,
+          item.bucket === "needs_you" && item.run_id ? h("a", { class: "btn sm", href: "#/needs", text: "Answer" }) : null,
           h("button", { type: "button", class: "btn secondary sm", text: "Open", onclick: () => Aira.openJob(item.job_id, { tab: "apply" }) })),
       );
     };
@@ -420,13 +452,14 @@
     draw();
   }
 
-  async function renderQueue(content) {
+  async function renderQueue(content, { skip = new Set() } = {}) {
     const data = await api("/api/applications/queue");
+    for (const key of ["ready", "needs_review", "in_progress"]) data[key] = data[key].filter((job) => !skip.has(job.job_id));
     const budget = h("div", { class: "stats", style: { marginBottom: "16px" } }, h("div", { class: "stat accent" }, h("span", { class: "label", text: "Today's budget" }), h("span", { class: "value", text: `${data.submitted_today} / ${data.daily_limit}` }), h("span", { class: "sub", text: `${data.remaining_today} applications remaining today` })), h("div", { class: "stat" }, h("span", { class: "label", text: "Ready to apply" }), h("span", { class: "value", text: String(data.ready.length) })), h("div", { class: "stat" }, h("span", { class: "label", text: "Needs review" }), h("span", { class: "value", text: String(data.needs_review.length) })), h("div", { class: "stat" }, h("span", { class: "label", text: "In progress" }), h("span", { class: "value", text: String(data.in_progress.length) })));
     const section = (title, items, emptyText, buttonLabel) => h("div", { class: "panel", style: { marginBottom: "14px" } }, h("div", { class: "panel-head" }, h("h3", { text: title }), h("small", { class: "muted", text: String(items.length) })), items.length ? h("div", { class: "list" }, ...items.map((job) => h("div", { class: "row" }, h("div", {}, h("span", { class: "title", text: job.title || job.job_id }), h("span", { class: "sub", text: [job.company, job.prep_status ? `packet ${fmt.stage(job.prep_status)}` : "no packet", job.documents_ready ? "drafts ready" : "drafts missing"].filter(Boolean).join(" · ") }), h("div", { class: "meta" }, ui.stage(job.stage), ui.classification(job.match_classification))), h("div", { class: "aside" }, h("button", { type: "button", class: "btn secondary sm", text: buttonLabel, onclick: () => Aira.openJob(job.job_id, { tab: "apply" }) }))))) : h("div", { class: "empty", text: emptyText }));
     content.replaceChildren(
       budget,
-      h("p", { class: "note info" }, `Automatic applications: ${data.auto_submit.paused ? "paused" : "available"}. ${data.auto_submit.reason} `, h("a", { href: "#/jobs/autopilot", text: "Open Auto-apply" })),
+      h("p", { class: "note info" }, `Automatic applications: ${data.auto_submit.paused ? "paused" : "available"}. ${data.auto_submit.reason} `, h("a", { href: "#/autopilot", text: "Open Auto-apply" })),
       section("Ready to apply", data.ready, "Approve a packet to see it here.", "Apply now"),
       section("Needs your review", data.needs_review, "Nothing is waiting for review.", "Review"),
       section("In progress", data.in_progress, "No application is open right now.", "Record confirmation"),
@@ -598,16 +631,16 @@
     const hour = new Date().getHours();
     const greeting = hour < 12 ? "Good morning" : hour < 18 ? "Good afternoon" : "Good evening";
     const checklist = h("div", { class: "checklist" },
-      checkItem(data.profile.has_resume, "Master resume saved", "#/settings/resume"),
-      checkItem(data.profile.ready, `Profile ${data.profile.percent}% complete`, "#/settings/profile"),
+      checkItem(data.profile.has_resume, "Master resume saved", "#/profile?tab=resume"),
+      checkItem(data.profile.ready, `Profile ${data.profile.percent}% complete`, "#/profile?tab=profile"),
       checkItem(data.linkedin && data.linkedin.state === "connected", "LinkedIn connected", "#/settings/integrations"),
       checkItem(data.ollama, "Ollama running for reviews", "#/settings/integrations"),
     );
-    const hero = h("section", { class: "hero" }, h("div", {}, h("h1", { text: `${greeting}.` }), h("p", { text: c.ready ? `${fmt.plural(c.ready, "application")} ready to submit and ${fmt.plural(c.needs_review, "item")} waiting for review.` : c.recommended ? `${fmt.plural(c.recommended, "recommended job")} waiting. Prepare one today.` : "Search jobs across LinkedIn, Google Jobs, and company portals to start your pipeline." }), h("div", { class: "btn-row", style: { marginTop: "14px" } }, h("a", { class: "btn secondary", href: "#/jobs/recommended", text: "Recommended jobs" }), h("a", { class: "btn secondary", href: "#/applications?tab=queue", text: "Review queue" }))), checklist);
+    const hero = h("section", { class: "hero" }, h("div", {}, h("h1", { text: `${greeting}.` }), h("p", { text: c.ready ? `${fmt.plural(c.ready, "application")} ready to submit and ${fmt.plural(c.needs_review, "item")} waiting for review.` : c.recommended ? `${fmt.plural(c.recommended, "recommended job")} waiting. Prepare one today.` : "Search jobs across LinkedIn, Google Jobs, and company portals to start your pipeline." }), h("div", { class: "btn-row", style: { marginTop: "14px" } }, h("a", { class: "btn secondary", href: "#/jobs/recommended", text: "Recommended jobs" }), h("a", { class: "btn secondary", href: "#/needs", text: "Needs you" }))), checklist);
     const stats = h("div", { class: "stats", style: { marginBottom: "18px" } },
       statLink("Recommended", c.recommended, "#/jobs/recommended", "jobs worth a look"),
-      statLink("Needs review", c.needs_review, "#/applications?tab=queue", "packets or drafts"),
-      statLink("Ready to apply", c.ready, "#/applications?tab=queue", `${data.queue.remaining_today} left today`),
+      statLink("Needs review", c.needs_review, "#/needs", "packets or drafts"),
+      statLink("Ready to apply", c.ready, "#/needs", `${data.queue.remaining_today} left today`),
       statLink("Applied", c.applied, "#/applications", "tracked applications"),
       statLink("Interviewing", c.interviewing, "#/interviews", "active conversations"),
       statLink("Offers", c.offers, "#/applications", "offers received"),

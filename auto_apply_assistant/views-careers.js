@@ -26,7 +26,7 @@
   const serp = () => Aira.serp;
 
   const TABS = [
-    ["jobs", "Jobs"],
+    ["jobs", "Advanced search"], // Google Jobs' own filters; the everyday search is Careers > Jobs
     ["company", "Company"],
     ["salary", "Salary"],
     ["market", "Market"],
@@ -521,7 +521,7 @@
   // ===========================================================================
 
   const emptyForm = () => ({ q: "", location: "", gl: "", radius: "", remote: false, posted: "", employment: "", chips: [], uds: "", udsLabel: "", provider: "" });
-  const PROVIDERS = [["aira", "Jobs (free)"], ["google", "Google Jobs"]];
+  const PROVIDERS = [["aira", "Free job boards"], ["google", "Google Jobs"]];
   /** Kept for the whole page session so switching tabs and coming back shows the same results. */
   const jobsState = { form: null, jobs: [], token: "", filters: [], meta: null, searched: false, selected: new Set(), loadedSaved: "", saved: null, alertLimits: null };
 
@@ -618,7 +618,7 @@
     const savedSelect = h("select", { id: "crSaved", "aria-label": "Saved searches" });
     const deleteSaved = btn("Delete", { icon: "trash", kind: "ghost", sm: true, title: "Delete the loaded saved search", onClick: () => removeSaved() });
     const saveBtn = btn("Save search", { icon: "save", sm: true, onClick: () => saveSearch() });
-    const alertBtn = btn("Add alert", { icon: "bell", sm: true, onClick: () => { changed(); if (st.form.provider === "aira") { Aira.modal({ title: "Alerts for Jobs", body: h("p", { class: "muted", text: "Job alerts run on Google Jobs and need a SerpApi key. To have Jobs searched on a schedule for free, create a search plan in Jobs > Auto-apply and choose \"Ask me first\": matching jobs are filled in and wait for your OK, nothing is sent on its own." }), actions: [{ label: "Close", kind: "ghost" }, { label: "Open Auto-apply", kind: "", onClick: () => { location.hash = "#/jobs/autopilot"; } }] }); return; } if (!st.form.q.trim()) { toast("Enter a search first, then add an alert for it.", "error"); qInput.focus(); return; } openAlertFor(alertSeed(st.form), () => { fill(alertsHint, "Alert created. ", h("a", { href: link("alerts"), text: "Manage alerts" })); }); } });
+    const alertBtn = btn("Add alert", { icon: "bell", sm: true, onClick: () => { changed(); if (st.form.provider === "aira") { Aira.modal({ title: "Alerts for the free job boards", body: h("p", { class: "muted", text: "Job alerts run on Google Jobs and need a SerpApi key. To have the free job boards searched on a schedule, create a search plan in Auto-apply and choose \"Ask me first\": matching jobs are filled in and wait for your OK, nothing is sent on its own." }), actions: [{ label: "Close", kind: "ghost" }, { label: "Open Auto-apply", kind: "", onClick: () => { location.hash = "#/jobs/autopilot"; } }] }); return; } if (!st.form.q.trim()) { toast("Enter a search first, then add an alert for it.", "error"); qInput.focus(); return; } openAlertFor(alertSeed(st.form), () => { fill(alertsHint, "Alert created. ", h("a", { href: link("alerts"), text: "Manage alerts" })); }); } });
     const resetBtn = btn("Clear", { kind: "ghost", sm: true, title: "Clear the search and its results", onClick: () => reset() });
     const alertsHint = h("span", { class: "cr-saved-note", role: "status" });
 
@@ -689,7 +689,7 @@
     const estimate = debounce(async () => {
       if (!st.form.q.trim()) { fill(costBox, h("span", { class: "muted", text: "Enter a search to see what it costs." })); return; }
       const mine = (estimateSeq += 1);
-      if (st.form.provider === "aira") { fill(costBox, h("span", { class: "sk-credit cache", title: "Jobs is Monosage's own search: it never uses a SerpApi search." }, ico("check"), h("span", { text: "Free" }))); return; }
+      if (st.form.provider === "aira") { fill(costBox, h("span", { class: "sk-credit cache", title: "The free job boards are Monosage's own search: they never use a SerpApi search." }, ico("check"), h("span", { text: "Free" }))); return; }
       try {
         const data = await api(`${BASE}/jobs/search`, { method: "POST", body: { ...searchBody(st.form), dry_run: true }, silent: true });
         if (mine !== estimateSeq) return;

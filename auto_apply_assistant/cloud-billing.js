@@ -87,7 +87,7 @@
     ["Coach and admin seats", (p) => (p.plan_id === "enterprise" ? "Custom" : num(p.limits.staff_seats))],
     ["Applications per candidate per day", (p) => (p.plan_id === "enterprise" ? "Custom" : num(p.limits.apps_per_candidate_day))],
     ["Applications per organization per month", (p) => (p.plan_id === "enterprise" ? "Custom" : num(p.limits.apps_per_org_month))],
-    ["Job sources", (p) => ["aira_jobs", "company_boards", "google_jobs", "linkedin"].filter((s) => p.features.includes(`sources.${s}`)).map((s) => ({ aira_jobs: "Jobs", company_boards: "Company boards", google_jobs: "Google Jobs (own SerpApi key)", linkedin: "LinkedIn (own session)" }[s])).join(", ")],
+    ["Job sources", (p) => ["aira_jobs", "company_boards", "google_jobs", "linkedin"].filter((s) => p.features.includes(`sources.${s}`)).map((s) => ({ aira_jobs: "Free job boards", company_boards: "Company boards", google_jobs: "Google Jobs (own SerpApi key)", linkedin: "LinkedIn (own session)" }[s])).join(", ")],
     ["Automatic submission", (p) => (p.features.includes("automation.submit") ? "Yes" : "Review mode only")],
     ["Search plans per candidate", (p) => (p.plan_id === "enterprise" ? "Custom" : num(p.limits.search_plans_per_candidate))],
     ["AI cover letters per month", (p) => (p.plan_id === "enterprise" ? "Custom, or your own model endpoint" : p.features.includes("ai.cover_letters") ? num(p.limits.cover_letters_per_month) : "—")],

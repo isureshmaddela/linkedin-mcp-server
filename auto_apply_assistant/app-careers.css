@@ -2,6 +2,19 @@
 
 /* Jobs: the "Source: ..." chip a link from Analytics adds above the filters. */
 .careers-filter-chip { margin: 0 0 10px; align-items: center; }
+/* All jobs: where to search, as chips (LinkedIn, the free job boards, Google Jobs, company portals). */
+.careers-source-chips { display: flex; flex-wrap: wrap; gap: 8px; margin: 0 0 14px; }
+.careers-source-chip { display: inline-flex; align-items: center; gap: 8px; min-height: 36px; padding: 0 14px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); color: var(--ink-2); font-weight: 700; font-size: 13.5px; text-decoration: none; }
+.careers-source-chip svg { width: 16px; height: 16px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linecap: round; stroke-linejoin: round; }
+.careers-source-chip:hover { background: var(--surface-2); color: var(--ink); }
+.careers-source-chip[aria-current="true"] { border-color: transparent; background: var(--app-soft, var(--brand-soft)); color: var(--app-ink, var(--brand-ink)); }
+.careers-source-chip:focus-visible { outline: 2px solid var(--brand); outline-offset: 2px; }
+/* A phone: the chips stay on one line and scroll sideways inside their row (the page itself never does). */
+@media (max-width: 600px) {
+  .careers-source-chips { flex-wrap: nowrap; overflow-x: auto; scrollbar-width: none; margin-inline: -14px; padding: 2px 14px; }
+  .careers-source-chips::-webkit-scrollbar { display: none; }
+  .careers-source-chip { flex: none; }
+}
 
 /* A job picker: a text box with suggestions (title · company) that fills its field. */
 .careers-job-picker { min-width: 0; }

@@ -40,7 +40,7 @@
     const tiles = h("div", { class: "stats", style: { marginBottom: "16px" } },
       tile("Jobs discovered", m.jobs_discovered, "jobs_discovered", "#/jobs/all"),
       tile("Jobs saved", m.jobs_saved, "jobs_saved", "#/jobs/saved"),
-      tile("Prepared", m.applications_prepared, "applications_prepared", "#/applications?tab=queue"),
+      tile("Prepared", m.applications_prepared, "applications_prepared", "#/needs"),
       tile("Submitted", m.applications_submitted, "applications_submitted", "#/jobs/all?stage=applied"),
       tile("Response rate", m.response_rate, "response_rate", "#/applications", m.response_rate === null ? "No submitted applications yet" : undefined),
       tile("Interview rate", m.interview_rate, "interview_rate", "#/interviews", m.interview_rate === null ? "No submitted applications yet" : undefined),

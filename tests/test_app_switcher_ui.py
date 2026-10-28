@@ -26,16 +26,23 @@ SHOTS = (
     if os.environ.get("SWITCHER_SHOTS")
     else None
 )
+# In the order of a job search, under the headings Home, Find, Apply, Follow up, Your materials and Insights.
 CAREERS_SECTIONS = [
     "dashboard",
     "jobs",
+    "careers",
+    "autopilot",
+    "needs",
     "applications",
     "interviews",
     "recruiters",
+    "emails",
+    "offers",
+    "profile",
     "documents",
     "analytics",
-    "careers",
 ]
+CAREERS_HEADINGS = ["Home", "Find", "Apply", "Follow up", "Your materials", "Insights"]
 # The Account pages (Today, Display and reading, the Business hub, Settings) live in the profile menu at the top
 # right, like a Google account: the left menu shows only the open app.
 ACCOUNT_SECTIONS: list[str] = []
@@ -86,7 +93,7 @@ def test_the_switcher_lists_the_apps_and_each_app_shows_only_its_sections(browse
     assert page.locator("#brandApp").inner_text() == "Careers"
     assert page.locator("#navAppHead strong").inner_text() == "Careers"
     assert page.locator("#navAppHead .muted").inner_text() == "Find, apply and track"
-    assert page.locator(".nav-label").all_text_contents() == ["Careers"]
+    assert page.locator(".nav-label").all_text_contents() == CAREERS_HEADINGS
     shot(page, "01-careers")
 
     switcher = open_switcher(page)
@@ -308,7 +315,10 @@ def test_the_account_menu_names_the_person_and_signs_out(browser, env, account_u
     # account's organization pages (only a person signed in through that account sees them).
     page.keyboard.press("Escape")
     switcher = open_switcher(page)
-    assert switcher.locator("a.menu-item", has_text="Your organization online").count() == 0
+    assert (
+        switcher.locator("a.menu-item", has_text="Your organization online").count()
+        == 0
+    )
     assert switcher.locator(f"a[href^='{account_url}']").count() == 0
     page.keyboard.press("Escape")
     # The sun and moon in the top bar switch the theme; sign out ends the session.
@@ -357,7 +367,7 @@ def test_at_phone_width_the_switcher_lives_in_the_more_sheet(browser, env, dark)
     # The bottom bar carries the current app's quick items; the top-bar switcher is hidden.
     assert page.locator("#bottomNav a[data-section]").evaluate_all(
         "links => links.map(a => a.dataset.section)"
-    ) == ["dashboard", "jobs", "applications", "interviews", "more"]
+    ) == ["dashboard", "jobs", "needs", "applications", "more"]
     assert page.locator("#appSwitcherBtn").is_hidden()
     assert page.locator("#accountBtn").is_visible()
     assert page.locator("#accountBtnEmail").bounding_box()["width"] <= 1

@@ -112,16 +112,68 @@
     },
   };
 
-  const JOB_TABS = [
-    { id: "all", label: "All Jobs", view: "all", icon: "careers-list" },
-    { id: "linkedin", label: "LinkedIn", view: "linkedin", icon: "careers-link" },
-    { id: "aira", label: "Jobs", view: "aira_jobs", icon: "careers" },
-    { id: "google", label: "Google Jobs", view: "google_jobs", icon: "careers-globe" },
-    { id: "portals", label: "Company Portals", view: "portals", icon: "careers-building" },
+  // The Jobs folders in the menu. Where a job came from is a filter on All jobs (the source chips), not a folder.
+  const JOB_FOLDERS = [
+    { id: "all", label: "All jobs", view: "all", icon: "careers-list" },
     { id: "recommended", label: "Recommended", view: "recommended", icon: "careers-sparkle" },
     { id: "saved", label: "Saved", view: "saved", icon: "careers-star" },
-    { id: "autopilot", label: "Auto-apply", view: "", icon: "careers-bolt" },
   ];
+  // The source chips on All jobs (#/jobs/all?from=<id>): each narrows the search form and the list to its source.
+  const JOB_SOURCES = [
+    { id: "all", label: "Every source", view: "all", icon: "careers-list" },
+    { id: "linkedin", label: "LinkedIn", view: "linkedin", icon: "careers-link" },
+    { id: "aira", label: "Free job boards", view: "aira_jobs", icon: "careers" },
+    { id: "google", label: "Google Jobs", view: "google_jobs", icon: "careers-globe" },
+    { id: "portals", label: "Company portals", view: "portals", icon: "careers-building" },
+  ];
+  const FREE_BOARDS = "#/jobs/all?from=aira";
+
+  // Old addresses keep working: a source that was a folder (#/jobs/linkedin, #/jobs?tab=google) is a chip on All jobs,
+  // Auto-apply is its own page, and Applications' Queue & review, Offers and Email updates moved (Needs you, Follow up).
+  Aira.redirects = Aira.redirects || [];
+  Aira.redirects.push((route) => {
+    const [section, sub, ...rest] = route.path;
+    const { tab, ...query } = route.query;
+    if (section === "jobs") {
+      const asked = sub || tab || "";
+      if (asked === "autopilot") return { path: ["autopilot"], query };
+      if (JOB_SOURCES.some((item) => item.id === asked && item.id !== "all")) return { path: ["jobs", "all", ...rest], query: { ...query, from: asked } };
+      if (!sub && tab && JOB_FOLDERS.some((item) => item.id === tab)) return { path: ["jobs", tab], query };
+    }
+    if (section === "applications") {
+      if (tab === "queue") return { path: ["needs"], query };
+      if (tab === "offers") return { path: ["offers"], query };
+      if (tab === "email") return { path: ["emails"], query };
+    }
+    return null;
+  });
+
+  // The count on Needs you (menu and phone bar): jobs held by Auto-apply plus jobs waiting in the review queue.
+  let needsAt = 0;
+  let needsLoad = null;
+  Aira.careersNeeds = async ({ force = false } = {}) => {
+    if (needsLoad) return needsLoad;
+    if (!force && Date.now() - needsAt < 30000) return Aira.state.navCounts ? Number(Aira.state.navCounts.needs) || 0 : 0;
+    needsAt = Date.now();
+    needsLoad = Promise.all([api("/api/autopilot", { silent: true }).catch(() => null), api("/api/applications/queue", { silent: true }).catch(() => null)]).then(([pilot, queue]) => {
+      const held = ((pilot && pilot.open) || []).map((run) => run.job_id);
+      const waiting = queue ? [...(queue.needs_review || []), ...(queue.ready || [])].map((job) => job.job_id) : [];
+      const count = new Set([...held, ...waiting]).size;
+      const before = Aira.state.navCounts ? Number(Aira.state.navCounts.needs) || 0 : 0;
+      if (count !== before) Aira.renderNav({ needs: count });
+      return count;
+    }).finally(() => { needsLoad = null; });
+    return needsLoad;
+  };
+  Aira.afterRoute = Aira.afterRoute || [];
+  Aira.afterRoute.push((section, app) => { if (app && app.id === "careers" && Aira.state.user) Aira.careersNeeds(); });
+
+  Aira.views.autopilot = async (main, route) => {
+    Aira.careersTakeNew(route);
+    const host = h("div");
+    main.replaceChildren(h("div", { class: "page-head" }, h("div", {}, h("h1", { text: "Auto-apply" }), h("p", { text: "Tell Monosage which positions you want. On a schedule it searches, scores every job against your profile and applies to the best matches, within your limits. What it cannot answer waits in Needs you." }))), host);
+    await Aira.renderAutopilot(host, { part: "plans" });
+  };
   const STAGES = ["discovered", "saved", "ready_to_apply", "applying", "needs_review", "applied", "assessment", "recruiter_screen", "technical_interview", "manager_interview", "panel_interview", "final_interview", "offer", "accepted", "rejected", "withdrawn", "failed"];
   const CLASSES = ["Recommended", "Strong Match", "Good Match", "Stretch", "Not Recommended"];
   const SUBMISSION_METHODS = { manual: "You sent Monosage's application", assisted: "Monosage filled it in, you sent it", auto: "Monosage applied for you", outside: "You applied another way" };
@@ -174,8 +226,8 @@
       const structured = ["linkedin", "google_jobs", "aira_jobs", "lever", "ashby", "smartrecruiters"].includes(chosen.source);
       workType.disabled = !structured;
       jobType.disabled = !structured;
-      if (chosen.source === "google_jobs" && !chosen.connected) hint.replaceChildren(`${chosen.label}: `, h("a", { href: KEY_PAGE, text: "connect a SerpApi key in API > Account" }), " (or set SERPAPI_API_KEY in .env), or search ", h("a", { href: "#/jobs/aira", text: "Jobs" }), " for free.");
-      else if (chosen.source === "aira_jobs") hint.textContent = "Jobs searches free job boards (Himalayas, The Muse, Remotive, Jobicy, Arbeitnow) itself: no key, no credits. Each result links back to its board.";
+      if (chosen.source === "google_jobs" && !chosen.connected) hint.replaceChildren(`${chosen.label}: `, h("a", { href: KEY_PAGE, text: "connect a SerpApi key in API > Account" }), " (or set SERPAPI_API_KEY in .env), or search the ", h("a", { href: FREE_BOARDS, text: "free job boards" }), " without a key.");
+      else if (chosen.source === "aira_jobs") hint.textContent = "Free job boards: Monosage searches Himalayas, The Muse, Remotive, Jobicy and Arbeitnow itself, with no key and no credits. Each result links back to its board.";
       else hint.textContent = chosen.connected ? chosen.connection_hint || "" : `${chosen.label}: ${chosen.connection_hint}`;
       submit.disabled = !chosen.connected && chosen.source !== "linkedin";
       Aira.remember("search.source", chosen.source);
@@ -185,7 +237,7 @@
       catalog = list.filter((item) => item.status === "available");
       const allowed = tab.id === "linkedin" ? ["linkedin"] : tab.id === "aira" ? ["aira_jobs"] : tab.id === "google" ? ["google_jobs"] : tab.id === "portals" ? catalog.filter((s) => s.group === "ats").map((s) => s.source) : catalog.map((s) => s.source);
       sourceSelect.replaceChildren(...catalog.filter((s) => allowed.includes(s.source)).map((s) => h("option", { value: s.source, text: s.label + (s.connected ? "" : " (not connected)") })));
-      // Without a LinkedIn session the free Aira Jobs source is the one that works out of the box.
+      // Without a LinkedIn session the free job boards are the source that works out of the box.
       const linkedinUp = catalog.some((s) => s.source === "linkedin" && s.connected);
       const remembered = Aira.recall("search.source", linkedinUp ? "linkedin" : "aira_jobs");
       if (allowed.includes(remembered)) sourceSelect.value = remembered;
@@ -242,17 +294,22 @@
   Aira.views.jobs = async (main, route) => {
     sourcesLoad = null;
     const making = Aira.careersTakeNew(route);
-    // A tab is #/jobs/<tab>; a menu folder links #/jobs?tab=<tab>, which opens the same place.
-    const { tab: tabQuery, ...asked } = route.query;
-    const tabId = route.path[1] || tabQuery || "all";
-    const tab = JOB_TABS.find((item) => item.id === tabId) || JOB_TABS[0];
-    Aira.careersFolders("jobs", JOB_TABS.map(({ id, label, icon }) => ({ id, label, icon })), tab.id);
+    // A folder is #/jobs/<folder>; the menu links #/jobs?tab=<folder>, which the redirects turn into the same place.
+    // On All jobs, ?from=<source> is the source chip.
+    const { tab: tabQuery, from, ...asked } = route.query;
+    const folder = JOB_FOLDERS.find((item) => item.id === (route.path[1] || tabQuery || "all")) || JOB_FOLDERS[0];
+    const tab = folder.id === "all" ? JOB_SOURCES.find((item) => item.id === from) || JOB_SOURCES[0] : folder;
+    const fromQuery = folder.id === "all" && tab.id !== "all" ? { from: tab.id } : {};
+    const goHere = (query) => router.go(["jobs", folder.id], { ...query, ...fromQuery }, { replace: true });
+    Aira.careersFolders("jobs", JOB_FOLDERS.map(({ id, label, icon }) => ({ id, label, icon, href: `#/jobs/${id}` })), folder.id);
     // A link that names filters (the search box across the top, a metric in Analytics) shows exactly those; a plain
     // visit brings back the filters last used on this tab.
     const stored = Object.keys(asked).length ? {} : Aira.recall(`filters.jobs.${tab.id}`, {});
     const filters = { q: "", stage: "", classification: "", min_score: "", sort: tab.id === "recommended" ? "score" : "updated", page: "1", workplace_type: "", source: "", ...stored, ...asked };
     const listBox = h("div", { class: "panel" });
-    const subnav = h("nav", { class: "subnav careers-tabstrip", "aria-label": "Job sources" }, ...JOB_TABS.map((item) => h("a", { href: `#/jobs/${item.id}`, "aria-current": item.id === tab.id ? "page" : "false", text: item.label })));
+    const subnav = h("nav", { class: "subnav careers-tabstrip", "aria-label": "Job folders" }, ...JOB_FOLDERS.map((item) => h("a", { href: `#/jobs/${item.id}`, "aria-current": item.id === folder.id ? "page" : "false", text: item.label })));
+    // All jobs is one search page: the chips choose the source for the search form and the list.
+    const sourceChips = folder.id === "all" ? h("nav", { class: "careers-source-chips", "aria-label": "Job sources" }, ...JOB_SOURCES.map((item) => h("a", { class: "careers-source-chip", href: item.id === "all" ? "#/jobs/all" : `#/jobs/all?from=${item.id}`, "aria-current": item.id === tab.id ? "true" : "false" }, Aira.icon(item.icon), h("span", { text: item.label })))) : null;
     const addJob = () => manualJobForm((job) => { if (Aira.state.views.jobsReload) Aira.state.views.jobsReload(); openJob(job.job_id); });
 
     const q = h("input", { type: "search", "data-search": "1", placeholder: "Filter by title, company, or location", value: filters.q });
@@ -265,29 +322,22 @@
     const apply = () => {
       const next = current("1");
       Aira.remember(`filters.jobs.${tab.id}`, next);
-      router.go(["jobs", tab.id], next, { replace: true });
+      goHere(next);
     };
     for (const control of [stage, classification, minScore, workplace, sort]) control.addEventListener("change", apply);
     let timer;
     q.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(apply, 350); });
     // A link from Analytics can narrow the list to one source; a chip shows it and clears it.
     const sourceChip = filters.source ? h("div", { class: "btn-row careers-filter-chip" }, h("span", { class: "badge source", text: `Source: ${Aira.fmt.source((filters.source === "manual" ? "added by you" : filters.source))}` }), h("button", { type: "button", class: "btn ghost sm", text: "Show every source", onclick: () => { filters.source = ""; apply(); } })) : null;
-    const filterBar = h("div", { class: "filters careers-compact-filters", role: "search" }, h("div", { class: "field grow" }, h("label", { for: "jobFilterQ", text: "Filter" }), Object.assign(q, { id: "jobFilterQ" })), ui.field("Status", stage), ui.field("Match", classification), ui.field("Score", minScore), ui.field("Workplace", workplace), ui.field("Sort", sort), h("button", { type: "button", class: "btn ghost sm", text: "Clear", onclick: () => { Aira.remember(`filters.jobs.${tab.id}`, {}); router.go(["jobs", tab.id], {}, { replace: true }); } }));
+    const filterBar = h("div", { class: "filters careers-compact-filters", role: "search" }, h("div", { class: "field grow" }, h("label", { for: "jobFilterQ", text: "Filter" }), Object.assign(q, { id: "jobFilterQ" })), ui.field("Status", stage), ui.field("Match", classification), ui.field("Score", minScore), ui.field("Workplace", workplace), ui.field("Sort", sort), h("button", { type: "button", class: "btn ghost sm", text: "Clear", onclick: () => { Aira.remember(`filters.jobs.${tab.id}`, {}); goHere({}); } }));
 
     const head = h("div", { class: "page-head" }, h("div", {}, h("h1", { text: "Jobs" }), h("p", { text: "Search every connected source, import postings by URL, and keep one deduplicated pipeline. Scores are explainable and never guess at missing facts." })), h("div", { class: "page-actions" }, h("button", { type: "button", class: "btn sm", text: "+ Add a job", onclick: addJob }), h("button", { type: "button", class: "btn secondary sm", text: "Rescore all", onclick: (event) => withBusy(event.currentTarget, async () => { const data = await api("/api/jobs/rescore", { method: "POST", body: {} }); toast(`${fmt.plural(data.scored, "job")} rescored.`, "success"); load(); }) })));
 
-    if (tab.id === "autopilot") {
-      const host = h("div");
-      main.replaceChildren(h("div", { class: "page-head" }, h("div", {}, h("h1", { text: "Jobs" }), h("p", { text: "Auto-apply: tell Monosage which positions you want. On a schedule it searches, scores every job against your profile and applies to the best matches, within your limits." }))), subnav, host);
-      await Aira.renderAutopilot(host);
-      if (making === "job") addJob();
-      return;
-    }
     const showSearch = !["recommended", "saved"].includes(tab.id);
     let finder = showSearch ? searchPanel(tab, (data) => { if (data.imported) { load().then(() => openJob(data.imported.job_id, { loadDetails: data.needs_details })); } else { load(); if (data.jobs[0]) openJob(data.jobs[0].job_id, { loadDetails: !data.jobs[0].description }); } }) : null;
     // On a phone the long search form folds away, so the jobs themselves are in view; it opens with one tap.
     if (finder && window.matchMedia && window.matchMedia("(max-width: 640px)").matches) finder = h("details", { class: "careers-finder", open: !filters.q && Aira.recall("careers.jobs.finderOpen", false), ontoggle: (event) => Aira.remember("careers.jobs.finderOpen", event.currentTarget.open) }, h("summary", {}, Aira.icon("jobs"), h("span", { text: tab.id === "all" ? "Search job boards or import a posting" : `Search ${tab.label}` }), h("span", { class: "careers-finder-chevron", "aria-hidden": "true", html: '<svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>' })), finder);
-    main.replaceChildren(...[head, subnav, finder || h("p", { class: "note", text: tab.id === "recommended" ? "Jobs classified Recommended or Strong Match by the explainable scorer, ranked by score. Load a description and your profile to score more jobs." : "Jobs you starred, plus anything in the Saved status." }), tab.id === "google" ? h("p", { class: "muted", style: { margin: "-6px 0 14px", fontSize: "12.5px" } }, "Want Google's own filters, job alerts and company research? ", h("a", { href: "#/careers?tab=jobs", text: "Open Research" }), ".") : tab.id === "aira" ? h("p", { class: "muted", style: { margin: "-6px 0 14px", fontSize: "12.5px" } }, "Monosage's own job search, built into API: no SerpApi key and no credits. Every search is kept in ", h("a", { href: "#/api?tab=history&engine=aira_jobs", text: "API history" }), ".") : null, sourceChip, filterBar, listBox].filter(Boolean));
+    main.replaceChildren(...[head, subnav, sourceChips, finder || h("p", { class: "note", text: tab.id === "recommended" ? "Jobs classified Recommended or Strong Match by the explainable scorer, ranked by score. Load a description and your profile to score more jobs." : "Jobs you starred, plus anything in the Saved status." }), tab.id === "google" ? h("p", { class: "muted", style: { margin: "-6px 0 14px", fontSize: "12.5px" } }, "Want Google's own filters, job alerts and company research? ", h("a", { href: "#/careers?tab=jobs", text: "Open Research" }), ".") : tab.id === "aira" ? h("p", { class: "muted", style: { margin: "-6px 0 14px", fontSize: "12.5px" } }, "Free job boards: Monosage's own job search, built into API, with no SerpApi key and no credits. Every search is kept in ", h("a", { href: "#/api?tab=history&engine=aira_jobs", text: "API history" }), ".") : null, sourceChip, filterBar, listBox].filter(Boolean));
 
     async function load() {
       listBox.replaceChildren(ui.skeleton(6));
@@ -304,17 +354,17 @@
       const selectedId = route.path[3];
       const narrowed = Boolean(q.value || stage.value || classification.value || minScore.value || workplace.value || filters.source);
       if (googleMissing) {
-        list.append(ui.empty("Google Jobs needs a SerpApi key", "Connect a key once and Google Jobs searches here, in Careers and in your own scripts all use it. It is stored encrypted on this computer. No key? Jobs searches free job boards without one.", h("div", { class: "btn-row", style: { justifyContent: "center" } }, h("a", { class: "btn", href: "#/jobs/aira", text: "Search Jobs (free)" }), h("a", { class: "btn secondary", href: KEY_PAGE, text: "Connect a key in API" }))));
+        list.append(ui.empty("Google Jobs needs a SerpApi key", "Connect a key once and Google Jobs searches here, in Careers and in your own scripts all use it. It is stored encrypted on this computer. No key? The free job boards need none.", h("div", { class: "btn-row", style: { justifyContent: "center" } }, h("a", { class: "btn", href: FREE_BOARDS, text: "Search the free job boards" }), h("a", { class: "btn secondary", href: KEY_PAGE, text: "Connect a key in API" }))));
       } else if (!data.jobs.length && narrowed) {
-        list.append(ui.empty(q.value ? `No jobs match “${q.value}”` : "No jobs match these filters", "Try other words, or clear the filters to see every job on this tab.", h("button", { type: "button", class: "btn secondary", text: "Clear filters", onclick: () => { Aira.remember(`filters.jobs.${tab.id}`, {}); router.go(["jobs", tab.id], {}, { replace: true }); } })));
+        list.append(ui.empty(q.value ? `No jobs match “${q.value}”` : "No jobs match these filters", "Try other words, or clear the filters to see every job on this tab.", h("button", { type: "button", class: "btn secondary", text: "Clear filters", onclick: () => { Aira.remember(`filters.jobs.${tab.id}`, {}); goHere({}); } })));
       } else if (!data.jobs.length) {
         const message = tab.id === "recommended" ? "Score jobs to see recommendations here: add a job description and complete your profile." : tab.id === "saved" ? "Star a job in any list to keep it here." : "Search above, import a posting by URL, or add a job you heard about yourself.";
         list.append(ui.empty("No jobs yet", message, tab.id === "recommended" || tab.id === "saved" ? h("a", { class: "btn", href: "#/jobs/all", text: "See all jobs" }) : h("button", { type: "button", class: "btn", text: "+ Add a job", onclick: addJob })));
       }
       for (const job of data.jobs) list.append(jobRow(job, { selected: job.job_id === selectedId, onSelect: (item) => openJob(item.job_id, { loadDetails: !item.has_description }) }));
-      const turn = (page) => { filters.page = String(page); router.go(["jobs", tab.id], current(filters.page), { replace: true }); };
+      const turn = (page) => { filters.page = String(page); goHere(current(filters.page)); };
       const pager = h("div", { class: "pager" }, h("span", { text: `${data.total} ${data.total === 1 ? "job" : "jobs"} · page ${data.page} of ${data.pages}` }), h("div", { class: "btn-row" }, h("button", { type: "button", class: "btn ghost sm", text: "Previous", disabled: data.page <= 1, onclick: () => turn(data.page - 1) }), h("button", { type: "button", class: "btn ghost sm", text: "Next", disabled: data.page >= data.pages, onclick: () => turn(data.page + 1) })));
-      const heading = q.value ? `${tab.id === "all" ? "Jobs" : tab.label} matching “${q.value}”` : tab.label;
+      const heading = q.value ? `${tab.id === "all" ? "Jobs" : tab.label} matching “${q.value}”` : tab.id === "all" ? "All jobs" : tab.label;
       listBox.replaceChildren(h("div", { class: "panel-head" }, h("h3", { text: heading }), h("small", { class: "muted", text: data.facets && data.facets.sources.length ? data.facets.sources.map((s) => `${s.source === "manual" ? "added by you" : Aira.fmt.source(s.source)} ${s.count}`).join(" · ") : "" })), list, pager);
     }
     Aira.state.views.jobsReload = load;
@@ -425,7 +475,7 @@
     const scoreBox = h("div", { class: "card" },
       h("div", { style: { display: "flex", gap: "14px", alignItems: "center" } }, ui.score(job.match_score), h("div", {}, h("strong", { text: job.match_classification || "Not scored yet" }), h("div", { class: "muted", text: explanation.classification_reason || "Load the job description and complete your profile, then score this job." }), explanation.version ? h("small", { class: "muted", text: `${explanation.version} · ${fmt.ago(explanation.computed_at)}` }) : null)),
       (explanation.hard_blockers || []).length ? h("div", { class: "note warn", style: { marginTop: "10px" } }, h("strong", { text: "Blocker: " }), explanation.hard_blockers.join(" ")) : null,
-      h("div", { class: "btn-row", style: { marginTop: "12px" } }, h("button", { type: "button", class: "btn secondary sm", text: job.match_score == null ? "Score this job" : "Rescore", disabled: !job.description, onclick: (event) => withBusy(event.currentTarget, async () => { await api(`/api/jobs/${encodeURIComponent(job.job_id)}/score`, { method: "POST", body: {} }); toast("Scored.", "success"); reload("fit"); }) }), h("a", { class: "btn ghost sm", href: "#/settings/profile", text: "Improve profile inputs" })),
+      h("div", { class: "btn-row", style: { marginTop: "12px" } }, h("button", { type: "button", class: "btn secondary sm", text: job.match_score == null ? "Score this job" : "Rescore", disabled: !job.description, onclick: (event) => withBusy(event.currentTarget, async () => { await api(`/api/jobs/${encodeURIComponent(job.job_id)}/score`, { method: "POST", body: {} }); toast("Scored.", "success"); reload("fit"); }) }), h("a", { class: "btn ghost sm", href: "#/profile?tab=profile", text: "Improve profile inputs" })),
     );
     const dimensionList = h("div", { class: "card", style: { marginTop: "12px" } }, h("h3", { text: "Score breakdown" }), h("p", { class: "muted", style: { fontSize: "12.5px" }, text: "Each dimension is scored only from explicit evidence. Dimensions without enough information are left out of the total instead of being guessed." }));
     for (const dim of dims) {

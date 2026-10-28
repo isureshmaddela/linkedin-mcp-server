@@ -1060,7 +1060,7 @@ def execute_run(
         services.notify(
             "Applied automatically",
             f"Monosage applied to {label}.{' Confirmation ' + outcome['confirmation_number'] + '.' if outcome['confirmation_number'] else ''}",
-            "#/jobs/autopilot",
+            "#/applications",
         )
     elif status in OPEN_STATUSES:
         services.on_held(job, updated, outcome)
@@ -1071,7 +1071,7 @@ def execute_run(
                 if status == "needs_review"
                 else f"{label}: the form is filled and waits for your OK."
             ),
-            "#/jobs/autopilot",
+            "#/needs",
         )
     return updated
 

@@ -272,61 +272,128 @@ def test_the_top_search_finds_jobs_recruiters_and_interviews(browser, env):
     context.close()
 
 
-def test_the_left_menu_shows_the_folders_and_each_opens_its_tab(browser, env):
+def test_the_left_menu_follows_a_job_search_and_old_links_still_work(browser, env):
     context, page, problems = signed_in_page(browser, env, width=1440, height=900)
     seed(context, env)
-    go(page, env, "applications")
-    assert folders(page, "applications") == [
-        "Pipeline",
-        "Queue & review",
-        "Offers",
-        "Email updates",
+    go(page, env, "dashboard")
+    page.wait_for_selector("#primaryNav a[data-section='dashboard']")
+    # The menu is grouped like a job search: find a job, apply, follow up.
+    assert page.locator("#primaryNav .nav-label").all_text_contents() == [
+        "Home",
+        "Find",
+        "Apply",
+        "Follow up",
+        "Your materials",
+        "Insights",
     ]
-    assert (
-        page.locator(
-            ".shell-subnav[data-section='applications'] a.shell-sublink svg"
-        ).count()
-        == 4
+    groups = page.evaluate(
+        r"""() => [...document.querySelectorAll('#primaryNav .nav-group')].map(g =>
+            [g.querySelector('.nav-label').textContent, [...g.querySelectorAll(':scope > a')].map(a => a.innerText.replace(/\s*\d+$/, '').trim())])"""
     )
-    page.locator(
-        ".shell-subnav[data-section='applications'] a", has_text="Offers"
-    ).click()
-    page.wait_for_url(re.compile(r"#/applications\?tab=offers"))
+    assert groups == [
+        ["Home", ["Dashboard"]],
+        ["Find", ["Jobs", "Research"]],
+        ["Apply", ["Auto-apply", "Needs you", "Applications"]],
+        [
+            "Follow up",
+            ["Interviews", "Messages & recruiters", "Email updates", "Offers"],
+        ],
+        ["Your materials", ["Profile & resume", "Documents"]],
+        ["Insights", ["Analytics"]],
+    ]
+    shot(page, "05-menu-groups")
+
+    # Applications is the pipeline; Offers and Email updates are pages of their own under Follow up.
+    page.click("#primaryNav a[data-section='applications']")
+    page.wait_for_selector("#main h1:has-text('Applications')")
+    assert page.locator(".shell-subnav[data-section='applications']").count() == 0
+    page.click("#primaryNav a[data-section='offers']")
+    page.wait_for_url(re.compile(r"#/offers$"))
+    page.wait_for_selector("#main h1:has-text('Offers')")
+    assert (
+        page.locator("#primaryNav a[data-section='offers']").get_attribute(
+            "aria-current"
+        )
+        == "page"
+    )
+    # Old addresses land on the new pages (bookmarks, notifications, links in older emails).
+    for old, new, heading in [
+        ("applications?tab=offers", r"#/offers$", "Offers"),
+        ("applications?tab=email", r"#/emails$", "Email updates"),
+        ("applications?tab=queue", r"#/needs$", "Needs you"),
+        ("jobs/autopilot", r"#/autopilot$", "Auto-apply"),
+        ("jobs?tab=autopilot", r"#/autopilot$", "Auto-apply"),
+    ]:
+        go(page, env, old)
+        page.wait_for_url(re.compile(new))
+        page.wait_for_selector(f"#main h1:has-text('{heading}')")
+
+    # Jobs has three folders; where a job comes from is a chip on All jobs.
+    page.click("#primaryNav a[data-section='jobs']")
+    assert folders(page, "jobs") == ["All jobs", "Recommended", "Saved"]
+    chips = page.locator("#main .careers-source-chip")
+    assert [t.strip() for t in chips.all_inner_texts()] == [
+        "Every source",
+        "LinkedIn",
+        "Free job boards",
+        "Google Jobs",
+        "Company portals",
+    ]
+    assert chips.first.get_attribute("aria-current") == "true"
+    chips.filter(has_text="Free job boards").click()
+    page.wait_for_url(re.compile(r"#/jobs/all\?from=aira"))
     until(
         page,
         lambda: (
-            page.locator("#main .tabs [aria-selected='true']").inner_text() == "Offers"
+            "Free job boards"
+            in page.locator("#main .search-panel select").first.inner_text()
         ),
-        what="the Offers tab",
+        what="the free job boards as the search source",
     )
     assert (
-        page.locator(
-            ".shell-subnav[data-section='applications'] a[aria-current='page']"
-        )
+        "Free job boards: Monosage searches"
+        in page.locator("#main .search-panel").inner_text()
+    )
+    assert (
+        page.locator("#main .careers-source-chip[aria-current='true']")
         .inner_text()
         .strip()
-        == "Offers"
+        == "Free job boards"
     )
-    # On a wide screen the folders stand in for the tab strip under the heading.
-    assert page.locator("#main .tabs.careers-tabstrip").is_hidden()
-    shot(page, "05-folders-applications")
-
-    # Jobs keeps its tabs in the address path; the folder link #/jobs?tab=saved opens the same tab.
-    page.click("#primaryNav a[data-section='jobs']")
-    assert folders(page, "jobs")[:3] == ["All Jobs", "LinkedIn", "Jobs"]
+    shot(page, "06-source-chips")
+    # The old source folders are chips now: #/jobs/linkedin opens All jobs with LinkedIn chosen.
+    go(page, env, "jobs/linkedin")
+    page.wait_for_url(re.compile(r"#/jobs/all\?from=linkedin"))
+    until(
+        page,
+        lambda: (
+            page.locator("#main .careers-source-chip[aria-current='true']")
+            .inner_text()
+            .strip()
+            == "LinkedIn"
+        ),
+        what="the LinkedIn chip",
+    )
     page.locator(".shell-subnav[data-section='jobs'] a", has_text="Saved").click()
-    page.wait_for_url(re.compile(r"#/jobs\?tab=saved"))
+    page.wait_for_url(re.compile(r"#/jobs/saved"))
     until(
         page,
         lambda: (
             page.locator("#main .subnav a[aria-current='page']").inner_text() == "Saved"
         ),
-        what="the Saved tab",
+        what="the Saved folder",
     )
     assert page.locator("#main .panel-head h3").first.inner_text() == "Saved"
+    assert page.locator("#main .careers-source-chips").count() == 0
     # Only the open page's folders show, so the menu stays short.
     assert page.locator(".shell-subnav[data-section='jobs']").is_visible()
-    assert page.locator(".shell-subnav[data-section='applications']").is_hidden()
+
+    # Profile & resume: the parts of Settings an application is filled from, as Careers folders.
+    page.click("#primaryNav a[data-section='profile']")
+    assert folders(page, "profile") == ["Profile", "Resume", "Standard answers"]
+    page.wait_for_selector("#main h1:has-text('Profile & resume')")
+    page.locator(".shell-subnav[data-section='profile'] a", has_text="Resume").click()
+    page.wait_for_url(re.compile(r"#/profile\?tab=resume"))
 
     page.click("#primaryNav a[data-section='interviews']")
     assert folders(page, "interviews") == ["Upcoming", "Past", "All"]
@@ -348,7 +415,7 @@ def test_the_left_menu_shows_the_folders_and_each_opens_its_tab(browser, env):
     # Research: the workspaces, with their own heading (not the app's name again).
     page.click("#primaryNav a[data-section='careers']")
     assert folders(page, "careers") == [
-        "Jobs",
+        "Advanced search",
         "Company",
         "Salary",
         "Market",
@@ -362,6 +429,55 @@ def test_the_left_menu_shows_the_folders_and_each_opens_its_tab(browser, env):
     page.wait_for_url(re.compile(r"#/careers\?tab=alerts"))
     page.wait_for_selector("#main h2:has-text('Job alerts')")
     shot(page, "06-folders-research")
+    assert not problems, problems
+    context.close()
+
+
+def test_needs_you_gathers_what_waits_and_counts_it_in_the_menu(browser, env):
+    context, page, problems = signed_in_page(browser, env, width=1440, height=900)
+    made = seed(context, env)
+    job = made["jobs"][1]
+    reply = context.request.patch(
+        f"{env.base}/api/jobs/{job['job_id']}/stage",
+        data=json.dumps({"stage": "needs_review", "reason": "Check the packet"}),
+        headers={
+            "Content-Type": "application/json",
+            "X-Requested-With": "aira",
+            "Origin": env.base,
+        },
+    )
+    assert reply.ok, reply.text()
+    go(page, env, "dashboard")
+    # The menu counts what waits for you.
+    badge = page.locator("#primaryNav a[data-section='needs'] .count")
+    until(
+        page,
+        lambda: badge.count() == 1 and badge.inner_text() == "1",
+        what="the Needs you count",
+    )
+    page.click("#primaryNav a[data-section='needs']")
+    page.wait_for_url(re.compile(r"#/needs$"))
+    page.wait_for_selector("#main h1:has-text('Needs you')")
+    page.wait_for_selector(
+        "#main .panel:has-text('Needs your review') .row:has-text('Solution Architect')"
+    )
+    shot(page, "07-needs-you")
+    # A phone shows Needs you in the bottom bar, with a dot for the count.
+    page.set_viewport_size({"width": 390, "height": 844})
+    go(page, env, "dashboard")
+    page.wait_for_selector("#bottomNav a[data-section='needs']")
+    until(
+        page,
+        lambda: page.locator("#bottomNav a[data-section='needs'] .dot").count() == 1,
+        what="the dot on Needs you",
+    )
+    assert (
+        page.locator("#bottomNav a[data-section='needs'] .dot").get_attribute(
+            "aria-label"
+        )
+        == "1 waiting"
+    )
+    assert page.evaluate("() => document.documentElement.scrollWidth - innerWidth") <= 1
     assert not problems, problems
     context.close()
 

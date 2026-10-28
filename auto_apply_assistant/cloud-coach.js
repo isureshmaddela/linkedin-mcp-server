@@ -160,7 +160,7 @@
 
   function queueCard(queue) {
     const open = queue.filter((item) => item.status === "needs_review").length;
-    return panel("Waiting for you", h("a", { class: "btn secondary sm", href: "#/jobs/autopilot", text: "Open Auto-apply" }), h("div", { class: "list" }, ...queue.slice(0, 4).map((item) => h("a", { class: "row", href: "#/jobs/autopilot" },
+    return panel("Waiting for you", h("a", { class: "btn secondary sm", href: "#/needs", text: "Open Needs you" }), h("div", { class: "list" }, ...queue.slice(0, 4).map((item) => h("a", { class: "row", href: "#/jobs/autopilot" },
       h("div", {}, h("span", { class: "title", text: `${item.title || "Application"}${item.company ? " · " + item.company : ""}` }), h("span", { class: "sub", text: item.status === "needs_review" ? `${(item.questions || []).length} question(s) need your answer` : "Filled in and waiting for your OK" })),
       h("small", { class: "muted", text: heldLabel(heldHours(item.held_since)) })))),
       open ? null : null);

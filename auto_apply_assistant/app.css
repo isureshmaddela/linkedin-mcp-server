@@ -348,7 +348,7 @@ button.row:hover, a.row:hover, .row.selectable:hover { background: var(--surface
 .badge.stage.recruiter_screen, .badge.stage.technical_interview, .badge.stage.manager_interview, .badge.stage.panel_interview, .badge.stage.final_interview { background: #e6e0fb; color: #4a3aa7; }
 .badge.stage.offer, .badge.stage.accepted { background: #d9f4d9; color: #0a6b0a; }
 .badge.stage.rejected, .badge.stage.withdrawn, .badge.stage.failed { background: var(--danger-soft); color: var(--danger); }
-.badge.source { background: var(--surface-2); color: var(--muted); text-transform: capitalize; }
+.badge.source { background: var(--surface-2); color: var(--muted); text-transform: none; }
 .badge.class-Recommended { background: #d9f4d9; color: #0a6b0a; }
 .badge.class-Strong { background: var(--brand-soft); color: var(--brand-ink); }
 .badge.class-Good { background: var(--info-soft); color: var(--info-ink); }

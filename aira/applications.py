@@ -537,7 +537,7 @@ def check_daily_limit(
 
 
 def auto_submit_policy(settings: Mapping[str, str]) -> dict[str, Any]:
-    """Automatic applications run from search plans in Jobs > Auto-apply.
+    """Automatic applications run from search plans in Careers > Auto-apply.
 
     The legacy ``auto_submit_enabled`` switch stays off: what is sent is decided
     per plan (sources, minimum score, mode) under the global pause and daily limit.
@@ -555,7 +555,7 @@ def auto_submit_policy(settings: Mapping[str, str]) -> dict[str, Any]:
         "approved_answer_profiles": ["confirmed_standard_answers"],
         "available": True,
         "paused": settings.get("auto_apply_paused") == "1",
-        "reason": "Search plans in Jobs > Auto-apply fill and submit forms for jobs that clear the plan's bar. Questions without a confirmed answer are held for you; nothing is guessed.",
+        "reason": "Search plans in Auto-apply fill and submit forms for jobs that clear the plan's bar. Questions without a confirmed answer are held for you; nothing is guessed.",
     }
 
 

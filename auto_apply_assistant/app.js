@@ -36,6 +36,13 @@ Aira.h = h;
 const ICONS = {
   dashboard: '<svg viewBox="0 0 24 24"><rect x="3" y="3" width="8" height="8" rx="1.5"/><rect x="13" y="3" width="8" height="5" rx="1.5"/><rect x="13" y="11" width="8" height="10" rx="1.5"/><rect x="3" y="14" width="8" height="7" rx="1.5"/></svg>',
   jobs: '<svg viewBox="0 0 24 24"><circle cx="11" cy="11" r="7"/><path d="m20 20-3.5-3.5"/></svg>',
+  // Careers' menu: Research, Auto-apply, Needs you, Email updates, Offers, Profile & resume.
+  research: '<svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m20 20-4.8-4.8M8 12.5V10M10.5 12.5V8M13 12.5v-1.5"/></svg>',
+  autoapply: '<svg viewBox="0 0 24 24"><path d="M13 2 4 14h7l-1 8 9-12h-7z"/></svg>',
+  needs: '<svg viewBox="0 0 24 24"><path d="M4 13 6.5 5h11l2.5 8v6H4z"/><path d="M4 13h4.5a3.5 3.5 0 0 0 7 0H20"/></svg>',
+  emails: '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="m3.5 6.5 8.5 6.5 8.5-6.5"/></svg>',
+  offers: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><path d="M15 9.2c-.5-1-1.6-1.6-3-1.6-1.7 0-3 .9-3 2.2 0 3 6 1.6 6 4.5 0 1.3-1.3 2.2-3 2.2-1.4 0-2.6-.6-3.1-1.7M12 6v1.6M12 16.4V18"/></svg>',
+  profile: '<svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4.5 20a7.5 7.5 0 0 1 15 0"/></svg>',
   applications: '<svg viewBox="0 0 24 24"><path d="M9 4h6l1 2h3a1 1 0 0 1 1 1v12a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V7a1 1 0 0 1 1-1h3z"/><path d="m9 13 2 2 4-4"/></svg>',
   interviews: '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="16" rx="2"/><path d="M3 10h18M8 3v4M16 3v4"/></svg>',
   recruiters: '<svg viewBox="0 0 24 24"><circle cx="9" cy="8" r="3.5"/><path d="M3 20c0-3.3 2.7-6 6-6s6 2.7 6 6"/><circle cx="17" cy="9" r="2.5"/><path d="M15.5 14.5c2.8.3 5 2.6 5 5.5"/></svg>',
@@ -191,8 +198,8 @@ Aira.fileToBase64 = fileToBase64;
 const fmt = {
   stage: (stage) => (stage || "discovered").replaceAll("_", " "),
   title: (text) => (text || "").replace(/\b\w/g, (c) => c.toUpperCase()),
-  // A job source id as people read it: aira_jobs is the free job boards, shown as "Jobs".
-  source: (id) => ({ aira_jobs: "Jobs" })[id] || String(id || "").replaceAll("_", " "),
+  // A job source id as people read it; ids without a name of their own show with spaces.
+  source: (id) => ({ aira_jobs: "Free job boards", google_jobs: "Google Jobs", linkedin: "LinkedIn", added_by_you: "Added by you" })[id] || fmt.title(String(id || "").replaceAll("_", " ")),
   date: (value) => {
     if (!value) return "—";
     // A calendar day ("2026-11-20") is that day wherever you are: new Date() would read it as UTC midnight,
@@ -346,7 +353,7 @@ Aira.withBusy = withBusy;
 const APP_CLOSED_CODES = new Set(["app_required", "app_disabled"]);
 const ui = {
   stage: (stage) => h("span", { class: `badge stage ${stage || "discovered"}`, text: fmt.stage(stage) }),
-  source: (source) => h("span", { class: "badge source", text: (source || "").replaceAll("_", " ") }),
+  source: (source) => h("span", { class: "badge source", text: fmt.source(source) }),
   classification: (label) => (label ? h("span", { class: `badge class-${label.split(" ")[0]}`, text: label }) : null),
   score: (value) => {
     if (value === null || value === undefined) return h("span", { class: "score none", title: "Not scored yet" }, h("span", { text: "—" }));
@@ -407,14 +414,21 @@ const APPS = [
 // `app` says which app a section belongs to; items in the Account group show under every app.
 // `quick` items sit in the bottom bar; everything else is reached through More, which opens the sidebar.
 const NAV = [
-  { id: "dashboard", label: "Dashboard", icon: "dashboard", app: "careers", group: "Careers", key: "d", quick: true },
-  { id: "jobs", label: "Jobs", icon: "jobs", app: "careers", group: "Careers", key: "j", quick: true },
-  { id: "applications", label: "Applications", icon: "applications", app: "careers", group: "Careers", key: "a", quick: true },
-  { id: "interviews", label: "Interviews", icon: "interviews", app: "careers", group: "Careers", key: "i", quick: true },
-  { id: "recruiters", label: "Recruiters", icon: "recruiters", app: "careers", group: "Careers", key: "r" },
-  { id: "documents", label: "Documents", icon: "documents", app: "careers", group: "Careers", key: "o" },
-  { id: "analytics", label: "Analytics", icon: "analytics", app: "careers", group: "Careers", key: "n" },
-  { id: "careers", label: "Research", icon: "careers", app: "careers", group: "Careers", key: "f" },
+  // Careers follows a job search: find a job, apply, follow up; the group names are the menu's headings.
+  { id: "dashboard", label: "Dashboard", icon: "dashboard", app: "careers", group: "Home", key: "d", quick: true },
+  { id: "jobs", label: "Jobs", icon: "jobs", app: "careers", group: "Find", key: "j", quick: true },
+  { id: "careers", label: "Research", icon: "research", app: "careers", group: "Find", key: "f" },
+  { id: "autopilot", label: "Auto-apply", icon: "autoapply", app: "careers", group: "Apply" },
+  // Everything that waits for the person: held Auto-apply runs and the review queue, with a count.
+  { id: "needs", label: "Needs you", icon: "needs", app: "careers", group: "Apply", quick: true },
+  { id: "applications", label: "Applications", icon: "applications", app: "careers", group: "Apply", key: "a", quick: true },
+  { id: "interviews", label: "Interviews", icon: "interviews", app: "careers", group: "Follow up", key: "i" },
+  { id: "recruiters", label: "Messages & recruiters", icon: "recruiters", app: "careers", group: "Follow up", key: "r" },
+  { id: "emails", label: "Email updates", icon: "emails", app: "careers", group: "Follow up" },
+  { id: "offers", label: "Offers", icon: "offers", app: "careers", group: "Follow up" },
+  { id: "profile", label: "Profile & resume", icon: "profile", app: "careers", group: "Your materials" },
+  { id: "documents", label: "Documents", icon: "documents", app: "careers", group: "Your materials", key: "o" },
+  { id: "analytics", label: "Analytics", icon: "analytics", app: "careers", group: "Insights", key: "n" },
   { id: "airaapi", label: "API", icon: "airaapi", app: "api", group: "Developers", key: "p", quick: true },
   // Third-party access: OAuth apps, access tokens and webhooks (views-developers.js).
   { id: "developers", label: "Connected apps", icon: "settings", app: "api", group: "Developers" },
@@ -588,6 +602,12 @@ const Router = {
     Router.renders += 1;
     const route = Router.parse();
     if (!route.path.length) { Router.go([(Aira.startPage && Aira.startPage(false)) || "dashboard"], {}, { replace: true }); return; }
+    // An old address an app has moved (Careers' #/jobs/autopilot is #/autopilot now): each redirect returns the new
+    // place or nothing; the address is replaced, so Back does not land on the old one again.
+    for (const redirect of Aira.redirects || []) {
+      const next = redirect(route);
+      if (next) { Router.go(next.path, next.query || {}, { replace: true }); return; }
+    }
     const section = route.path[0];
     if (section === "airaapi" && /^#\/?airaapi\b/.test(location.hash)) history.replaceState(history.state, "", location.hash.replace(/^#\/?airaapi\b/, "#/api"));
     const view = Aira.views[section];
@@ -632,6 +652,7 @@ const Router = {
     // element instead of over the page the person moved to.
     const stage = h("div", { class: "view-stage" }, ui.skeleton(5));
     main.replaceChildren(stage);
+    for (const hook of Aira.afterRoute || []) { try { hook(section, app); } catch (error) { console.error(error); } }
     try { await view(stage, route); }
     catch (error) { console.error(error); if (stage.isConnected) stage.replaceChildren(ui.error(error, () => Router.render())); }
   },
@@ -666,7 +687,7 @@ function renderNav(counts = {}) {
   const items = visibleNav();
   const menuItems = items.filter((item) => item.group !== "Account");
   $("brandApp").textContent = app.name || "Monosage";
-  const link = (item) => h("a", { href: `#/${item.id}`, dataset: { section: item.id }, "aria-current": current === item.id ? "page" : "false", "aria-keyshortcuts": `g ${item.key}`, onclick: () => { if (window.innerWidth <= 900) setSidebarOpen(false); } }, Aira.icon(item.icon), h("span", { text: item.label }), shown[item.id] ? h("span", { class: "count", text: shown[item.id] }) : null);
+  const link = (item) => h("a", { href: `#/${item.id}`, dataset: { section: item.id }, "aria-current": current === item.id ? "page" : "false", "aria-keyshortcuts": item.key ? `g ${item.key}` : null, onclick: () => { if (window.innerWidth <= 900) setSidebarOpen(false); } }, Aira.icon(item.icon), h("span", { text: item.label }), shown[item.id] ? h("span", { class: "count", text: shown[item.id] }) : null);
   // The app's own groups first, the Account group (shown under every app) last.
   const groups = [...new Set(menuItems.map((item) => item.group))];
   const head = h("div", { class: "nav-apphead", id: "navAppHead" }, Aira.icon(app.icon || "dashboard"), h("div", {}, h("strong", { text: app.name || "Monosage" }), app.tagline ? h("span", { class: "muted", text: app.tagline }) : null));
@@ -682,7 +703,9 @@ function renderNav(counts = {}) {
   if (hidden) more.append(h("span", { class: "dot", role: "img", "aria-label": `${hidden} waiting in More` }));
   // A build may choose the phone bar's items (life.js: Home and the everyday apps on Today and in those apps).
   const quickItems = (Aira.quickItems && Aira.quickItems(items, current)) || items.filter((item) => item.quick).slice(0, 4);
-  bottom.replaceChildren(...quickItems.map((item) => h("a", { href: `#/${item.id}`, dataset: { section: item.id }, "aria-current": current === item.id ? "page" : "false" }, Aira.icon(item.icon), h("span", { text: item.label }))), more);
+  // A count on a bar item (Careers' Needs you) shows as a dot with the number for screen readers.
+  const badge = (item) => (Number(shown[item.id]) ? h("span", { class: "dot", role: "img", "aria-label": `${shown[item.id]} waiting` }) : null);
+  bottom.replaceChildren(...quickItems.map((item) => h("a", { href: `#/${item.id}`, dataset: { section: item.id }, "aria-current": current === item.id ? "page" : "false" }, Aira.icon(item.icon), h("span", { text: item.label }), badge(item))), more);
 }
 Aira.renderNav = renderNav;
 
@@ -964,7 +987,7 @@ document.addEventListener("keydown", (event) => {
 function showShortcuts() {
   const sections = visibleNav();
   const appRows = APPS.map((item) => [`g then ${item.key}`, `${item.name} app`]);
-  const rows = [...appRows, ...sections.map((item) => [`g then ${item.key}`, item.label]), ["/", "Focus search"], ["↑ ↓", "Move through a list"], ["Esc", "Close panel"], ["?", "This help"]];
+  const rows = [...appRows, ...sections.filter((item) => item.key).map((item) => [`g then ${item.key}`, item.label]), ["/", "Focus search"], ["↑ ↓", "Move through a list"], ["Esc", "Close panel"], ["?", "This help"]];
   modal({ title: "Keyboard shortcuts", body: h("table", { class: "table" }, h("tbody", {}, ...rows.map(([key, label]) => h("tr", {}, h("td", {}, h("span", { class: "kbd", text: key })), h("td", { text: label }))))), actions: [{ label: "Close", kind: "" }] });
 }
 document.addEventListener("keydown", (event) => {

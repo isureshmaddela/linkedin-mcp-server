@@ -6208,7 +6208,7 @@ def _application_queue() -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
-# Auto-apply (Jobs > Auto-apply): search plans that apply on a schedule
+# Auto-apply (Careers > Auto-apply): search plans that apply on a schedule
 # ---------------------------------------------------------------------------
 
 # The answers that decide whether automatic applications can run without holding:
@@ -6240,7 +6240,7 @@ _autopilot_activity_lock = threading.Lock()
 
 
 def _autopilot_progress(label: str) -> None:
-    """Say what the account's auto-apply run is doing now (shown live in Jobs > Auto-apply)."""
+    """Say what the account's auto-apply run is doing now (shown live in Careers > Auto-apply)."""
     if HOSTING.progress is not None:
         HOSTING.progress(label)
     user_id = getattr(_request_context, "user_id", None)
@@ -6278,7 +6278,7 @@ def _autopilot_search(
     where = {
         "linkedin": "LinkedIn",
         "google_jobs": "Google Jobs",
-        "aira_jobs": "Jobs",
+        "aira_jobs": "the free job boards",
     }.get(source, f"{source} {identifier}".strip())
     _autopilot_progress(f"Searching {where} for {position}")
     result = _unified_search(
@@ -6884,7 +6884,7 @@ def _autopilot_readiness(
             "detail": "Contact details are complete."
             if completeness["ready"]
             else "Missing: " + ", ".join(completeness["missing_required"]) + ".",
-            "action": "#/settings/profile",
+            "action": "#/profile?tab=profile",
             "required": True,
         },
         {
@@ -6898,7 +6898,7 @@ def _autopilot_readiness(
             else "Add your resume in Settings > Resume or upload it in Documents.",
             "action": "#/documents"
             if len(state["resume"]) >= 80
-            else "#/settings/resume",
+            else "#/profile?tab=resume",
             "required": True,
             "warn": not resume_files and len(state["resume"]) >= 80,
         },
@@ -7195,7 +7195,7 @@ def _autopilot_apply_job_now(
         ).fetchone()
         if active:
             raise ValueError(
-                "This job already has an application in progress; see Jobs > Auto-apply."
+                "This job already has an application in progress; see Needs you or Auto-apply."
             )
     services = _autopilot_services(user)
     if mode == "apply":

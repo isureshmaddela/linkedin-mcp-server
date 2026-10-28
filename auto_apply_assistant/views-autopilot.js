@@ -1,4 +1,5 @@
-/* Aira — Jobs > Auto-apply: search plans that find matching jobs and apply on a schedule */
+/* Aira — Careers > Auto-apply: search plans that find matching jobs and apply on a schedule. The runs it holds
+   for the person (questions, a filled form waiting for a click) are drawn on Needs you (part "needs"). */
 "use strict";
 (() => {
   const { h, api, fmt, ui, toast, withBusy } = Aira;
@@ -21,8 +22,10 @@
   const jobLabel = (run) => [run.job && run.job.title, run.job && run.job.company].filter(Boolean).join(" · ") || run.job_id;
   const toggle = (...args) => Aira.serp.toggleSwitch(...args);
 
-  /** Renders the Auto-apply tab into ``host`` and keeps it fresh while something runs. */
-  Aira.renderAutopilot = async (host) => {
+  /** Renders Auto-apply into ``host`` and keeps it fresh while something runs.
+   *  part "plans": status, readiness, search plans and activity (the Auto-apply page); part "needs": only the runs
+   *  that wait for the person (Needs you), and ``onData`` hears each fresh answer; "all": everything. */
+  Aira.renderAutopilot = async (host, { part = "all", onData = null } = {}) => {
     let data = null;
     let timer = null;
     const root = h("div", { class: "aap" }, ui.skeleton(6));
@@ -33,6 +36,7 @@
       try { data = await api(BASE, { silent: quiet }); }
       catch (error) { if (!quiet) root.replaceChildren(ui.error(error, () => load())); return; }
       if (!root.isConnected) return;
+      if (onData) onData(data);
       paint();
       // Poll while a run is going (or just finished) so results appear without a reload.
       if (data.status.running) timer = setTimeout(() => { if (root.isConnected) load({ quiet: true }); }, 2500);
@@ -40,7 +44,7 @@
     const afterStart = (message) => { toast(message, "success"); setTimeout(() => load({ quiet: true }), 600); };
 
     function paint() {
-      const sections = [hero(), readiness(), needsYou(), plansSection(), activity()].filter(Boolean);
+      const sections = (part === "needs" ? [needsYou()] : part === "plans" ? [hero(), readiness(), plansSection(), activity()] : [hero(), readiness(), needsYou(), plansSection(), activity()]).filter(Boolean);
       root.replaceChildren(...sections);
     }
 
@@ -64,7 +68,7 @@
       return h("section", { class: `aap-hero${s.paused ? " paused" : ""}`, "aria-label": "Auto-apply status" },
         h("div", { class: "aap-hero-main" },
           h("div", { class: "aap-state" }, h("span", { class: `aap-dot ${s.paused ? "off" : "on"}`, "aria-hidden": "true" }), h("strong", { text: s.paused ? "Auto-apply is paused" : data.plans.some((p) => p.enabled) ? "Auto-apply is on" : "No active search plan" })),
-          h("p", { class: "aap-sub" }, sentText, waiting ? h("a", { href: "#aapNeeds", class: "aap-waiting", text: ` · ${waiting} waiting for you` }) : null),
+          h("p", { class: "aap-sub" }, sentText, waiting ? h("a", { href: part === "plans" ? "#/needs" : "#aapNeeds", class: "aap-waiting", text: ` · ${waiting} waiting for you in Needs you` }) : null),
           running),
         h("div", { class: "aap-hero-actions" },
           h("div", { class: "btn-row" }, h("button", { type: "button", class: "btn", text: "New search plan", onclick: () => planEditor(null) }), pause),
@@ -90,7 +94,7 @@
     function needsYou() {
       if (!data.open.length) return null;
       return h("section", { id: "aapNeeds", "aria-labelledby": "aapNeedsTitle" },
-        h("div", { class: "aap-sec-head" }, h("h2", { id: "aapNeedsTitle", text: `Needs you (${data.open.length})` })),
+        h("div", { class: "aap-sec-head" }, h("h2", { id: "aapNeedsTitle", text: part === "needs" ? `Held by Auto-apply (${data.open.length})` : `Needs you (${data.open.length})` })),
         h("div", { class: "aap-needs" }, ...data.open.map(openCard)));
     }
 
@@ -154,7 +158,7 @@
     }
 
     function planCard(plan) {
-      const where = [...plan.sources.map((s) => ({ linkedin: "LinkedIn", aira_jobs: "Jobs", google_jobs: "Google Jobs" }[s] || s)), ...plan.boards.map((b) => `${BOARD_LABELS[b.source]}: ${b.identifier}`)];
+      const where = [...plan.sources.map((s) => ({ linkedin: "LinkedIn", aira_jobs: "Free job boards", google_jobs: "Google Jobs" }[s] || s)), ...plan.boards.map((b) => `${BOARD_LABELS[b.source]}: ${b.identifier}`)];
       const enabled = toggle(plan.enabled ? "On schedule" : "Off", plan.enabled, async (on) => {
         try { await api(`${BASE}/plans/${plan.plan_id}`, { method: "PATCH", body: { enabled: on } }); toast(on ? "Plan on. Its first run starts within a minute." : "Plan off.", "success"); load({ quiet: true }); }
         catch (error) { enabled.set(!on); Aira.reportError(error); }
@@ -232,7 +236,7 @@
         h("div", { class: "form-grid" }, ui.field("Arrangement", workplace), ui.field("Employment type", jobType)),
         h("fieldset", { class: "aap-fieldset" }, h("legend", { text: "Where to search" }),
           h("label", { class: "check" }, linkedin, "LinkedIn (needs LinkedIn connected)"),
-          h("label", { class: "check" }, airaJobs, "Jobs: free job boards (Himalayas, The Muse, Remotive, Jobicy, Arbeitnow), no key needed"),
+          h("label", { class: "check" }, airaJobs, "Free job boards (Himalayas, The Muse, Remotive, Jobicy, Arbeitnow), no key needed"),
           h("label", { class: "check" }, google, "Google Jobs (uses one SerpApi search per position per run)"),
           ui.field("Company boards", boards, "Greenhouse, Lever, Ashby or SmartRecruiters, as source: identifier")),
         h("fieldset", { class: "aap-fieldset" }, h("legend", { text: "When to apply" }),
@@ -280,7 +284,7 @@
       const body = h("div", { class: "aap-answers" },
         h("p", { class: "muted", text: "Saving an answer confirms it: Monosage uses it on every form that asks the same question. Sensitive answers (work authorization, sponsorship, attestations) are only ever filled from here." }),
         ...rows.map(({ answer, input }) => ui.field(answer.label, input, answer.sensitivity === "sensitive" ? "Sensitive" : null)),
-        h("p", { class: "muted", style: { fontSize: "12.5px" } }, "Demographic and other questions can be answered in ", h("a", { href: "#/settings/answers", text: "Settings > Standard answers" }), "."),
+        h("p", { class: "muted", style: { fontSize: "12.5px" } }, "Demographic and other questions can be answered in ", h("a", { href: "#/profile?tab=answers", text: "Settings > Standard answers" }), "."),
         remembered);
       Aira.modal({ title: "Your answers", wide: true, body, actions: [
         { label: "Close", kind: "ghost" },
@@ -350,7 +354,7 @@
       return card;
     }
     if (active) {
-      card.append(h("p", {}, statusBadge(active.status), " ", active.status === "running" || active.status === "queued" ? "Monosage is working on it." : "It waits for you in Jobs > Auto-apply."), h("a", { class: "btn secondary sm", href: "#/jobs/autopilot", text: "Open Auto-apply" }));
+      card.append(h("p", {}, statusBadge(active.status), " ", active.status === "running" || active.status === "queued" ? "Monosage is working on it." : "It waits for you in Needs you."), active.status === "running" || active.status === "queued" ? h("a", { class: "btn secondary sm", href: "#/autopilot", text: "Open Auto-apply" }) : h("a", { class: "btn secondary sm", href: "#/needs", text: "Open Needs you" }));
       return card;
     }
     const last = runs[0];
@@ -360,7 +364,7 @@
     const start = (mode) => async (event) => withBusy(event.currentTarget, async () => {
       if (mode === "apply" && !(await Aira.confirm({ title: "Apply to this job now?", message: `${job.title || "This job"}${job.company ? ` at ${job.company}` : ""}. Monosage submits the application if it can answer every required question.`, confirmLabel: "Apply for me" }))) return;
       await api(`/api/jobs/${encodeURIComponent(job.job_id)}/auto-apply`, { method: "POST", body: { mode } });
-      toast(mode === "apply" ? "Applying… follow it in Jobs > Auto-apply." : "Filling the form… it will wait for your OK.", "success");
+      toast(mode === "apply" ? "Applying… follow it in Auto-apply." : "Filling the form… it will wait for your OK.", "success");
       setTimeout(() => reload("apply"), 1500);
     });
     card.append(h("div", { class: "btn-row" }, h("button", { type: "button", class: "btn", text: "Apply for me", onclick: start("apply") }), h("button", { type: "button", class: "btn secondary", text: "Fill it, I'll submit", onclick: start("review") })));

@@ -997,7 +997,7 @@ SOURCE_CATALOG: tuple[SourceDescriptor, ...] = (
     ),
     SourceDescriptor(
         source="aira_jobs",
-        label="Jobs",
+        label="Free job boards",
         group="aira",
         status="available",
         access_method="Monosage's own job search over free public job-board APIs (Himalayas, The Muse, Remotive, Jobicy, Arbeitnow); no key, no credits",

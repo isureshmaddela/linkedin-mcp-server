@@ -79,7 +79,7 @@ def test_new_sections_are_in_the_navigation_with_icons_and_chords() -> None:
         for section in ids - {"leads"}:
             assert "key" not in nav[section], section
     assert nav["today"]["app"] == "account" and nav["display"]["app"] == "account"
-    assert len(nav) == 34
+    assert len(nav) == 39
     keys = [item["key"] for item in nav.values() if "key" in item]
     assert len(set(keys)) == len(keys), "two sections share a g-chord"
     for item in nav.values():
@@ -103,7 +103,10 @@ def test_new_sections_are_in_the_navigation_with_icons_and_chords() -> None:
 def test_chords_and_help_are_driven_by_the_same_list() -> None:
     assert "NAV.find((item) => item.key === event.key)" in APP_JS
     assert "APPS.find((item) => item.key === event.key" in APP_JS
-    assert "sections.map((item) => [`g then ${item.key}`, item.label])" in APP_JS
+    assert (
+        "sections.filter((item) => item.key).map((item) => [`g then ${item.key}`, item.label])"
+        in APP_JS
+    )
 
 
 def test_the_app_keys_do_not_collide_with_section_chords() -> None:

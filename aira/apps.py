@@ -97,7 +97,19 @@ CAREERS = App(
     feature="",
     key="c",
     description="Job search across LinkedIn, Google Jobs and company boards, automatic applications with a person in the loop, interviews, recruiters, documents and analytics.",
-    extra_sections=("onboarding", "activity", "coach", "coach-queue"),
+    # Pages of the Careers menu that are views over the sections above (Auto-apply, Needs you, Email updates,
+    # Offers, Profile & resume): they belong to Careers too.
+    extra_sections=(
+        "onboarding",
+        "activity",
+        "coach",
+        "coach-queue",
+        "autopilot",
+        "needs",
+        "emails",
+        "offers",
+        "profile",
+    ),
 )
 API = App(
     id="api",

@@ -434,3 +434,31 @@ app working end to end with one account, tests per app, more features where they
   ("Search"). An AI routine added after its time today first runs the next day (`ai_routines.starts_on`), so
   saving one no longer pops its answer over the page at once. Full suite: 3309 passed; the 16 that failed under load
   or after the changes were fixed and pass (91 passed in the re-run).
+
+## Careers navigation, in the order of a job search (2026-10-28)
+- **Menu (`NAV` in app.js):** Home (Dashboard) · Find (Jobs, Research) · Apply (Auto-apply, Needs you, Applications)
+  · Follow up (Interviews, Messages & recruiters, Email updates, Offers) · Your materials (Profile & resume,
+  Documents) · Insights (Analytics). The group names are the menu headings. New sections `autopilot`, `needs`,
+  `emails`, `offers`, `profile` (Careers `extra_sections`, hosted `WORKSPACE_IDS`); they have no `g` chord (every
+  letter is already taken somewhere). Phone bar: Dashboard, Jobs, Needs you, Applications, More.
+- **Jobs:** three folders (All jobs, Recommended, Saved). Where a job comes from is a chip row on All jobs
+  (`#/jobs/all?from=linkedin|aira|google|portals`): Every source, LinkedIn, Free job boards, Google Jobs, Company
+  portals; the chip narrows both the search form's sources and the list. The free boards source (`aira_jobs`) is
+  "Free job boards" everywhere (source catalog, chip, hint, badges, Auto-apply plan editor, Research's provider
+  switch, billing); the renamer had left it as a bare "Jobs". Research's own search tab is "Advanced search".
+- **Needs you (`#/needs`):** Auto-apply's held runs (questions with the AI's drafts, filled forms waiting for a
+  click; `renderAutopilot(host, { part: "needs" })`) above the review queue (Ready to apply, Needs your review, In
+  progress), a job held by Auto-apply listed once. Count badge on the menu item and a dot on the phone bar: held runs
+  plus queue items, by job (`Aira.careersNeeds`, refreshed on every Careers page, at most every 30 s, and at once on
+  Needs you). Auto-apply (`#/autopilot`) keeps status, readiness, plans and activity and links to Needs you.
+- **Applications** is the pipeline (with the summary); **Offers** (`#/offers`) and **Email updates** (`#/emails`)
+  are pages of their own. **Profile & resume** (`#/profile?tab=profile|resume|answers`) draws Settings' Profile,
+  Resume and Standard answers inside Careers; Careers' links and the Auto-apply readiness actions point there.
+- **Old links redirect** (`Aira.redirects`, run by the router before a page is drawn, address replaced):
+  `#/jobs/linkedin|aira|google|portals` and `#/jobs?tab=<source>` → `#/jobs/all?from=<source>` (job paths kept);
+  `#/jobs/autopilot`, `#/jobs?tab=autopilot` → `#/autopilot`; `#/applications?tab=queue|offers|email` → `#/needs`,
+  `#/offers`, `#/emails`. In-app links, Auto-apply notifications (`#/needs`, `#/applications`) and Analytics tiles
+  use the new places.
+- **Tests:** `test_suite_careers_shell_ui.py` (menu groups and order, redirects, source chips, Saved, Profile &
+  resume folders, Needs you page with the menu count and phone dot), `test_app_switcher_ui.py`,
+  `test_integration_shell.py` updated. te/hi translations for the 32 new strings (`i18n_check` clean for both).

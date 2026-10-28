@@ -18,6 +18,22 @@
     try { await renderer(content); } catch (error) { content.replaceChildren(ui.error(error, () => router.render())); }
   };
 
+  // Careers > Profile & resume: the parts of Settings a job search starts from, as folders in the Careers menu.
+  const MATERIALS = [{ id: "profile", label: "Profile", icon: "profile" }, { id: "resume", label: "Resume", icon: "documents" }, { id: "answers", label: "Standard answers", icon: "careers-check" }];
+  Aira.views.profile = async (main, route) => {
+    const tab = MATERIALS.some((item) => item.id === route.query.tab) ? route.query.tab : "profile";
+    Aira.careersFolders("profile", MATERIALS, tab);
+    const content = h("div", {});
+    main.replaceChildren(
+      h("div", { class: "page-head" }, h("div", {}, h("h1", { text: "Profile & resume" }), h("p", { text: "What every application is filled from: your profile, your resume and the answers you confirmed. Monosage never guesses past them." }))),
+      Aira.careersStrip(ui.tabs(MATERIALS, tab, (id) => router.go(["profile"], { tab: id }, { replace: true }))),
+      content,
+    );
+    const renderer = { profile: renderProfile, resume: renderResume, answers: renderAnswers }[tab];
+    content.replaceChildren(ui.skeleton(5));
+    try { await renderer(content); } catch (error) { content.replaceChildren(ui.error(error, () => router.render())); }
+  };
+
   async function loadProfile() { Aira.state.profile = await api("/api/profile"); return Aira.state.profile; }
   async function saveProfile(partial) {
     const p = Aira.state.profile || (await loadProfile());
