@@ -156,7 +156,8 @@ def test_a_scheduled_upload_waits_and_studio_finds_it(browser, env):
         "input[name=publish_at]",
         (datetime.now() + timedelta(days=2)).strftime("%Y-%m-%dT18:30"),
     )
-    page.locator("button:has-text('Upload')").last.click()
+    # the form's own button (patchright 1.58's .last times out when one element matches)
+    page.locator("#vidUpload button:has-text('Upload')").first.click()
     page.wait_for_url("**watch=*", timeout=60000)
     page.wait_for_selector("text=Until then only you can watch it")
     scheduled_id = page.url.split("watch=")[1]

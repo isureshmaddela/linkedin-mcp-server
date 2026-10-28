@@ -145,11 +145,11 @@ def render(markdown: str) -> str:
 
 
 PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
-<title>{title} · Aira</title><link rel="stylesheet" href="/static/app.css">
+<title>{title} · Monosage</title><link rel="stylesheet" href="/static/app.css">
 <style>body{{margin:0;background:var(--bg,#fff);color:var(--text,#111)}}main.legal{{max-width:820px;margin:0 auto;padding:24px 16px 64px;line-height:1.6}}
 main.legal table{{width:100%;border-collapse:collapse;display:block;overflow-x:auto}}main.legal td,main.legal th{{border:1px solid var(--border,#ccc);padding:6px 8px;vertical-align:top;text-align:left}}
 main.legal blockquote{{border-left:4px solid var(--border,#ccc);margin:16px 0;padding:4px 16px;background:var(--surface,#f6f6f6)}}main.legal pre{{overflow-x:auto}}
-nav.legal-nav a{{margin-right:12px}}</style></head><body><main class="legal"><nav class="legal-nav" aria-label="Legal pages"><a href="/">Aira</a>{nav}</nav>{body}</main></body></html>"""
+nav.legal-nav a{{margin-right:12px}}</style></head><body><main class="legal"><nav class="legal-nav" aria-label="Legal pages"><a href="/">Monosage</a>{nav}</nav>{body}</main></body></html>"""
 
 
 def _nav(current: str) -> str:

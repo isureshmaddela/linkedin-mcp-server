@@ -84,7 +84,7 @@
     $("app").hidden = true;
     const screen = $("authScreen");
     screen.hidden = false;
-    screen.replaceChildren(h("div", { class: "auth-panel cp-auth" }, h("div", { class: "brand" }, h("span", { class: "brand-mark", text: "A" }), h("span", {}, "AIRA", h("small", { text: "Platform console" }))), h("h1", { style: { marginTop: "18px" }, text: title }), intro ? h("p", { class: "muted", text: intro }) : null, ...children));
+    screen.replaceChildren(h("div", { class: "auth-panel cp-auth" }, h("div", { class: "brand" }, h("span", { class: "brand-mark", text: "M" }), h("span", {}, "MONOSAGE", h("small", { text: "Platform console" }))), h("h1", { style: { marginTop: "18px" }, text: title }), intro ? h("p", { class: "muted", text: intro }) : null, ...children));
     const first = screen.querySelector("input");
     if (first) setTimeout(() => first.focus(), 30);
   }
@@ -105,7 +105,7 @@
         } catch (error) { notice.textContent = error.message; }
       });
     } }, ui.field("Operator email", email), ui.field("Password", password), notice, submit);
-    authShell("Platform sign-in", "For Aira operators only. Organizations sign in at the main address.", form);
+    authShell("Platform sign-in", "For Monosage operators only. Organizations sign in at the main address.", form);
   }
 
   function showMfaVerify(message = "") {
@@ -167,7 +167,7 @@
   const NAV_DEFS = [
     { sub: "tenants", id: "ptenants", label: "Tenants", icon: "dashboard", key: "t", quick: true },
     { sub: "plans", id: "pplans", label: "Plans", icon: "settings", key: "l" },
-    { sub: "apps", id: "papps", label: "Apps", icon: "hub", key: "p" },
+    { sub: "Apps", id: "papps", label: "Apps", icon: "hub", key: "p" },
     { sub: "flags", id: "pflags", label: "Feature flags", icon: "airaapi", key: "f" },
     { sub: "support", id: "psupport", label: "Support access", icon: "recruiters", key: "u", quick: true },
     { sub: "announcements", id: "pannounce", label: "Announcements", icon: "more", key: "n" },
@@ -269,7 +269,7 @@
     const sub = route.path[1] || "tenants";
     const item = P.items.find((i) => i.sub === sub);
     $("crumbs").replaceChildren(h("span", { text: item ? `Platform · ${item.label}` : "Platform" }));
-    document.title = `${item ? item.label : "Platform"} · Aira platform`;
+    document.title = `${item ? item.label : "Platform"} · Monosage platform`;
     if (!P.active || !P.me) { put(stage, empty("Sign in to the platform console", "Open #/platform and sign in as an operator.")); return; }
     if (!item) { put(stage, empty("Not available", "That console page does not exist or needs a platform admin.")); return; }
     await SCREENS[sub](stage, route);
@@ -719,7 +719,7 @@
       Aira.toast("Blocked words saved.", "success");
       Aira.router.render();
     } });
-    put(stage, pageHead("Social moderation", "Reports from everyone on Aira Social. Hide what breaks the rules, suspend people who keep doing it, dismiss the rest. Every action is in the platform audit log.", h("button", { type: "button", class: "btn secondary", text: `Blocked words (${(blocklist || []).length})`, onclick: editWords })),
+    put(stage, pageHead("Social moderation", "Reports from everyone on Monosage Social. Hide what breaks the rules, suspend people who keep doing it, dismiss the rest. Every action is in the platform audit log.", h("button", { type: "button", class: "btn secondary", text: `Blocked words (${(blocklist || []).length})`, onclick: editWords })),
       section("", filter, table(["Reported", "What", "Reason", "Content", "Author", "Reported by", ""], rows, status === "open" ? "Nothing to review. Reports appear here when someone flags a post, comment, message, story or profile." : `No ${status} reports.`)));
   };
 
@@ -753,7 +753,7 @@
         n.status === "received" ? h("button", { type: "button", class: "btn sm secondary", text: "Reject", onclick: () => decide(n, "reject") }) : null,
         n.status === "counter_filed" || n.status === "taken_down" ? h("button", { type: "button", class: "btn sm secondary", text: "Put back", onclick: () => decide(n, "restore") }) : null,
         n.status === "counter_filed" ? h("button", { type: "button", class: "btn sm danger secondary", text: "Keep down", onclick: () => decide(n, "uphold") }) : null))));
-    put(stage, pageHead("Videos moderation", "Reports from everyone on Aira Videos, and copyright notices from the public form. Hide what breaks the rules, suspend channels that keep doing it, take down copied work and handle counter-notices. Every action is in the platform audit log."),
+    put(stage, pageHead("Videos moderation", "Reports from everyone on Monosage Videos, and copyright notices from the public form. Hide what breaks the rules, suspend channels that keep doing it, take down copied work and handle counter-notices. Every action is in the platform audit log."),
       section("Reports", filter, table(["Reported", "What", "Reason", "Content", "Channel", "Reported by", ""], rows, status === "open" ? "Nothing to review. Reports appear here when someone flags a video, comment or channel." : `No ${status} reports.`)),
       section("Copyright notices", h("p", { class: "muted", text: `Anyone can send one from ${location.origin}/videos/copyright. A takedown is a strike for 90 days; three stop a channel uploading.` }), table(["Received", "Video", "Claimant", "Their work", "Counter-notice", "Channel", "Status", ""], noticeRows, "No copyright notices.")));
   };
@@ -769,7 +769,7 @@
     const kpis = h("div", { class: "suite-kpis" },
       kpi("Gross ad revenue", micros(t.gross_micros), "what advertisers were charged"),
       kpi("Creator earnings", micros(t.creators_micros), `${t.settings.revenue_share_percent}% share`),
-      kpi("Platform revenue", micros(t.platform_micros), "what Aira keeps"),
+      kpi("Platform revenue", micros(t.platform_micros), "what Monosage keeps"),
       kpi("Estimated, not yet confirmed", micros(t.estimated_micros)),
       kpi("Payouts waiting", micros(t.requested_micros), `${t.payouts_waiting} requests`),
       kpi("Paid to creators", micros(t.paid_micros)),
@@ -786,7 +786,7 @@
         h("button", { type: "button", class: "btn sm danger secondary", text: "Reject", onclick: () => formModal({ title: "Reject this ad", fields: [{ name: "note", label: "What the advertiser must change", type: "textarea", rows: 3 }], submit: "Reject", danger: true, onSubmit: async (v) => { if (!v.note) throw new Error("Tell the advertiser why."); await api(`/api/platform/ads/creatives/${c.id}/review`, { method: "POST", body: { decision: "reject", note: v.note } }); Aira.router.render(); } }) })))));
     const payoutRows = overview.payouts.map((p) => h("tr", {}, td(ts(Date.parse(p.requested_at) / 1000 || p.requested_at)), td(p.channel ? p.channel.name : "Removed"), td(micros(p.amount_micros), "num"), td(h("div", { class: "cp-preview", text: p.details })), td(micros((p.balances || {}).payable_micros), "num"),
       td(money ? h("div", { class: "btn-row" },
-        h("button", { type: "button", class: "btn sm", text: "Mark paid", onclick: () => formModal({ title: `Paid ${micros(p.amount_micros)}?`, intro: "Pay it outside Aira (bank transfer, UPI), then give the reference here. The creator is told.", fields: [{ name: "reference", label: "Payment reference" }], submit: "Mark paid", onSubmit: async (v) => { if (!v.reference) throw new Error("Give the payment reference."); await api(`/api/platform/ads/payouts/${p.id}`, { method: "POST", body: { action: "paid", reference: v.reference } }); Aira.router.render(); } }) }),
+        h("button", { type: "button", class: "btn sm", text: "Mark paid", onclick: () => formModal({ title: `Paid ${micros(p.amount_micros)}?`, intro: "Pay it outside Monosage (bank transfer, UPI), then give the reference here. The creator is told.", fields: [{ name: "reference", label: "Payment reference" }], submit: "Mark paid", onSubmit: async (v) => { if (!v.reference) throw new Error("Give the payment reference."); await api(`/api/platform/ads/payouts/${p.id}`, { method: "POST", body: { action: "paid", reference: v.reference } }); Aira.router.render(); } }) }),
         h("button", { type: "button", class: "btn sm secondary", text: "Decline", onclick: () => formModal({ title: "Decline this payout", fields: [{ name: "note", label: "Why (the creator sees it)", type: "textarea", rows: 2 }], submit: "Decline", danger: true, onSubmit: async (v) => { if (!v.note) throw new Error("Say why."); await api(`/api/platform/ads/payouts/${p.id}`, { method: "POST", body: { action: "reject", note: v.note } }); Aira.router.render(); } }) })) : null)));
     const monthRows = t.months.map((m) => h("tr", {}, td(m.month), td(micros(m.gross_micros), "num"), td(micros(m.creators_micros), "num"), td(micros(m.platform_micros), "num"), td(String(m.impressions), "num"), td(String(m.invalid), "num"),
       td(m.closed ? chip("closed", "ok") : money ? h("button", { type: "button", class: "btn sm secondary", text: "Close month", onclick: async () => { if (await Aira.confirm({ title: `Close ${m.month}?`, message: "Its traffic is reviewed once more (too many ads from one viewer to one channel in a day are refunded), then creators' earnings are confirmed and can be paid.", confirmLabel: "Close month" })) { const r = await api("/api/platform/ads/close-month", { method: "POST", body: { month: m.month } }); Aira.toast(`${r.month} closed: ${r.invalid} impressions refunded.`, "success"); Aira.router.render(); } } }) : chip("open"))));

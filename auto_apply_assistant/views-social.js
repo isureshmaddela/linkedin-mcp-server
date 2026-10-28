@@ -518,7 +518,7 @@
   // Groups and pages
   // ---------------------------------------------------------------------------
   const GROUP_FIELDS = [{ name: "name", label: "Group name", required: true, placeholder: "Neighbourhood walkers" }, { name: "about", label: "What it is about", type: "textarea", rows: 3 }, { name: "visibility", label: "Who can see it", type: "select", options: [["public", "Public: anyone can find and join"], ["private", "Private: people ask to join"]] }];
-  const PAGE_FIELDS = [{ name: "name", label: "Page name", required: true, placeholder: "Asha's Bakery" }, { name: "category", label: "Category", placeholder: "Bakery" }, { name: "about", label: "About", type: "textarea", rows: 3 }, { name: "link", label: "Your website or Aira public page (https://…)", type: "url" }];
+  const PAGE_FIELDS = [{ name: "name", label: "Page name", required: true, placeholder: "Asha's Bakery" }, { name: "category", label: "Category", placeholder: "Bakery" }, { name: "about", label: "About", type: "textarea", rows: 3 }, { name: "link", label: "Your website or Monosage public page (https://…)", type: "url" }];
   const startGroup = () => S.edit({ title: "Start a group", fields: GROUP_FIELDS, values: { visibility: "public" }, submitLabel: "Start the group", onSave: async (values) => { const created = await api("/groups", { method: "POST", body: values }); go({ tab: "groups", group: created.group.id }); } });
   const createPage = () => S.edit({ title: "Create a page", fields: PAGE_FIELDS, submitLabel: "Create the page", onSave: async (values) => { const created = await api("/pages", { method: "POST", body: values }); go({ tab: "pages", page: created.page.id }); } });
   async function groupsTab(body, me, route) {
@@ -609,7 +609,7 @@
     { name: "place", label: "Where to pick it up (town or area)", placeholder: "Riverside" },
     { name: "photos", label: "Photo links (https://…), one per line, up to 6", type: "textarea", rows: 3 },
     { name: "audience", label: "Who can see it", type: "select", options: [["public", "Everyone on Social"], ["friends", "Only my friends"]] },
-    { name: "payment_link", label: "Your payment link (optional, https://…)", type: "url", hint: "Buyers pay you there or in person. Aira never handles the money." },
+    { name: "payment_link", label: "Your payment link (optional, https://…)", type: "url", hint: "Buyers pay you there or in person. Monosage never handles the money." },
     setup.business ? { name: "for_business", label: `Sell it for ${setup.business.name}`, type: "checkbox", hint: `The sale counts in the Business hub.${setup.business.has_payment_link ? " Buyers see the business's payment link if you leave yours empty." : ""}` } : null,
   );
   const listingBody = (values) => ({ ...values, photos: photoList(values.photos) });
@@ -677,7 +677,7 @@
         listing.mine ? S.section("How it is going", h("p", { style: { margin: 0 }, text: `${count(listing.views || 0, "view", "views")} · saved by ${count(listing.saves || 0, "person", "people")}` }),
           listing.status === "sold" ? h("p", { style: { margin: 0 }, text: `${listing.sold_cents ? `Sold for ${listing.sold}` : "Given away"}${listing.buyer ? ` to ${listing.buyer}` : ""}.${listing.sold_cents ? (listing.for_business ? " It counts in the Business hub." : " It counts in your earnings from sales.") : ""}` }) : null,
           listing.for_business ? h("p", { class: "muted small", style: { margin: 0 }, text: "You are selling this for the business." }) : null) : null,
-        listing.mine && listing.audience === "public" && listing.status !== "sold" ? S.section("Share it outside Aira", S.share({ title: "Listing link", text: "A page anyone can open, even without Aira: the photos, the price and a button to pay you. They can tell you they are interested.", link, onCreate: async () => (await api(`/market/${listing.id}/share`, { method: "POST", body: {} })).link, onRevoke: async () => { await api(`/market/${listing.id}/share`, { method: "DELETE" }); } })) : null));
+        listing.mine && listing.audience === "public" && listing.status !== "sold" ? S.section("Share it outside Monosage", S.share({ title: "Listing link", text: "A page anyone can open, even without Monosage: the photos, the price and a button to pay you. They can tell you they are interested.", link, onCreate: async () => (await api(`/market/${listing.id}/share`, { method: "POST", body: {} })).link, onRevoke: async () => { await api(`/market/${listing.id}/share`, { method: "DELETE" }); } })) : null));
     };
     await draw();
   }
@@ -798,7 +798,7 @@
       professional(me)));
     if (!young && me.visibility === "public") {
       const link = (await api("/me/share")).link;
-      body.append(S.section("Share your profile", S.share({ title: "Public profile link", text: "A page anyone can open, even without Aira: your name, about you, your work and your public posts.", link, onCreate: async () => (await api("/me/share", { method: "POST", body: {} })).link, onRevoke: async () => { await api("/me/share", { method: "DELETE" }); } })));
+      body.append(S.section("Share your profile", S.share({ title: "Public profile link", text: "A page anyone can open, even without Monosage: your name, about you, your work and your public posts.", link, onCreate: async () => (await api("/me/share", { method: "POST", body: {} })).link, onRevoke: async () => { await api("/me/share", { method: "DELETE" }); } })));
     }
     body.append(h("h2", { class: "suite-h2", text: "Your posts" }));
     const { state, ctx } = postList(body, me, async () => (await api(`/people/${me.id}`)).posts, { empty: Aira.ui.empty("You have not posted yet", "Share something from the Feed.") });
@@ -1002,7 +1002,7 @@
     const subtitle = searching ? "People, chats, groups, pages, things for sale and your family." : tabId === "feed" && news.length ? news.join(" · ") : TAB_META[tabId].about;
     const body = S.page(main, { title, subtitle });
     body.classList.add("so-page");
-    document.title = `${title} · Social · Aira`;
+    document.title = `${title} · Social · Monosage`;
     // The tab bar (on a phone) and the menu's folders (shell.js draws them from the same items) carry the unread
     // counts in their labels.
     S.tabs(body, route, "social", tabs.map((item) => ({ id: item.id, icon: item.icon, label: item.count ? `${item.label} (${item.count})` : item.label })), searching ? "" : tabId);

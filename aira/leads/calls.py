@@ -149,7 +149,7 @@ def calling_window(
         return {
             "known": False,
             "ok": None,
-            "note": "Aira cannot tell where this business is. Call between 9 am and 5 pm in its own time zone.",
+            "note": "Monosage cannot tell where this business is. Call between 9 am and 5 pm in its own time zone.",
         }
     try:
         from zoneinfo import ZoneInfo
@@ -204,7 +204,7 @@ def dial_info(
         "blocked": blocked,
         "window": calling_window(lead, now),
         "reminders": [
-            "You place the call yourself; Aira never dials.",
+            "You place the call yourself; Monosage never dials.",
             "Say who you are and why you are calling in the first sentence.",
             "If they ask not to be called again, log it as 'Asked not to be called again' and stop.",
             "Check the Do Not Call rules and any registration your country or state requires for sales calls.",

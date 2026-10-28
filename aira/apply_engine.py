@@ -926,7 +926,7 @@ class _Runner:
             self.step("The page asks for a sign-in")
             return self.outcome(
                 "needs_review",
-                "The page asks for a sign-in. Aira never signs in to employer sites; "
+                "The page asks for a sign-in. Monosage never signs in to employer sites; "
                 "apply manually or sign in yourself first.",
                 screenshot=self.screenshot("sign-in"),
             )
@@ -951,7 +951,7 @@ class _Runner:
             self.step(f"A verification step is on the form ({captcha})")
             return self.outcome(
                 "needs_review",
-                "A CAPTCHA or verification step is on the form. Aira never bypasses "
+                "A CAPTCHA or verification step is on the form. Monosage never bypasses "
                 "these; complete it yourself and submit.",
                 screenshot=self.screenshot("captcha"),
             )
@@ -1157,7 +1157,7 @@ class _Runner:
             return (
                 None,
                 "unknown",
-                "Aira could not match this question to anything it knows; answer it in review.",
+                "Monosage could not match this question to anything it knows; answer it in review.",
             )
         mapping = _mapping_for(control, canonical)
         prefilled = prefill_fields(
@@ -1219,7 +1219,7 @@ class _Runner:
                 control,
                 None,
                 "unsupported",
-                "Aira cannot operate this kind of control.",
+                "Monosage cannot operate this kind of control.",
             )
         if control.disabled:
             return self._question(control, None, "skipped", "The control is disabled.")
@@ -1377,7 +1377,7 @@ class _Runner:
                 control,
                 None,
                 "unknown",
-                "Aira does not know which document this upload wants.",
+                "Monosage does not know which document this upload wants.",
             )
         if control.disabled:
             return self._question(control, None, "skipped", "The upload is disabled.")
@@ -1433,7 +1433,7 @@ class _Runner:
             self.step("No submit button was found on the form")
             return self.outcome(
                 "failed",
-                "The form has no submit button Aira can press.",
+                "The form has no submit button Monosage can press.",
                 screenshot=self.screenshot("no-submit"),
             )
         try:

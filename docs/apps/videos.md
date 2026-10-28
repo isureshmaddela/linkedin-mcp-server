@@ -8,9 +8,25 @@ Open it from the apps menu. The menu badge counts new notifications on your chan
 messages from the moderators, payouts). Today shows new videos from the channels you follow and, when you earn,
 what you earned today and this month.
 
+## In the Aira frame
+
+Videos lives at `/videos`, with its own logo and tab icon, like the other apps.
+
+* **+ New** (above the left menu): Upload a video, Upload a reel, Upload a short film (each opens Studio's upload form
+  set to that kind, with the keyboard on the file chooser), New playlist, and for adults New brand deal (Earnings >
+  Brand deals). A suspended channel is not offered the uploads. On a phone the page keeps its own Upload button.
+* **Search** (the box across the top): as you type it suggests up to six matches: channels, videos, reels and short
+  films everyone can find, your own videos only you can find (private, link only, scheduled) and your playlists;
+  choosing one opens it. Enter shows every result on Home (`?q=`), with Everything / Videos / Reels / Short films,
+  the channels, and your own private matches apart with a link to them in Studio.
+* **Folders** (the left menu): Home, Reels, Short films, Library, Studio (with the count of new notifications),
+  Analytics, Earnings (adults) and Moderation (the household's owner). Each opens `#/videos?tab=<id>` and names the
+  page; on a wide screen they stand in for the page's own tab bar, which a phone keeps.
+
 ## Watching
 
-* **Home**: from your subscriptions, Popular and New, with category buttons and a search box (videos and channels).
+* **Home**: from your subscriptions, Popular and New, with category buttons. Search with the box at the top of the
+  page (see below).
 * **Popular** is worked out in the open: `(views in the last 7 days + 2 × likes + 3 × comments + 1) ÷ (hours since
   upload + 2)^1.2`. Nothing is paid for and nothing is personal. Unlisted and private videos are never listed.
 * **The watch page**: the player (seeking works; captions when the uploader added them), Like, Subscribe, Watch

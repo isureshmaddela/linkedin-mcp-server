@@ -213,7 +213,7 @@ canvas { display: block; max-width: 100%; max-height: 100%; background: #fff; to
   <div id="stage"><canvas id="screen" tabindex="0" aria-label="Private browser window" data-frames="0"></canvas></div>
   <div id="done" role="status"></div>
 </main>
-<p class="note" id="note">This is a private browser that Aira runs for you. Type your LinkedIn details here yourself; Aira does not store or log what you type, and keeps only the signed-in session.</p>
+<p class="note" id="note">This is a private browser that Monosage runs for you. Type your LinkedIn details here yourself; Monosage does not store or log what you type, and keeps only the signed-in session.</p>
 <input id="kb" type="text" autocomplete="off" autocapitalize="off" autocorrect="off" spellcheck="false" inputmode="text" aria-hidden="true" tabindex="-1">
 <script nonce="__NONCE__">
 (() => {
@@ -255,7 +255,7 @@ canvas { display: block; max-width: 100%; max-height: 100%; background: #fff; to
         if (!ready) { ready = true; setState("Sign in below. This window closes by itself when you are signed in."); }
       } catch (_) { /* a damaged frame is skipped */ }
     };
-    ws.onclose = () => { if (!ended) finish("The connection closed before sign-in finished. Start again from Aira.", true); };
+    ws.onclose = () => { if (!ended) finish("The connection closed before sign-in finished. Start again from Monosage.", true); };
   };
 
   const status = (m) => {
@@ -330,7 +330,7 @@ canvas { display: block; max-width: 100%; max-height: 100%; background: #fff; to
 
   document.getElementById("cancel").addEventListener("click", () => {
     if (ended) { window.close(); return; }
-    send({ t: "cancel" }); finish("Sign-in cancelled. You can start again from Aira.", true);
+    send({ t: "cancel" }); finish("Sign-in cancelled. You can start again from Monosage.", true);
   });
   let resizeTimer = 0;
   window.addEventListener("resize", () => { clearTimeout(resizeTimer); resizeTimer = setTimeout(() => { const s = size(); send({ t: "resize", w: s.w, h: s.h }); }, 250); });
@@ -397,7 +397,7 @@ class Session:
                 {
                     "type": "error",
                     "code": "failed",
-                    "message": "The private browser could not be started. Try again from Aira.",
+                    "message": "The private browser could not be started. Try again from Monosage.",
                 }
             )
         finally:
@@ -479,11 +479,11 @@ class Session:
                 )
         message = {
             "signed_in": "You are signed in to LinkedIn. You can close this window.",
-            "cancelled": "Sign-in cancelled. You can start again from Aira.",
-            "timeout": "This sign-in window timed out. Start again from Aira.",
-            "revoked": "This sign-in link was replaced or is no longer valid. Start again from Aira.",
+            "cancelled": "Sign-in cancelled. You can start again from Monosage.",
+            "timeout": "This sign-in window timed out. Start again from Monosage.",
+            "revoked": "This sign-in link was replaced or is no longer valid. Start again from Monosage.",
             "replaced": "A newer sign-in window was opened for this account.",
-            "shutdown": "The sign-in service is restarting. Start again from Aira.",
+            "shutdown": "The sign-in service is restarting. Start again from Monosage.",
         }.get(outcome)
         if message and self.outcome != "refused":
             await self._tell({"type": "ended", "outcome": outcome, "message": message})

@@ -16,10 +16,10 @@
   const asPerson = (name, title) => {
     const set = (id, fn) => { const node = document.getElementById(id); if (node) fn(node); };
     set("pubName", (node) => { node.textContent = name || ""; });
-    set("pubTagline", (node) => { node.textContent = "on Aira Social"; });
+    set("pubTagline", (node) => { node.textContent = "on Monosage Social"; });
     set("pubLogo", (node) => { node.hidden = true; node.removeAttribute("src"); });
     set("pubContact", (node) => node.replaceChildren());
-    document.title = title && name ? `${title} · ${name}` : title || name || "Aira";
+    document.title = title && name ? `${title} · ${name}` : title || name || "Monosage";
   };
   // Clear what an earlier try left on the page ("Enter your name.") before showing a new message.
   const clearNotices = (root) => { for (const node of root.querySelectorAll(".pub-notice")) node.remove(); };
@@ -37,7 +37,7 @@
       ? h("img", { src: person.avatar, alt: "", referrerpolicy: "no-referrer", style: { width: "88px", height: "88px", borderRadius: "50%", objectFit: "cover" } })
       : h("span", { "aria-hidden": "true", style: { display: "inline-grid", placeItems: "center", width: "88px", height: "88px", borderRadius: "50%", background: "#e2e8f0", fontSize: "46px" }, text: person.avatar || "🙂" });
     root.append(h("section", { class: "pub-card" },
-      h("div", { style: { display: "flex", gap: "16px", alignItems: "center", flexWrap: "wrap" } }, avatar, h("div", {}, h("h1", { style: { margin: 0 }, text: person.name }), h("p", { class: "pub-muted", style: { margin: 0 }, text: `@${person.handle} on Aira Social` }))),
+      h("div", { style: { display: "flex", gap: "16px", alignItems: "center", flexWrap: "wrap" } }, avatar, h("div", {}, h("h1", { style: { margin: 0 }, text: person.name }), h("p", { class: "pub-muted", style: { margin: 0 }, text: `@${person.handle} on Monosage Social` }))),
       person.headline ? h("p", { style: { fontSize: "18px" }, text: person.headline }) : null,
       person.open_to_work ? h("p", {}, h("span", { class: "pub-badge", text: "Open to work" })) : null,
       person.bio ? h("p", { class: "pub-pre", text: person.bio }) : null));

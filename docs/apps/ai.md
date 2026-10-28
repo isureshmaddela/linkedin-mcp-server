@@ -5,6 +5,19 @@ One assistant across all your apps. Open it from the app switcher (Everyday > AI
 agent settings, approvals, routines, memories, the log) is yours alone: another person in the household, or another
 member of the organization, never sees it.
 
+## In the Aira frame
+
+AI lives at `/ai`, with the search box across the top, **+ New** above its menu and the launcher to the other apps.
+
+* **+ New** offers **New conversation** (a fresh chat, the message box ready), **New routine** (the routine form),
+  **Something to remember** (the Memory tab's box) and **Earning goal** (the earning-goal form; only for the people
+  who may count the account's earnings, and only with the Life app).
+* **Search** suggests your conversations (by name or by anything said in them), memories, routines and agents; picking
+  one opens it (the conversation, the marked memory or routine, or the agent's Configure). **Enter** shows every
+  match on a results page, with the agents' activity too and an **Ask Aira** button that asks the chat the same words.
+* **Menu folders**: Chat, Agents, Approvals, Routines, Memory, Earn and Activity. The page is named after the open
+  folder; on a wide screen the tab bar under the title is folded away (phones keep it).
+
 ## Chat
 
 * Ask about your day, goals, medicines, chores, family, learning, news, videos, stocks or business: "Give me my

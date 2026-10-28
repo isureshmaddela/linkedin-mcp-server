@@ -419,7 +419,7 @@ def video_link_create(request: Request) -> tuple[int, dict[str, Any]]:
     with _open(request) as (sc, me):
         video = service.own_video(sc, me, _id(request))
         if me["age_group"] == "child":
-            raise PermissionError("Children's videos are not shared outside Aira.")
+            raise PermissionError("Children's videos are not shared outside Monosage.")
         if video["visibility"] == "private":
             raise PermissionError("Make the video public or unlisted first.")
         if video["rating"] == "mature":
@@ -697,7 +697,7 @@ def record_payouts(connection: Any, sc: Any, home: str) -> int:
             amount_cents=int(item["amount_micros"]) // CENT,
             currency_code="USD",
             label="Creator payout from Videos",
-            customer="Aira Ads",
+            customer="Monosage Ads",
             at=str(item["decided_at"] or "")[:19] + "Z" if item["decided_at"] else "",
         )
     connection.commit()

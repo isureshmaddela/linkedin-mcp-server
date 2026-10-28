@@ -1034,7 +1034,7 @@ def _transactional(
     mail["Reply-To"] = str(settings.get("reply_to") or sender)
     mail["Date"] = formatdate(localtime=False)
     mail["Message-ID"] = make_msgid(domain=sender.split("@")[-1] or "localhost")
-    mail["X-Mailer"] = "Aira"
+    mail["X-Mailer"] = "Monosage"
     footer_bits = [
         str(profile.get(k) or "")
         for k in ("name", "address", "phone")

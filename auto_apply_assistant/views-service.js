@@ -215,7 +215,7 @@
     const closed = c.status === "closed";
     const reopen = () => { changed(); openCase(caseId, changed); };
     const thread = h("ol", { class: "sv-thread", "aria-label": "Conversation" }, ...detail.messages.map((m) => h("li", { class: `sv-msg ${m.author_kind}${m.internal ? " internal" : ""}` },
-      h("div", { class: "sv-msg-head" }, h("strong", { translate: "no", text: m.author_kind === "customer" ? (m.author_name || "Customer") : m.author_name || (m.author_kind === "system" ? "Aira" : "You") }),
+      h("div", { class: "sv-msg-head" }, h("strong", { translate: "no", text: m.author_kind === "customer" ? (m.author_name || "Customer") : m.author_name || (m.author_kind === "system" ? "Monosage" : "You") }),
         m.internal && m.author_kind !== "system" ? S.pill("internal note", { "internal note": "warn" }) : null,
         h("span", { class: "muted small", text: S.when(m.created_at) })),
       h("p", { class: "sv-msg-body", translate: "no", text: m.body }),
@@ -566,7 +566,7 @@
     const earned = data.earned;
     body.append(...[
       h("p", { class: "muted", text: "Sell the help that is worth paying for: a setup call, a repair, a priority answer. Customers ask for it from your help centre, see the price and pay with your own payment link; you mark the payment received and it counts in your revenue." }),
-      data.payment_link ? null : h("div", { class: "cloud-banner warning", role: "status" }, h("strong", { text: "Add your payment link" }), h("span", { text: "Customers need it to pay you. Aira never takes the money." }), h("a", { class: "btn secondary sm", href: "#/hub?tab=business", text: "Business profile" })),
+      data.payment_link ? null : h("div", { class: "cloud-banner warning", role: "status" }, h("strong", { text: "Add your payment link" }), h("span", { text: "Customers need it to pay you. Monosage never takes the money." }), h("a", { class: "btn secondary sm", href: "#/hub?tab=business", text: "Business profile" })),
       data.help_link ? null : h("div", { class: "cloud-banner", role: "status" }, h("strong", { text: "Share your help centre" }), h("span", { text: "Paid services appear there for customers to ask for." }), h("a", { class: "btn secondary sm", href: "#/service?tab=help", text: "Help centre" })),
       S.kpis([
         { label: "Earned this month", value: money(earned.this_month_cents), tone: earned.this_month_cents ? "good" : "" },

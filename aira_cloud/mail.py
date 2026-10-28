@@ -26,11 +26,11 @@ TEMPLATES: dict[str, tuple[str, str]] = {
         "Hello {name},\n\nConfirm your email address to finish setting up {org}:\n{link}\n\nThe link works once and expires in 24 hours.",
     ),
     "invite": (
-        "{inviter} invited you to {org} on Aira",
-        "Hello,\n\n{inviter} invited you to join {org} on Aira Career Copilot as {role}.\nAccept the invitation: {link}\n\nThe link works once and expires on {expires}.",
+        "{inviter} invited you to {org} on Monosage",
+        "Hello,\n\n{inviter} invited you to join {org} on Monosage Career Copilot as {role}.\nAccept the invitation: {link}\n\nThe link works once and expires on {expires}.",
     ),
     "password_reset": (
-        "Reset your Aira password",
+        "Reset your Monosage password",
         "Hello {name},\n\nSomeone asked to reset the password for your {org} account. If it was you, choose a new password here:\n{link}\n\nThe link works once and expires in 24 hours. If it was not you, ignore this message.",
     ),
     "payment_failed": (
@@ -54,8 +54,8 @@ TEMPLATES: dict[str, tuple[str, str]] = {
         "The subscription for {org} is cancelled. Data stays readable and exportable until {export_until}:\n{link}",
     ),
     "support_request": (
-        "Aira support asks for access to {org}",
-        "{operator} from Aira support asked for time-limited access to {org}.\nReason: {reason}\nReview and approve or deny the request:\n{link}",
+        "Monosage support asks for access to {org}",
+        "{operator} from Monosage support asked for time-limited access to {org}.\nReason: {reason}\nReview and approve or deny the request:\n{link}",
     ),
     "downgrade_pause": (
         "{org} is over its new plan limits",
@@ -78,7 +78,7 @@ class Mailer:
     def send(self, org_id: str, to: str, kind: str, **context: Any) -> str:
         subject_template, body_template = TEMPLATES[kind]
         branding = self.branding(org_id) if org_id else {}
-        org_name = str(context.get("org") or branding.get("name") or "Aira")
+        org_name = str(context.get("org") or branding.get("name") or "Monosage")
         values = {"name": "there", "org": org_name, **context}
         subject = subject_template.format(**values)
         body = body_template.format(**values)

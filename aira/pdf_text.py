@@ -233,7 +233,7 @@ def text_to_pdf(text: str, title: str = "") -> bytes:
         b" /Encoding /WinAnsiEncoding >>"
     )
     stamp = datetime.now(timezone.utc).strftime("D:%Y%m%d%H%M%SZ")
-    info = b"<< /Producer (Aira Career Copilot) /CreationDate (" + stamp.encode("ascii")
+    info = b"<< /Producer (Monosage Career Copilot) /CreationDate (" + stamp.encode("ascii")
     if title.strip():
         info += b") /Title " + _pdf_string(" ".join(title.split())[:200]) + b" >>"
     else:

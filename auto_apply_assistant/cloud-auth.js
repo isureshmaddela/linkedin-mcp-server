@@ -59,7 +59,7 @@
   const cloud = Aira.cloud;
   const auth = (cloud.auth = { logic });
 
-  const FALLBACK_NOTICE = "LinkedIn's User Agreement forbids automated access. Connecting LinkedIn lets Aira search, read and (if you enable it) apply and reply through your own session, which can lead LinkedIn to restrict your account.";
+  const FALLBACK_NOTICE = "LinkedIn's User Agreement forbids automated access. Connecting LinkedIn lets Monosage search, read and (if you enable it) apply and reply through your own session, which can lead LinkedIn to restrict your account.";
 
   // While a gate (verify email, second factor) is up, the app behind it must not request anything: it routes to this blank view.
   let gated = false;
@@ -85,7 +85,7 @@
   }
 
   function brand() {
-    return h("div", { class: "brand", "data-org-brand": "" }, h("span", { class: "brand-mark", text: "A" }), h("span", {}, "AIRA", h("small", { text: "Career Copilot" })));
+    return h("div", { class: "brand", "data-org-brand": "" }, h("span", { class: "brand-mark", text: "M" }), h("span", {}, "MONOSAGE", h("small", { text: "Career Copilot" })));
   }
 
   // Team and Enterprise organizations show their own name and logo on the sign-in page (the plan decides; others get no change).
@@ -97,7 +97,7 @@
     const slot = panel.querySelector("[data-org-brand]");
     if (!info.branded || !slot || !slot.isConnected) return;
     const mark = info.logo_url ? h("img", { class: "ca-org-logo", src: info.logo_url, alt: "", width: 40, height: 40, referrerpolicy: "no-referrer" }) : h("span", { class: "brand-mark", text: (info.name || "?")[0].toUpperCase() });
-    slot.replaceChildren(mark, h("span", {}, info.name, h("small", { text: "Career support, powered by Aira" })));
+    slot.replaceChildren(mark, h("span", {}, info.name, h("small", { text: "Career support, powered by Monosage" })));
   }
 
   // One panel, replaced on every screen change.
@@ -111,7 +111,7 @@
     applyOrgBrand(panel, new URLSearchParams(location.hash.split("?")[1] || "").get("org") || Aira.recall("lastOrg", ""));
     const first = panel.querySelector("input:not([type=hidden]), select, button.btn");
     if (first) first.focus();
-    document.title = `${title} · Aira`;
+    document.title = `${title} · Monosage`;
     return panel;
   }
 
@@ -170,9 +170,9 @@
         }
       });
     });
-    show("Sign in", "Sign in to your organization's Aira workspace.", form,
+    show("Sign in", "Sign in to your organization's Monosage workspace.", form,
       swap("New organization? ", link("Create one", "#/signup")), swap(link("Forgot your password?", "#/forgot")),
-      h("p", { class: "switch ca-staff" }, h("a", { href: "#/platform", text: "Aira staff" })));
+      h("p", { class: "switch ca-staff" }, h("a", { href: "#/platform", text: "Monosage staff" })));
   }
 
   function renderMfa({ gate }) {
@@ -256,7 +256,7 @@
         h("h2", { text: "Save your recovery codes" }),
         h("p", { class: "muted", text: "Each code works once if you lose your authenticator. They are shown only now." }),
         h("div", { class: "ca-codes", role: "list" }, ...codes.map((c) => h("code", { role: "listitem", text: c }))),
-        h("div", { class: "btn-row" }, h("button", { type: "button", class: "btn secondary sm", text: "Copy all", onclick: (event) => copyText(text, event.currentTarget) }), h("button", { type: "button", class: "btn secondary sm", text: "Download", onclick: () => download("aira-recovery-codes.txt", `Aira recovery codes\n\n${text}\n`) })),
+        h("div", { class: "btn-row" }, h("button", { type: "button", class: "btn secondary sm", text: "Copy all", onclick: (event) => copyText(text, event.currentTarget) }), h("button", { type: "button", class: "btn secondary sm", text: "Download", onclick: () => download("aira-recovery-codes.txt", `Monosage recovery codes\n\n${text}\n`) })),
         h("label", { class: "ca-check", for: "caSaved" }, confirmed, h("span", { text: "I saved these codes somewhere safe" })),
         h("div", { class: "btn-row", style: { marginTop: "10px" } }, next)));
     confirmed.focus();
@@ -452,7 +452,7 @@
     return new Promise((resolve) => {
       modal({
         title: "Before you connect LinkedIn",
-        body: h("div", {}, h("p", { text }), h("p", { class: "muted", text: "This is optional. Aira works without LinkedIn, and you can turn it off at any time." })),
+        body: h("div", {}, h("p", { text }), h("p", { class: "muted", text: "This is optional. Monosage works without LinkedIn, and you can turn it off at any time." })),
         actions: [{ label: "Cancel", kind: "ghost", onClick: () => resolve(false) }, { label: confirmLabel, onClick: () => resolve(true) }],
         onClose: () => resolve(false),
       });

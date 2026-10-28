@@ -127,7 +127,7 @@
       h("div", { class: "btn-row" }, ...actions));
   };
   Aira.apps.remedy = (id, kind) => {
-    if (kind === "disabled") return { text: "Aira has paused it for every organization; it comes back with your data when it is switched on again." };
+    if (kind === "disabled") return { text: "Monosage has paused it for every organization; it comes back with your data when it is switched on again." };
     if (kind === "role") {
       return cloud.role() === "candidate" && !LIFE_IDS.has(id)
         ? { text: "It holds your organization's business data, which its owners, administrators and coaches use." }
@@ -208,7 +208,7 @@
     if (!own.exists) {
       const ok = await Aira.confirm({
         title: "Start your own workspace",
-        message: "Use Careers and Leads yourself, in a workspace only you can open (coaches and other admins cannot). It takes one candidate seat. Starting it agrees to Aira running searches and applications for you, and to your organization's policy for sensitive answers.",
+        message: "Use Careers and Leads yourself, in a workspace only you can open (coaches and other admins cannot). It takes one candidate seat. Starting it agrees to Monosage running searches and applications for you, and to your organization's policy for sensitive answers.",
         confirmLabel: "Start my workspace",
       });
       if (!ok) return false;

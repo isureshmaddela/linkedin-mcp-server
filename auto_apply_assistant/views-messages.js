@@ -37,7 +37,7 @@
 
   function lastCheckTable(check, onReview) {
     if (!check || !check.items.length) {
-      return h("p", { class: "muted", style: { margin: "10px 0 0", fontSize: "12.5px" }, text: "No inbox check has run yet. Use Check inbox now to see how Aira handles each conversation." });
+      return h("p", { class: "muted", style: { margin: "10px 0 0", fontSize: "12.5px" }, text: "No inbox check has run yet. Use Check inbox now to see how Monosage handles each conversation." });
     }
     const rows = check.items.map((item) => {
       const open = h("button", { type: "button", class: "btn ghost sm", text: "Open" });
@@ -53,7 +53,7 @@
     return h("details", { style: { marginTop: "12px" }, open: true },
       h("summary", { text: `Last inbox check · ${fmt.datetime(check.started_at)} · ${fmt.plural(check.items.length, "conversation")}` }),
       h("div", { class: "table-wrap" }, h("table", { class: "table" },
-        h("thead", {}, h("tr", {}, h("th", { text: "Conversation" }), h("th", { text: "Reply mode and why" }), h("th", { text: "Wrote last" }), h("th", { text: "What Aira did" }), h("th", { text: "" }))),
+        h("thead", {}, h("tr", {}, h("th", { text: "Conversation" }), h("th", { text: "Reply mode and why" }), h("th", { text: "Wrote last" }), h("th", { text: "What Monosage did" }), h("th", { text: "" }))),
         h("tbody", {}, ...rows))));
   }
 
@@ -133,7 +133,7 @@
         if (id !== "selected") {
           const ok = await Aira.confirm({
             title: id === "all" ? "Auto-reply to every conversation?" : "Auto-reply to all recruiter conversations?",
-            message: (id === "all" ? "Aira will reply automatically in every conversation where the other person wrote last. " : "Aira will reply automatically in conversations whose messages read like recruiter outreach (hiring, roles, resume, W2/C2C, staffing). ")
+            message: (id === "all" ? "Monosage will reply automatically in every conversation where the other person wrote last. " : "Monosage will reply automatically in conversations whose messages read like recruiter outreach (hiring, roles, resume, W2/C2C, staffing). ")
               + "Every reply still passes the safety checks; anything about pay, visa, personal details, offers, or relocation is held for you. Conversations you set to Manual stay manual.",
             confirmLabel: "Turn on",
           });
@@ -188,7 +188,7 @@
         h("div", { class: "btn-row", style: { marginTop: "12px", alignItems: "center" } },
           h("span", { class: "label", style: { fontSize: "12px", fontWeight: "700" }, text: "Automatic replies apply to" }), scopeGroup),
         lastCheckTable(status.last_check, onReview),
-        status.held.length ? h("p", { class: "note warn", style: { marginTop: "12px" }, text: `${fmt.plural(status.held.length, "reply")} held for your review. Aira never sends replies about pay, visa or work authorization, personal details, offers, relocation, links, or contact details on its own.` }) : null,
+        status.held.length ? h("p", { class: "note warn", style: { marginTop: "12px" }, text: `${fmt.plural(status.held.length, "reply")} held for your review. Monosage never sends replies about pay, visa or work authorization, personal details, offers, relocation, links, or contact details on its own.` }) : null,
         held,
         recent,
       ),
@@ -287,7 +287,7 @@
 
     // List pane -------------------------------------------------------------
     const syncBar = h("div", { class: "msgr-sync", role: "status", "aria-live": "polite" });
-    const syncButton = h("button", { type: "button", class: "btn secondary sm msgr-sync-btn", "aria-label": "Sync inbox now", title: "Refresh the list and read your newest conversations in the background. LinkedIn marks the conversations Aira opens as read." },
+    const syncButton = h("button", { type: "button", class: "btn secondary sm msgr-sync-btn", "aria-label": "Sync inbox now", title: "Refresh the list and read your newest conversations in the background. LinkedIn marks the conversations Monosage opens as read." },
       h("span", { "aria-hidden": "true", text: "↻" }), h("span", { text: "Sync" }));
     const search = h("input", { type: "search", "data-search": "1", placeholder: "Search people and messages", "aria-label": "Search conversations", autocomplete: "off", maxlength: "100" });
     const chips = h("div", { class: "msgr-chips", role: "group", "aria-label": "Filter conversations" });
@@ -371,11 +371,11 @@
     }
 
     // Saved copies of private messages can be deleted at any time.
-    const clearButton = h("button", { type: "button", class: "msgr-link", title: "Delete the conversations and messages Aira saved on this computer", text: "Clear saved copy" });
+    const clearButton = h("button", { type: "button", class: "msgr-link", title: "Delete the conversations and messages Monosage saved on this computer", text: "Clear saved copy" });
     clearButton.addEventListener("click", async () => {
       const ok = await Aira.confirm({
         title: "Clear the saved copy of your messages?",
-        message: "Aira deletes the conversations and messages it saved on this computer. Nothing is deleted on LinkedIn, and a sync saves them again while LinkedIn is connected. Drafts, sent-reply history and recruiter records are not affected.",
+        message: "Monosage deletes the conversations and messages it saved on this computer. Nothing is deleted on LinkedIn, and a sync saves them again while LinkedIn is connected. Drafts, sent-reply history and recruiter records are not affected.",
         confirmLabel: "Clear saved copy",
         danger: true,
       });
@@ -423,7 +423,7 @@
       catch (error) { if (manual) Aira.reportError(error); return; }
       if (ctx.list) ctx.list.sync = result.sync;
       if (manual && result.reason === "not_connected") toast("LinkedIn is not connected. Connect it in Settings > Integrations to refresh your inbox.", "error", { timeout: 8000 });
-      else if (manual && !result.started && result.reason !== "already_running") toast(result.message || "Aira could not start a sync just now.", "", { timeout: 6000 });
+      else if (manual && !result.started && result.reason !== "already_running") toast(result.message || "Monosage could not start a sync just now.", "", { timeout: 6000 });
       renderSyncBar();
       renderList();
       if (result.started || result.reason === "already_running") pollSync();
@@ -503,11 +503,11 @@
       const sync = list.sync || {};
       if (list.saved_total) {
         if (!ctx.q && ctx.filter === "auto") return ui.empty("No conversation is set to Auto-reply", "Open a conversation and switch it to Auto-reply, or choose which conversations automatic replies cover in the Automatic replies panel above.");
-        if (!ctx.q && ctx.filter === "needs_reply") return ui.empty("Nothing needs a reply", "Every conversation Aira has saved is answered or does not ask for a reply.");
-        if (!ctx.q && ctx.filter === "recruiters") return ui.empty("No recruiter conversations yet", "Conversations that read like recruiter outreach appear here once Aira has seen them.");
+        if (!ctx.q && ctx.filter === "needs_reply") return ui.empty("Nothing needs a reply", "Every conversation Monosage has saved is answered or does not ask for a reply.");
+        if (!ctx.q && ctx.filter === "recruiters") return ui.empty("No recruiter conversations yet", "Conversations that read like recruiter outreach appear here once Monosage has seen them.");
         return ui.empty("No matching conversations", list.message || "Try a different search or filter.");
       }
-      if (!list.linkedin_connected) return ui.empty("Connect LinkedIn to see your messages", "Aira keeps its own copy of your conversations, so you can read and answer recruiters here without opening LinkedIn. Connect your account once and your inbox loads automatically.", connectLinkedInAction());
+      if (!list.linkedin_connected) return ui.empty("Connect LinkedIn to see your messages", "Monosage keeps its own copy of your conversations, so you can read and answer recruiters here without opening LinkedIn. Connect your account once and your inbox loads automatically.", connectLinkedInAction());
       if (sync.running || sync.status === "idle") return h("div", {}, ...skeletonRows(6), h("p", { class: "msgr-empty-note", text: "Loading your inbox from LinkedIn…" }));
       if (sync.status === "error" || sync.status === "interrupted") return ui.empty("Could not load your inbox", sync.error || "LinkedIn did not answer. Try again in a moment.", h("button", { type: "button", class: "btn sm", text: "Try again", onclick: () => startSync({ manual: true }) }));
       return ui.empty("Your inbox is empty", "LinkedIn returned no conversations.");
@@ -523,7 +523,7 @@
       if (!list) { rows.replaceChildren(...skeletonRows(6)); return; }
       if (!list.linkedin_connected && list.saved_total) {
         banner.append(h("div", { class: "msgr-banner" },
-          h("span", { text: "LinkedIn is not connected. You are reading the copy saved in Aira." }),
+          h("span", { text: "LinkedIn is not connected. You are reading the copy saved in Monosage." }),
           h("a", { href: "#/settings/integrations", text: "Connect" })));
       }
       if (!list.conversations.length) { rows.replaceChildren(emptyListState(list)); return; }
@@ -586,7 +586,7 @@
       return h("div", { class: "msgr-placeholder" },
         h("div", { class: "msgr-placeholder-mark", "aria-hidden": "true", text: "✉" }),
         h("strong", { text: "Select a conversation" }),
-        h("p", { text: "Read it here, draft a reply with your local model, and send it from Aira. Switch a conversation to Auto-reply to let Aira answer during inbox checks." }));
+        h("p", { text: "Read it here, draft a reply with your local model, and send it from Monosage. Switch a conversation to Auto-reply to let Monosage answer during inbox checks." }));
     }
     function threadSkeleton(name) {
       return h("div", { class: "msgr-thread" },
@@ -660,10 +660,10 @@
         const first = previousSender !== who;
         previousSender = who;
         nodes.push(h("div", { class: `msgr-msg${message.own ? " own" : ""}${first ? " first" : ""}` },
-          h("div", { class: "msgr-bubble", title: message.source === "aira" ? "Sent from Aira. LinkedIn has not listed this message yet." : null },
+          h("div", { class: "msgr-bubble", title: message.source === "aira" ? "Sent from Monosage. LinkedIn has not listed this message yet." : null },
             first && !message.own ? h("div", { class: "msgr-sender", text: message.sender }) : null,
             h("div", { class: "msgr-text", text: message.text }),
-            h("div", { class: "msgr-stamp" }, message.time || "", message.source === "aira" ? h("span", { class: "msgr-via", text: " · sent from Aira" }) : null))));
+            h("div", { class: "msgr-stamp" }, message.time || "", message.source === "aira" ? h("span", { class: "msgr-via", text: " · sent from Monosage" }) : null))));
       }
       return nodes;
     }
@@ -710,7 +710,7 @@
         // Say so when the copy being answered may be behind LinkedIn.
         const checked = data.confirmed_at || data.synced_at;
         const outdated = data.stale || data.live_error
-          ? ` Aira last checked this conversation ${checked ? fmt.ago(checked) : "a while ago"}${data.live_error ? " and could not check LinkedIn just now" : ""}, so newer messages may exist.`
+          ? ` Monosage last checked this conversation ${checked ? fmt.ago(checked) : "a while ago"}${data.live_error ? " and could not check LinkedIn just now" : ""}, so newer messages may exist.`
           : "";
         const confirmed = await Aira.confirm({
           title: `Send this reply to ${participant}?`,
@@ -788,14 +788,14 @@
             if (mode === "auto") {
               const confirmed = await Aira.confirm({
                 title: `Auto-reply to ${participant}?`,
-                message: "During inbox checks Aira will draft and send replies in this conversation for you. It holds any reply about pay, visa or work authorization, personal details, offers, relocation, links, or contact details for your review, waits at least 6 hours between automatic replies here, and stops at your daily limit. You can switch back to Manual at any time.",
+                message: "During inbox checks Monosage will draft and send replies in this conversation for you. It holds any reply about pay, visa or work authorization, personal details, offers, relocation, links, or contact details for your review, waits at least 6 hours between automatic replies here, and stops at your daily limit. You can switch back to Manual at any time.",
                 confirmLabel: "Turn on Auto-reply",
               });
               if (!confirmed) return;
             }
             await withBusy(button, async () => {
               const result = await api(`/api/conversations/${enc(threadId)}/policy`, { method: "PATCH", body: { mode, participant } });
-              if (mode === "auto" && !result.schedule_active) toast("Auto-reply is on. Turn on inbox checks in the Automatic replies panel so Aira can reply.", "success", { timeout: 8000 });
+              if (mode === "auto" && !result.schedule_active) toast("Auto-reply is on. Turn on inbox checks in the Automatic replies panel so Monosage can reply.", "success", { timeout: 8000 });
               else toast(mode === "auto" ? `Auto-reply is on for ${participant}.` : `${participant} is back to manual sending.`, "success");
               renderStatusPanel(autoBox, onReview);
               await reloadOpenThread();
@@ -826,7 +826,7 @@
         refreshButton.disabled = refreshing || !data.linkedin_connected;
         refreshButton.title = data.linkedin_connected ? "Refresh this conversation from LinkedIn" : "Connect LinkedIn to refresh";
         const sub = [];
-        sub.push(data.synced_at ? `Updated ${fmt.ago(data.synced_at)}` : saved ? "Not refreshed yet" : "Not saved in Aira yet");
+        sub.push(data.synced_at ? `Updated ${fmt.ago(data.synced_at)}` : saved ? "Not refreshed yet" : "Not saved in Monosage yet");
         if (data.message_count) sub.push(fmt.plural(data.message_count, "message"));
         head.replaceChildren(
           backBar(),
@@ -863,14 +863,14 @@
       function renderHistory() {
         const sends = data.sends || [];
         historyBox.replaceChildren(h("details", { class: "msgr-history" },
-          h("summary", { text: sends.length ? `Aira activity in this conversation (${sends.length})` : "Aira activity in this conversation" }),
+          h("summary", { text: sends.length ? `Monosage activity in this conversation (${sends.length})` : "Monosage activity in this conversation" }),
           sends.length
             ? h("ul", { class: "timeline" }, ...sends.map((item) => h("li", {},
                 h("div", { class: "btn-row" }, statusBadge(item.status) || h("span", { class: "badge", text: item.status }), h("span", { class: "badge", text: item.mode === "auto" ? "Automatic" : "Sent by you" })),
                 h("div", { text: item.reply.length > 220 ? `${item.reply.slice(0, 220)}…` : item.reply }),
                 item.detail ? h("small", { text: item.detail }) : null,
                 h("small", { text: fmt.datetime(item.created_at) }))))
-            : h("p", { class: "muted", text: "Nothing has been sent in this conversation from Aira yet." })));
+            : h("p", { class: "muted", text: "Nothing has been sent in this conversation from Monosage yet." })));
       }
 
       function scrollToEnd() {

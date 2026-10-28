@@ -95,7 +95,7 @@
       const overlay = h("div", { class: "life-picker", role: "dialog", "aria-modal": "true", "aria-labelledby": "lifePickerTitle" });
       const close = (ok) => { overlay.remove(); picking = null; resolve(ok); };
       const grid = h("div", { class: "life-faces" });
-      const title = h("h1", { id: "lifePickerTitle", text: "Who's using Aira?" });
+      const title = h("h1", { id: "lifePickerTitle", text: "Who's using Monosage?" });
       const note = h("p", { class: "muted", text: reason === "profile_locked" ? "This person has a PIN. Choose them and type it." : "Tap your name." });
       overlay.append(h("div", { class: "life-picker-box" }, title, note, grid));
       document.body.append(overlay);
@@ -349,7 +349,7 @@
             h("button", { type: "button", class: "btn secondary", text: L.prefs.easy_mode ? "Normal size" : "Make it bigger", onclick: async () => { await L.savePrefs({ easy_mode: !L.prefs.easy_mode, text_size: L.prefs.easy_mode ? "normal" : "large" }); render(); } }),
             h("a", { class: "btn ghost", href: "#/display", text: "Display and reading" }))),
         ...birthdays,
-        remindersOff ? h("div", { class: "cloud-banner info", role: "status" }, h("strong", { text: "Get reminders on this device" }), h("span", { text: "Aira can show your medicine and chore reminders even when this tab is in the background." }), h("button", { type: "button", class: "btn secondary sm", text: "Turn on", onclick: async () => { try { await Notification.requestPermission(); } catch { /* ignored */ } render(); } })) : null,
+        remindersOff ? h("div", { class: "cloud-banner info", role: "status" }, h("strong", { text: "Get reminders on this device" }), h("span", { text: "Monosage can show your medicine and chore reminders even when this tab is in the background." }), h("button", { type: "button", class: "btn secondary sm", text: "Turn on", onclick: async () => { try { await Notification.requestPermission(); } catch { /* ignored */ } render(); } })) : null,
         data.cards.length ? h("div", { class: "life-cards" }, ...data.cards.map((card) => cardNode(card, render))) : null,
         !data.apps.length ? Aira.ui.empty("No everyday apps yet", hosted() ? "Ask your organization's owner to turn on Family, Health, Learn, Play or Planner." : "The everyday apps appear here when they are installed.") : null,
         tiles.length ? h("section", { class: "life-tiles-wrap" }, h("h2", { class: "suite-h2", text: "Your apps" }), h("div", { class: "life-tiles" }, ...tiles)) : null,
@@ -380,14 +380,14 @@
       const body = S.page(main, { title: "Display and reading", subtitle: L.me ? `Settings for ${L.me.name}. Each person on this device has their own.` : "" });
       const languages = Aira.i18n ? h("div", { class: "life-sizes", role: "radiogroup", "aria-label": "Language", translate: "no" }, ...Aira.i18n.languages.map((language) => h("button", { type: "button", role: "radio", lang: language.code, "aria-checked": String(Aira.i18n.lang === language.code), class: "life-size", onclick: async () => { await Aira.i18n.set(language.code); render(); } }, h("span", { text: language.native }), language.code === "en" ? null : h("span", { class: "muted small", text: language.name })))) : null;
       body.append(
-        languages ? S.section("Language", h("p", { class: "muted", text: "Aira shows its menus, buttons and messages in this language." }), languages) : null,
+        languages ? S.section("Language", h("p", { class: "muted", text: "Monosage shows its menus, buttons and messages in this language." }), languages) : null,
         S.section("Text size", sizes),
         S.section("Easier to use",
-          toggle("Easy mode", "Bigger buttons, fewer menus, and Aira opens on Today.", L.prefs.easy_mode, (on) => L.savePrefs({ easy_mode: on })),
+          toggle("Easy mode", "Bigger buttons, fewer menus, and Monosage opens on Today.", L.prefs.easy_mode, (on) => L.savePrefs({ easy_mode: on })),
           toggle("High contrast", "Stronger colours and borders.", L.prefs.contrast, (on) => L.savePrefs({ contrast: on })),
           toggle("Read aloud button", "Shows a button that reads the page, or what you select, out loud.", L.prefs.read_aloud, (on) => L.savePrefs({ read_aloud: on })),
           toggle("Less movement", "Turns off animations.", L.prefs.reduce_motion, (on) => L.savePrefs({ reduce_motion: on }))),
-        S.section("Start page", h("p", { class: "muted", text: "The page Aira opens on." }), Aira.ui.field("Open Aira on", start)),
+        S.section("Start page", h("p", { class: "muted", text: "The page Monosage opens on." }), Aira.ui.field("Open Monosage on", start)),
         hosted() ? null : peopleSection(render),
       );
     };

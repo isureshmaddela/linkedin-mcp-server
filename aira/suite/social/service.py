@@ -2827,7 +2827,7 @@ def moderate(
     ):
         if _home_of(sc, _author_of(found["target_type"], target)) != home:
             raise PermissionError(
-                "You can hide what was reported; only Aira's moderators suspend someone outside your household."
+                "You can hide what was reported; only Monosage's moderators suspend someone outside your household."
             )
     if action == "hide" and found["target_type"] != "account":
         table = {

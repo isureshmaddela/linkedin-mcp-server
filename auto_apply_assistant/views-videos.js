@@ -414,7 +414,7 @@
   function supportSection(channel, support, videoId) {
     const names = support.supporters || [];
     return S.section(`Support ${channel.name}`,
-      h("p", { class: "muted", text: support.note || `${channel.name} takes support from viewers. You pay them directly; Aira takes nothing.` }),
+      h("p", { class: "muted", text: support.note || `${channel.name} takes support from viewers. You pay them directly; Monosage takes nothing.` }),
       names.length ? h("p", { class: "vid-meta", text: `Thank you to ${names.map((item) => item.name).join(", ")}.` }) : null,
       support.can_give ? h("div", { class: "btn-row" }, S.button(`Support ${channel.name}`, () => supportDialog(channel, support, videoId), { kind: "secondary" })) : h("p", { class: "muted", text: "Supporting creators with money is for adults." }));
   }
@@ -542,8 +542,8 @@
 
   async function share(video) {
     const inApp = `${location.origin}/#/videos?watch=${video.id}`;
-    const parts = [h("p", { class: "muted", text: "People who use Aira can open this address." }), h("div", { class: "vid-row" }, h("code", { style: { overflowWrap: "anywhere" }, text: inApp }), S.button("Copy", () => S.copy(inApp), { kind: "secondary sm" }))];
-    if (video.mine && video.members_only) parts.push(h("p", { class: "muted", text: "Videos for members have no page for everyone: only your members can watch them, in Aira." }));
+    const parts = [h("p", { class: "muted", text: "People who use Monosage can open this address." }), h("div", { class: "vid-row" }, h("code", { style: { overflowWrap: "anywhere" }, text: inApp }), S.button("Copy", () => S.copy(inApp), { kind: "secondary sm" }))];
+    if (video.mine && video.members_only) parts.push(h("p", { class: "muted", text: "Videos for members have no page for everyone: only your members can watch them, in Monosage." }));
     else if (video.mine && video.scheduled) parts.push(h("p", { class: "muted", text: "Once the video is out you can also make a page anyone can watch." }));
     else if (video.mine && video.visibility !== "private" && video.rating !== "mature" && !video.blocked) {
       const { link } = await api(`/videos/${video.id}/link`);
@@ -591,7 +591,7 @@
     if (data.reels.length) panel.append(S.section("Reels", h("div", { class: "vid-grid vid-shorts" }, ...data.reels.map((reel) => card(reel, { open: () => go({ tab: "reels", start: reel.id }) })))));
     // Nothing at all yet (a new household, or a category nobody has used): one invitation, not two empty lists.
     if (!data.popular.length && !data.recent.length && !data.reels.length && !data.subscriptions.length) {
-      panel.append(S.section("", Aira.ui.empty(category ? `No ${lower(CATEGORY[category] || category)} videos yet` : "No videos yet", category ? "Be the first to share one, or look at All." : "Be the first: share a video, a reel or a short film. Everyone in Aira can watch it, and you can earn from it.", uploadLink(info, "Upload a video"))));
+      panel.append(S.section("", Aira.ui.empty(category ? `No ${lower(CATEGORY[category] || category)} videos yet` : "No videos yet", category ? "Be the first to share one, or look at All." : "Be the first: share a video, a reel or a short film. Everyone in Monosage can watch it, and you can earn from it.", uploadLink(info, "Upload a video"))));
       return;
     }
     panel.append(S.section("Popular", grid(data.popular, ["Nothing popular yet", "Videos people watch most appear here.", uploadLink(info, "Upload a video")]), h("p", { class: "vid-meta", text: `How Popular is worked out: ${data.ranking}. Nothing is paid for and nothing is personal.` })));
@@ -1085,7 +1085,7 @@
       h("ul", { class: "life-lines" }, ...plan.why_not.map((reason) => h("li", { class: "life-line", text: reason }))),
       h("div", { class: "btn-row" }, S.button("Ads and payouts", () => toPart("ads"), { kind: "ghost sm" }), S.button("Support from viewers", () => toPart("support"), { kind: "ghost sm" }))) : null;
     panel.append(S.section("Your membership",
-      h("p", { class: "muted", text: "Members pay you directly every month, on your own payment page or by UPI: Aira takes nothing. Each payment has a reference; mark it received when the money arrives and the member can watch your videos for members for that many months." }),
+      h("p", { class: "muted", text: "Members pay you directly every month, on your own payment page or by UPI: Monosage takes nothing. Each payment has a reference; mark it received when the money arrives and the member can watch your videos for members for that many months." }),
       blockers, form.node, h("div", { class: "btn-row" }, save)));
     const decide = async (payment, action) => {
       if (action === "not_received" && payment.status === "received" && !(await Aira.confirm({ title: "Mark this payment not received?", message: `${payment.member.name} loses the ${monthsText(payment.months)} it paid for and cannot watch your videos for members for that time. Do this only if the money never arrived.`, confirmLabel: "Mark not received", danger: true }))) return;
@@ -1193,10 +1193,10 @@
     panel.append(S.grid(
       S.section(state.monetized ? "You are earning" : "Start earning", S.checklist(steps), actions.length ? h("div", { class: "btn-row" }, ...actions) : null),
       S.section("How the money works",
-        h("p", { text: `Businesses pay for the ads shown on your videos. You get ${rules.revenue_share_percent}% of what they pay; Aira keeps the rest.` }),
+        h("p", { text: `Businesses pay for the ads shown on your videos. You get ${rules.revenue_share_percent}% of what they pay; Monosage keeps the rest.` }),
         h("p", { text: "An ad counts when it plays or is on screen for 2 seconds. Your own views, your household's views and repeated views do not count." }),
         h("p", { text: `Earnings are estimated until the month is closed and checked for invalid traffic. Then they are confirmed, and you can ask to be paid once you have at least ${usd(rules.min_payout_micros)}.` }),
-        !data.terms_accepted_at ? h("p", { class: "muted", text: "Creator terms: you own or may use everything in your videos; you do not buy, swap or fake views or clicks; earnings from invalid traffic are taken back; you give correct payment details; Aira can stop ads on a channel that breaks these rules." }) : null)));
+        !data.terms_accepted_at ? h("p", { class: "muted", text: "Creator terms: you own or may use everything in your videos; you do not buy, swap or fake views or clicks; earnings from invalid traffic are taken back; you give correct payment details; Monosage can stop ads on a channel that breaks these rules." }) : null)));
     panel.append(S.section("This month by video", S.table({
       columns: [
         { key: "title", label: "Video", render: (row) => h("a", { href: `#/videos?watch=${row.video_id}`, text: row.title }) },
@@ -1272,7 +1272,7 @@
       tip.status === "pledged" || tip.status === "declined" ? S.button("Received", () => decide(tip, "received"), { kind: tip.status === "pledged" ? "sm" : "ghost sm" }) : null,
       tip.status === "pledged" || tip.status === "received" ? S.button("Not received", () => decide(tip, "not_received"), { kind: "ghost sm" }) : null))) : Aira.ui.empty("No support yet", settings.enabled ? "When a viewer pledges, it shows here. Mark it received when the money arrives." : "Turn on support so viewers can pay you directly.");
     return S.section(support.waiting ? `Support from viewers (${support.waiting} waiting)` : "Support from viewers",
-      h("p", { class: "muted", text: "Viewers pay you directly, on your own payment page or by UPI: Aira takes nothing and never holds the money. Each supporter gets a reference to put in the payment note; mark the pledge received when the money arrives." }),
+      h("p", { class: "muted", text: "Viewers pay you directly, on your own payment page or by UPI: Monosage takes nothing and never holds the money. Each supporter gets a reference to put in the payment note; mark the pledge received when the money arrives." }),
       support.totals.length ? h("p", { text: `Received so far: ${support.totals.map((item) => item.amount).join(" + ")}` }) : null,
       settings.can_enable || settings.enabled ? h("div", { class: "suite-body" }, form.node, h("div", { class: "btn-row" }, save)) : adult(info.channel) ? h("div", { class: "btn-row" }, h("span", { class: "muted", text: "Accept the creator terms first." }), S.button("Ads and payouts", () => toPart("ads"), { kind: "ghost sm" })) : h("p", { class: "muted", text: "Earning money is for adults." }),
       list);

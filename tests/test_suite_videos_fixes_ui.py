@@ -63,7 +63,8 @@ def test_the_upload_form_checks_before_sending_the_file(browser, env):
         "input[name=publish_at]",
         (datetime.now() - timedelta(days=1)).strftime("%Y-%m-%dT10:00"),
     )
-    page.locator("button:has-text('Upload')").last.click()
+    # the form's own button (patchright 1.58's .last times out when one element matches)
+    page.locator("#vidUpload button:has-text('Upload')").first.click()
     page.wait_for_selector("text=That time has already passed")
     assert len(_files()) == before
     assert page.locator(".vid-progress").is_hidden()

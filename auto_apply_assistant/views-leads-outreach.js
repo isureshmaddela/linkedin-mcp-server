@@ -88,7 +88,7 @@
     }) });
     return h("section", { class: "ld-block ld-audit", "aria-label": "Website check", id: "ldAudit" },
       h("h3", { text: "Website check" }),
-      h("p", { class: "muted", text: "A plain look at the home page: what anyone can see is missing in its source. These are observations, not a score, and the checks are repeatable. Aira reads only public pages and respects robots.txt." }),
+      h("p", { class: "muted", text: "A plain look at the home page: what anyone can see is missing in its source. These are observations, not a score, and the checks are repeatable. Monosage reads only public pages and respects robots.txt." }),
       !lead.website ? h("p", { class: "muted", text: "This lead has no website to check." }) : null,
       audit.url ? h("p", { class: "ld-audit-summary" }, h("strong", { text: audit.summary || "" }), h("span", { class: "muted", text: ` · answered in ${audit.seconds >= 1 ? `${audit.seconds} s` : "under 1 s"}${audit.builder ? ` · built with ${audit.builder}` : ""}` })) : null,
       findings.length ? h("ul", { class: "ld-findings", "aria-label": "Findings" }, ...findings.map((f) => h("li", {},
@@ -115,8 +115,8 @@
 
   function callBlock(lead, helpers) {
     const box = h("section", { class: "ld-block ld-call", "aria-label": "Call", id: "ldCall" }, h("h3", { text: "Call" }));
-    const rule = h("p", { class: "ld-nodial", id: "ldNoDial" }, ico("shield"), h("span", {}, h("strong", { text: "Aira never dials. You place the call." }),
-      " Aira has no auto-dialer: it never places a call, plays a recording or speaks with a synthetic voice. Google Voice's policy forbids automated calling, and in many places an AI-voice marketing call needs the called person's prior written consent. Aira writes the talk track and keeps the record; you press Call."));
+    const rule = h("p", { class: "ld-nodial", id: "ldNoDial" }, ico("shield"), h("span", {}, h("strong", { text: "Monosage never dials. You place the call." }),
+      " Monosage has no auto-dialer: it never places a call, plays a recording or speaks with a synthetic voice. Google Voice's policy forbids automated calling, and in many places an AI-voice marketing call needs the called person's prior written consent. Monosage writes the talk track and keeps the record; you press Call."));
     const body = h("div", { class: "ld-call-body" }, ui.skeleton(2));
     box.append(rule, body);
 
@@ -146,7 +146,7 @@
       const notes = h("textarea", { id: "ldCallNotes", rows: 2, maxlength: "2000", placeholder: "What they said, what to do next…", "aria-label": "Call notes" });
       const days = h("input", { id: "ldCallDays", type: "number", min: "0", max: "365", placeholder: "days", "aria-label": "Follow up in days" });
       const log = btn("Log this call", { icon: "check", id: "ldCallLog", onClick: (event) => busy(event.currentTarget, async () => {
-        if (outcome.value === "do_not_call" && !(await Aira.confirm({ title: "Add to the do-not-contact list?", message: "This lead's phone number and email go on your do-not-contact list, and the lead is marked disqualified. Aira will not draft or send anything to them again.", confirmLabel: "Add and log" }))) return;
+        if (outcome.value === "do_not_call" && !(await Aira.confirm({ title: "Add to the do-not-contact list?", message: "This lead's phone number and email go on your do-not-contact list, and the lead is marked disqualified. Monosage will not draft or send anything to them again.", confirmLabel: "Add and log" }))) return;
         const out = await api(`${BASE}/items/${lead.id}/calls`, { method: "POST", body: { outcome: outcome.value, notes: notes.value, follow_up_days: days.value === "" ? null : Number(days.value) }, expect: 201 });
         toast("Call logged.", "success");
         document.dispatchEvent(new CustomEvent(CALL_LOGGED));
@@ -362,7 +362,7 @@
         paintSender(outcome); paintStrip(); paintOutbox();
       }) });
       fill(senderBox,
-        h("div", { class: "panel-head" }, h("h2", { id: "ldSenderTitle", text: "Sender settings" }), h("small", { class: "muted", text: "Your own mail server. Aira has no shared mailer." })),
+        h("div", { class: "panel-head" }, h("h2", { id: "ldSenderTitle", text: "Sender settings" }), h("small", { class: "muted", text: "Your own mail server. Monosage has no shared mailer." })),
         h("div", { class: "panel-body" }, h("form", { class: "ld-form", id: "ldSenderForm", novalidate: "true", "aria-label": "Sender settings", onsubmit: (event) => event.preventDefault() },
           missing,
           h("div", { class: "ld-grid" },
@@ -373,13 +373,13 @@
             h("div", { class: "field" }, h("label", { for: "ldset-smtp_password", text: "Password" }), password, h("span", { class: "hint", text: state.hasPassword ? "A password is saved (encrypted). Type a new one to replace it." : "Stored encrypted. Never shown again." }), state.hasPassword ? h("label", { class: "check" }, clear, h("span", { text: "Remove the saved password" })) : null),
             field({ name: "postal_address", label: "Postal address for the footer", multiline: true, rows: 2, wide: true, hint: "Commercial email rules (CAN-SPAM and others) require a real postal address in every message." }, st.postal_address),
             field({ name: "signature", label: "Signature (optional)", placeholder: "Sam Seller, Seller Web Studio" }, st.signature),
-            field({ name: "calling_number", label: "Your calling number (display only)", placeholder: "Your Google Voice number", hint: "Shown in call notes. Aira never dials from it." }, st.calling_number),
-            field({ name: "offer", label: "What you offer, in a sentence", multiline: true, rows: 2, wide: true, hint: "Used in email drafts and talk tracks. Aira adds nothing about you that is not here." }, st.offer),
+            field({ name: "calling_number", label: "Your calling number (display only)", placeholder: "Your Google Voice number", hint: "Shown in call notes. Monosage never dials from it." }, st.calling_number),
+            field({ name: "offer", label: "What you offer, in a sentence", multiline: true, rows: 2, wide: true, hint: "Used in email drafts and talk tracks. Monosage adds nothing about you that is not here." }, st.offer),
             field({ name: "daily_cap", label: `Emails per day (1 to ${state.limits.max_daily_cap})`, type: "number", maxlength: "3" }, String(st.daily_cap || 20)), field({ name: "delay_seconds", label: `Pause between emails, seconds (${state.limits.min_delay} or more)`, type: "number", maxlength: "3" }, String(st.delay_seconds || 5))),
           h("fieldset", { class: "ld-fieldset", id: "ldsetServices" }, h("legend", { text: "Services you offer" }), h("div", { class: "ld-checks" }, ...serviceBoxes)),
           h("fieldset", { class: "ld-fieldset", id: "ldsetLawful" }, h("legend", { text: "People in the EU, UK or Canada" }),
             h("label", { class: "check" }, lawful, h("span", { text: "I have a lawful basis to email people in the EU, UK or Canada" })),
-            h("p", { class: "hint", text: "By default Aira refuses to draft or send cold email to leads whose location looks like the EU, the UK or Canada, where consent rules are strict (GDPR, PECR, CASL). Tick this only if you have consent or another lawful basis; that is your responsibility, not Aira's." })),
+            h("p", { class: "hint", text: "By default Monosage refuses to draft or send cold email to leads whose location looks like the EU, the UK or Canada, where consent rules are strict (GDPR, PECR, CASL). Tick this only if you have consent or another lawful basis; that is your responsibility, not Monosage's." })),
           h("div", { class: "btn-row" }, saveBtn, testBtn), result)));
     }
 
@@ -396,7 +396,7 @@
         error.textContent = "";
         try { await api(`${BASE}/suppressions`, { method: "POST", body: { value: value.value, reason: reason.value }, expect: 201, silent: true }); }
         catch (err) { error.textContent = message(err); return; }
-        toast("Added. Aira will not draft or send anything to them.", "success");
+        toast("Added. Monosage will not draft or send anything to them.", "success");
         await refreshDnc();
       }) });
       fill(dncBox,
@@ -416,7 +416,7 @@
     const compliance = h("section", { class: "panel ld-panel ld-compliance", id: "ldCompliance", "aria-labelledby": "ldComplianceTitle" },
       h("div", { class: "panel-head" }, h("h2", { id: "ldComplianceTitle", text: "The rules, in plain words" }), h("small", { class: "muted", text: "Not legal advice" })),
       h("div", { class: "panel-body" }, h("ul", { class: "ld-rules" },
-        h("li", {}, h("strong", { text: "Email. " }), "In the US (CAN-SPAM) a commercial email needs your real name and postal address, an honest subject and a working way to opt out, and you must honour opt-outs. In the EU and UK (GDPR, PECR) and Canada (CASL), emailing people you have no relationship with generally needs their consent; business-to-business rules differ by country. Aira adds the footer and checks your do-not-contact list, and blocks those regions unless you confirm a lawful basis."),
+        h("li", {}, h("strong", { text: "Email. " }), "In the US (CAN-SPAM) a commercial email needs your real name and postal address, an honest subject and a working way to opt out, and you must honour opt-outs. In the EU and UK (GDPR, PECR) and Canada (CASL), emailing people you have no relationship with generally needs their consent; business-to-business rules differ by country. Monosage adds the footer and checks your do-not-contact list, and blocks those regions unless you confirm a lawful basis."),
         h("li", {}, h("strong", { text: "Calls. " }), "You place every call yourself. In the US (TCPA) an artificial or prerecorded voice, including an AI voice, needs the called person's prior express written consent for marketing, and calls to numbers on the Do Not Call registry and outside 8 am to 9 pm local time are restricted. Other countries have their own registries and registration rules. Google Voice's policy also forbids automated calling and bulk messages."),
         h("li", {}, h("strong", { text: "Public posts. " }), "A person who posted a request did so in a public place. Reply there, in your own name, within that community's rules. Do not copy their details into a mailing list."))));
 

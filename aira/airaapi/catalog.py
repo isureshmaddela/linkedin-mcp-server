@@ -41,7 +41,7 @@ PARAM_TYPES = frozenset(
 # from run options (or by Aira itself), so accepting them as engine parameters
 # would let a stored search carry a credential or silently change behaviour.
 RESERVED_PARAMS = {
-    "api_key": "Aira adds the SerpApi key itself; never put it in parameters.",
+    "api_key": "Monosage adds the SerpApi key itself; never put it in parameters.",
     "engine": "The engine is chosen separately from its parameters.",
     "output": "Set the output format in the run options.",
     "async": "Set async in the run options.",

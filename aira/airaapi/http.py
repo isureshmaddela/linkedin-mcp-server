@@ -205,7 +205,7 @@ def aira_route(
         name = str(getattr(handler, "__name__", "handler"))
         attr = f"airaapi__{handler.__module__.rsplit('.', 1)[-1]}__{name}"
         if any(item.attr == attr for item in AIRA_ROUTES):
-            raise RuntimeError(f"Duplicate Aira route handler {attr}.")
+            raise RuntimeError(f"Duplicate Monosage route handler {attr}.")
         AIRA_ROUTES.append(
             AiraRoute(method.upper(), re.compile(pattern), handler, auth, attr)
         )

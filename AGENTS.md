@@ -13,7 +13,6 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 - Pre-commit: `uv run pre-commit install` then `uv run pre-commit run --all-files`
 - Run server locally: `uv run -m linkedin_mcp_server --no-headless`
 - Run via uvx (PyPI/package verification only): `uvx linkedin-scraper-mcp`
-- Docker build: `docker build -t linkedin-mcp-server .`
 - Install browser: `uv run patchright install chromium`
 
 ## Scraping Rules
@@ -37,7 +36,7 @@ Optional additional keys:
 
 ## Verifying Bug Reports
 
-Always verify scraping bugs end-to-end against live LinkedIn, not just code analysis. Use `uv run`, not `uvx`, so the running process reflects your workspace. Use `uvx` only for packaged distribution verification. For live Docker investigations, refresh the source session first with `uv run -m linkedin_mcp_server --login` before testing each materially different approach. Assume a valid login profile already exists at `~/.linkedin-mcp/profile/`.
+Always verify scraping bugs end-to-end against live LinkedIn, not just code analysis. Use `uv run`, not `uvx`, so the running process reflects your workspace. Use `uvx` only for packaged distribution verification. Assume a valid login profile already exists at `~/.linkedin-mcp/profile/`.
 
 ```bash
 # Start server
@@ -69,7 +68,7 @@ gt create -m "chore: Bump version to X.Y.Z"
 gt submit                        # merge PR to trigger release workflow
 ```
 
-The CI release workflow automatically updates `manifest.json` and `docker-compose.yml` with the new version — do not update them manually.
+The CI release workflow automatically updates `manifest.json` with the new version — do not update it manually.
 
 After the workflow completes, file a PR in the MCP registry to update the version.
 
@@ -95,7 +94,7 @@ Always read [`CONTRIBUTING.md`](CONTRIBUTING.md) before filing an issue or worki
   1. Check open issues. If no issue exists, create one following the templates in `.github/ISSUE_TEMPLATE/`. Fill in every section; delete optional sections if not applicable.
   2. Branch from `main`: `feature/issue-number-short-description`
   3. Implement and test
-  4. Update README.md and docs/docker-hub.md if relevant
+  4. Update README.md if relevant
   5. Create a draft PR; only convert to regular PR when ready to merge
   6. Review with AI agents first, then manual review. Do not squash commits.
 

@@ -244,10 +244,10 @@ def standin_portal_page(req: Req):  # noqa: ANN201
         ):
             raise NotFound("No organization uses this billing account.")
     body = (
-        "<h1 style='margin-top:18px'>Billing portal (stand-in)</h1><p class='muted'>Use these to see how Aira reacts to payment events.</p>"
+        "<h1 style='margin-top:18px'>Billing portal (stand-in)</h1><p class='muted'>Use these to see how Monosage reacts to payment events.</p>"
         f"<form method='post' action='/billing/standin/portal/{customer}/fail'><button class='btn ghost' type='submit' style='width:100%;margin-top:8px'>Simulate a failed payment</button></form>"
         f"<form method='post' action='/billing/standin/portal/{customer}/recover'><button class='btn' type='submit' style='width:100%;margin-top:8px'>Simulate a recovered payment</button></form>"
-        f"<p class='muted'><a href='{quote(req.app.config.base_url)}/#/org/billing'>Back to Aira</a></p>"
+        f"<p class='muted'><a href='{quote(req.app.config.base_url)}/#/org/billing'>Back to Monosage</a></p>"
     )
     return _page(body)
 

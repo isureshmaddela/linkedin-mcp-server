@@ -146,14 +146,14 @@
     }, { kind: "secondary sm" });
     const body = h("div", { class: "suite-form" },
       Aira.ui.field("Client *", client),
-      isProposal ? h("div", { class: "card", style: { display: "grid", gap: "8px" } }, Aira.ui.field("Brief (optional)", brief, "Aira drafts the title, introduction, scope and lines. You set the prices."), h("div", { class: "btn-row" }, draftButton)) : null,
+      isProposal ? h("div", { class: "card", style: { display: "grid", gap: "8px" } }, Aira.ui.field("Brief (optional)", brief, "Monosage drafts the title, introduction, scope and lines. You set the prices."), h("div", { class: "btn-row" }, draftButton)) : null,
       isProposal ? Aira.ui.field("Title *", title) : null,
       isProposal ? Aira.ui.field("Introduction", intro) : null,
       isProposal ? Aira.ui.field("Scope", scope, "Phases, deliverables and what is not included.") : null,
       h("h3", { class: "suite-h3", text: "Lines" }), items.node,
       S.grid(Aira.ui.field("Discount", discount), Aira.ui.field(`${business.tax_label || "Tax"} %`, taxPct, "From your business profile; change it for this document if needed.")),
       totals,
-      isProposal ? S.grid(Aira.ui.field("Valid until", validUntil), Aira.ui.field("Deposit when accepted (%)", deposit, "Empty for none. When the client accepts, Aira sends them an invoice for this share, and the final invoice takes it off.")) : S.grid(Aira.ui.field("Issue date", issue), Aira.ui.field("Due date", due, "Empty: your payment terms.")),
+      isProposal ? S.grid(Aira.ui.field("Valid until", validUntil), Aira.ui.field("Deposit when accepted (%)", deposit, "Empty for none. When the client accepts, Monosage sends them an invoice for this share, and the final invoice takes it off.")) : S.grid(Aira.ui.field("Issue date", issue), Aira.ui.field("Due date", due, "Empty: your payment terms.")),
       isProposal ? null : Aira.ui.field("Note for the client", notes),
       isProposal ? null : Aira.ui.field("Internal notes", internal),
       error);
@@ -573,7 +573,7 @@
     if (p.status === "accepted" && !p.converted) actions.push(S.button("Start project and invoice", () => convert(id)));
     if (!locked) actions.push(S.button(p.status === "draft" ? "Send to client" : "Send again", async () => { const r = await API(`/proposals/${id}/send`, { method: "POST", body: {} }); Aira.toast(r.message ? "The email is in the outbox (Business hub)." : r.note, r.message ? "success" : ""); rerender(); openProposal(id); }, { kind: p.status === "draft" ? "" : "secondary" }));
     if (!locked) actions.push(S.button("Edit", async () => { const r = await documentEditor({ kind: "proposal", doc: p }); if (r) { rerender(); openProposal(id); } }, { kind: "secondary" }));
-    if (!locked) actions.push(S.button("Mark accepted", async () => { if (await Aira.confirm({ title: "Mark as accepted", message: "Record that the client agreed outside Aira (on a call or by email)?", confirmLabel: "Mark accepted" })) { await API(`/proposals/${id}/status`, { method: "POST", body: { status: "accepted" } }); rerender(); openProposal(id); } }, { kind: "ghost" }));
+    if (!locked) actions.push(S.button("Mark accepted", async () => { if (await Aira.confirm({ title: "Mark as accepted", message: "Record that the client agreed outside Monosage (on a call or by email)?", confirmLabel: "Mark accepted" })) { await API(`/proposals/${id}/status`, { method: "POST", body: { status: "accepted" } }); rerender(); openProposal(id); } }, { kind: "ghost" }));
     if (!locked) actions.push(S.button("Mark declined", async () => { await API(`/proposals/${id}/status`, { method: "POST", body: { status: "declined" } }); rerender(); openProposal(id); }, { kind: "ghost" }));
     if (p.invoice_id) actions.push(S.button("Open invoice", () => openInvoice(p.invoice_id), { kind: "secondary" }));
     if (p.project_id) actions.push(S.button("Open project", () => openProject(p.project_id), { kind: "ghost" }));
@@ -583,7 +583,7 @@
       h("div", { class: "btn-row" }, pill(p.status), h("span", { class: "muted", text: `${who(p)} · valid until ${day(p.valid_until)}` })),
       p.status === "accepted" ? h("div", { class: "cloud-banner info", role: "status" }, h("strong", { text: `Accepted by ${p.accepted_name}` }), h("span", { class: "muted", text: S.when(p.accepted_at) })) : null,
       p.status === "declined" ? h("div", { class: "cloud-banner warning", role: "status" }, h("strong", { text: "Declined" }), p.decline_reason ? h("span", { text: p.decline_reason }) : null) : null,
-      deposit.total_cents ? h("p", { class: "muted" }, h("strong", { text: `Deposit: ${deposit.deposit_bp / 100}% (${money(deposit.total_cents)})` }), h("span", { text: p.deposit_invoice_id ? " · invoiced to the client when they accepted. The final invoice takes it off." : " · when the client accepts, Aira sends them an invoice for it. The final invoice takes it off." })) : null,
+      deposit.total_cents ? h("p", { class: "muted" }, h("strong", { text: `Deposit: ${deposit.deposit_bp / 100}% (${money(deposit.total_cents)})` }), h("span", { text: p.deposit_invoice_id ? " · invoiced to the client when they accepted. The final invoice takes it off." : " · when the client accepts, Monosage sends them an invoice for it. The final invoice takes it off." })) : null,
       !locked || link ? S.share({ title: "Client page", text: "Your client reads the proposal and accepts it here. Creating the link marks the proposal as sent.", link, onCreate: async () => { const r = await API(`/proposals/${id}/link`, { method: "POST", body: {} }); rerender(); return r.link; }, onRevoke: async () => { await API(`/proposals/${id}/link`, { method: "DELETE" }); } }) : null,
       h("div", { class: "btn-row" }, ...actions),
       p.intro ? S.section("Introduction", h("p", { class: "suite-pre", text: p.intro })) : null,
@@ -882,7 +882,7 @@
     const pipelineForm = S.form(OPEN_STAGES.map((stage) => ({ name: stage, label: `${STAGE_LABELS[stage]} (%)`, type: "number", min: 0, max: 100 })), probabilities);
     body.append(S.section("Chance of winning at each stage", h("p", { class: "muted", text: "Used for the weighted forecast. Won is always 100% and lost 0%." }), pipelineForm.node,
       h("div", { class: "btn-row" }, S.button("Save chances", async () => { pipelineForm.setError(""); try { await API("/pipeline", { method: "POST", body: pipelineForm.read() }); Aira.toast("Saved.", "success"); } catch (error) { pipelineForm.setError(error.message); } }))));
-    body.append(S.section("What Sales does by itself", h("p", { class: "muted", text: "Every few minutes, even when Aira is closed, Sales can draft retainer invoices, remind clients who are late and follow up proposals. You approve every email before it goes." }), autoForm.node,
+    body.append(S.section("What Sales does by itself", h("p", { class: "muted", text: "Every few minutes, even when Monosage is closed, Sales can draft retainer invoices, remind clients who are late and follow up proposals. You approve every email before it goes." }), autoForm.node,
       h("div", { class: "btn-row" }, S.button("Save reminders and retainers", saveAuto), S.button("Check now", runNow, { kind: "secondary" }), h("a", { href: "#/hub?tab=outbox", text: "Open the outbox" }))));
     body.append(S.section("Sales settings", form.node, h("div", { class: "btn-row" }, S.button("Save settings", async () => { form.setError(""); try { await API("/settings", { method: "POST", body: form.read() }); Aira.toast("Saved.", "success"); } catch (error) { form.setError(error.message); } })),
       h("p", { class: "muted small" }, "Your business name, tax rate, currency and payment link are in the ", h("a", { href: "#/hub?tab=business", text: "Business hub" }), ".")));

@@ -38,10 +38,10 @@
     // the token must not stay in the address bar or the history
     history.replaceState(null, "", `${location.pathname}${location.search}#/`);
     if (typeof Aira !== "undefined" && Aira.showAuth) Aira.showAuth();
-    notice("Signing in with your Aira account…");
+    notice("Signing in with your Monosage account…");
     try {
       const data = await call("/api/auth/launch", { method: "POST", body: { token } });
-      notice(`Signed in as ${data.email}. Opening Aira…`);
+      notice(`Signed in as ${data.email}. Opening Monosage…`);
       location.reload();
       return true;
     } catch (error) {

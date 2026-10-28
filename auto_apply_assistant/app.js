@@ -155,7 +155,7 @@ async function api(path, { method = "GET", body, raw = false, silent = false } =
     return data;
   } catch (error) {
     if (error instanceof ApiError) throw error;
-    throw new ApiError("Aira is unreachable. Check that the server is running.", 0, "");
+    throw new ApiError("Monosage is unreachable. Check that the server is running.", 0, "");
   } finally {
     if (!silent) setProgress(false);
   }
@@ -398,7 +398,7 @@ const APPS = [
   { id: "news", name: "News", tagline: "Today's headlines in your language", icon: "news", home: "news", path: "news", category: "life", scope: "org" },
   { id: "videos", name: "Videos", tagline: "Watch, upload and earn", icon: "videos", home: "videos", path: "videos", category: "life", scope: "org" },
   { id: "journey", name: "Life", tagline: "Goals, milestones and documents", icon: "journey", home: "journey", path: "life", category: "life", scope: "org" },
-  { id: "ai", name: "AI", tagline: "Chat with Aira and manage its agents", icon: "ai", home: "ai", path: "ai", category: "life", scope: "org" },
+  { id: "ai", name: "AI", tagline: "Chat with Monosage and manage its agents", icon: "ai", home: "ai", path: "ai", category: "life", scope: "org" },
   { id: "stocks", name: "Stocks", tagline: "Markets, predictions and your portfolio", icon: "stocks", home: "stocks", path: "stocks", category: "life", scope: "org" },
 ];
 // One list drives the sidebar, the phone bottom bar, the `g` then <key> chords and the shortcuts help.
@@ -565,6 +565,8 @@ const Router = {
     const hash = location.hash.replace(/^#\/?/, "");
     const [pathPart, queryPart = ""] = hash.split("?");
     const path = pathPart.split("/").filter(Boolean).map(decodeURIComponent);
+    // The address reads #/api; the page's id inside the code is still "airaapi" (old #/airaapi links keep working).
+    if (path[0] === "api") path[0] = "airaapi";
     const query = Object.fromEntries(new URLSearchParams(queryPart));
     return { path, query };
   },
@@ -584,6 +586,7 @@ const Router = {
     const route = Router.parse();
     if (!route.path.length) { Router.go([(Aira.startPage && Aira.startPage(false)) || "dashboard"], {}, { replace: true }); return; }
     const section = route.path[0];
+    if (section === "airaapi" && /^#\/?airaapi\b/.test(location.hash)) history.replaceState(history.state, "", location.hash.replace(/^#\/?airaapi\b/, "#/api"));
     const view = Aira.views[section];
     const main = $("main");
     Router.current = route;
@@ -612,7 +615,7 @@ const Router = {
     if (blocked) {
       const closed = apps.describe(blocked.app);
       $("crumbs").replaceChildren(h("span", { class: "crumb-app", text: closed.name }));
-      document.title = `${closed.name} · Aira`;
+      document.title = `${closed.name} · Monosage`;
       main.replaceChildren(h("div", { class: "view-stage" }, apps.locked(blocked)));
       return;
     }
@@ -620,7 +623,7 @@ const Router = {
     const label = navItem ? navItem.label : section;
     const inProduct = APPS.some((entry) => entry.id === app.id) && navItem && navItem.group !== "Account";
     $("crumbs").replaceChildren(...(inProduct ? [h("span", { class: "crumb-app", text: app.name }), h("span", { class: "crumb-sep", "aria-hidden": "true", text: "/" })] : []), h("span", { text: label }));
-    document.title = `${label} · ${inProduct ? `${app.name} · ` : ""}Aira`;
+    document.title = `${label} · ${inProduct ? `${app.name} · ` : ""}Monosage`;
     // Each render draws into its own stage. A newer render swaps in a fresh stage, so a slower
     // earlier view (the dashboard still loading when a link is followed) writes into a detached
     // element instead of over the page the person moved to.
@@ -658,11 +661,11 @@ function renderNav(counts = {}) {
   const current = Router.current && Router.current.path[0];
   const app = apps.current();
   const items = visibleNav();
-  $("brandApp").textContent = app.name || "Aira";
+  $("brandApp").textContent = app.name || "Monosage";
   const link = (item) => h("a", { href: `#/${item.id}`, dataset: { section: item.id }, "aria-current": current === item.id ? "page" : "false", "aria-keyshortcuts": `g ${item.key}`, onclick: () => { if (window.innerWidth <= 900) setSidebarOpen(false); } }, Aira.icon(item.icon), h("span", { text: item.label }), shown[item.id] ? h("span", { class: "count", text: shown[item.id] }) : null);
   // The app's own groups first, the Account group (shown under every app) last.
   const groups = [...new Set(items.map((item) => item.group))].sort((a, b) => (a === "Account") - (b === "Account"));
-  const head = h("div", { class: "nav-apphead", id: "navAppHead" }, Aira.icon(app.icon || "dashboard"), h("div", {}, h("strong", { text: app.name || "Aira" }), app.tagline ? h("span", { class: "muted", text: app.tagline }) : null));
+  const head = h("div", { class: "nav-apphead", id: "navAppHead" }, Aira.icon(app.icon || "dashboard"), h("div", {}, h("strong", { text: app.name || "Monosage" }), app.tagline ? h("span", { class: "muted", text: app.tagline }) : null));
   const extra = Aira.shell ? Aira.shell.navExtras(app) : { before: [], after: [] };
   $("primaryNav").replaceChildren(head, ...extra.before, ...groups.map((group) => {
     const labelId = `navGroup${group.replace(/\W+/g, "")}`;
@@ -763,7 +766,7 @@ function renderSwitcher(panel) {
   // replaceChildren turns a null child into the text "null": only real nodes go in.
   panel.replaceChildren(
     ...[
-      h("div", { class: "popover-title", text: "Aira apps" }),
+      h("div", { class: "popover-title", text: "Apps" }),
       Aira.shell ? Aira.shell.homeTile() : null,
       core.length ? h("div", { class: "app-grid" }, ...core.map(tile)) : null,
       everyday.length ? h("div", { class: "popover-subtitle", text: "Everyday" }) : null,
@@ -813,7 +816,7 @@ async function refreshStatus() {
     strip.replaceChildren(
       pill(linkedin.state === "connected", linkedin.state === "connected" ? "LinkedIn connected" : linkedin.state === "login" || linkedin.state === "starting" ? "LinkedIn connecting" : "LinkedIn off", linkedin.message, linkedin.state === "login" || linkedin.state === "starting"),
       pill(status.ollama, status.ollama ? "Ollama ready" : "Ollama offline", status.ollama ? "Local model available for reviews and drafts" : "Start Ollama to review fit and generate drafts"),
-      pill(status.google_jobs, status.google_jobs ? "SerpApi ready" : "SerpApi off", status.google_jobs ? "A SerpApi key is connected: Google Jobs, Careers and the API console can search" : "Connect a SerpApi key in API > Account to use Google Jobs, Careers and the API console", false, "#/airaapi?tab=account"),
+      pill(status.google_jobs, status.google_jobs ? "SerpApi ready" : "SerpApi off", status.google_jobs ? "A SerpApi key is connected: Google Jobs, Careers and the API console can search" : "Connect a SerpApi key in API > Account to use Google Jobs, Careers and the API console", false, "#/api?tab=account"),
     );
     if (linkedin.state === "login" || linkedin.state === "starting") setTimeout(refreshStatus, 3000);
   } catch { /* status is best-effort */ }
@@ -827,10 +830,10 @@ function applyTheme(theme) {
 
 // Sign-in modes: login, register, forgot (ask for a reset code) and reset (code + new password).
 const AUTH_MODES = {
-  login: { title: "Sign in", submit: "Sign in", switchText: "New to Aira?", switchLabel: "Create an account", password: "Aira password", autocomplete: "current-password", hint: "" },
-  register: { title: "Create your workspace", submit: "Create account", switchText: "Already registered?", switchLabel: "Sign in", password: "Aira password", autocomplete: "new-password", hint: "Use at least 12 characters. This password protects your local workspace." },
-  forgot: { title: "Reset your password", submit: "Get a reset code", switchText: "Remembered it?", switchLabel: "Sign in", intro: "Enter your account email. Aira emails you a one-time code when a mail server is set up, and always shows it in the window where Aira is running." },
-  reset: { title: "Choose a new password", submit: "Set new password", switchText: "Remembered it?", switchLabel: "Sign in", password: "New Aira password", autocomplete: "new-password", hint: "At least 12 characters. Every other signed-in session is signed out.", intro: "Enter the code from your email or the window where Aira is running, then a new password." },
+  login: { title: "Sign in", submit: "Sign in", switchText: "New to Monosage?", switchLabel: "Create an account", password: "Monosage password", autocomplete: "current-password", hint: "" },
+  register: { title: "Create your workspace", submit: "Create account", switchText: "Already registered?", switchLabel: "Sign in", password: "Monosage password", autocomplete: "new-password", hint: "Use at least 12 characters. This password protects your local workspace." },
+  forgot: { title: "Reset your password", submit: "Get a reset code", switchText: "Remembered it?", switchLabel: "Sign in", intro: "Enter your account email. Monosage emails you a one-time code when a mail server is set up, and always shows it in the window where Monosage is running." },
+  reset: { title: "Choose a new password", submit: "Set new password", switchText: "Remembered it?", switchLabel: "Sign in", password: "New Monosage password", autocomplete: "new-password", hint: "At least 12 characters. Every other signed-in session is signed out.", intro: "Enter the code from your email or the window where Monosage is running, then a new password." },
 };
 const AUTH_INTRO = "Your workspace stays on this computer. LinkedIn sign-in happens separately in your own browser session.";
 function setAuthMode(mode) {

@@ -109,7 +109,7 @@ API = App(
     route_prefixes=("/api/airaapi", "/v1"),
     feature="api.console",
     key="p",
-    description="A console for 136 search engines with a shared cache, saved searches and monitors, a SerpApi-compatible endpoint for your own scripts, and the apps you connect to Aira.",
+    description="A console for 136 search engines with a shared cache, saved searches and monitors, a SerpApi-compatible endpoint for your own scripts, and the apps you connect to Monosage.",
     addon=True,
     scope="org",
 )
@@ -368,7 +368,7 @@ SOCIAL = _life(
     "Social",
     "Friends, family, chats and photos",
     "6",
-    "Aira's own social network: a profile, friends and followers, a feed with photos, stories, groups and "
+    "Monosage's own social network: a profile, friends and followers, a feed with photos, stories, groups and "
     "business pages, private chats and a professional profile, and a private family space with a family chat, "
     "calendar, birthdays and a board for relatives, with blocking, reporting and safety for every age.",
     (
@@ -413,7 +413,7 @@ JOURNEY = _life(
 AI = _life(
     "ai",
     "AI",
-    "Chat with Aira and manage its agents",
+    "Chat with Monosage and manage its agents",
     "",
     "One assistant across all your apps: ask about your day, goals, medicines, chores, family or business and get "
     "a morning brief; ask it to add a goal, a task or a shopping item. One agent per app, each with the consent "

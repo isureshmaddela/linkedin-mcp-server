@@ -217,7 +217,7 @@
       S.section("What needs doing", todo.length ? h("ul", {}, ...todo) : h("p", { class: "muted", text: info.active ? "Your ads are running." : "Create a campaign to start." }),
         canCreate() ? h("div", { class: "btn-row ads-todo-new" }, S.button("New campaign", () => newCampaign(info), { kind: "primary", icon: "plus" })) : null),
       S.section("How Ads works",
-        h("p", { text: "Your ads run on videos people watch in Aira: a short video before the video (people can skip it after 5 seconds), a banner beside it, or a sponsored reel." }),
+        h("p", { text: "Your ads run on videos people watch in Monosage: a short video before the video (people can skip it after 5 seconds), a banner beside it, or a sponsored reel." }),
         h("p", { text: "You pay only for ads that played or were on screen for 2 seconds, or for clicks. Views by your own people, repeat views and other invalid traffic are not charged." }),
         h("p", { text: "Record the sales each campaign brings, and Reports shows what you get back for each dollar you spend." }),
         h("p", { text: `Every ad is reviewed before it runs. ${info.settings.revenue_share_percent}% of what you pay goes to the creator of the video your ad ran on.` }))));
@@ -542,11 +542,11 @@
     ]));
     if (data.hosted) {
       panel.append(S.section("Top up",
-        h("p", { text: "The amount is added to your organization's next invoice from its billing provider, and to your balance as soon as it is billed. Aira never takes card details itself. Owners and billing contacts can top up." }),
+        h("p", { text: "The amount is added to your organization's next invoice from its billing provider, and to your balance as soon as it is billed. Monosage never takes card details itself. Owners and billing contacts can top up." }),
         h("div", { class: "btn-row" }, S.button("Top up", topUp, { kind: "primary", icon: "plus" }))));
       hooks.topup = topUp;
     } else {
-      panel.append(S.section("Adding money", h("p", { text: "On this computer, the owner of its first account records the money an advertiser paid them (cash, a transfer or a payment link), and it becomes your balance. Aira does not take payments itself." }),
+      panel.append(S.section("Adding money", h("p", { text: "On this computer, the owner of its first account records the money an advertiser paid them (cash, a transfer or a payment link), and it becomes your balance. Monosage does not take payments itself." }),
         known.operator ? h("div", { class: "btn-row" }, h("a", { class: "btn secondary", href: "#/ads?tab=admin&new=payment", text: "Record a payment" })) : null));
     }
     panel.append(S.section("History", S.table({
@@ -569,7 +569,7 @@
     panel.append(S.kpis([
       { label: "Paid by advertisers", value: usd(t.gross_micros) },
       { label: "Earned by creators", value: usd(t.creators_micros) },
-      { label: "Kept by Aira", value: usd(t.platform_micros) },
+      { label: "Kept by Monosage", value: usd(t.platform_micros) },
       { label: "Waiting to be paid", value: usd(t.requested_micros), tone: t.requested_micros ? "warn" : "" },
       { label: "Paid to creators", value: usd(t.paid_micros) },
       { label: "Refunded", value: usd(t.refunded_micros) },
@@ -606,7 +606,7 @@
         { key: "month", label: "Month" },
         { key: "gross_micros", label: "Paid by advertisers", num: true, render: (row) => usd(row.gross_micros) },
         { key: "creators_micros", label: "Creators", num: true, render: (row) => usd(row.creators_micros) },
-        { key: "platform_micros", label: "Aira", num: true, render: (row) => usd(row.platform_micros) },
+        { key: "platform_micros", label: "Monosage", num: true, render: (row) => usd(row.platform_micros) },
         { key: "invalid", label: "Not counted", num: true },
         { key: "closed", label: "", render: (row) => (row.closed ? S.pill("confirmed") : S.button("Close month", async () => { if (await Aira.confirm({ title: `Close ${row.month}?`, message: "Its traffic is checked once more, then creators' earnings for it are confirmed and can be paid.", confirmLabel: "Close month" })) { await api("/admin/close-month", { method: "POST", body: { month: row.month } }); Aira.router.render(); } }, { kind: "ghost sm" })) },
       ],
@@ -717,7 +717,7 @@
     const meta = tabs.find((item) => item.id === tabId);
     // The page is named after the open tab (the app's own name is in the bar above), like a mail app's folder; a
     // campaign's page names the campaign.
-    const subtitle = tabId === "overview" ? `Advertising as ${info.advertiser || "your business"} on videos people watch in Aira` : meta.about;
+    const subtitle = tabId === "overview" ? `Advertising as ${info.advertiser || "your business"} on videos people watch in Monosage` : meta.about;
     // On a phone the menu (and its "+ New") is folded away, so the page keeps its own New campaign there.
     const body = S.page(main, { title: meta.label, subtitle, actions: canCreate() ? [S.button("New campaign", () => newCampaign(info), { kind: "primary ads-phone-new", icon: "plus" })] : [] });
     const setHead = (title, line) => {
@@ -726,9 +726,9 @@
       head.querySelector("h1").textContent = title;
       const sub = head.querySelector("h1 + p");
       if (sub) sub.textContent = line;
-      document.title = `${title} · Ads · Aira`;
+      document.title = `${title} · Ads · Monosage`;
     };
-    document.title = `${meta.label} · Ads · Aira`;
+    document.title = `${meta.label} · Ads · Monosage`;
     const tab = S.tabs(body, route, "ads", tabs, tabId);
     const panel = h("div", { class: "suite-body ads-app" });
     body.append(panel);

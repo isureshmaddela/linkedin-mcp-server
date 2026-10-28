@@ -142,7 +142,7 @@ def test_the_switcher_lists_the_apps_and_each_app_shows_only_its_sections(browse
         "/",
         "Find",
     ]
-    assert "Leads" in page.title()
+    assert "leads" in page.title().lower()
     assert page.locator("#brandApp").inner_text() == "Marketing"
     assert sections(page) == ["marketing", "leads", *ACCOUNT_SECTIONS]
     shot(page, "03-leads")

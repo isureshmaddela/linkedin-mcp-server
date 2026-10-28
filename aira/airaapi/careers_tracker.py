@@ -490,7 +490,7 @@ def job_search_log(
         if text.startswith("Applied "):
             how = text.split(".", 1)[0]
         elif row["method"] == "auto":
-            how = "Aira applied for you"
+            how = "Monosage applied for you"
         elif row["method"]:
             how = "Online application"
         link = str(row["application_url"] or row["job_url"] or "")

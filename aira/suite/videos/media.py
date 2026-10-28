@@ -145,8 +145,8 @@ def check_space(size: int) -> None:
     if free - size < reserve:
         where = f" in {target}" if show_paths else ""
         raise ValueError(
-            f"There is not enough free disk space for this upload: {human(free)} is free{where} and Aira keeps "
-            f"{human(reserve)} free. Set AIRA_MEDIA_DIR to a folder on a drive with more space, then restart Aira."
+            f"There is not enough free disk space for this upload: {human(free)} is free{where} and Monosage keeps "
+            f"{human(reserve)} free. Set AIRA_MEDIA_DIR to a folder on a drive with more space, then restart Monosage."
         )
 
 
@@ -163,7 +163,7 @@ def sniff(head: bytes, kind: str) -> str:
         if head[:4] == b"\x1a\x45\xdf\xa3":
             return "video/webm" if b"webm" in head[:64] else "video/x-matroska"
         raise ValueError(
-            "This file is not a video Aira can keep: use MP4, MOV or WebM."
+            "This file is not a video Monosage can keep: use MP4, MOV or WebM."
         )
     if kind == "image":
         if head[:3] == b"\xff\xd8\xff":
@@ -312,7 +312,7 @@ def start(
         raise ValueError("This file is empty.")
     if size > limit:
         raise ValueError(
-            f"This file is too large: the most Aira keeps is {human(limit)}."
+            f"This file is too large: the most Monosage keeps is {human(limit)}."
         )
     _sweep(sc)
     open_count = store.scalar(

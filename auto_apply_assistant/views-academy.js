@@ -103,7 +103,7 @@
     if (heading) heading.textContent = title;
     const line = main.querySelector(".page-head p");
     if (line && about !== undefined) line.textContent = about;
-    document.title = `${title} · Courses & Events · Aira`;
+    document.title = `${title} · Courses & Events · Monosage`;
   };
 
   // "+ New" and a search result ask through the address: ?new=<kind> or ?open=<kind>:<id>. take() keeps the ask,
@@ -247,7 +247,7 @@
     const refresh = () => goTab({ tab: "partners", q, t: Date.now() });
     const search = h("input", { type: "search", placeholder: "Name, email or code", value: q, "aria-label": "Search partners", "data-search": "1", onkeydown: (event) => { if (event.key === "Enter") goTab({ tab: "partners", q: search.value.trim() }); } });
     body.append(
-      h("p", { class: "muted", text: "Partners share your courses and events with their own link: teachers, clubs, creators, past students. When someone they send pays, they earn a commission. You pay them yourself; Aira keeps the count and gives each partner a page with their links and earnings." }),
+      h("p", { class: "muted", text: "Partners share your courses and events with their own link: teachers, clubs, creators, past students. When someone they send pays, they earn a commission. You pay them yourself; Monosage keeps the count and gives each partner a page with their links and earnings." }),
       S.kpis([
         { label: "Active partners", value: t.partners },
         { label: "Referrals", value: t.referrals },
@@ -365,7 +365,7 @@
               { key: "completed", label: "Completed", num: true, wide: true, render: (row) => row.completed || 0 },
             ],
             rows: data.top_courses,
-            empty: Aira.ui.empty("No courses yet", "Create a course, or let Aira draft an outline from a topic.", S.button("Create a course", () => newCourse())),
+            empty: Aira.ui.empty("No courses yet", "Create a course, or let Monosage draft an outline from a topic.", S.button("Create a course", () => newCourse())),
             onRow: (row) => go({ tab: "courses", course: row.id }),
           })),
         S.section("Recent activity", S.activity(data.activity)),
@@ -397,7 +397,7 @@
     Aira.modal({
       title: "Draft a course with AI",
       wide: true,
-      body: h("div", { class: "suite-body" }, h("p", { class: "muted", text: "Aira drafts modules and lessons from your topic. You edit everything before students see it." }), form.node, preview),
+      body: h("div", { class: "suite-body" }, h("p", { class: "muted", text: "Monosage drafts modules and lessons from your topic. You edit everything before students see it." }), form.node, preview),
       actions: [
         { label: "Cancel", kind: "ghost" },
         { label: "Draft outline", kind: "secondary", onClick: async () => {
@@ -867,7 +867,7 @@
       about: tabId === "search" ? "Courses, events, students, ticket orders and partners that match." : meta.about,
       phoneNew: tabId === "courses" ? null : S.button("New course", () => newCourse(), { icon: "plus" }),
     });
-    document.title = `${title} · Courses & Events · Aira`;
+    document.title = `${title} · Courses & Events · Monosage`;
     const tab = S.tabs(body, route, "academy", TABS, tabId);
     const panel = h("div", { class: "suite-body" });
     body.append(panel);

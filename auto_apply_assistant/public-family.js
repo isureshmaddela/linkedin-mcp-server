@@ -26,7 +26,7 @@
     // The board is the family's page, not the account's business: no business name, logo or contact details.
     const set = (id, fn) => { const node = document.getElementById(id); if (node) fn(node); };
     set("pubName", (node) => { node.textContent = page.title || "Our family"; });
-    set("pubTagline", (node) => { node.textContent = "Family board on Aira"; });
+    set("pubTagline", (node) => { node.textContent = "Family board on Monosage"; });
     set("pubLogo", (node) => { node.hidden = true; node.removeAttribute("src"); });
     set("pubContact", (node) => node.replaceChildren());
     document.title = page.title || "Our family";

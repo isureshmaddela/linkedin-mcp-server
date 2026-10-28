@@ -488,7 +488,7 @@ def current(request: Any, connection: sqlite3.Connection) -> dict[str, Any]:
         profile_id, _, token = header.partition(".")
         chosen = next((p for p in everyone if p["id"] == profile_id), None)
         if chosen is None:
-            raise ProfileRequired("Choose who is using Aira.")
+            raise ProfileRequired("Choose who is using Monosage.")
         if chosen.get("pin_hash") and not hmac.compare_digest(
             token, unlock_token(chosen)
         ):
@@ -497,7 +497,7 @@ def current(request: Any, connection: sqlite3.Connection) -> dict[str, Any]:
     owner = next((p for p in everyone if p["owner"]), None)
     if len(everyone) == 1 and owner and not owner.get("pin_hash"):
         return owner
-    raise ProfileRequired("Choose who is using Aira.")
+    raise ProfileRequired("Choose who is using Monosage.")
 
 
 # ---------------------------------------------------------------------------

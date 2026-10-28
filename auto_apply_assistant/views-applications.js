@@ -25,8 +25,8 @@
     const prepareBtn = h("button", { type: "button", class: "btn sm" + (prep ? " secondary" : ""), text: prep ? "Re-prepare packet" : "Prepare packet", disabled: !job.description || !profileReady, onclick: (event) => withBusy(event.currentTarget, async () => { event.currentTarget.textContent = "Preparing…"; await api(`/api/jobs/${encodeURIComponent(job.job_id)}/prepare`, { method: "POST", body: {} }); toast("Application packet prepared.", "success"); reload("apply"); }) });
     steps.append(stepNode(prepDone ? "done" : submission ? "" : prep ? "active" : docsReady ? "active" : "", "Prepare and review answers", prep ? `${prep.summary.prefilled} prefilled · ${prep.summary.needs_confirmation} to confirm · ${prep.summary.unknown} unknown (${fmt.stage(prep.questions_source)})` : submission ? sentText : "Map the application questions to your profile and flag anything sensitive.", submission ? null : prepareBtn));
     // Step 4 submit
-    steps.append(stepNode(submission ? "done" : prepDone ? "active" : "", "Apply on the provider site, then record confirmation", submission ? `Recorded ${fmt.datetime(submission.submitted_at)}${submission.confirmation_number ? ` · #${submission.confirmation_number}` : ""}` : "Aira opens the application page; you submit it and paste the confirmation here.", null));
-    pane.append(Aira.renderAutoApplyCard(job, reload), h("h3", { text: "Or apply yourself", style: { marginTop: "16px" } }), h("p", { class: "note", text: "Aira prepares, prefills and flags; you review and submit on the provider site, then Aira records the confirmation and tracks the outcome." }), steps);
+    steps.append(stepNode(submission ? "done" : prepDone ? "active" : "", "Apply on the provider site, then record confirmation", submission ? `Recorded ${fmt.datetime(submission.submitted_at)}${submission.confirmation_number ? ` · #${submission.confirmation_number}` : ""}` : "Monosage opens the application page; you submit it and paste the confirmation here.", null));
+    pane.append(Aira.renderAutoApplyCard(job, reload), h("h3", { text: "Or apply yourself", style: { marginTop: "16px" } }), h("p", { class: "note", text: "Monosage prepares, prefills and flags; you review and submit on the provider site, then Monosage records the confirmation and tracks the outcome." }), steps);
 
     if (prep && !submission) pane.append(renderPacket(job, prep, reload));
     if (prepDone && !submission) pane.append(renderSubmitCard(job, prep, reload));
@@ -51,7 +51,7 @@
     const remember = h("input", { type: "checkbox", checked: true });
     const card = h("div", { class: "card", style: { marginTop: "14px" } },
       h("h3", { text: `Application packet · ${fmt.stage(prep.status)}` }),
-      prep.summary.sensitive_pending && prep.summary.sensitive_pending.length ? h("div", { class: "sensitive-note" }, h("span", { text: "⚠" }), h("span", { text: `Sensitive questions need your explicit answer: ${prep.summary.sensitive_pending.join(", ")}. Aira never guesses work authorization, visa, salary, demographic, or legal answers.` })) : null,
+      prep.summary.sensitive_pending && prep.summary.sensitive_pending.length ? h("div", { class: "sensitive-note" }, h("span", { text: "⚠" }), h("span", { text: `Sensitive questions need your explicit answer: ${prep.summary.sensitive_pending.join(", ")}. Monosage never guesses work authorization, visa, salary, demographic, or legal answers.` })) : null,
       prep.summary.unknown_questions && prep.summary.unknown_questions.length ? h("p", { class: "muted", style: { fontSize: "12.5px" }, text: `Unmapped questions you will answer on the site: ${prep.summary.unknown_questions.join("; ")}` }) : null,
       list,
       h("div", { style: { marginTop: "12px" } }, ui.field("Review notes", notes), h("label", { class: "check", style: { marginTop: "8px" } }, remember, "Remember my confirmed answers for future applications")),
@@ -82,7 +82,7 @@
     }));
     return h("details", { class: "card careers-outside-card", style: { marginTop: "14px" } },
       h("summary", { text: "Already applied another way? Record it" }),
-      h("p", { class: "muted", style: { fontSize: "12.5px" }, text: "Sent your CV by email, handed it in at the shop, or applied before you used Aira? Record it so it is tracked, reminded and counted in your job search log." }),
+      h("p", { class: "muted", style: { fontSize: "12.5px" }, text: "Sent your CV by email, handed it in at the shop, or applied before you used Monosage? Record it so it is tracked, reminded and counted in your job search log." }),
       h("div", { class: "form-grid" }, ui.field("How you applied", channel), ui.field("Day you applied", when), ui.field("Reference number", reference), ui.field("Note", note)),
       h("div", { class: "btn-row", style: { marginTop: "12px" } }, save),
     );
@@ -270,7 +270,7 @@
   function negotiate(offer, comparison) {
     const money = Aira.careersMoney;
     const per = Aira.careersPer;
-    const ask = h("input", { type: "number", min: "0", step: "any", inputmode: "decimal", id: "negotiateAsk", placeholder: "Leave empty for Aira's suggestion" });
+    const ask = h("input", { type: "number", min: "0", step: "any", inputmode: "decimal", id: "negotiateAsk", placeholder: "Leave empty for Monosage's suggestion" });
     const higher = comparison.offers.some((o) => o.job_id !== offer.job_id && o.currency === offer.currency && o.annual_base > offer.annual_base && !["declined", "expired"].includes(o.status));
     const mention = h("input", { type: "checkbox" });
     const subject = h("input", { type: "text", id: "negotiateSubject", maxlength: 300 });
@@ -280,7 +280,7 @@
       h("h3", { text: "Why this amount" }), reasons,
       h("div", { class: "field" }, h("label", { for: "negotiateSubject", text: "Subject" }), subject),
       h("div", { class: "field" }, h("label", { for: "negotiateBody", text: "Email" }), message),
-      h("p", { class: "muted", style: { fontSize: "12.5px" }, text: "Aira does not send this. Read it, change anything you like, then send it from your own email." }),
+      h("p", { class: "muted", style: { fontSize: "12.5px" }, text: "Monosage does not send this. Read it, change anything you like, then send it from your own email." }),
       h("div", { class: "btn-row" }, h("button", { type: "button", class: "btn secondary sm", text: "Copy email", onclick: async () => { await navigator.clipboard.writeText(`${subject.value}\n\n${message.value}`); toast("Email copied.", "success"); } })),
     );
     const write = h("button", { type: "button", class: "btn", text: "Write the email" });
@@ -317,7 +317,7 @@
     const importBtn = h("button", { type: "button", class: "btn", text: "Classify & import" });
     const form = h("div", { class: "card", style: { marginBottom: "16px" } },
       h("h3", { text: "Import an email" }),
-      h("p", { class: "muted", style: { fontSize: "12.5px" }, text: "Aira classifies interview invitations, assessments, confirmations, rejections, offers, and recruiter outreach, extracts explicit dates and links, and suggests an action you confirm. Mailbox sync is not connected in this build, so paste the message or upload an .eml file." }),
+      h("p", { class: "muted", style: { fontSize: "12.5px" }, text: "Monosage classifies interview invitations, assessments, confirmations, rejections, offers, and recruiter outreach, extracts explicit dates and links, and suggests an action you confirm. Mailbox sync is not connected in this build, so paste the message or upload an .eml file." }),
       h("div", { class: "form-grid" }, ui.field("Subject", subject), ui.field("From", sender), h("div", { class: "field wide" }, h("label", { for: "emailBody", text: "Body" }), Object.assign(body, { id: "emailBody" })), h("div", { class: "field" }, h("label", { for: "emlFile", text: "Or upload .eml" }), Object.assign(eml, { id: "emlFile" }))),
       h("div", { class: "btn-row", style: { marginTop: "12px" } }, importBtn),
     );

@@ -252,7 +252,7 @@ def build_message(
     message["Date"] = formatdate(localtime=False)
     message["Message-ID"] = make_msgid(domain=sender_domain(settings))
     message["List-Unsubscribe"] = f"<mailto:{reply_to}?subject=unsubscribe>"
-    message["X-Mailer"] = "Aira Leads"
+    message["X-Mailer"] = "Monosage Leads"
     signature = store.clean(settings.get("signature"), 200) or name
     footer = (
         f"\n\n--\n{signature}\n{store.clean(settings.get('postal_address'), 300)}\n"
@@ -721,8 +721,8 @@ def send_test(
     built = build_message(
         settings,
         to=str(settings["from_email"]),
-        subject="Aira Leads: test message",
-        body="This is a test from Aira Leads. If you can read it, your mail server settings work.",
+        subject="Monosage Leads: test message",
+        body="This is a test from Monosage Leads. If you can read it, your mail server settings work.",
     )
     sender(settings, password, built)
     return {"sent_to": str(settings["from_email"])}

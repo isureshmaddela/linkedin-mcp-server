@@ -315,7 +315,7 @@ class Webhooks:
             actor.org_id,
             row,
             "aira.test",
-            {"title": "A test event from Aira", "ref_type": "", "ref_id": ""},
+            {"title": "A test event from Monosage", "ref_type": "", "ref_id": ""},
         )
         return self.deliver(actor.org_id, delivery)
 
@@ -412,10 +412,10 @@ class Webhooks:
         timestamp = self.now
         headers = {
             "Content-Type": "application/json",
-            "User-Agent": "Aira-Webhooks/1",
-            "Aira-Event": delivery["event"],
-            "Aira-Delivery": delivery_id,
-            "Aira-Signature": sign(secret, timestamp, body),
+            "User-Agent": "Monosage-Webhooks/1",
+            "Monosage-Event": delivery["event"],
+            "Monosage-Delivery": delivery_id,
+            "Monosage-Signature": sign(secret, timestamp, body),
         }
         attempts = int(delivery["attempts"]) + 1
         status: int | None = None

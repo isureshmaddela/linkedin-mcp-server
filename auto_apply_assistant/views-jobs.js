@@ -115,7 +115,7 @@
   const JOB_TABS = [
     { id: "all", label: "All Jobs", view: "all", icon: "careers-list" },
     { id: "linkedin", label: "LinkedIn", view: "linkedin", icon: "careers-link" },
-    { id: "aira", label: "Aira Jobs", view: "aira_jobs", icon: "careers" },
+    { id: "aira", label: "Jobs", view: "aira_jobs", icon: "careers" },
     { id: "google", label: "Google Jobs", view: "google_jobs", icon: "careers-globe" },
     { id: "portals", label: "Company Portals", view: "portals", icon: "careers-building" },
     { id: "recommended", label: "Recommended", view: "recommended", icon: "careers-sparkle" },
@@ -124,7 +124,7 @@
   ];
   const STAGES = ["discovered", "saved", "ready_to_apply", "applying", "needs_review", "applied", "assessment", "recruiter_screen", "technical_interview", "manager_interview", "panel_interview", "final_interview", "offer", "accepted", "rejected", "withdrawn", "failed"];
   const CLASSES = ["Recommended", "Strong Match", "Good Match", "Stretch", "Not Recommended"];
-  const SUBMISSION_METHODS = { manual: "You sent Aira's application", assisted: "Aira filled it in, you sent it", auto: "Aira applied for you", outside: "You applied another way" };
+  const SUBMISSION_METHODS = { manual: "You sent Monosage's application", assisted: "Monosage filled it in, you sent it", auto: "Monosage applied for you", outside: "You applied another way" };
 
   // The source catalog is read again on every visit to Jobs: a SerpApi key connected in API, or a LinkedIn session
   // that just came up, must show here without a reload.
@@ -133,7 +133,7 @@
     if (!sourcesLoad) sourcesLoad = api("/api/sources", { silent: true }).then((data) => (Aira.state.sources = data.sources), (error) => { sourcesLoad = null; throw error; });
     return sourcesLoad;
   }
-  const KEY_PAGE = "#/airaapi?tab=account";
+  const KEY_PAGE = "#/api?tab=account";
 
   // -------------------------------------------------------------------------
   // Search panel (per tab)
@@ -174,8 +174,8 @@
       const structured = ["linkedin", "google_jobs", "aira_jobs", "lever", "ashby", "smartrecruiters"].includes(chosen.source);
       workType.disabled = !structured;
       jobType.disabled = !structured;
-      if (chosen.source === "google_jobs" && !chosen.connected) hint.replaceChildren(`${chosen.label}: `, h("a", { href: KEY_PAGE, text: "connect a SerpApi key in API > Account" }), " (or set SERPAPI_API_KEY in .env), or search ", h("a", { href: "#/jobs/aira", text: "Aira Jobs" }), " for free.");
-      else if (chosen.source === "aira_jobs") hint.textContent = "Aira Jobs searches free job boards (Himalayas, The Muse, Remotive, Jobicy, Arbeitnow) itself: no key, no credits. Each result links back to its board.";
+      if (chosen.source === "google_jobs" && !chosen.connected) hint.replaceChildren(`${chosen.label}: `, h("a", { href: KEY_PAGE, text: "connect a SerpApi key in API > Account" }), " (or set SERPAPI_API_KEY in .env), or search ", h("a", { href: "#/jobs/aira", text: "Jobs" }), " for free.");
+      else if (chosen.source === "aira_jobs") hint.textContent = "Jobs searches free job boards (Himalayas, The Muse, Remotive, Jobicy, Arbeitnow) itself: no key, no credits. Each result links back to its board.";
       else hint.textContent = chosen.connected ? chosen.connection_hint || "" : `${chosen.label}: ${chosen.connection_hint}`;
       submit.disabled = !chosen.connected && chosen.source !== "linkedin";
       Aira.remember("search.source", chosen.source);
@@ -278,7 +278,7 @@
 
     if (tab.id === "autopilot") {
       const host = h("div");
-      main.replaceChildren(h("div", { class: "page-head" }, h("div", {}, h("h1", { text: "Jobs" }), h("p", { text: "Auto-apply: tell Aira which positions you want. On a schedule it searches, scores every job against your profile and applies to the best matches, within your limits." }))), subnav, host);
+      main.replaceChildren(h("div", { class: "page-head" }, h("div", {}, h("h1", { text: "Jobs" }), h("p", { text: "Auto-apply: tell Monosage which positions you want. On a schedule it searches, scores every job against your profile and applies to the best matches, within your limits." }))), subnav, host);
       await Aira.renderAutopilot(host);
       if (making === "job") addJob();
       return;
@@ -287,7 +287,7 @@
     let finder = showSearch ? searchPanel(tab, (data) => { if (data.imported) { load().then(() => openJob(data.imported.job_id, { loadDetails: data.needs_details })); } else { load(); if (data.jobs[0]) openJob(data.jobs[0].job_id, { loadDetails: !data.jobs[0].description }); } }) : null;
     // On a phone the long search form folds away, so the jobs themselves are in view; it opens with one tap.
     if (finder && window.matchMedia && window.matchMedia("(max-width: 640px)").matches) finder = h("details", { class: "careers-finder", open: !filters.q && Aira.recall("careers.jobs.finderOpen", false), ontoggle: (event) => Aira.remember("careers.jobs.finderOpen", event.currentTarget.open) }, h("summary", {}, Aira.icon("jobs"), h("span", { text: tab.id === "all" ? "Search job boards or import a posting" : `Search ${tab.label}` }), h("span", { class: "careers-finder-chevron", "aria-hidden": "true", html: '<svg viewBox="0 0 24 24"><path d="m6 9 6 6 6-6"/></svg>' })), finder);
-    main.replaceChildren(...[head, subnav, finder || h("p", { class: "note", text: tab.id === "recommended" ? "Jobs classified Recommended or Strong Match by the explainable scorer, ranked by score. Load a description and your profile to score more jobs." : "Jobs you starred, plus anything in the Saved status." }), tab.id === "google" ? h("p", { class: "muted", style: { margin: "-6px 0 14px", fontSize: "12.5px" } }, "Want Google's own filters, job alerts and company research? ", h("a", { href: "#/careers?tab=jobs", text: "Open Research" }), ".") : tab.id === "aira" ? h("p", { class: "muted", style: { margin: "-6px 0 14px", fontSize: "12.5px" } }, "Aira's own job search, built into API: no SerpApi key and no credits. Every search is kept in ", h("a", { href: "#/airaapi?tab=history&engine=aira_jobs", text: "API history" }), ".") : null, sourceChip, filterBar, listBox].filter(Boolean));
+    main.replaceChildren(...[head, subnav, finder || h("p", { class: "note", text: tab.id === "recommended" ? "Jobs classified Recommended or Strong Match by the explainable scorer, ranked by score. Load a description and your profile to score more jobs." : "Jobs you starred, plus anything in the Saved status." }), tab.id === "google" ? h("p", { class: "muted", style: { margin: "-6px 0 14px", fontSize: "12.5px" } }, "Want Google's own filters, job alerts and company research? ", h("a", { href: "#/careers?tab=jobs", text: "Open Research" }), ".") : tab.id === "aira" ? h("p", { class: "muted", style: { margin: "-6px 0 14px", fontSize: "12.5px" } }, "Monosage's own job search, built into API: no SerpApi key and no credits. Every search is kept in ", h("a", { href: "#/api?tab=history&engine=aira_jobs", text: "API history" }), ".") : null, sourceChip, filterBar, listBox].filter(Boolean));
 
     async function load() {
       listBox.replaceChildren(ui.skeleton(6));
@@ -304,7 +304,7 @@
       const selectedId = route.path[3];
       const narrowed = Boolean(q.value || stage.value || classification.value || minScore.value || workplace.value || filters.source);
       if (googleMissing) {
-        list.append(ui.empty("Google Jobs needs a SerpApi key", "Connect a key once and Google Jobs searches here, in Careers and in your own scripts all use it. It is stored encrypted on this computer. No key? Aira Jobs searches free job boards without one.", h("div", { class: "btn-row", style: { justifyContent: "center" } }, h("a", { class: "btn", href: "#/jobs/aira", text: "Search Aira Jobs (free)" }), h("a", { class: "btn secondary", href: KEY_PAGE, text: "Connect a key in API" }))));
+        list.append(ui.empty("Google Jobs needs a SerpApi key", "Connect a key once and Google Jobs searches here, in Careers and in your own scripts all use it. It is stored encrypted on this computer. No key? Jobs searches free job boards without one.", h("div", { class: "btn-row", style: { justifyContent: "center" } }, h("a", { class: "btn", href: "#/jobs/aira", text: "Search Jobs (free)" }), h("a", { class: "btn secondary", href: KEY_PAGE, text: "Connect a key in API" }))));
       } else if (!data.jobs.length && narrowed) {
         list.append(ui.empty(q.value ? `No jobs match “${q.value}”` : "No jobs match these filters", "Try other words, or clear the filters to see every job on this tab.", h("button", { type: "button", class: "btn secondary", text: "Clear filters", onclick: () => { Aira.remember(`filters.jobs.${tab.id}`, {}); router.go(["jobs", tab.id], {}, { replace: true }); } })));
       } else if (!data.jobs.length) {
@@ -393,7 +393,7 @@
     const byHand = job.source === "manual";
     const editJob = () => manualJobForm(() => reload("overview"), job);
     const noDescription = byHand
-      ? [h("span", { text: "Write a few lines about the job (duties, skills, hours) and Aira scores it like any other." }), h("div", { class: "btn-row", style: { justifyContent: "center", marginTop: "8px" } }, h("button", { type: "button", class: "btn", text: "Add a description", onclick: editJob }))]
+      ? [h("span", { text: "Write a few lines about the job (duties, skills, hours) and Monosage scores it like any other." }), h("div", { class: "btn-row", style: { justifyContent: "center", marginTop: "8px" } }, h("button", { type: "button", class: "btn", text: "Add a description", onclick: editJob }))]
       : (job.sources || []).includes("linkedin")
         ? [h("button", { type: "button", class: "btn", text: "Read posting from LinkedIn", onclick: (event) => withBusy(event.currentTarget, async () => { await api(`/api/jobs/${encodeURIComponent(job.job_id)}/details`, { method: "POST", body: {} }); toast("Description loaded and scored.", "success"); reload(); }) })]
         : [h("span", { text: job.has_posting === false ? "This job has no description." : "This source did not include a description. Open the posting to read it." })];
@@ -522,7 +522,7 @@
     syncHours();
     notes.id = "offerNotes";
     const body = h("div", {},
-      h("p", { class: "muted", style: { marginTop: "0" }, text: "Only the base pay is needed. Add what you know; Aira adds it up so offers can be compared fairly." }),
+      h("p", { class: "muted", style: { marginTop: "0" }, text: "Only the base pay is needed. Add what you know; Monosage adds it up so offers can be compared fairly." }),
       h("div", { class: "form-grid" }, ui.field("Base pay", base), ui.field("Paid", period), hoursField, ui.field("Currency", currency, "Three letters, like USD, GBP or INR."), ui.field("Yearly bonus", bonus), ui.field("Stock or equity a year", equity), ui.field("Sign-on payment", signOn, "Paid once."), ui.field("Benefits worth a year", benefits, "Your own estimate, for example health cover."), ui.field("Start date", start), ui.field("Answer by", deadline), ui.field("Status", status), h("div", { class: "field wide" }, h("label", { for: "offerNotes", text: "Notes" }), notes)),
     );
     const actions = [{ label: "Cancel", kind: "ghost" }];
@@ -554,10 +554,10 @@
     const low = h("input", { type: "number", min: "0", step: "any", inputmode: "decimal", "aria-label": "Lowest pay a year", value: was.salary_min == null ? "" : String(was.salary_min) });
     const high = h("input", { type: "number", min: "0", step: "any", inputmode: "decimal", "aria-label": "Highest pay a year", value: was.salary_max == null ? "" : String(was.salary_max) });
     const currency = h("input", { type: "text", maxlength: 3, value: was.currency || ((Aira.state.profile && Aira.state.profile.candidate_profile) || {}).salary_currency || "USD", style: { textTransform: "uppercase" } });
-    const description = h("textarea", { rows: 5, maxlength: 50000, placeholder: "Paste or write what you know about the job: duties, skills, hours. Aira scores the job from this." }, was.description || "");
+    const description = h("textarea", { rows: 5, maxlength: 50000, placeholder: "Paste or write what you know about the job: duties, skills, hours. Monosage scores the job from this." }, was.description || "");
     description.id = "manualJobDescription";
     const body = h("div", {},
-      h("p", { class: "muted", style: { marginTop: "0" }, text: existing ? "Correct anything you typed. The job keeps its history, documents and offer." : "For a job you heard about from a friend, saw in a shop window or found on a site Aira does not search." }),
+      h("p", { class: "muted", style: { marginTop: "0" }, text: existing ? "Correct anything you typed. The job keeps its history, documents and offer." : "For a job you heard about from a friend, saw in a shop window or found on a site Monosage does not search." }),
       h("div", { class: "form-grid" }, ui.field("Job title", title), ui.field("Company or employer", company), ui.field("Location", location), ui.field("Link to the posting", url), ui.field("Workplace", workplace), ui.field("Employment", employment), ui.field("Lowest pay a year", low), ui.field("Highest pay a year", high), ui.field("Currency", currency), h("div", { class: "field wide" }, h("label", { for: "manualJobDescription", text: "About the job" }), description)),
     );
     Aira.modal({ title: existing ? "Edit this job" : "Add a job", body, wide: true, actions: [{ label: "Cancel", kind: "ghost" }, { label: existing ? "Save changes" : "Add job", kind: "", onClick: async () => {
@@ -572,7 +572,7 @@
         }
         const data = await api("/api/jobs/import", { method: "POST", body: { manual: fields } });
         // A link Aira already tracks opens that job instead of making a second one.
-        if (data.existing) toast(`Aira already tracks this link: ${[data.job.title, data.job.company].filter(Boolean).join(" at ")}. It is open now; nothing new was added.`, "info", { timeout: 8000 });
+        if (data.existing) toast(`Monosage already tracks this link: ${[data.job.title, data.job.company].filter(Boolean).join(" at ")}. It is open now; nothing new was added.`, "info", { timeout: 8000 });
         else toast("Job added.", "success");
         onSaved(data.job);
       } catch (error) { Aira.reportError(error); return false; }

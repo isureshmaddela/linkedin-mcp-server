@@ -1,12 +1,28 @@
 # Stocks
 
 Follow the markets, learn to invest without risk, keep track of the shares you own, and earn from the stock ideas you
-publish. Open it from the app switcher (Everyday > Stocks), or go to `#/stocks`. The app's id is `stocks`
+publish. Open it from the app switcher (Everyday > Stocks), or go to `/stocks`. The app's id is `stocks`
 (`/api/stocks/*`).
 
 **Nothing in Stocks is financial advice.** Forecasts are estimates from past prices and are often wrong; every
 forecast shows its track record so you can see how often. **Aira never buys or sells real shares**: the practice
 portfolio uses virtual money, and your real holdings are a record you keep of what you did with your own broker.
+
+## In the Aira frame
+
+Stocks lives at `/stocks`, with its own logo and tab icon, inside the frame every Aira app shares.
+
+* **+ New** offers **Buy with practice money**, **Price alert** and **My prediction**, and for adults **Record a real
+  trade** and **Publish a stock idea**. Each opens the same form as the button on its tab (with no practice portfolio
+  yet, the form that starts one comes first). On a stock's page they are about that stock: the alert, the prediction
+  and the trade start with its symbol.
+* **The search across the top** suggests stocks and indices as you type, by symbol or name, and says which ones are
+  on one of your watchlists; choosing one opens its page. **Enter** lists every match from both markets with today's
+  price and change (`#/stocks?q=bank`), or says nothing matched with a way back to every stock.
+* **The left menu's folders** are the tabs: Markets, Watchlist, Portfolio, Predictions, Ideas (earn) and Alerts, each
+  with its icon. The page is named after the open folder, or after the stock on a stock's page (its symbol, exchange
+  and currency underneath). On a wide screen the tab bar under the title is hidden, since the folders say the same;
+  phones and tablets keep it.
 
 ## Where the prices come from
 
@@ -26,7 +42,7 @@ portfolio uses virtual money, and your real holdings are a record you keep of wh
 * **Top gainers** and **top losers** today, the **most traded** (by volume), and stocks **near their 52-week high**
   or **low** (within 2%).
 * **Every stock** in the market, sortable by name, biggest rise, biggest fall or volume.
-* **Find a stock** by name or symbol (Apple, AAPL, Reliance, TCS.NS).
+* **Find a stock** by name or symbol (Apple, AAPL, Reliance, TCS.NS) with the search box across the top.
 * If you own something, **Your money today** shows each portfolio's value and today's change.
 
 Rises are shown with ▲ and a + sign, falls with ▼ and a - sign (colour only helps).

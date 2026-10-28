@@ -28,10 +28,10 @@
   const seconds = (ms) => (ms === null || ms === undefined ? "-" : `${(ms / 1000).toFixed(1)}s`);
   const tokens = (n) => (n >= 1000 ? `${(n / 1000).toFixed(1)}K` : String(n || 0));
   const plural = (n, one, many) => `${Number(n || 0).toLocaleString()} ${n === 1 ? one : many}`;
-  const SOURCE = { model: "Aira's model", template: "Built-in answers", command: "Done at once" };
+  const SOURCE = { model: "Monosage's model", template: "Built-in answers", command: "Done at once" };
 
   async function undoOp(op) {
-    if (!(await Aira.confirm({ title: "Undo this", message: `Undo "${op.summary}"? Aira takes it back in its app.`, confirmLabel: "Undo" }))) return null;
+    if (!(await Aira.confirm({ title: "Undo this", message: `Undo "${op.summary}"? Monosage takes it back in its app.`, confirmLabel: "Undo" }))) return null;
     const result = await api(`/ops/${op.id}/undo`, { method: "POST", body: {} });
     Aira.toast(result.op.result || "Undone.", "success");
     tick();
@@ -78,7 +78,7 @@
     return h("div", { class: `ai-msg ${mine ? "mine" : "theirs"}` },
       h("span", { class: "ai-avatar", "aria-hidden": "true" }, mine ? h("span", { text: (Aira.state.user && Aira.state.user.email ? Aira.state.user.email[0] : "Y").toUpperCase() }) : Aira.icon("ai")),
       h("div", { class: "ai-bubble" },
-        h("span", { class: "sr-only", text: mine ? "You said:" : "Aira said:" }),
+        h("span", { class: "sr-only", text: mine ? "You said:" : "Monosage said:" }),
         text,
         ...actions.map((action) => actionChip(action, rerender)),
         meta));
@@ -93,7 +93,7 @@
           const result = await api(`/messages/${message.id}/rate`, { method: "POST", body: { rating: next } });
           message.rating = result.message.rating;
           draw();
-          if (next) Aira.toast(next > 0 ? "Thanks. Glad it helped." : "Thanks. Aira will keep it in mind.", "success");
+          if (next) Aira.toast(next > 0 ? "Thanks. Glad it helped." : "Thanks. Monosage will keep it in mind.", "success");
         } catch (error) { Aira.reportError(error); }
       } });
       row.replaceChildren(button(1, "Helpful"), button(-1, "Not helpful"));
@@ -109,7 +109,7 @@
     const item = (label, value) => h("span", { class: "ai-stat" }, h("span", { class: "muted", text: `${label}: ` }), h("strong", { text: value }));
     return [h("div", { class: "ai-stats", role: "group", "aria-label": "This conversation" },
       item("Agent", s.agent || "Master agent"),
-      item("Tokens", `${tokens(s.tokens || 0)} (estimate)`),
+      s.tokens ? item("Tokens", `${tokens(s.tokens)} (estimate)`) : null,
       item("Avg response", `${seconds(s.avg_ms)} over ${plural(s.answers, "answer", "answers")}`),
       item("Answers from", SOURCE[s.source] || "-"),
       s.source === "template" ? h("a", { class: "small", href: "#/settings", text: "Start the writing model in Settings for fuller answers" }) : null)];
@@ -136,7 +136,7 @@
 
     const statsHolder = h("div", { class: "ai-stats-holder" }, ...statsRow(state.stats));
     const log = h("div", { class: "ai-log", role: "log", "aria-live": "polite", "aria-label": "Conversation" });
-    const input = h("textarea", { class: "ai-input", rows: 1, maxlength: 2000, placeholder: "Ask anything about your life…", "aria-label": "Message to Aira" });
+    const input = h("textarea", { class: "ai-input", rows: 1, maxlength: 2000, placeholder: "Ask anything about your life…", "aria-label": "Message to Monosage" });
     const send = h("button", { type: "button", class: "btn ai-send", "aria-label": "Send", title: "Send" }, h("span", { text: "Send" }));
     const has = (id) => on.some((a) => a.id === id);
 
@@ -157,14 +157,14 @@
       if (!state.messages.length) {
         log.replaceChildren(h("div", { class: "ai-welcome" },
           h("span", { class: "ai-welcome-mark", "aria-hidden": "true" }, Aira.icon("ai")),
-          h("h3", { text: "Welcome to Aira AI" }),
+          h("h3", { text: "Welcome to Monosage AI" }),
           h("p", { class: "muted", text: on.length ? `I work through ${on.length} agents, one for each of your apps: ${on.map((a) => a.name).join(", ")}.` : "Every agent is switched off. Switch some on in the Agents tab." }),
           h("p", { class: "muted", text: "Ask about your day, goals, health, home, money or business, or ask me to add something. You can undo what I do. Say \"Remember that ...\" and I will keep it in mind." }),
           h("div", { class: "ai-suggest" }, ...suggestions.map(([label, text]) => h("button", { type: "button", class: "btn secondary", text: label, onclick: () => { input.value = text; ask(); } })))));
         return;
       }
       log.replaceChildren(...state.messages.map((message) => bubble(message, draw)));
-      if (state.busy) log.append(h("div", { class: "ai-msg theirs" }, h("span", { class: "ai-avatar", "aria-hidden": "true" }, Aira.icon("ai")), h("div", { class: "ai-bubble ai-typing", role: "status", "aria-label": "Aira is thinking" }, h("span", {}), h("span", {}), h("span", {}))));
+      if (state.busy) log.append(h("div", { class: "ai-msg theirs" }, h("span", { class: "ai-avatar", "aria-hidden": "true" }, Aira.icon("ai")), h("div", { class: "ai-bubble ai-typing", role: "status", "aria-label": "Monosage is thinking" }, h("span", {}), h("span", {}), h("span", {}))));
       log.scrollTop = log.scrollHeight;
     };
 
@@ -272,7 +272,7 @@
           statsHolder,
           log,
           h("div", { class: "ai-compose" }, mic, input, send),
-          h("p", { class: "muted small ai-hint", text: "Press Enter to send · Shift+Enter for a new line. Aira only uses what is in your apps." }))));
+          h("p", { class: "muted small ai-hint", text: "Press Enter to send · Shift+Enter for a new line. Monosage only uses what is in your apps." }))));
     draw();
     if (route.query.ask && !state.messages.length) { input.value = route.query.ask; ask(); } else if (!state.messages.length) input.focus();
   }
@@ -316,7 +316,7 @@
   }
 
   function activityList(ops, rerender) {
-    if (!ops.length) return Aira.ui.empty("No activity yet", "When you chat with Aira, what each agent reads and does shows up here.", h("a", { class: "btn secondary sm", href: "#/ai?tab=chat", text: "Start a conversation" }));
+    if (!ops.length) return Aira.ui.empty("No activity yet", "When you chat with Monosage, what each agent reads and does shows up here.", h("a", { class: "btn secondary sm", href: "#/ai?tab=chat", text: "Start a conversation" }));
     return h("ul", { class: "suite-activity ai-activity-list" }, ...ops.map((op) => h("li", {},
       h("span", { class: `suite-dot ${op.status === "done" ? "" : "public"}`, "aria-hidden": "true" }),
       h("div", { class: "ai-activity-text" }, h("strong", { text: op.agent_name }), h("span", { text: ` ${op.summary}` }), h("div", { class: "muted small", text: `${Aira.fmt.ago(op.created_at)}${op.result ? ` · ${op.result}` : ""}` })),
@@ -361,7 +361,7 @@
     const data = await api("/approvals");
     if (!data.ops.length) {
       body.append(Aira.ui.empty("Nothing waits for you", "Actions an agent may not take alone wait here until you approve them. Set each agent's consent level in Agents.",
-        h("div", { class: "btn-row" }, h("a", { class: "btn secondary sm", href: "#/ai?tab=agents", text: "Choose consent levels" }), h("a", { class: "btn ghost sm", href: "#/ai?tab=chat", text: "Ask Aira something" }))));
+        h("div", { class: "btn-row" }, h("a", { class: "btn secondary sm", href: "#/ai?tab=agents", text: "Choose consent levels" }), h("a", { class: "btn ghost sm", href: "#/ai?tab=chat", text: "Ask Monosage something" }))));
       return;
     }
     const decideAll = (approve) => S.button(approve ? "Approve all" : "Reject all", async () => {
@@ -388,7 +388,7 @@
     const days = new Set((routine && routine.days) || [0, 1, 2, 3, 4, 5, 6]);
     const fields = [
       { name: "title", label: "Name", placeholder: "Morning brief", hint: "Leave empty to use what you ask." },
-      { name: "prompt", label: "What should Aira do?", type: "textarea", rows: 3, required: true, placeholder: "Give me my morning brief", hint: "A question (How are my goals going?) or a command (Add milk to the shopping list)." },
+      { name: "prompt", label: "What should Monosage do?", type: "textarea", rows: 3, required: true, placeholder: "Give me my morning brief", hint: "A question (How are my goals going?) or a command (Add milk to the shopping list)." },
       { name: "at", label: "At", type: "time", required: true },
       { type: "heading", label: "On these days" },
       ...DAYS.map(([id, label], index) => ({ name: `day_${id}`, label, type: "checkbox", value: days.has(index) })),
@@ -416,7 +416,7 @@
     const data = await api("/routines");
     const add = S.button("New routine", () => routineForm(null, rerender), { kind: "primary" });
     hooks.new = () => routineForm(null, rerender);
-    const intro = h("p", { class: "muted", text: `Aira runs these for you at their time (your clock says ${data.clock}) while Aira is open, shows the answer and puts it on Today. Commands follow each agent's consent level.` });
+    const intro = h("p", { class: "muted", text: `Monosage runs these for you at their time (your clock says ${data.clock}) while Monosage is open, shows the answer and puts it on Today. Commands follow each agent's consent level.` });
     const list = data.routines.length ? h("ul", { class: "ai-routines" }, ...data.routines.map((routine) => {
       const toggle = h("input", { type: "checkbox", role: "switch", checked: routine.enabled, "aria-label": `${routine.title} on` });
       toggle.addEventListener("change", async () => {
@@ -432,7 +432,7 @@
         h("label", { class: "ai-switch" }, toggle, h("span", { text: routine.enabled ? "On" : "Off" })),
         h("div", { class: "btn-row ai-routine-actions" },
           S.button("Run now", async () => {
-            Aira.toast("Aira is working on it…");
+            Aira.toast("Monosage is working on it…");
             const result = await api(`/routines/${routine.id}/run`, { method: "POST", body: { seen: true } });
             tick();
             Aira.router.go(["ai"], { tab: "chat", session: result.session_id });
@@ -440,7 +440,7 @@
           routine.session_id ? h("a", { class: "btn ghost sm", href: `#/ai?tab=chat&session=${routine.session_id}`, text: "Read answers" }) : null,
           S.button("Change", () => routineForm(routine, rerender), { kind: "ghost sm" }),
           S.button("Delete", async () => { if (!(await S.confirmDelete(`the routine "${routine.title}"`))) return; await api(`/routines/${routine.id}`, { method: "DELETE" }); rerender(); }, { kind: "ghost sm" })));
-    })) : Aira.ui.empty("No routines yet", "Add one, or start from an idea below: Aira will give you your morning brief at 7 every day.");
+    })) : Aira.ui.empty("No routines yet", "Add one, or start from an idea below: Monosage will give you your morning brief at 7 every day.");
     const have = new Set(data.routines.map((r) => r.prompt.toLowerCase()));
     const ideas = data.suggested.filter((idea) => !have.has(idea.prompt.toLowerCase()));
     put(body,
@@ -454,12 +454,12 @@
   async function memoryTab(body, route, rerender) {
     const q = route.query.q || "";
     const data = await api(`/memories${q ? `?q=${encodeURIComponent(q)}` : ""}`);
-    const box = h("textarea", { class: "ai-memory-input", rows: 2, maxlength: 300, placeholder: "For example: I am vegetarian. My daughter's school is Oakfield.", "aria-label": "Something for Aira to remember" });
+    const box = h("textarea", { class: "ai-memory-input", rows: 2, maxlength: 300, placeholder: "For example: I am vegetarian. My daughter's school is Oakfield.", "aria-label": "Something for Monosage to remember" });
     const add = S.button("Remember this", async () => {
       const text = box.value.trim();
       if (!text) { box.focus(); return; }
       const result = await api("/memories", { method: "POST", body: { text } });
-      Aira.toast(result.memory && result.memory.existing ? `Aira already remembers that: "${result.memory.text}"` : "Aira will remember that.", "success");
+      Aira.toast(result.memory && result.memory.existing ? `Monosage already remembers that: "${result.memory.text}"` : "Monosage will remember that.", "success");
       rerender();
     }, { kind: "primary" });
     box.addEventListener("keydown", (event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); add.click(); } });
@@ -470,7 +470,7 @@
     search.addEventListener("search", go);
     const edit = (item) => S.edit({
       title: "Change memory",
-      fields: [{ name: "text", label: "What Aira remembers", type: "textarea", rows: 3, required: true }],
+      fields: [{ name: "text", label: "What Monosage remembers", type: "textarea", rows: 3, required: true }],
       values: { text: item.text },
       onSave: async (values) => { await api(`/memories/${item.id}`, { method: "PATCH", body: values }); Aira.toast("Saved.", "success"); rerender(); },
     });
@@ -483,18 +483,18 @@
           await api(`/memories/${item.id}`, { method: "DELETE" });
           rerender();
         }, { kind: "ghost sm" })))))
-      : Aira.ui.empty(q ? "Nothing matches" : "Aira remembers nothing yet", q ? "Try other words." : "Add something above, or say \"Remember that ...\" in the chat.");
+      : Aira.ui.empty(q ? "Nothing matches" : "Monosage remembers nothing yet", q ? "Try other words." : "Add something above, or say \"Remember that ...\" in the chat.");
     const clearAll = data.memories.length && !q ? S.button("Forget everything", async () => {
-      if (!(await Aira.confirm({ title: "Forget everything", message: "Forget everything you asked Aira to remember? This cannot be undone.", confirmLabel: "Forget everything", danger: true }))) return;
+      if (!(await Aira.confirm({ title: "Forget everything", message: "Forget everything you asked Monosage to remember? This cannot be undone.", confirmLabel: "Forget everything", danger: true }))) return;
       const result = await api("/memories", { method: "DELETE" });
       Aira.toast(`Forgot ${plural(result.deleted, "thing", "things")}.`, "success");
       rerender();
     }, { kind: "ghost sm" }) : null;
     put(body,
-      S.section("Tell Aira something to remember",
-        h("p", { class: "muted", text: "Aira keeps these in mind for every answer, like your diet, your family's names or how you like answers. Only you see them." }),
+      S.section("Tell Monosage something to remember",
+        h("p", { class: "muted", text: "Monosage keeps these in mind for every answer, like your diet, your family's names or how you like answers. Only you see them." }),
         h("div", { class: "ai-memory-add" }, box, add)),
-      S.section(`What Aira remembers (${data.memories.length} of ${data.limit})`,
+      S.section(`What Monosage remembers (${data.memories.length} of ${data.limit})`,
         h("div", { class: "btn-row ai-filters" }, search, clearAll),
         list));
   }
@@ -514,7 +514,7 @@
 
   async function earnTab(body, rerender) {
     const data = await api("/earn");
-    const askButton = h("a", { class: "btn primary", href: `#/ai?tab=chat&ask=${encodeURIComponent("How much did I earn this month and how can I earn more?")}`, text: "Ask Aira how to earn more" });
+    const askButton = h("a", { class: "btn primary", href: `#/ai?tab=chat&ask=${encodeURIComponent("How much did I earn this month and how can I earn more?")}`, text: "Ask Monosage how to earn more" });
     const ways = data.ways.length ? h("ul", { class: "ai-ways" }, ...data.ways.map((way) => h("li", { class: "ai-way" },
       h("strong", { text: way.name }), h("span", { class: "muted small", text: way.text }), h("a", { class: "btn ghost sm", href: way.link, text: `Open ${way.name}` })))) : Aira.ui.empty("No earning apps yet", "Add a business app, Videos or Stocks to start earning.");
     const fromAgents = data.from_agents.length ? S.section("From your apps", h("ul", { class: "life-lines" }, ...data.from_agents.flatMap((entry) => entry.lines.map((line) => h("li", { class: "life-line" }, h("span", { class: "life-line-text", text: line }), h("span", { class: "muted small", text: entry.name })))))) : null;
@@ -644,7 +644,7 @@
     const q = String(route.query.q || "").trim();
     if (!q) { body.append(Aira.ui.empty("Search AI", "Type in the search box above: conversations, memories, routines, agents and activity.")); return; }
     const short = q.length > 60 ? `${q.slice(0, 60)}…` : q;
-    const askLink = h("a", { class: "btn primary", href: `#/ai?tab=chat&ask=${encodeURIComponent(q)}` }, Aira.icon("ai"), h("span", { text: `Ask Aira: “${short}”` }));
+    const askLink = h("a", { class: "btn primary", href: `#/ai?tab=chat&ask=${encodeURIComponent(q)}` }, Aira.icon("ai"), h("span", { text: `Ask Monosage: “${short}”` }));
     const [hits, ops] = await Promise.all([searchAll(q), api(`/ops?${new URLSearchParams({ q, limit: "20" })}`, { silent: true })]);
     const group = (title, rows) => (rows.length ? S.section(`${title} (${rows.length})`,
       h("ul", { class: "ai-hits" }, ...rows.map((row) => h("li", {},
@@ -652,22 +652,22 @@
     const total = hits.sessions.length + hits.memories.length + hits.routines.length + hits.agents.length + ops.ops.length;
     put(body,
       h("div", { class: "ai-results-head" }, h("p", { class: "ai-results-for", text: total ? `${plural(total, "match", "matches")} for “${short}”` : `Nothing in AI matches “${short}”` }), askLink),
-      total ? null : Aira.ui.empty("No conversation, memory, routine or agent has these words", "Try other words, or ask Aira: it reads your apps to answer.", h("a", { class: "btn secondary sm", href: "#/ai?tab=chat", text: "Open the chat" })),
+      total ? null : Aira.ui.empty("No conversation, memory, routine or agent has these words", "Try other words, or ask Monosage: it reads your apps to answer.", h("a", { class: "btn secondary sm", href: "#/ai?tab=chat", text: "Open the chat" })),
       group("Conversations", hits.sessions),
       group("Memories", hits.memories),
       group("Routines", hits.routines),
       group("Agents", hits.agents),
-      ops.ops.length ? S.section(`Activity (${ops.ops.length}${ops.ops.length >= 20 ? "+" : ""})`, activityList(ops.ops, null),
+      ops.ops.length ? S.section(`Activity (${ops.ops.length}${ops.ops.length >= 20 ? "+" : ""})`, activityList(ops.ops.slice(0, 6), null),
         h("div", { class: "btn-row" }, h("a", { class: "btn ghost sm", href: `#/ai?tab=activity&q=${encodeURIComponent(q)}`, text: "See all in Activity" }))) : null);
   }
 
   // ---------------------------------------------------------------- in the Aira frame
   const TABS = [
-    { id: "chat", label: "Chat", icon: "social", about: "Ask about your apps, or ask Aira to do something. You can undo what it does." },
+    { id: "chat", label: "Chat", icon: "social", about: "Ask about your apps, or ask Monosage to do something. You can undo what it does." },
     { id: "agents", label: "Agents", icon: "ai", about: "One agent per app. Choose what each may do on its own." },
     { id: "approvals", label: "Approvals", icon: "applications", about: "Actions an agent may not take alone wait here for your yes." },
-    { id: "routines", label: "Routines", icon: "interviews", about: "Questions and commands Aira runs for you at a set time." },
-    { id: "memory", label: "Memory", icon: "learn", about: "What Aira keeps in mind for every answer. Only you see it." },
+    { id: "routines", label: "Routines", icon: "interviews", about: "Questions and commands Monosage runs for you at a set time." },
+    { id: "memory", label: "Memory", icon: "learn", about: "What Monosage keeps in mind for every answer. Only you see it." },
     { id: "earn", label: "Earn", icon: "stocks", about: "What your apps earn, your earning goals and ways to earn more." },
     { id: "activity", label: "Activity", icon: "analytics", about: "Every read and action your agents took, with Undo." },
   ];

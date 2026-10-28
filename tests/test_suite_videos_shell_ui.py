@@ -44,7 +44,9 @@ def seeded(browser, env, **size):
         )
         assert status == 201, body
         made[title] = body["video"]
-    status, body = person.call("POST", "/api/videos/playlists", {"name": "Garden ideas"})
+    status, body = person.call(
+        "POST", "/api/videos/playlists", {"name": "Garden ideas"}
+    )
     assert status == 201, body
     made["playlist"] = body["playlist"]
     return context, page, problems, made
@@ -122,9 +124,11 @@ def test_new_search_and_folders_in_the_frame(browser, env):
     page.wait_for_selector(".modal h2:has-text('New brand deal')")
     until(
         page,
-        lambda: "tab=earnings" in page.url
-        and "part=deals" in page.url
-        and "new=" not in page.url,
+        lambda: (
+            "tab=earnings" in page.url
+            and "part=deals" in page.url
+            and "new=" not in page.url
+        ),
         what="Brand deals without new=",
     )
     page.keyboard.press("Escape")
@@ -142,10 +146,14 @@ def test_new_search_and_folders_in_the_frame(browser, env):
     page.wait_for_selector("#appSearchList [role='option']:has-text('Garden ideas')")
     found = options(page)
     assert any("Garden walk in spring" in text for text in found), found
-    assert any("Private garden notes" in text and "Only me" in text for text in found), found
+    assert any(
+        "Private garden notes" in text and "Only me" in text for text in found
+    ), found
     assert any("Garden ideas" in text and "Playlist" in text for text in found), found
     assert not any("Harbour" in text for text in found), found
-    page.locator("#appSearchList [role='option']", has_text="Garden walk in spring").click()
+    page.locator(
+        "#appSearchList [role='option']", has_text="Garden walk in spring"
+    ).click()
     page.wait_for_selector("#main h1:has-text('Garden walk in spring')")
     assert f"watch={made['Garden walk in spring']['id']}" in page.url
     box.fill("boats")
@@ -162,7 +170,9 @@ def test_new_search_and_folders_in_the_frame(browser, env):
     page.wait_for_selector("#main h1:has-text('Results for')")
     assert "tab=home" in page.url and "q=garden" in page.url
     page.wait_for_selector("#main h2:has-text('Your videos only you can find')")
-    assert page.locator("#main .vid-card", has_text="Garden walk in spring").count() == 1
+    assert (
+        page.locator("#main .vid-card", has_text="Garden walk in spring").count() == 1
+    )
     assert page.locator("#main .vid-card", has_text="Private garden notes").count() == 1
     page.locator("#main .vid-card", has_text="Private garden notes").click()
     page.wait_for_selector("#main h1:has-text('Private garden notes')")
@@ -203,7 +213,9 @@ def test_new_search_and_folders_in_the_frame(browser, env):
 
 @pytest.mark.parametrize("dark", [False, True], ids=["light", "dark"])
 def test_videos_fits_a_phone(browser, env, dark):
-    context, page, problems, made = seeded(browser, env, width=390, height=844, dark=dark)
+    context, page, problems, made = seeded(
+        browser, env, width=390, height=844, dark=dark
+    )
     for hash_ in (
         "videos?tab=home",
         "videos?tab=reels",
@@ -218,7 +230,9 @@ def test_videos_fits_a_phone(browser, env, dark):
     ):
         open_app(page, env, hash_)
         page.wait_for_timeout(300)
-        wide = page.evaluate("() => document.documentElement.scrollWidth - window.innerWidth")
+        wide = page.evaluate(
+            "() => document.documentElement.scrollWidth - window.innerWidth"
+        )
         assert wide <= 1, (hash_, wide)
     # A phone keeps the page's own tab bar and Upload (the menu is a sheet); Upload opens the upload form.
     open_app(page, env, "videos?tab=home")
@@ -226,6 +240,8 @@ def test_videos_fits_a_phone(browser, env, dark):
     assert page.locator("#appSearchInput").get_attribute("placeholder") == "Search"
     page.locator("#main .vid-phone-new").click()
     page.wait_for_selector("#vidUpload")
-    until(page, lambda: "tab=studio" in page.url and "new=" not in page.url, what="Studio")
+    until(
+        page, lambda: "tab=studio" in page.url and "new=" not in page.url, what="Studio"
+    )
     assert not problems, problems
     context.close()

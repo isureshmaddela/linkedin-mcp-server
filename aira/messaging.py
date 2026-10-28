@@ -247,7 +247,7 @@ def evaluate_auto_reply(
         return AutoReplyDecision(
             "hold",
             (
-                "Aira could not tell who wrote the latest message. Add your full name, exactly as LinkedIn shows it, in Settings > Profile.",
+                "Monosage could not tell who wrote the latest message. Add your full name, exactly as LinkedIn shows it, in Settings > Profile.",
             ),
         )
     if paused:
@@ -261,7 +261,7 @@ def evaluate_auto_reply(
         return AutoReplyDecision(
             "hold",
             (
-                f"Aira already replied in this conversation within the last {hours:g} hours.",
+                f"Monosage already replied in this conversation within the last {hours:g} hours.",
             ),
         )
 

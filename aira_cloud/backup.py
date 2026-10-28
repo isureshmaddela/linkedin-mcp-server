@@ -292,7 +292,7 @@ class BackupService:
             manifest = json.loads(archive.read("manifest.json"))
         except (zipfile.BadZipFile, KeyError, ValueError):
             raise ValidationFailed(
-                "This is not a valid Aira backup.", code="bad_backup"
+                "This is not a valid Monosage backup.", code="bad_backup"
             ) from None
         if manifest.get("format") != FORMAT_VERSION:
             raise ValidationFailed(

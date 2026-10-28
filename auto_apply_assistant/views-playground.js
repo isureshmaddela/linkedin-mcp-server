@@ -1,7 +1,7 @@
 /* API Playground — the flagship search console (spec 7.2)
  *
  * Aira.renderPlayground(content, route) mounts the Playground into `content`. views-airaapi.js calls it for
- * #/airaapi?tab=playground, so the sub-navigation and page heading belong to that file; this one owns everything
+ * #/api?tab=playground, so the sub-navigation and page heading belong to that file; this one owns everything
  * below them: the engine picker, the catalog-driven request form, options, live code, the run, the result viewer,
  * the history and saved-search rails, compare, monitor and export.
  *
@@ -92,7 +92,7 @@
         credentials: "same-origin",
       });
     } catch {
-      throw new CallError("Aira is unreachable. Check that the server is running.", 0, {}, "");
+      throw new CallError("Monosage is unreachable. Check that the server is running.", 0, {}, "");
     }
     const data = await response.json().catch(() => ({}));
     const requestId = response.headers.get("X-Request-ID") || "";
@@ -147,7 +147,7 @@
   }
   function hashFor(query) {
     const clean = Object.fromEntries(Object.entries(query).filter(([, v]) => !isEmpty(v)));
-    return `#/airaapi?${new URLSearchParams(clean).toString()}`;
+    return `#/api?${new URLSearchParams(clean).toString()}`;
   }
   /** Link other views use to open a request in the Playground (Engines, Locations, History, Careers, Docs). */
   Aira.playgroundLink = (engine, params = {}, options = {}) => hashFor(stateToQuery(engine, params, options, ""));
@@ -442,8 +442,8 @@
 
       dom.setup = h("div", { class: "pg-setup", hidden: true, role: "note" },
         icon("key"),
-        h("div", {}, h("strong", { text: "Connect a SerpApi key to run searches" }), h("p", { text: "You can already pick an engine, build a request and copy the code. Running needs the key, which Aira keeps encrypted on this computer." })),
-        h("a", { class: "btn sm", href: "#/airaapi?tab=account", text: "Connect key" }));
+        h("div", {}, h("strong", { text: "Connect a SerpApi key to run searches" }), h("p", { text: "You can already pick an engine, build a request and copy the code. Running needs the key, which Monosage keeps encrypted on this computer." })),
+        h("a", { class: "btn sm", href: "#/api?tab=account", text: "Connect key" }));
 
       // request panel
       dom.engineInfo = h("div", { class: "pg-eng" });
@@ -593,7 +593,7 @@
       } });
       const desc = h("p", { class: "pg-eng-desc", text: entry.description });
       const detail = h("div", { class: "pg-eng-detail", hidden: true },
-        entry.aira_use ? h("p", {}, h("strong", { text: "In Aira: " }), entry.aira_use) : null,
+        entry.aira_use ? h("p", {}, h("strong", { text: "In Monosage: " }), entry.aira_use) : null,
         entry.pagination && entry.pagination.notes ? h("p", { class: "sk-hint" }, h("strong", { text: "Paging: " }), entry.pagination.notes) : null,
         (entry.result_keys || []).length ? h("div", { class: "sk-chips" }, h("span", { class: "sk-hint", text: "Returns" }), ...entry.result_keys.slice(0, 14).map((key) => h("code", { class: "pg-key", text: key }))) : null);
       dom.engineInfo.replaceChildren(
@@ -690,7 +690,7 @@
       const tick = () => { if (!S.running || !alive()) return; elapsed.textContent = `${((Date.now() - S.startedAt) / 1000).toFixed(1)} s`; setTimer(tick, 200); };
       dom.resBody.replaceChildren(h("div", { class: "pg-loading", role: "status" },
         h("div", { class: "pg-loading-head" }, h("span", { class: "sk-pulse", "aria-hidden": "true" }), h("strong", { text: `Searching ${S.entry ? S.entry.name : "the engine"}` }), elapsed),
-        h("p", { class: "sk-hint", text: "Aira checks its cache first. A live search usually takes a few seconds; some engines take longer." }),
+        h("p", { class: "sk-hint", text: "Monosage checks its cache first. A live search usually takes a few seconds; some engines take longer." }),
         ui.skeleton(4),
         h("div", { class: "btn-row" }, btn("Stop waiting", { kind: "ghost", onClick: stopWaiting, title: "The search keeps running and still lands in History" }))));
       tick();
@@ -712,19 +712,19 @@
       if (code === "not_configured") {
         title = "No SerpApi key is connected";
         text = "Connect your SerpApi key to run live searches. Cached results and the Docs tab work without it.";
-        action = h("a", { class: "btn sm", href: "#/airaapi?tab=account", text: "Connect key" });
+        action = h("a", { class: "btn sm", href: "#/api?tab=account", text: "Connect key" });
       } else if (code === "invalid_api_key") {
         title = "SerpApi rejected the key";
-        text = "The stored key was refused. Replace it on the Account tab; Aira checks a key before keeping it.";
-        action = h("a", { class: "btn sm", href: "#/airaapi?tab=account", text: "Update key" });
+        text = "The stored key was refused. Replace it on the Account tab; Monosage checks a key before keeping it.";
+        action = h("a", { class: "btn sm", href: "#/api?tab=account", text: "Update key" });
       } else if (code === "out_of_searches" || status === 402) {
         title = "Out of searches";
         text = `${error.message} Cached identical searches still work, and extra credits can be added on SerpApi.`;
         action = h("a", { class: "btn secondary sm", href: "https://serpapi.com/manage-api-key", target: "_blank", rel: "noopener noreferrer", text: "Open SerpApi billing" });
       } else if (code === "rate_limited" || status === 429) {
         title = "Slow down for a moment";
-        text = `${error.message} Aira limits how fast searches go out; try again shortly.`;
-      } else if (status === 0) title = "Aira is unreachable";
+        text = `${error.message} Monosage limits how fast searches go out; try again shortly.`;
+      } else if (status === 0) title = "Monosage is unreachable";
       else if (status === 400 || status === 422) title = "Check the request";
       return h("div", { class: "pg-callout", role: "alert" }, icon("alert"), h("div", {}, h("strong", { text: title }), h("p", { text }), error.requestId ? h("p", { class: "sk-hint", text: `Request ${error.requestId}` }) : null), action);
     }
@@ -1083,7 +1083,7 @@
       const thisEngine = serp().toggleSwitch("This engine only", S.historyEngineOnly, (on) => { S.historyEngineOnly = on; Aira.remember("playground.historyEngineOnly", on); loadHistory(); }, { id: "pg-hist-engine" });
       const pinnedOnly = serp().toggleSwitch("Pinned only", false, (on) => { S.historyPinned = on; loadHistory(); }, { id: "pg-hist-pinned" });
       dom.historyPane.append(
-        h("div", { class: "pg-pane-tools wrap" }, thisEngine.node, pinnedOnly.node, h("a", { class: "btn ghost sm", href: "#/airaapi?tab=history" }, icon("history"), h("span", { text: "Open full history" }))),
+        h("div", { class: "pg-pane-tools wrap" }, thisEngine.node, pinnedOnly.node, h("a", { class: "btn ghost sm", href: "#/api?tab=history" }, icon("history"), h("span", { text: "Open full history" }))),
         dom.historyCount, dom.historyList);
     }
     async function loadHistory() {
@@ -1136,7 +1136,7 @@
       dom.savedPane.append(
         h("div", { class: "pg-pane-tools wrap" },
           btn("Save current request", { icon: "bookmark", onClick: () => saveCurrent() }),
-          h("a", { class: "btn ghost sm", href: "#/airaapi?tab=monitors" }, icon("bell"), h("span", { text: "Manage monitors" }))),
+          h("a", { class: "btn ghost sm", href: "#/api?tab=monitors" }, icon("bell"), h("span", { text: "Manage monitors" }))),
         dom.savedList);
     }
     async function loadSaved() {
@@ -1233,7 +1233,7 @@
       const defaultName = (record && record.label) || `${primaryValue(useParams) || "Search"} · ${engineName(engineId)}`.slice(0, 80);
       const name = h("input", { type: "text", maxlength: 80, value: defaultName, autocomplete: "off", required: true });
       const tags = h("input", { type: "text", maxlength: 120, autocomplete: "off", placeholder: "job-search, austin" });
-      const watch = serp().toggleSwitch("Watch this search for changes", monitor && !existingMonitor, () => paintEstimate(), { hint: "Runs it on a schedule, compares with the last run and notifies you in Aira when results change.", id: "pg-watch" });
+      const watch = serp().toggleSwitch("Watch this search for changes", monitor && !existingMonitor, () => paintEstimate(), { hint: "Runs it on a schedule, compares with the last run and notifies you in Monosage when results change.", id: "pg-watch" });
       const interval = ui.select(MONITOR_INTERVALS, 1440, { "aria-label": "How often" });
       interval.value = "1440";
       const notify = serp().toggleSwitch("Notify me when results change", true, () => {}, { id: "pg-notify" });

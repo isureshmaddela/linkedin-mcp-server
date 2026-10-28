@@ -13,7 +13,7 @@
   const S = Aira.suite;
   const TABS = [
     { id: "start", label: "Get started", icon: "aa-book" },
-    { id: "apps", label: "Apps", icon: "dashboard" },
+    { id: "Apps", label: "Apps", icon: "dashboard" },
     { id: "tokens", label: "Access tokens", icon: "aa-key" },
     { id: "webhooks", label: "Webhooks", icon: "aa-pulse" },
     { id: "connected", label: "Connected apps", icon: "settings" },
@@ -58,11 +58,11 @@
   async function start(body, data) {
     const base = data.base_url;
     body.append(
-      S.section("Connect another app to Aira", h("p", { class: "muted", text: "Other apps can read and change your Aira data safely, with your permission. Pick the way that fits." }),
+      S.section("Connect another app to Monosage", h("p", { class: "muted", text: "Other apps can read and change your Monosage data safely, with your permission. Pick the way that fits." }),
         h("ol", { class: "dev-steps" },
           h("li", {}, h("strong", { text: "For your own script or a no-code tool: " }), h("span", { text: "make an access token under Access tokens and send it as a Bearer token." })),
           h("li", {}, h("strong", { text: "For an app other people sign in to: " }), h("span", { text: "register it under Apps and use OAuth 2.0 with PKCE. People see exactly what it asks for and can disconnect it any time." })),
-          h("li", {}, h("strong", { text: "To hear about changes as they happen: " }), h("span", { text: "add a webhook. Aira posts signed events to your address." })))),
+          h("li", {}, h("strong", { text: "To hear about changes as they happen: " }), h("span", { text: "add a webhook. Monosage posts signed events to your address." })))),
       S.section("Call the API with a token",
         code(`curl -H "Authorization: Bearer aira_pat_..." ${base}/api/studio/overview`),
         code(`const res = await fetch("${base}/api/shop/orders", {\n  headers: { Authorization: "Bearer " + process.env.AIRA_TOKEN },\n});\nconsole.log(await res.json());`),
@@ -72,7 +72,7 @@
         code(`${base}/.well-known/oauth-authorization-server`),
         code(`1. Send the person to:\n${base}/oauth/authorize?response_type=code&client_id=CLIENT_ID&redirect_uri=REDIRECT&scope=shop:read%20profile&state=STATE&code_challenge=CHALLENGE&code_challenge_method=S256\n\n2. Exchange the code:\ncurl -X POST ${base}/oauth/token -d grant_type=authorization_code -d code=CODE -d redirect_uri=REDIRECT -d code_verifier=VERIFIER -u CLIENT_ID:CLIENT_SECRET\n\n3. Refresh (the refresh token changes every time):\ncurl -X POST ${base}/oauth/token -d grant_type=refresh_token -d refresh_token=REFRESH -u CLIENT_ID:CLIENT_SECRET`)),
       S.section("Check a webhook's signature",
-        code(`// Node.js: header "Aira-Signature: t=TIMESTAMP,v1=HEX"\nconst [t, v1] = header.split(",").map((p) => p.split("=")[1]);\nconst expected = crypto.createHmac("sha256", SECRET).update(t + "." + rawBody).digest("hex");\nconst ok = crypto.timingSafeEqual(Buffer.from(v1), Buffer.from(expected)) && Date.now() / 1000 - t < 300;`)),
+        code(`// Node.js: header "Monosage-Signature: t=TIMESTAMP,v1=HEX"\nconst [t, v1] = header.split(",").map((p) => p.split("=")[1]);\nconst expected = crypto.createHmac("sha256", SECRET).update(t + "." + rawBody).digest("hex");\nconst ok = crypto.timingSafeEqual(Buffer.from(v1), Buffer.from(expected)) && Date.now() / 1000 - t < 300;`)),
     );
   }
 
@@ -156,7 +156,7 @@
       const rows = (await Aira.api(`/api/developers/webhooks/${endpoint.endpoint_id}/deliveries`)).deliveries;
       Aira.modal({ title: "Recent deliveries", wide: true, body: S.table({ columns: [{ key: "created_at", label: "When", render: (d) => Aira.fmt.ago(d.created_at) }, { key: "event", label: "Event", render: (d) => h("code", { translate: "no", text: d.event }) }, { key: "status", label: "Status", render: (d) => S.pill(d.status, { delivered: "good", failed: "bad", pending: "warn" }) }, { key: "attempts", label: "Tries", num: true }, { key: "last_error", label: "Error" }], rows, empty: "Nothing sent yet" }), actions: [{ label: "Close", kind: "secondary" }] });
     };
-    body.append(S.section("Webhooks", h("p", { class: "muted", text: "Aira posts each event to your address, signed with your secret, and tries again if it fails." }),
+    body.append(S.section("Webhooks", h("p", { class: "muted", text: "Monosage posts each event to your address, signed with your secret, and tries again if it fails." }),
       data.can_manage ? h("div", { class: "btn-row" }, withId(S.button("Add a webhook", add), "devNewWebhook")) : null,
       S.table({ columns: [
         { key: "url", label: "Address", render: (e) => h("code", { translate: "no", text: e.url }) },
@@ -170,7 +170,7 @@
   }
 
   async function connected(body, data, rerender) {
-    body.append(S.section("Apps you allowed", h("p", { class: "muted", text: "These apps can use your Aira data with the access you gave them. Disconnect one to stop it at once." }),
+    body.append(S.section("Apps you allowed", h("p", { class: "muted", text: "These apps can use your Monosage data with the access you gave them. Disconnect one to stop it at once." }),
       S.table({ columns: [{ key: "name", label: "App" }, { key: "scopes", label: "Access", render: (c) => h("span", { translate: "no", class: "small", text: c.scopes.join(" ") }) }, { key: "since", label: "Since", render: (c) => Aira.fmt.date(c.since) },
         { key: "x", label: "", render: (c) => S.button("Disconnect", async () => { await Aira.api(`/api/developers/connected/${c.client_id}`, { method: "DELETE" }); rerender(); }, { kind: "ghost sm" }) }], rows: data.connected, empty: "You have not connected any apps" })));
   }
@@ -184,17 +184,17 @@
   }
 
   Aira.views.developers = async (main, route) => {
-    const body = S.page(main, { title: "Connected apps", subtitle: "Let other apps use your Aira data safely: OAuth 2.0, access tokens and webhooks." });
-    const hostedOnly = "Connecting other apps with OAuth, tokens and webhooks is part of the hosted Aira, where other systems can reach it safely. On this computer, your scripts and tools call Aira through the API console's /v1 endpoint with an API key.";
+    const body = S.page(main, { title: "Connected apps", subtitle: "Let other apps use your Monosage data safely: OAuth 2.0, access tokens and webhooks." });
+    const hostedOnly = "Connecting other apps with OAuth, tokens and webhooks is part of the hosted Monosage, where other systems can reach it safely. On this computer, your scripts and tools call Monosage through the API console's /v1 endpoint with an API key.";
     // What a script can use here instead: the API console and its keys.
     const instead = () => h("div", { class: "btn-row" },
-      h("a", { class: "btn", href: "#/airaapi?tab=keys&new=key", text: "Create an API key" }),
-      h("a", { class: "btn secondary", href: "#/airaapi?tab=docs", text: "Read the API docs" }));
+      h("a", { class: "btn", href: "#/api?tab=keys&new=key", text: "Create an API key" }),
+      h("a", { class: "btn secondary", href: "#/api?tab=docs", text: "Read the API docs" }));
     // The single-user build has no developer platform: say so without asking a server that does not have it.
-    if (!Aira.cloud) { body.append(Aira.ui.empty("Available in the hosted Aira", hostedOnly, instead())); return; }
+    if (!Aira.cloud) { body.append(Aira.ui.empty("Available in the hosted Monosage", hostedOnly, instead())); return; }
     let data;
     try { data = await Aira.api("/api/developers/overview", { silent: true }); } catch (error) {
-      body.append(Aira.ui.empty("Available in the hosted Aira", error.status === 404 ? hostedOnly : error.message, error.status === 404 ? instead() : null));
+      body.append(Aira.ui.empty("Available in the hosted Monosage", error.status === 404 ? hostedOnly : error.message, error.status === 404 ? instead() : null));
       return;
     }
     const tab = S.tabs(body, route, "developers", TABS);
@@ -205,7 +205,7 @@
       panel.replaceChildren(Aira.ui.skeleton(3));
       try {
         data = await Aira.api("/api/developers/overview", { silent: true });
-        if (tab === "apps") await apps(holder, data, render);
+        if (tab === "Apps") await apps(holder, data, render);
         else if (tab === "tokens") await tokens(holder, data, render);
         else if (tab === "webhooks") await webhooks(holder, data, render);
         else if (tab === "connected") await connected(holder, data, render);
@@ -232,7 +232,7 @@
       location.assign(result.redirect);
     };
     body.append(h("section", { class: "card dev-consent" },
-      h("h2", { text: `${info.client.name} wants to use your Aira account` }),
+      h("h2", { text: `${info.client.name} wants to use your Monosage account` }),
       h("p", { class: "muted", text: `Made by ${info.client.organization}${info.client.homepage ? ` · ${info.client.homepage}` : ""}` }),
       h("p", { text: "It will be able to:" }),
       h("ul", { class: "dev-consent-list" }, ...info.scopes.map((scope) => h("li", {}, h("strong", { text: scope.label }), h("code", { class: "muted small", translate: "no", text: ` ${scope.scope}` })))),

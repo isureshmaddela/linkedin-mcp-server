@@ -23,8 +23,6 @@ tests
 AGENTS.md
 CLAUDE.md
 CONTRIBUTING.md
-docker-compose.yml
-Dockerfile
 RELEASE_NOTES_TEMPLATE.md
 btca.config.jsonc
 pytest.ini

@@ -322,7 +322,7 @@
   // The left menu's folders (shell.js) and each tab's page title and line under it. Aira.ICONS names; the ones the
   // shared set lacks (mkMail, mkHistory) are added by views-marketing.js, and a missing one falls back to a dot.
   const FOLDER_ICONS = { find: "jobs", leads: "leads", outreach: "mkMail", settings: "settings", history: "mkHistory" };
-  const PROMISE = "Aira finds and prepares. An email is sent only after you approve it, through your own mail server; you place every call yourself.";
+  const PROMISE = "Monosage finds and prepares. An email is sent only after you approve it, through your own mail server; you place every call yourself.";
   const HEADS = {
     find: ["Find leads", () => `People and businesses that need what you sell: from Google Maps, Google, public requests${Aira.cloud ? ", a Sales Navigator list" : ", your own LinkedIn Sales Navigator"} or a CSV file. ${PROMISE}`],
     leads: ["Your leads", () => "Every lead you saved, scored against your ideal customer. Open one to add contact details from its own website, prepare a call or draft an email; nothing is sent until you approve it."],
@@ -332,7 +332,7 @@
   };
   let ask = null; // what "+ New" or the top search asked for: { new } or { open }, answered once the page is drawn
   const link = (tab, query = {}) => `#/leads?${new URLSearchParams({ tab, ...clean(query) })}`;
-  const accountLink = () => "#/airaapi?tab=account";
+  const accountLink = () => "#/api?tab=account";
   const remember = (key, value) => Aira.remember(`leads.${key}`, value);
   const recall = (key, fallback) => Aira.recall(`leads.${key}`, fallback);
   const session = { confirmed: false }; // the credits confirmation is asked once per page load
@@ -593,7 +593,7 @@
       fill(offeredBox,
         h("div", { class: "panel-head" }, h("h2", { id: "ldOfferedTitle", text: "Services I offer" }), h("small", { class: "muted", id: "ldOfferedSaved", role: "status", "aria-live": "polite" })),
         h("div", { class: "panel-body" },
-          h("p", { class: "muted", text: "Tell Aira what you sell. It uses this to find people asking for it, to point out which businesses need it, to raise the fit score of leads that do, and to write emails and call notes about it." }),
+          h("p", { class: "muted", text: "Tell Monosage what you sell. It uses this to find people asking for it, to point out which businesses need it, to raise the fit score of leads that do, and to write emails and call notes about it." }),
           h("div", { class: "ld-checks", role: "group", "aria-label": "Services I offer" }, ...boxes)));
     }
     async function saveOffered(next) {
@@ -638,7 +638,7 @@
           return h("label", { class: "check" }, box, h("span", { text: label }));
         })));
       const fresh = h("div", { class: "field" }, h("label", { for: "ldFreshness", text: "Posted" }), ui.select(FRESHNESS, form.freshness || "month", { id: "ldFreshness", name: "freshness" }));
-      const note = h("p", { class: "ld-notice-line", id: "ldRequestNote" }, ico("info"), " These are public posts. Aira never replies for you: open a post and answer in your own name, following that community's rules.");
+      const note = h("p", { class: "ld-notice-line", id: "ldRequestNote" }, ico("info"), " These are public posts. Monosage never replies for you: open a post and answer in your own name, following that community's rules.");
       return { summary, fresh, where, note };
     }
     function roleChipRow(form) {
@@ -680,7 +680,7 @@
         h("span", { class: "ld-notice-ico" }, ico(info.ok ? "info" : "warn")),
         h("div", {},
           h("strong", { text: info.ok ? "Read only, in your own LinkedIn session" : "Sales Navigator is not available yet" }),
-          h("p", { class: "muted", text: "Aira opens the search you built in your own signed-in LinkedIn browser and reads the results at a human pace. It never connects, messages or saves anyone. LinkedIn restricts automated access, so keep volumes low (a few pages at a time) and use your own account. The LinkedIn account needs a Sales Navigator subscription." }),
+          h("p", { class: "muted", text: "Monosage opens the search you built in your own signed-in LinkedIn browser and reads the results at a human pace. It never connects, messages or saves anyone. LinkedIn restricts automated access, so keep volumes low (a few pages at a time) and use your own account. The LinkedIn account needs a Sales Navigator subscription." }),
           info.ok ? null : h("p", {}, h("strong", { text: info.needs || "Connect your LinkedIn account first." }), " ", h("a", { href: "#/settings/integrations", text: "Open Settings > Integrations" }))));
     }
 
@@ -730,7 +730,7 @@
         const costLine = document.getElementById("ldCost");
         if (costLine) costLine.textContent = planText(plan, source.id);
         if (needsConfirm(plan, session)) {
-          const go = await Aira.confirm({ title: "Run this search?", message: `${planText(plan, source.id)} Aira asks once per visit before it spends SerpApi searches.`, confirmLabel: "Search" });
+          const go = await Aira.confirm({ title: "Run this search?", message: `${planText(plan, source.id)} Monosage asks once per visit before it spends SerpApi searches.`, confirmLabel: "Search" });
           if (!go) return;
           session.confirmed = true;
         }
@@ -820,7 +820,7 @@
         : null;
       fill(resultsBox, h("section", { class: "panel ld-panel", "aria-labelledby": "ldResultsTitle" },
         h("div", { class: "panel-head" }, h("h2", { id: "ldResultsTitle", text: "Results" }), h("div", { class: "btn-row" }, picker.node, saveSel, saveNew)),
-        h("div", { class: "panel-body" }, gapToggle, summary, ...warnings, table, requests ? h("p", { class: "ld-notice-line" }, ico("info"), " Replies are yours: open the post and answer in your own name. Aira never posts or messages for you.") : null, moreButton ? h("div", { class: "btn-row ld-more" }, moreButton) : null)));
+        h("div", { class: "panel-body" }, gapToggle, summary, ...warnings, table, requests ? h("p", { class: "ld-notice-line" }, ico("info"), " Replies are yours: open the post and answer in your own name. Monosage never posts or messages for you.") : null, moreButton ? h("div", { class: "btn-row ld-more" }, moreButton) : null)));
     }
 
     async function saveLeads(chosen) {
@@ -871,7 +871,7 @@
         h("ol", {},
           h("li", {}, h("strong", { text: "Search Google. " }), "Local businesses from Google Maps (phone and website included), or people and companies from LinkedIn pages Google has indexed."),
           h("li", {}, h("strong", { text: "Find people who need your services. " }), "Public posts where someone asks for a website, marketing, content or ads help, and local businesses with no website, few reviews or a low rating."),
-          h("li", {}, h("strong", { text: "Read your Sales Navigator. " }), "Build a search in LinkedIn Sales Navigator, paste its address, and Aira reads the results in your own session, read only."),
+          h("li", {}, h("strong", { text: "Read your Sales Navigator. " }), "Build a search in LinkedIn Sales Navigator, paste its address, and Monosage reads the results in your own session, read only."),
           h("li", {}, h("strong", { text: "Import a CSV. " }), "Bring leads from anywhere. Everything lands in lists you can score, enrich and export.")))
       : null;
 
@@ -1076,7 +1076,7 @@
         h("p", { class: "ld-says", text: requestText(lead) || "—" }),
         h("div", { class: "ld-badges" }, ...requestBadges(lead).map((b) => chip(b.text, b.tone)), ...(lead.tags || []).map((id) => chip(serviceLabel(catalogCache, id), "ok"))),
         requestUrl(lead) ? h("p", {}, externalLink(requestUrl(lead), "Open the post")) : null,
-        h("p", { class: "ld-notice-line" }, ico("info"), " Reply on the post yourself, in your own name. Aira has no way to post, email or call for you.")) : null;
+        h("p", { class: "ld-notice-line" }, ico("info"), " Reply on the post yourself, in your own name. Monosage has no way to post, email or call for you.")) : null;
       const links = [lead.linkedin_url ? externalLink(lead.linkedin_url, "LinkedIn profile") : null, lead.sales_nav_url ? externalLink(lead.sales_nav_url, "Sales Navigator") : null, lead.website ? externalLink(lead.website, "Website") : null].filter(Boolean);
       fill(body,
         h("section", { class: "ld-block", "aria-label": "Fit" },
@@ -1113,10 +1113,10 @@
       const useEmail = (address) => btn("Use this email", { sm: true, kind: "secondary", disabled: lead.email === address, onClick: (event) => busy(event.currentTarget, async () => { const out = await api(`${BASE}/items/${lead.id}`, { method: "PATCH", body: { email: address } }); lead = out.lead; ctx.onUpdate(lead); paint(); toast("Email saved on the lead.", "success"); }) });
       const usePhone = (number) => btn("Use this phone", { sm: true, kind: "secondary", disabled: lead.phone === number, onClick: (event) => busy(event.currentTarget, async () => { const out = await api(`${BASE}/items/${lead.id}`, { method: "PATCH", body: { phone: number } }); lead = out.lead; ctx.onUpdate(lead); paint(); toast("Phone saved on the lead.", "success"); }) });
       fill(enrichBox,
-        h("p", { class: "muted", text: "Aira reads the company's own public website (the home page and a few contact, about and team pages), respects robots.txt, and shows only what the site publishes, with the page it came from. It never guesses an address. Role addresses such as info@ or sales@ are labelled as such." }),
+        h("p", { class: "muted", text: "Monosage reads the company's own public website (the home page and a few contact, about and team pages), respects robots.txt, and shows only what the site publishes, with the page it came from. It never guesses an address. Role addresses such as info@ or sales@ are labelled as such." }),
         h("div", { class: "btn-row" }, run, lead.website ? null : h("span", { class: "muted", text: "This lead has no website yet." })),
         has ? h("div", { class: "ld-found" },
-          emails.length ? h("ul", { class: "ld-contacts", "aria-label": "Emails found" }, ...emails.map((e) => h("li", {}, h("div", {}, h("strong", { text: e.address }), " ", chip(e.kind === "generic" ? "role address" : "personal", e.kind === "generic" ? "" : "ok"), e.same_domain ? null : chip("another domain", "warn"), h("div", { class: "muted" }, "Found on ", externalLink(e.source_url, e.source_url.replace(/^https?:\/\//, "")))), useEmail(e.address)))) : h("p", { class: "muted", text: "No email address is published on the pages Aira could read." }),
+          emails.length ? h("ul", { class: "ld-contacts", "aria-label": "Emails found" }, ...emails.map((e) => h("li", {}, h("div", {}, h("strong", { text: e.address }), " ", chip(e.kind === "generic" ? "role address" : "personal", e.kind === "generic" ? "" : "ok"), e.same_domain ? null : chip("another domain", "warn"), h("div", { class: "muted" }, "Found on ", externalLink(e.source_url, e.source_url.replace(/^https?:\/\//, "")))), useEmail(e.address)))) : h("p", { class: "muted", text: "No email address is published on the pages Monosage could read." }),
           phones.length ? h("ul", { class: "ld-contacts", "aria-label": "Phone numbers found" }, ...phones.map((p) => h("li", {}, h("div", {}, h("strong", { text: p.number }), h("div", { class: "muted" }, "Found on ", externalLink(p.source_url, p.source_url.replace(/^https?:\/\//, "")))), usePhone(p.number)))) : null,
           Object.keys(data.socials || {}).length ? h("p", { class: "ld-links" }, ...Object.entries(data.socials).flatMap(([name, url], i) => (i ? [" · ", externalLink(url, name)] : [externalLink(url, name)]))) : null,
           data.robots_blocked ? h("p", { class: "ld-warning", text: "Some pages were skipped because the site's robots.txt asks automated visitors not to read them." }) : null,
@@ -1130,7 +1130,7 @@
         const plan = await api(`${BASE}/items/${lead.id}/signals`, { method: "POST", body: { dry_run: true } });
         cost.textContent = planText(plan, "news");
         if (needsConfirm(plan, session)) {
-          const go = await Aira.confirm({ title: "Look up recent news?", message: `${planText(plan, "news")} Aira asks once per visit before it spends SerpApi searches.`, confirmLabel: "Look up news" });
+          const go = await Aira.confirm({ title: "Look up recent news?", message: `${planText(plan, "news")} Monosage asks once per visit before it spends SerpApi searches.`, confirmLabel: "Look up news" });
           if (!go) return;
           session.confirmed = true;
         }
@@ -1143,7 +1143,7 @@
       }) });
       const news = (lead.signals || []).filter((s) => s.type === "news");
       fill(newsBox,
-        h("p", { class: "muted", text: "Looks up recent Google News headlines about the lead's company and keeps up to three as buying signals. Headlines only: Aira does not read the articles, and a headline is not proof of anything." }),
+        h("p", { class: "muted", text: "Looks up recent Google News headlines about the lead's company and keeps up to three as buying signals. Headlines only: Monosage does not read the articles, and a headline is not proof of anything." }),
         h("div", { class: "btn-row" }, find, company ? null : h("span", { class: "muted", text: "This lead has no company yet." })), cost,
         news.length ? h("ul", { class: "ld-signals", "aria-label": "News signals" }, ...news.map((s) => h("li", {}, chip("news", "hot"), " ", s.url ? externalLink(s.url, s.text) : s.text))) : null);
     }
@@ -1171,9 +1171,9 @@
     }));
     const modal = Aira.modal({ title: `Draft a message to ${lead.name}`, wide: true,
       body: h("div", { class: "ld-form" },
-        h("p", { class: "ld-notice-line" }, ico("info"), " Aira only writes the words. Drafts are never sent: copy it and send it yourself, from your own email or LinkedIn."),
+        h("p", { class: "ld-notice-line" }, ico("info"), " Monosage only writes the words. Drafts are never sent: copy it and send it yourself, from your own email or LinkedIn."),
         h("div", { class: "ld-grid" }, ui.field("Channel", channel), ui.field("Tone", tone)),
-        ui.field("What you offer", offer, "Used as written. Aira adds nothing that is not on this lead."), h("div", { class: "btn-row" }, generate), out),
+        ui.field("What you offer", offer, "Used as written. Monosage adds nothing that is not on this lead."), h("div", { class: "btn-row" }, generate), out),
       actions: [{ label: "Close", kind: "ghost" }] });
     offer.focus();
     return modal;
@@ -1219,7 +1219,7 @@
       h("div", { class: "field narrow" }, h("label", { for: "ldicp-min_rating", text: "Minimum Google rating (businesses)" }), rating),
       h("div", { class: "btn-row" }, save), result);
     fill(content, h("section", { class: "panel ld-panel" }, h("div", { class: "panel-head" }, h("h2", { text: "Ideal customer profile" }), h("small", { class: "muted", text: ctx.overview.icp_empty ? "Not set: leads have no score yet." : icpSummary(icp) })),
-      h("div", { class: "panel-body" }, h("p", { class: "muted", text: "Aira scores every lead from 0 to 100 against these rules and shows which rules fired. The score is rules you can read, not a model. With nothing set, leads are not scored." }), form)));
+      h("div", { class: "panel-body" }, h("p", { class: "muted", text: "Monosage scores every lead from 0 to 100 against these rules and shows which rules fired. The score is rules you can read, not a model. With nothing set, leads are not scored." }), form)));
   }
 
   async function renderHistory(content, ctx) {
@@ -1234,7 +1234,7 @@
           h("td", { "data-label": "Source" }, h("span", { class: "badge source", text: sourceLabel(run.source) })),
           h("td", { "data-label": "Search", text: Object.entries(run.params || {}).filter(([k]) => !["engine", "hl", "type"].includes(k)).map(([, v]) => (Array.isArray(v) ? v.join(", ") : String(v))).join(" · ").slice(0, 120) || "—" }),
           h("td", { "data-label": "Result", text: describeRun(run) }),
-          h("td", { "data-label": "Credits" }, run.record_id ? h("a", { href: `#/airaapi?tab=history`, text: `${run.credits}${run.cache_hit ? " (cached)" : ""}` }) : String(run.credits)))))))));
+          h("td", { "data-label": "Credits" }, run.record_id ? h("a", { href: `#/api?tab=history`, text: `${run.credits}${run.cache_hit ? " (cached)" : ""}` }) : String(run.credits)))))))));
   }
 
   // ===========================================================================
@@ -1258,7 +1258,7 @@
     Aira.closeDrawer();
     const label = (TABS.find(([id]) => id === tab) || TABS[0])[1];
     const [title, about] = HEADS[tab];
-    document.title = `${title} · Marketing · Aira`;
+    document.title = `${title} · Marketing · Monosage`;
     const crumbs = document.getElementById("crumbs");
     if (crumbs) crumbs.replaceChildren(h("span", { text: "Leads" }), h("span", { class: "muted", "aria-hidden": "true", text: "/" }), h("span", { text: label }));
     if (Aira.shell && Aira.shell.tabs) Aira.shell.tabs("leads", TABS.map(([id, text]) => ({ id, label: text, icon: FOLDER_ICONS[id] })), tab);

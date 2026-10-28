@@ -287,7 +287,7 @@
         { label: "Scheduled this week", value: data.scheduled_week, hint: `${data.published_month} published this month` },
         { label: "Paid by leads this month", value: S.money(data.earned_month_cents), hint: `${data.customers_month} paying customer${data.customers_month === 1 ? "" : "s"} · ${S.money(data.open_value_cents)} still open`, tone: data.earned_month_cents ? "good" : "" },
       ]),
-      data.due_posts.length ? S.section("Ready to post now", h("p", { class: "muted", text: "Aira does not post for you: copy the text, post it, then mark it published." }), table({
+      data.due_posts.length ? S.section("Ready to post now", h("p", { class: "muted", text: "Monosage does not post for you: copy the text, post it, then mark it published." }), table({
         columns: [
           { key: "scheduled_at", label: "Due", render: (p) => S.when(p.scheduled_at) },
           { key: "channel", label: "Channel", render: (p) => CHANNEL_NAME[p.channel] },
@@ -331,7 +331,7 @@
         { name: "ends_on", label: "Ends", type: "date" },
         { name: "budget_cents", label: "Budget", type: "money" },
         { name: "spend_cents", label: "Spent so far", type: "money" },
-        { name: "revenue_cents", label: "Other revenue it brought (your estimate)", type: "money", hint: "Leads from its forms that you mark paid add up by themselves; enter only sales Aira cannot see." },
+        { name: "revenue_cents", label: "Other revenue it brought (your estimate)", type: "money", hint: "Leads from its forms that you mark paid add up by themselves; enter only sales Monosage cannot see." },
         { name: "status", label: "Status", type: "select", options: S.statusOptions(["active", "paused", "ended"]) },
         { name: "utm_source", label: "UTM source", placeholder: "instagram" },
         { name: "utm_medium", label: "UTM medium", placeholder: "social" },
@@ -952,7 +952,7 @@
       subtitle: tabId === "search" ? "Leads, subscribers, posts, campaigns, forms, links and newsletters that match, and your saved sales leads." : meta.about,
       actions: tabId === "overview" && canCreate() ? [S.button("Write with AI", () => writeWithAi(), { kind: "secondary", icon: "ai" }), S.button("New post", () => editPost({ status: "draft" }), { icon: "plus" })] : [],
     });
-    document.title = `${title} · Marketing · Aira`;
+    document.title = `${title} · Marketing · Monosage`;
     const tab = S.tabs(body, route, "marketing", TABS, tabId);
     const panel = h("div", { class: "suite-body" });
     body.append(panel);

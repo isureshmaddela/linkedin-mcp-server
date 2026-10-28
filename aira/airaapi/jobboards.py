@@ -509,7 +509,7 @@ def http_json(url: str) -> Any:
         ) from None
     if len(data) > MAX_BODY_BYTES:
         raise SerpApiError(
-            "upstream_error", "The job board sent more data than Aira accepts."
+            "upstream_error", "The job board sent more data than Monosage accepts."
         )
     try:
         return json.loads(data.decode("utf-8", "replace"))
@@ -942,7 +942,7 @@ def search(
         "jobs_results": unique,
     }
     if not unique:
-        body["error"] = "Aira Jobs hasn't returned any results for this query."
+        body["error"] = "Jobs hasn't returned any results for this query."
     return body
 
 
@@ -962,12 +962,12 @@ class LocalJobsClient:
     ) -> RawResponse:
         if engine_id != ENGINE_ID:
             raise SerpApiError(
-                "bad_request", f"Aira serves {ENGINE_ID} itself, not {engine_id}."
+                "bad_request", f"Monosage serves {ENGINE_ID} itself, not {engine_id}."
             )
         if options.get("output", "json") != "json" or options.get("async"):
             raise SerpApiError(
                 "bad_request",
-                "Aira Jobs answers JSON only, right away (no html, md or async).",
+                "Jobs answers JSON only, right away (no html, md or async).",
             )
         started = time.monotonic()
         try:

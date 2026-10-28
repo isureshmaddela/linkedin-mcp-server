@@ -385,3 +385,23 @@ app working end to end with one account, tests per app, more features where they
   account (`tester@aira.test`): 18 apps, 30 sections, 155 tabs, 0 script errors, 0 failed requests, 0 error boxes;
   the AI app lists 13 agents including StocksAgent; "Add Apple to my watchlist" through the model now resolves
   "Apple Inc." (fixed, regression test).
+
+## Google-style shell (2026-10-27)
+- **Ask:** every app should feel like Gmail/Drive. The user kept the old pale app icons (no per-app colors).
+- **Frame (`auto_apply_assistant/shell.js`, Suite shell section of `app.css`):** the top bar spans the page with the
+  app's logo and name, a pill search box (`/` focuses it) and the launcher; each app has its own address (`/stocks`,
+  `/health`, `/home` for Today; `aira/apps.py` `APP_PATHS`, route `ui_app_page`, public in `aira_cloud/policy.py`);
+  sign-in lands on Home (`/home#/today`), whose menu lists every app; "+ New" above the menu
+  (`Aira.appNew[appId]`); search with suggestions and Enter results (`Aira.appSearch[appId]`, Home searches every
+  app); a page's tabs show as menu folders (`Aira.shell.tabs`, used by `S.tabs`); only the open page's folders show;
+  the favicon is drawn per app. Page routes are exempt from the API rate limit (a page loads ~90 files).
+- **Workflow (18 agents, one per app):** each app registers its + New (opening its existing forms via `?new=<kind>`,
+  removed from the address so Back/reload don't reopen), a search over its own records (new `/search` routes for
+  several apps), folders with icons, polish for desktop/phone/dark, `tests/test_suite_<id>_shell_ui.py` and an
+  "In the Aira frame" section in `docs/apps/<id>.md`.
+- **Shared fixes from their requests:** Enter cancels pending suggestions; folder counts and per-item `href` (Health
+  keeps `?person=`); a short search hint on phones (`placeholderShort`, else "Search <app>"); "+ New" re-reads its
+  list on click; status pills hidden on phones; `ui_app_page` in the hosted policy and isolation sweep; the e2e
+  walk's Upload click (patchright `.last` with one match never resolves).
+- **Not applied:** hiding every page's own tab bar on desktop (about 30 browser tests click it; Sales, Social and
+  Careers hide it themselves); shared `link/mail/history/image` icons (Marketing ships its own).

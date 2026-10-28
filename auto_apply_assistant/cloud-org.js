@@ -120,7 +120,7 @@
     { id: "org-audit", page: "audit", label: "Audit log", icon: "documents", key: "t", roles: READERS },
     { id: "org-data", page: "data", label: "Data & closure", icon: "analytics", key: "x", roles: READERS },
     // The apps the organization subscribes to (cloud-apps.js draws the page; a plain list stands in until it loads).
-    { id: "org-apps", page: "apps", label: "Apps", icon: "more", key: "z", roles: [...READERS, "billing"] },
+    { id: "org-apps", page: "Apps", label: "Apps", icon: "more", key: "z", roles: [...READERS, "billing"] },
   ];
   const ALIASES = { dashboard: "", support: "data" };
 
@@ -131,7 +131,7 @@
     const render = A.pages[page];
     A.setCurrent(page);
     if (!render) { stage.replaceChildren(ui.empty("Page not found", "Choose a page from the navigation.")); return; }
-    if (!READERS.includes(cloud.role()) && !(page === "apps" && cloud.role() === "billing")) { stage.replaceChildren(ui.empty("Not available", "Organization administration is for owners, administrators and auditors.")); return; }
+    if (!READERS.includes(cloud.role()) && !(page === "Apps" && cloud.role() === "billing")) { stage.replaceChildren(ui.empty("Not available", "Organization administration is for owners, administrators and auditors.")); return; }
     if (["members", "coaches", "policy"].includes(page) && !STAFF.includes(cloud.role())) { stage.replaceChildren(ui.empty("Not available for your role", "Members, coach assignments and policy are managed by owners and administrators. Auditors have read-only access to the rest of the organization.")); return; }
     await render(stage, route);
   }
@@ -192,7 +192,7 @@
     tiles.append(A.usageTile("Coach and admin seats", usage.seats.staff.used, usage.seats.staff.limit, "#/org/members"));
     tiles.append(A.usageTile("Applications this month", usage.applications.used, usage.applications.limit, "#/org/candidates", usage.applications.overage ? `${A.n(usage.applications.overage)} billed as overage` : undefined));
     tiles.append(A.usageTile("Searches", usage.searches.used, null, "#/org/audit?action=candidate.jobs_search", "Candidate and automated searches"));
-    tiles.append(A.usageTile("API searches", usage.api_searches.used, usage.api_searches.limit, A.can("integrations.manage") ? "#/airaapi" : "#/org/integrations"));
+    tiles.append(A.usageTile("API searches", usage.api_searches.used, usage.api_searches.limit, A.can("integrations.manage") ? "#/api" : "#/org/integrations"));
     tiles.append(A.usageTile("AI cover letters", usage.cover_letters.used, usage.cover_letters.limit, "#/org/audit?action=candidate.job_generate"));
     tiles.append(A.usageTile("Document storage", usage.storage.used_bytes, usage.storage.limit_bytes, "#/org/data", undefined, A.size));
     const history = usage.history || [];
@@ -255,7 +255,7 @@
     "consent.grant": "gave consent", "consent.revoke": "withdrew consent", "application.submit": "submitted an application", "held.answer": "answered a held question", "auth.login": "signed in", "auth.mfa_enable": "turned on MFA", "auth.mfa_disable": "turned off MFA",
     "auth.mfa_reset": "reset MFA", "auth.password_change": "changed their password", "auth.password_reset": "reset their password", "auth.locked": "was locked out after failed sign-ins", "auth.session_revoke": "signed out a device", "auth.sign_out_devices": "signed out other devices",
     "billing.checkout_start": "started checkout", "billing.upgrade": "upgraded the plan", "billing.downgrade_scheduled": "scheduled a downgrade", "billing.downgrade_cancelled": "cancelled a downgrade", "billing.cancel": "cancelled the subscription", "billing.reactivate": "reactivated the subscription",
-    "data.export_org": "exported the organization", "data.export_candidate": "exported a candidate", "data.export_audit": "exported the audit log", "data.delete_candidate": "deleted a candidate workspace", "support.request": "Aira support asked for access", "support.approve": "approved support access",
+    "data.export_org": "exported the organization", "data.export_candidate": "exported a candidate", "data.export_audit": "exported the audit log", "data.delete_candidate": "deleted a candidate workspace", "support.request": "Monosage support asked for access", "support.approve": "approved support access",
     "support.deny": "denied support access", "support.enter": "support entered the organization", "support.end": "support access ended", "support.expired": "support access expired", "linkedin.opt_in": "turned LinkedIn on", "linkedin.easy_apply_opt_in": "turned LinkedIn Easy Apply on",
     "integrations.model_endpoint": "set a model endpoint", "integrations.model_endpoint_removed": "removed the model endpoint",
   };

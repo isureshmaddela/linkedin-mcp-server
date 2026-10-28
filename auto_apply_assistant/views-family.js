@@ -408,7 +408,7 @@
     const news = [unread.messages ? `${unread.messages} new message${unread.messages === 1 ? "" : "s"}` : "", unread.posts ? `${unread.posts} new post${unread.posts === 1 ? "" : "s"}` : ""].filter(Boolean);
     const body = S.page(main, { title: meta.title, subtitle: (tabId === "feed" || tabId === "chat") && news.length ? news.join(" · ") : meta.about });
     body.classList.add("fa-page");
-    document.title = `${meta.title} · Social · Aira`;
+    document.title = `${meta.title} · Social · Monosage`;
     const tab = S.tabs(body, route, "family", tabs.map(({ id, label, icon }) => ({ id, label, icon })), tabId);
     const panel = h("div", { class: `suite-body ${["feed", "calendar", "dates", "wishes"].includes(tab) ? "so-column" : ""}`.trim() });
     body.append(panel);

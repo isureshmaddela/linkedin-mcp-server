@@ -46,7 +46,7 @@
     { id: "budget", label: "Budget", icon: "pn-budget", adult: true, about: "Money in and money spent this month, by category." },
     { id: "savings", label: "Savings", icon: "pn-savings", adult: true, about: "Save for the things that matter. Money from things you sell and side jobs can go straight here." },
     { id: "bills", label: "Bills", icon: "pn-bills", adult: true, about: "Regular bills, when they are due and what is paid." },
-    { id: "sell", label: "Sell", icon: "pn-sell", adult: true, about: "Earn from things you no longer need and from side jobs for neighbours. Aira does not take payments: you and the buyer settle in person." },
+    { id: "sell", label: "Sell", icon: "pn-sell", adult: true, about: "Earn from things you no longer need and from side jobs for neighbours. Monosage does not take payments: you and the buyer settle in person." },
     { id: "notes", label: "Notes", icon: "pn-notes", about: "Shared or private notes and checklists for the home." },
     { id: "rewards", label: "Rewards", icon: "pn-rewards", about: "Points from chores, rewards to spend them on, and pocket money." },
   ];
@@ -533,7 +533,7 @@
           bill.status !== "settled" ? S.button("Paid", async () => { await api(`/bills/${bill.id}/paid`, { method: "POST", body: {} }); Aira.toast(`${bill.name} marked paid.`, "success"); rerender(); }) : null,
           bill.last_paid_period ? S.button("Undo last payment", async () => { await api(`/bills/${bill.id}/unpaid`, { method: "POST", body: { period: bill.last_paid_period } }); rerender(); }, { kind: "ghost sm" }) : null,
           S.button("Edit", () => edit({ title: `Edit ${bill.name}`, fields: billFields(data.categories), values: bill, onSave: async (values) => { await api(`/bills/${bill.id}`, { method: "PATCH", body: values }); rerender(); } }), { kind: "ghost sm" }),
-          S.button("Remove", async () => { if (await S.confirmDelete(bill.name)) { await api(`/bills/${bill.id}`, { method: "DELETE" }); rerender(); } }, { kind: "ghost sm" }))))) : Aira.ui.empty("No bills yet", "Add your regular bills and Aira reminds you before they are due.", h("div", { class: "btn-row" }, S.button("Add a bill", add, { icon: "plus" }))),
+          S.button("Remove", async () => { if (await S.confirmDelete(bill.name)) { await api(`/bills/${bill.id}`, { method: "DELETE" }); rerender(); } }, { kind: "ghost sm" }))))) : Aira.ui.empty("No bills yet", "Add your regular bills and Monosage reminds you before they are due.", h("div", { class: "btn-row" }, S.button("Add a bill", add, { icon: "plus" }))),
     );
   }
 
@@ -734,7 +734,7 @@
         { label: "Needed each month", value: S.money(data.per_month_cents, currency), hint: "To reach every goal on time" },
       ]) : null,
       data.goals.length ? h("div", { class: "btn-row" }, S.button("Save for something", newGoal)) : null,
-      data.goals.length ? h("div", { class: "life-cards" }, ...data.goals.map(card)) : Aira.ui.empty("Nothing saved for yet", "Save for a holiday, a new bike or a rainy day. Aira shows how much to put aside each month.", h("div", { class: "btn-row" }, S.button("Save for something", newGoal, { icon: "plus" }))),
+      data.goals.length ? h("div", { class: "life-cards" }, ...data.goals.map(card)) : Aira.ui.empty("Nothing saved for yet", "Save for a holiday, a new bike or a rainy day. Monosage shows how much to put aside each month.", h("div", { class: "btn-row" }, S.button("Save for something", newGoal, { icon: "plus" }))),
     );
   }
 

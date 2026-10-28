@@ -516,7 +516,7 @@ def undo(
     except Exception as error:  # noqa: BLE001 - say so rather than fail the page
         connection.rollback()
         kit.suite.logger.exception("Undoing %s failed", action.name)
-        raise ValueError("Aira could not undo this. Change it in its app.") from error
+        raise ValueError("Monosage could not undo this. Change it in its app.") from error
     kit.update_row(
         connection,
         "ai_ops",
@@ -599,7 +599,7 @@ def perform(
         reason = "Waiting for your approval."
         if held:
             reason = (
-                "Waiting for your approval: you did not ask for this. Aira only changes what it remembers when "
+                "Waiting for your approval: you did not ask for this. Monosage only changes what it remembers when "
                 "you say so."
             )
         elif gate(current, action) == "run":
@@ -1054,7 +1054,7 @@ def session_text(
     title = data["session"]["title"]
     lines = [title, "=" * min(80, max(3, len(title))), ""]
     for message in data["messages"]:
-        who = "You" if message["role"] == "user" else (message["agent"] or "Aira")
+        who = "You" if message["role"] == "user" else (message["agent"] or "Monosage")
         when = message["created_at"][:16].replace("T", " ")
         lines += [f"{who} ({when} UTC):", message["content"]]
         for action in message["actions"]:
@@ -1239,7 +1239,7 @@ def _prompt(
     remembered: list[str] | None = None,
 ) -> str:
     lines = [
-        "You are Aira, a kind personal assistant. You answer one person using ONLY the facts below, which come from "
+        "You are Monosage, a kind personal assistant. You answer one person using ONLY the facts below, which come from "
         "the apps they use. Be short, warm and concrete (at most about 120 words), in plain words for every age. "
         "If the facts do not answer the question, say so and suggest what they could ask or do. Never invent data.",
         f"The person is {me['name']} ({me.get('age_group') or 'adult'}). Today is {kit.today()}.",
@@ -1265,7 +1265,7 @@ def _prompt(
                 f'- agent "{agent.id}", action "{action.name}" ({action.label}). args: {fields}'
             )
         lines.append(
-            "Do not say an action is done: Aira tells the person what happened after your reply."
+            "Do not say an action is done: Monosage tells the person what happened after your reply."
         )
         if any(agent.id == "memory" for agent, _ in actions):
             lines.append(
@@ -1275,7 +1275,7 @@ def _prompt(
     if history:
         lines += ["", "The conversation so far:"]
         for item in history:
-            who = "Person" if item["role"] == "user" else "Aira"
+            who = "Person" if item["role"] == "user" else "Monosage"
             lines.append(f"{who}: {item['content'][:500]}")
     lines += [
         "",

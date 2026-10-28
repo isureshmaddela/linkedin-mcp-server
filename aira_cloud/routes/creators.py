@@ -90,7 +90,7 @@ def videos_video_state(req: Req):  # noqa: ANN201
         ).fetchone():
             return 404, {"error": "That video was not found.", "code": "not_found"}
         videos.set_hidden(
-            sc, "video", req.group(), action == "hide", reason or "Reviewed by Aira"
+            sc, "video", req.group(), action == "hide", reason or "Reviewed by Monosage"
         )
         sc.commit()
     req.app.platform_audit.record(
@@ -115,7 +115,7 @@ def videos_suspend(req: Req):  # noqa: ANN201
         ).fetchone():
             return 404, {"error": "That channel was not found.", "code": "not_found"}
         videos.set_suspended(
-            sc, req.group(), on, str(req.body().get("reason") or "Reviewed by Aira")
+            sc, req.group(), on, str(req.body().get("reason") or "Reviewed by Monosage")
         )
     req.app.platform_audit.record(
         "videos.suspend" if on else "videos.unsuspend",

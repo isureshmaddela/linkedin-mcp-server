@@ -1155,8 +1155,8 @@ def notify_missed(
                         f"Hello {caregiver['name'] or ''},\n\n"
                         f"{person['name']} has not marked {slot['name']} {slot['dose']} as taken. It was due at "
                         f"{slot['time']} on {slot['date']}.\n\nYou may want to check in with them.\n\n"
-                        f"Open Aira: {kit.public_url('/#/care', origin)}\n\n"
-                        f"You receive this because {person['name']} made you their caregiver in Aira Health."
+                        f"Open Monosage: {kit.public_url('/#/care', origin)}\n\n"
+                        f"You receive this because {person['name']} made you their caregiver in Monosage Health."
                     ),
                     ref_type="medicine",
                     ref_id=slot["medicine_id"],

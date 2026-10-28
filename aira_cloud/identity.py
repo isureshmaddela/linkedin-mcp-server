@@ -523,7 +523,7 @@ class Identity:
             raise Unauthorized("This account is not active.")
         if member["org_status"] == "suspended":
             raise Forbidden(
-                "This organization is suspended. Contact your administrator or Aira support."
+                "This organization is suspended. Contact your administrator or Monosage support."
             )
         sso = (
             self.app.sso.enforced_for(member["org_id"])

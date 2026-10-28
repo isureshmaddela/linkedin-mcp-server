@@ -1910,7 +1910,7 @@ def moderate(
     ):
         if home is not None and _home(sc, owner_id) != home:
             raise PermissionError(
-                "You can hide what was reported; only Aira's moderators suspend someone outside your household."
+                "You can hide what was reported; only Monosage's moderators suspend someone outside your household."
             )
     if action in ("hide", "restore") and found["target_type"] != "channel":
         set_hidden(

@@ -14,7 +14,7 @@
     travel: { tab: "travel", label: "Travel" },
     learn: { tab: "learn", label: "Learn" },
   };
-  const apiLink = (tab, query = {}) => `#/airaapi?${new URLSearchParams({ tab, ...query })}`;
+  const apiLink = (tab, query = {}) => `#/api?${new URLSearchParams({ tab, ...query })}`;
   const careersLink = (tab, query = {}) => `#/careers?${new URLSearchParams({ tab, ...query })}`;
 
   function panelHead(title, right) {

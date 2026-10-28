@@ -603,7 +603,7 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         1,
         "baseline",
-        "Tables created by earlier Aira builds (jobs, source records, events, settings, drafts, schedules, runs, activity).",
+        "Tables created by earlier Monosage builds (jobs, source records, events, settings, drafts, schedules, runs, activity).",
         _baseline,
     ),
     Migration(
@@ -705,13 +705,13 @@ MIGRATIONS: tuple[Migration, ...] = (
     Migration(
         18,
         "leads",
-        "Aira Leads: lead lists, leads with de-duplication keys, saved lead searches, search run history and the ideal customer profile.",
+        "Monosage Leads: lead lists, leads with de-duplication keys, saved lead searches, search run history and the ideal customer profile.",
         _leads,
     ),
     Migration(
         19,
         "leads_outreach",
-        "Aira Leads outreach: the email outbox with approval, the suppression list and the call log.",
+        "Monosage Leads outreach: the email outbox with approval, the suppression list and the call log.",
         _leads_outreach,
     ),
 )

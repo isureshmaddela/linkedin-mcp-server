@@ -298,7 +298,7 @@
       const starters = data.starters.filter((s) => matches(`${s.title} ${s.description}`));
       const filtering = search.value.trim() || wanted !== "all";
       put(results,
-        !data.decks.length ? S.section("Your decks", Aira.ui.empty("No decks yet", "Add a starter deck below, make your own, or let Aira make one on any topic."))
+        !data.decks.length ? S.section("Your decks", Aira.ui.empty("No decks yet", "Add a starter deck below, make your own, or let Monosage make one on any topic."))
           : filtering && !list.length ? S.section("Your decks", Aira.ui.empty("No decks match", "Try other words, or show all decks."), h("div", { class: "btn-row" }, S.button("Show all decks", () => { search.value = ""; filter.value = "all"; draw(); findMore(); }, { kind: "secondary" })))
             : null,
         mine.length ? S.section(`Your decks (${mine.length})`, h("div", { class: "life-cards" }, ...mine.map(deckCard))) : (!filtering && data.decks.length ? S.section("Your decks", Aira.ui.empty("No decks of your own yet", "Make one, or add a starter deck below.")) : null),
@@ -756,7 +756,7 @@
           h("li", { text: "Put a price on a deck you made (open it under Decks, then Sell this deck)." }),
           h("li", { text: "Share its link. People try a few cards for free and ask to buy it." }),
           h("li", { text: "They pay you through your own payment link. When the money arrives, press Payment received." }),
-          h("li", { text: sum.hosted ? "You get their access code and an email ready to send them. The money is yours: it is not counted in your organization's revenue." : "Aira emails them an access code that opens every card. Your earnings show here and in the Business hub." })),
+          h("li", { text: sum.hosted ? "You get their access code and an email ready to send them. The money is yours: it is not counted in your organization's revenue." : "Monosage emails them an access code that opens every card. Your earnings show here and in the Business hub." })),
         sellable.length ? h("div", { class: "btn-row" }, S.button("Sell one of my decks", async () => {
           const picked = await S.edit({ title: "Which deck?", fields: [{ name: "deck", label: "Deck", type: "select", options: sellable.map((d) => [d.id, `${d.emoji} ${d.title}`]) }], values: { deck: sellable[0].id }, submitLabel: "Next", onSave: async (v) => v.deck });
           if (picked) await openDeck(picked, rerender); // after the picker has closed

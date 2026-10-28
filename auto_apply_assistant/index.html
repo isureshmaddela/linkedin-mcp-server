@@ -4,8 +4,8 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <meta name="theme-color" content="#0c4932">
-  <meta name="description" content="Aira Career Copilot: discover jobs across sources, score fit, prepare applications, and track interviews, recruiters, and documents.">
-  <title>Aira</title>
+  <meta name="description" content="Monosage Career Copilot: discover jobs across sources, score fit, prepare applications, and track interviews, recruiters, and documents.">
+  <title>Monosage</title>
   <link rel="stylesheet" href="/static/app.css">
   <link rel="stylesheet" href="/static/leads.css">
   <link rel="stylesheet" href="/static/app-careers.css">
@@ -30,27 +30,27 @@
 <body>
   <a class="skip-link" href="#main">Skip to content</a>
   <div id="progress" role="progressbar" aria-label="Loading" aria-hidden="true"></div>
-  <div id="boot" class="boot">Aira</div>
+  <div id="boot" class="boot">Monosage</div>
 
   <section id="authScreen" class="auth-screen" hidden>
     <form id="authForm" class="auth-panel" novalidate>
-      <div class="brand"><span class="brand-mark">A</span><span>AIRA<small>Career Copilot</small></span></div>
+      <div class="brand"><span class="brand-mark">M</span><span>MONOSAGE<small>Career Copilot</small></span></div>
       <h1 id="authTitle" style="margin-top:18px">Sign in</h1>
       <p class="muted" id="authIntro">Your workspace stays on this computer. LinkedIn sign-in happens separately in your own browser session.</p>
       <div class="field"><label for="authEmail">Email</label><input id="authEmail" type="email" autocomplete="username" required maxlength="254"></div>
-      <div class="field" id="authCodeField" hidden><label for="authCode">Reset code</label><input id="authCode" type="text" autocomplete="one-time-code" spellcheck="false" autocapitalize="characters" maxlength="20"><span class="hint">From your email or the window where Aira is running, for example ABCD-EFGH.</span></div>
-      <div class="field" id="authPasswordField"><label for="authPassword" id="authPasswordLabel">Aira password</label><input id="authPassword" type="password" autocomplete="current-password" required minlength="12" maxlength="1024"><span class="hint" id="authHint"></span></div>
+      <div class="field" id="authCodeField" hidden><label for="authCode">Reset code</label><input id="authCode" type="text" autocomplete="one-time-code" spellcheck="false" autocapitalize="characters" maxlength="20"><span class="hint">From your email or the window where Monosage is running, for example ABCD-EFGH.</span></div>
+      <div class="field" id="authPasswordField"><label for="authPassword" id="authPasswordLabel">Monosage password</label><input id="authPassword" type="password" autocomplete="current-password" required minlength="12" maxlength="1024"><span class="hint" id="authHint"></span></div>
       <p class="auth-forgot" id="authForgotRow"><button id="authForgot" type="button">Forgot your password?</button></p>
       <p id="authNotice" class="muted" role="status" aria-live="polite" style="min-height:20px;margin:10px 0 0"></p>
       <button id="authSubmit" class="btn" type="submit" style="width:100%;margin-top:8px">Sign in</button>
-      <p class="switch"><span id="authSwitchText">New to Aira?</span> <button id="authSwitch" type="button">Create an account</button></p>
+      <p class="switch"><span id="authSwitchText">New to Monosage?</span> <button id="authSwitch" type="button">Create an account</button></p>
       <div id="authExtras" class="auth-extras"></div>
     </form>
   </section>
 
   <div id="app" class="app" hidden>
     <aside id="sidebar" class="sidebar" aria-label="Primary">
-      <div class="brand"><span class="brand-mark">A</span><span>AIRA<small id="brandApp">Career Copilot</small></span></div>
+      <div class="brand"><span class="brand-mark">M</span><span>MONOSAGE<small id="brandApp">Career Copilot</small></span></div>
       <nav class="nav" id="primaryNav" aria-label="Primary navigation"></nav>
       <div class="sidebar-foot">
         <button id="appSwitcherSideBtn" class="btn ghost sm app-switch-side" type="button" aria-haspopup="menu" aria-expanded="false" aria-controls="appSwitcher">
@@ -64,7 +64,7 @@
         <button id="menuBtn" class="btn ghost icon menu-btn" type="button" aria-label="Open navigation" aria-controls="sidebar" aria-expanded="false">
           <svg viewBox="0 0 24 24"><path d="M4 7h16M4 12h16M4 17h16"/></svg>
         </button>
-        <a id="appBrand" class="app-brand" href="/home#/today" aria-label="Aira: home"><span class="app-brand-icon" id="appBrandIcon" aria-hidden="true"></span><span class="app-brand-text"><span class="app-brand-aira" translate="no">Aira</span> <span id="appBrandName"></span></span></a>
+        <a id="appBrand" class="app-brand" href="/home#/today" aria-label="Monosage: home"><span class="app-brand-icon" id="appBrandIcon" aria-hidden="true"></span><span class="app-brand-text"><span class="app-brand-aira" translate="no">Monosage</span> <span id="appBrandName"></span></span></a>
         <a id="homeBtn" class="btn ghost home-btn" href="#/today" aria-label="Home: Today" title="Home (Today)" hidden>
           <svg viewBox="0 0 24 24"><path d="M3 11 12 4l9 7"/><path d="M5 10v10h14V10"/><path d="M10 20v-5h4v5"/></svg><span class="home-label">Home</span>
         </a>
@@ -84,10 +84,10 @@
         </button>
         <div class="status-strip" id="statusStrip" aria-live="polite"></div>
         <div class="topbar-menu">
-          <button id="appSwitcherBtn" class="btn ghost icon app-switch" type="button" aria-label="Switch app" title="Aira apps" aria-haspopup="menu" aria-expanded="false" aria-controls="appSwitcher">
+          <button id="appSwitcherBtn" class="btn ghost icon app-switch" type="button" aria-label="Switch app" title="Apps" aria-haspopup="menu" aria-expanded="false" aria-controls="appSwitcher">
             <svg viewBox="0 0 24 24"><circle cx="5" cy="5" r="1.6"/><circle cx="12" cy="5" r="1.6"/><circle cx="19" cy="5" r="1.6"/><circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/><circle cx="5" cy="19" r="1.6"/><circle cx="12" cy="19" r="1.6"/><circle cx="19" cy="19" r="1.6"/></svg>
           </button>
-          <div id="appSwitcher" class="popover app-switcher" role="menu" aria-label="Aira apps" hidden></div>
+          <div id="appSwitcher" class="popover app-switcher" role="menu" aria-label="Apps" hidden></div>
         </div>
         <div class="topbar-menu">
           <button id="accountBtn" class="account-btn" type="button" aria-label="Account menu" aria-haspopup="menu" aria-expanded="false" aria-controls="accountMenu">

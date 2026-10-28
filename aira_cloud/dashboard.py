@@ -191,7 +191,7 @@ class Dashboard:
                 {
                     "kind": "support_access",
                     "level": "warning",
-                    "title": "Aira support has access to this organization",
+                    "title": "Monosage support has access to this organization",
                     "body": f"Until {grant['expires_at']}.",
                     "link": "#/org/support",
                 }

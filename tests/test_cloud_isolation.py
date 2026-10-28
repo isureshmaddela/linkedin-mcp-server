@@ -69,6 +69,7 @@ EXEMPT_GROUPS = {
 # Routes with no tenant selector in the path; mutating ones are covered by body-identifier tests below.
 PUBLIC_OR_OWN_SESSION = {
     "ui_index",
+    "ui_app_page",
     "ui_static",
     "api_health",
     "api_ready",

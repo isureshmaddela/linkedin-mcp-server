@@ -68,7 +68,7 @@ class LinkedInSessions:
             if row["state"] != "pending" or row["used_at"]:
                 raise Gone("This sign-in link was already used or replaced.")
             if row["expires_at"] <= now:
-                raise Gone("This sign-in link has expired. Start again from Aira.")
+                raise Gone("This sign-in link has expired. Start again from Monosage.")
             connection.execute(
                 "UPDATE remote_login_sessions SET state = 'used', used_at = ? WHERE token_hash = ?",
                 (now, digest),

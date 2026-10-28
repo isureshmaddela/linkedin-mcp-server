@@ -58,16 +58,13 @@
     const brand = $("appBrand");
     if (brand) {
       brand.href = entry.path ? appHref(entry) : "#/";
-      brand.setAttribute("aria-label", `Aira ${entry.name}: home`);
+      brand.setAttribute("aria-label", `Monosage ${entry.name}: home`);
       $("appBrandIcon").replaceChildren(Aira.icon(entry.icon || "dashboard"));
       $("appBrandName").textContent = entry.name;
     }
     const input = $("appSearchInput");
     if (input) {
-      const handler = Aira.appSearch[entry.id];
-      const label = (handler && handler.placeholder) || (entry.id === "home" ? "Search Aira apps" : `Search in ${entry.name}`);
-      input.placeholder = label;
-      input.setAttribute("aria-label", label);
+      placeSearch(entry);
       if (document.activeElement !== input) input.value = "";
       closeList();
     }
@@ -76,6 +73,19 @@
     if (strip) strip.classList.toggle("shell-quiet", !["careers", "api"].includes(entry.id));
     drawFavicon(entry);
   };
+
+  // The search box's hint. A phone shows a short one ("Search Play"): an app's own wording would be cut after a word.
+  const narrow = window.matchMedia("(max-width: 600px)");
+  function placeSearch(entry) {
+    const input = $("appSearchInput");
+    if (!input || !entry) return;
+    const handler = Aira.appSearch[entry.id];
+    const long = (handler && handler.placeholder) || (entry.id === "home" ? "Search apps" : `Search in ${entry.name}`);
+    const short = (handler && handler.placeholderShort) || (entry.id === "home" ? "Search apps" : `Search ${entry.name}`);
+    input.placeholder = narrow.matches ? short : long;
+    input.setAttribute("aria-label", long);
+  }
+  narrow.addEventListener("change", () => placeSearch(shell.app));
 
   // /stocks opens Stocks, /home opens Today; null for the root or an address that is not an app.
   shell.fromAddress = () => {
@@ -147,8 +157,11 @@
       const single = items.length === 1;
       const button = h("button", { type: "button", class: "shell-new", ...(single ? {} : { "aria-haspopup": "menu", "aria-expanded": "false" }), onclick: (event) => {
         event.stopPropagation();
-        if (single) { if (window.innerWidth <= 900) Aira.setSidebarOpen(false); runItem(items[0]); return; }
-        if (newMenu) closeNewMenu(false); else openNewMenu(button, items);
+        // Read again: who is signed in, or the app catalog, may have loaded after the menu was drawn.
+        const now = newItems(app);
+        const list = now.length ? now : items;
+        if (list.length === 1) { if (window.innerWidth <= 900) Aira.setSidebarOpen(false); runItem(list[0]); return; }
+        if (newMenu) closeNewMenu(false); else openNewMenu(button, list);
       } }, Aira.icon("plus"), h("span", { text: single ? items[0].label : "New" }));
       before.push(h("div", { class: "shell-new-wrap" }, button));
     }
@@ -168,7 +181,7 @@
 
   // ---------------------------------------------------------------------------------------------------------------
   // A page's tabs in the left menu, like a mail app's folders (Aira.suite.tabs calls this; a page with its own tab
-  // bar may too). Items: { id, label, icon? }; each opens #/<section>?tab=<id>.
+  // bar may too). Items: { id, label, icon?, count?, href? }; each opens its href, or #/<section>?tab=<id>.
   // ---------------------------------------------------------------------------------------------------------------
   const TAB_ICONS = [
     [/overview|home|summary|today|dashboard|markets/, "dashboard"], [/setting|setup|profile|account/, "settings"],
@@ -193,12 +206,12 @@
     const link = document.querySelector(`#primaryNav a[data-section="${CSS.escape(section)}"]`);
     if (!link) return;
     let list = link.nextElementSibling && link.nextElementSibling.classList.contains("shell-subnav") ? link.nextElementSibling : null;
-    const signature = items.map((item) => `${item.id}:${item.label}`).join("|");
+    const signature = items.map((item) => `${item.id}:${item.label}:${item.count || ""}:${item.href || ""}`).join("|");
     if (!list || list.dataset.signature !== signature) {
       const fresh = h("div", { class: "shell-subnav", dataset: { section, signature } },
         ...items.map((item) => {
           const icon = tabIcon(item);
-          return h("a", { href: `#/${section}?tab=${encodeURIComponent(item.id)}`, class: "shell-sublink", dataset: { tab: item.id }, onclick: () => { if (window.innerWidth <= 900) Aira.setSidebarOpen(false); } },
+          return h("a", { href: item.href || `#/${section}?tab=${encodeURIComponent(item.id)}`, class: "shell-sublink", dataset: { tab: item.id }, onclick: () => { if (window.innerWidth <= 900) Aira.setSidebarOpen(false); } },
             icon ? Aira.icon(icon) : h("span", { class: "shell-subdot", "aria-hidden": "true" }), h("span", { text: item.label }), item.count ? h("span", { class: "count", text: String(item.count) }) : null);
         }));
       if (list) list.replaceWith(fresh); else link.after(fresh);
@@ -225,6 +238,7 @@
   let options = [];
   let active = -1;
   let typed = 0; // the newest keystroke wins when suggestions arrive out of order
+  let timer = 0; // suggestions wait for a pause in typing
   function closeList() {
     const list = $("appSearchList");
     const input = $("appSearchInput");
@@ -312,6 +326,8 @@
   function submit() {
     const input = $("appSearchInput");
     const query = input.value.trim();
+    clearTimeout(timer);
+    typed += 1;
     if (active >= 0 && options[active]) { choose(options[active]); return; }
     if (!query) return;
     const app = shell.app || {};
@@ -321,14 +337,13 @@
     if (searchPage(query)) return;
     const first = builtIn(query)[0];
     if (first) { choose(first); return; }
-    Aira.toast(`Nothing in ${app.name || "Aira"} matches “${query}”.`, "info");
+    Aira.toast(`Nothing in ${app.name || "Monosage"} matches “${query}”.`, "info");
   }
 
   document.addEventListener("DOMContentLoaded", () => {
     const form = $("appSearch");
     const input = $("appSearchInput");
     if (!form || !input) return;
-    let timer = 0;
     input.addEventListener("input", () => { clearTimeout(timer); timer = setTimeout(suggest, 160); });
     input.addEventListener("focus", () => { if (input.value.trim()) suggest(); });
     input.addEventListener("blur", () => setTimeout(closeList, 120));

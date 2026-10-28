@@ -340,7 +340,7 @@ def openapi(req: Req):  # noqa: ANN201
     spec = {
         "openapi": "3.1.0",
         "info": {
-            "title": "Aira API",
+            "title": "API",
             "version": "1",
             "description": "Every app's API. Use an OAuth access token or a personal access token as a Bearer token.",
         },

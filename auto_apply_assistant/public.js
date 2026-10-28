@@ -103,7 +103,7 @@
 
   function brand(data) {
     business = data.business || business;
-    document.title = data.title && data.title !== business.name ? `${data.title} · ${business.name || "Aira"}` : business.name || data.title || "Aira";
+    document.title = data.title && data.title !== business.name ? `${data.title} · ${business.name || "Monosage"}` : business.name || data.title || "Monosage";
     if (business.accent && /^#[0-9a-f]{6}$/i.test(business.accent)) document.documentElement.style.setProperty("--pub-accent", business.accent);
     $("pubHeader").hidden = false;
     $("pubName").textContent = business.name || "";
@@ -130,7 +130,7 @@
     const search = new URLSearchParams();
     for (const [key, value] of Object.entries(rest)) if (value !== undefined && value !== null) search.set(key, String(value));
     const suffix = search.toString() ? `?${search}` : "";
-    return request("GET", `/api/public/${token}/${name}${suffix}`, undefined, secret ? { "Aira-Secret": String(secret) } : undefined);
+    return request("GET", `/api/public/${token}/${name}${suffix}`, undefined, secret ? { "Monosage-Secret": String(secret) } : undefined);
   }
 
   async function load() {

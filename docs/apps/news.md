@@ -33,6 +33,28 @@ own language, topics, words they follow, sources, hidden sources, saved and read
 * **The same story once**: headlines that differ only in case, spaces or punctuation are one story. Hindi and
   Telugu vowel signs count as letters, so "दिल की बात" and "दाल की बात" are two stories.
 
+## In the Aira frame
+
+News lives at `/news`, with its own logo, the search box across the top, **+ New** above the left menu and the
+nine-dot launcher, like the other Aira apps.
+
+* **+ New** offers *Follow a word or topic* (the same form as on Sources & settings), *Add a news source* (not for
+  children) and *New newsletter issue* (grown-ups only): with no newsletter yet it opens the form that starts one,
+  otherwise My newsletter opens with the next issue's title ready to type (or, with no stories picked yet, the Next
+  issue section, which says how to add them). Each goes through `?new=` and the address forgets it, so Back or a
+  reload does not open the form again.
+* **Search** ("Search news") suggests, as you type, the headlines already loaded (top stories and saved ones, a saved
+  one marked *Saved*), the words you follow, the topics and, for a newsletter writer, readers by name or email.
+  A headline opens the story in a new tab (counted as read), a word opens its news, a topic opens that section and a
+  reader opens My newsletter filtered to them. **Enter** searches all the news on the Search tab, where the search
+  can be followed.
+* **Folders**: the tabs (Top stories, Topics, For you, Search, Saved, My newsletter, Sources & settings) are the
+  folders in the left menu, each with its own icon. On a wide screen the page shows no second tab bar; phones and
+  tablets keep it, since the menu is a sheet there. Each page is named for its tab, with a line on what it holds;
+  "Listen to today's headlines" sits on the headline tabs (Top stories, Topics, For you).
+* Empty pages say what to do next: For you offers *Follow a word or topic* and *Search the news*, an empty headline
+  list offers *Refresh now*, Saved and an issue with no stories link to today's top stories.
+
 ## Earn: your newsletter
 
 Adults can run a newsletter from the **My newsletter** tab (children and teenagers do not see it):

@@ -198,7 +198,7 @@ def remove_key(request: Request) -> tuple[int, dict[str, Any]]:
             raise SerpApiError(
                 "conflict",
                 "The key comes from SERPAPI_API_KEY in the server environment. "
-                "Remove it from .env and restart Aira.",
+                "Remove it from .env and restart Monosage.",
                 http_status=409,
             )
         raise LookupError("There is no stored SerpApi key to remove.")

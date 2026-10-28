@@ -429,7 +429,7 @@ def _routine_card(connection: Any, me: dict[str, Any]) -> list[dict[str, Any]]:
             )
     ran = next((r for r in due if r["ran_today"] and r["session_id"]), None)
     link = f"#/ai?tab=chat&session={ran['session_id']}" if ran else "#/ai?tab=routines"
-    return [life.card(APP, "Aira's routines today", lines=lines, link=link)]
+    return [life.card(APP, "Monosage's routines today", lines=lines, link=link)]
 
 
 @life.pulse(APP)

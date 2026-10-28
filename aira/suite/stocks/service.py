@@ -33,7 +33,7 @@ from aira.suite.stocks import market, predict, store
 APP = store.APP
 DISCLAIMER = (
     "This is not financial advice. Forecasts are estimates from past prices and are often wrong; "
-    "the track record shows how often. Aira never buys or sells real shares."
+    "the track record shows how often. Monosage never buys or sells real shares."
 )
 RANGES = {"1m": 21, "3m": 63, "6m": 126, "1y": 252, "2y": 520}
 PRACTICE_DEFAULTS = {"USD": 100_000_00, "INR": 10_00_000_00}
@@ -497,7 +497,7 @@ def create_prediction(
             )
         ).isoformat()
     if not target_date:
-        raise ValueError("Choose the date when Aira should check your prediction.")
+        raise ValueError("Choose the date when Monosage should check your prediction.")
     when = date.fromisoformat(target_date)
     if when <= today():
         raise ValueError("Choose a date after today.")

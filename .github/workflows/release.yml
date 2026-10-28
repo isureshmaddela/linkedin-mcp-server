@@ -70,12 +70,11 @@ jobs:
       - name: Set up Bun
         uses: oven-sh/setup-bun@0c5077e51419868618aeaa5fe8019c62421857d6 # v2
 
-      - name: Update manifest.json and docker-compose.yml version
+      - name: Update manifest.json version
         run: |
           set -e
           sed -i 's/"version": ".*"/"version": "'$VERSION'"/' manifest.json
-          sed -i 's/stickerdaniel\/linkedin-mcp-server:[^ ]*/stickerdaniel\/linkedin-mcp-server:'$VERSION'/' docker-compose.yml
-          echo "✅ Updated manifest.json and docker-compose.yml to version $VERSION"
+          echo "✅ Updated manifest.json to version $VERSION"
 
       - name: Remove branch protection (temporary)
         run: |
@@ -89,11 +88,11 @@ jobs:
           set -e
           git config --local user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git config --local user.name "github-actions[bot]"
-          git add manifest.json docker-compose.yml
+          git add manifest.json
           if git diff --staged --quiet; then
             echo "ℹ️ No changes to commit"
           else
-            git commit -m "chore: update manifest.json and docker-compose.yml to v$VERSION [skip ci]"
+            git commit -m "chore: update manifest.json to v$VERSION [skip ci]"
             git push origin main
             echo "✅ Committed version updates"
           fi
@@ -138,35 +137,6 @@ jobs:
             echo "✅ Created and pushed tag v$VERSION"
           fi
 
-      - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4
-
-      - name: Log in to Docker Hub
-        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-
-      - name: Build and push Docker images
-        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7
-        with:
-          context: .
-          push: true
-          tags: |
-            stickerdaniel/linkedin-mcp-server:${{ env.VERSION }}
-            stickerdaniel/linkedin-mcp-server:latest
-          platforms: linux/amd64,linux/arm64
-          cache-from: type=gha
-          cache-to: type=gha,mode=max
-
-      - name: Update Docker Hub description
-        uses: peter-evans/dockerhub-description@1b9a80c056b620d92cedb9d9b5a223409c68ddfa # v5
-        with:
-          username: ${{ secrets.DOCKER_USERNAME }}
-          password: ${{ secrets.DOCKER_PASSWORD }}
-          repository: stickerdaniel/linkedin-mcp-server
-          readme-filepath: docs/docker-hub.md
-
       - name: Optimize uv cache for CI
         run: uv cache prune --ci
 
@@ -210,6 +180,5 @@ jobs:
       - name: Summary
         run: |
           echo "Successfully released v$VERSION!"
-          echo "Docker: stickerdaniel/linkedin-mcp-server:$VERSION"
           echo "PyPI: https://pypi.org/project/linkedin-scraper-mcp/$VERSION/"
           echo "GitHub: https://github.com/${{ github.repository }}/releases/tag/v$VERSION"

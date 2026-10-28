@@ -938,7 +938,7 @@ def execute_run(
         remaining = services.daily_remaining()
         if remaining is not None and remaining <= 0:
             raise ValueError(
-                "The daily application limit is reached. Raise it, or Aira continues tomorrow."
+                "The daily application limit is reached. Raise it, or Monosage continues tomorrow."
             )
     with services.connect() as connection:
         merged_answers = {
@@ -957,7 +957,7 @@ def execute_run(
                 run_id,
                 {
                     "status": "already_applied",
-                    "error": "Aira already recorded an application for this job.",
+                    "error": "Monosage already recorded an application for this job.",
                     "finished_at": _iso(services.now()),
                 },
             )
@@ -1011,7 +1011,7 @@ def execute_run(
         services.on_submitted(job, updated, outcome)
         services.notify(
             "Applied automatically",
-            f"Aira applied to {label}.{' Confirmation ' + outcome['confirmation_number'] + '.' if outcome['confirmation_number'] else ''}",
+            f"Monosage applied to {label}.{' Confirmation ' + outcome['confirmation_number'] + '.' if outcome['confirmation_number'] else ''}",
             "#/jobs/autopilot",
         )
     elif status in OPEN_STATUSES:

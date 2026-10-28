@@ -397,7 +397,7 @@ def parse(body: bytes) -> Feed:
     """RSS 2.0 or Atom to a Feed; FeedError for anything else or anything unsafe."""
     if _DECLARATION.search(body):
         raise FeedError(
-            "That feed uses a document type declaration, which Aira does not read."
+            "That feed uses a document type declaration, which Monosage does not read."
         )
     try:
         root = ET.fromstring(body)

@@ -12,9 +12,9 @@
     new MutationObserver(() => {
       if (titleGuard) return;
       const org = Aira.cloud && Aira.cloud.me && Aira.cloud.me.org && Aira.cloud.me.org.name;
-      if (!org || document.title.includes(org) || !document.title.endsWith("· Aira")) return;
+      if (!org || document.title.includes(org) || !document.title.endsWith("· Monosage")) return;
       titleGuard = true;
-      document.title = document.title.replace(/· Aira$/, `· ${org} · Aira`);
+      document.title = document.title.replace(/· Aira$/, `· ${org} · Monosage`);
       titleGuard = false;
     }).observe(node, { childList: true });
   }

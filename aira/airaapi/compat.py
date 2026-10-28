@@ -836,7 +836,7 @@ _V1_ENDPOINTS = (
         "method": "GET",
         "path": "/account.json",
         "alias": "/v1/account.json",
-        "description": "Plan, usage and hourly rate limit of the SerpApi account behind Aira. Never includes the SerpApi key. A client's key (one with a client, price, allowance or engine list) gets its own allowance and usage instead.",
+        "description": "Plan, usage and hourly rate limit of the SerpApi account behind Monosage. Never includes the SerpApi key. A client's key (one with a client, price, allowance or engine list) gets its own allowance and usage instead.",
         "returns": "SerpApi account fields.",
     },
     {
@@ -849,14 +849,14 @@ _V1_ENDPOINTS = (
     {
         "method": "GET",
         "path": "/v1/searches.json?engine=&status=&limit=25&offset=0",
-        "description": "List searches stored in Aira (newest first). A client's key lists only the searches made with it.",
+        "description": "List searches stored in Monosage (newest first). A client's key lists only the searches made with it.",
         "returns": "{items, total, limit, offset} without result bodies.",
     },
     {
         "method": "GET",
         "path": "/searches/{id}.json",
         "alias": "/searches/{id}.html, /v1/searches/{id}.json",
-        "description": "Fetch a stored search by Aira id or SerpApi search id, as JSON or as the raw HTML page. A client's key reaches only its own searches.",
+        "description": "Fetch a stored search by Monosage id or SerpApi search id, as JSON or as the raw HTML page. A client's key reaches only its own searches.",
         "returns": "The stored SerpApi JSON, or the page.",
     },
     {
@@ -892,14 +892,14 @@ _AIRA_ERRORS = (
         "http_status": 429,
         "code": "local_rate_limit",
         "message": "The local hourly limit of N live searches is reached.",
-        "meaning": "Aira's own protection against spending the SerpApi quota was hit.",
+        "meaning": "Monosage's own protection against spending the SerpApi quota was hit.",
         "advice": "Raise the limit in API settings.",
     },
     {
         "http_status": 409,
         "code": "not_configured",
         "message": "No SerpApi key is configured.",
-        "meaning": "The account behind this Aira key has not connected a SerpApi key.",
+        "meaning": "The account behind this Monosage key has not connected a SerpApi key.",
         "advice": "Connect one under API > Account.",
     },
     {
@@ -951,7 +951,7 @@ def docs_payload(base_url: str) -> dict[str, Any]:
             + " in your code. SerpApi's own paths work (/search.json, /account.json, /locations.json, /searches/{id}.json) and so do the /v1 paths.",
             "Replace your SerpApi key with an API key from API > Keys.",
             "Nothing else changes: parameters, JSON bodies, pagination links and error shapes match SerpApi, and the official SDKs work unchanged.",
-            "Identical searches within the cache window now cost no SerpApi searches and appear in Aira's history.",
+            "Identical searches within the cache window now cost no SerpApi searches and appear in Monosage's history.",
         ],
         "sdk": {
             "python (serpapi)": (

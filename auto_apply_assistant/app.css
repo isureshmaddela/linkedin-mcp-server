@@ -2722,3 +2722,9 @@ body.less-motion .ai-typing span { animation: none; opacity: .7; }
 .nav a.shell-sublink { padding: 8px 14px; font-weight: 600; }
 .shell-subdot { display: grid; place-items: center; flex: none; width: 18px; height: 18px; }
 .shell-subdot::before { content: ""; width: 6px; height: 6px; border-radius: 50%; background: currentColor; opacity: 0.55; }
+
+/* Only the open page's folders show, like a mail app expanding one label tree at a time; an app's only section
+   keeps its folders on every page of the app. */
+.nav a.shell-has-subnav:not(.shell-folded):not([aria-current="page"]) + .shell-subnav { display: none; }
+/* On a phone the search box needs the room: the LinkedIn, Ollama and SerpApi pills wait for a wider screen. */
+@media (max-width: 600px) { .status-strip { display: none; } }

@@ -266,6 +266,7 @@ Videos is one catalog for the whole platform and an ad bought by one organizatio
 | Method | Path | Auth | Flags | Body and query | What it does, and who may call it |
 | --- | --- | --- | --- | --- | --- |
 | GET | `/` | none |  |  | The web interface with the hosted scripts injected. |
+| GET | `/{app}/?` | none |  |  | An app's own address (`/home`, `/careers`, `/developers`, `/sales`, `/marketing`, `/service`, `/commerce`, `/courses`, `/ads`, `/social`, `/health`, `/learn`, `/play`, `/planner`, `/news`, `/videos`, `/life`, `/ai`, `/stocks`): the same page as `/`, opened on that app. |
 | GET | `/static/{file}` | none |  |  | Static assets for the interface. |
 | GET | `/static/i18n/{code}.json` | none |  |  | The screens' translations for one language (`te`, `hi`): English source text to translation. English is the source and has no file. |
 | GET | `/api/health` | none |  |  | Liveness. |

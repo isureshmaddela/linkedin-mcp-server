@@ -91,7 +91,7 @@ def add(
         >= MAX_MEMORIES
     ):
         raise ValueError(
-            f"Aira keeps {MAX_MEMORIES} memories for you. Remove one in AI > Memory first."
+            f"Monosage keeps {MAX_MEMORIES} memories for you. Remove one in AI > Memory first."
         )
     stamp = kit.now()
     memory_id = kit.new_id()

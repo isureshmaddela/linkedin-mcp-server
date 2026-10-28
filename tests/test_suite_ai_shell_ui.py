@@ -43,17 +43,29 @@ def choose_new(page, label):
 
 
 def active_class(page):
-    return page.evaluate("() => document.activeElement ? document.activeElement.className : ''")
+    return page.evaluate(
+        "() => document.activeElement ? document.activeElement.className : ''"
+    )
 
 
 def seed(context, env):
     post(context, env, "/api/ai/chat", {"message": "Remember that I am vegetarian"})
-    post(context, env, "/api/ai/chat", {"message": "Add milk and bread to the shopping list"})
+    post(
+        context,
+        env,
+        "/api/ai/chat",
+        {"message": "Add milk and bread to the shopping list"},
+    )
     post(
         context,
         env,
         "/api/ai/routines",
-        {"title": "Money check", "prompt": "How much did I earn this month?", "at": "19:00", "days": EVERY_DAY},
+        {
+            "title": "Money check",
+            "prompt": "How much did I earn this month?",
+            "at": "19:00",
+            "days": EVERY_DAY,
+        },
     )
 
 
@@ -77,12 +89,20 @@ def test_ai_new_search_and_folders_in_the_frame(browser, env):
     until(page, lambda: "tab=routines" in page.url, what="the Routines folder")
     page.wait_for_selector("#main .page-head h1:has-text('Routines')")
     page.wait_for_selector(".ai-routine:has-text('Money check')")
-    assert page.locator("#primaryNav .shell-sublink[aria-current='page']").inner_text().strip() == "Routines"
+    assert (
+        page.locator("#primaryNav .shell-sublink[aria-current='page']")
+        .inner_text()
+        .strip()
+        == "Routines"
+    )
 
     # "+ New" lists the app's creates; each opens its form, and the address forgets ?new= at once.
     page.click(".shell-new")
     page.wait_for_selector(".shell-new-menu")
-    assert [t.strip() for t in page.locator(".shell-new-menu [role='menuitem']").all_inner_texts()] == NEW_ITEMS
+    assert [
+        t.strip()
+        for t in page.locator(".shell-new-menu [role='menuitem']").all_inner_texts()
+    ] == NEW_ITEMS
     page.keyboard.press("Escape")
 
     choose_new(page, "New routine")
@@ -97,7 +117,11 @@ def test_ai_new_search_and_folders_in_the_frame(browser, env):
     choose_new(page, "Something to remember")
     until(page, lambda: "tab=memory" in page.url, what="the Memory tab")
     page.wait_for_selector(".ai-memory:has-text('I am vegetarian')")
-    until(page, lambda: "ai-memory-input" in active_class(page), what="the memory box to take focus")
+    until(
+        page,
+        lambda: "ai-memory-input" in active_class(page),
+        what="the memory box to take focus",
+    )
     assert "new=" not in page.url
 
     choose_new(page, "Earning goal")
@@ -109,7 +133,11 @@ def test_ai_new_search_and_folders_in_the_frame(browser, env):
     choose_new(page, "New conversation")
     until(page, lambda: "tab=chat" in page.url, what="the chat")
     page.wait_for_selector(".ai-welcome")
-    until(page, lambda: "ai-input" in active_class(page), what="the message box to take focus")
+    until(
+        page,
+        lambda: "ai-input" in active_class(page),
+        what="the message box to take focus",
+    )
     assert "new=" not in page.url and "session=" not in page.url
 
     # Back does not open a form again.
@@ -120,29 +148,40 @@ def test_ai_new_search_and_folders_in_the_frame(browser, env):
 
     # The search across the top: conversations, memories, routines and agents, each opening itself.
     open_ai(page, env, "ai?tab=agents")
-    assert page.get_attribute("#appSearchInput", "placeholder") == "Search chats, memories and routines"
+    assert (
+        page.get_attribute("#appSearchInput", "placeholder")
+        == "Search chats, memories and routines"
+    )
     search(page, "vegetarian")
     texts = page.locator("#appSearchList .shell-search-option").all_inner_texts()
     assert any("I am vegetarian" in t and "Memory" in t for t in texts), texts
-    assert any("Remember that I am vegetarian" in t and "Conversation" in t for t in texts), texts
+    assert any(
+        "Remember that I am vegetarian" in t and "Conversation" in t for t in texts
+    ), texts
     page.locator("#appSearchList .shell-search-option:has-text('Memory')").first.click()
     page.wait_for_selector(".ai-memory.ai-picked:has-text('I am vegetarian')")
     assert "tab=memory" in page.url and "open=" not in page.url
 
     search(page, "money check")
-    page.locator("#appSearchList .shell-search-option:has-text('Routine')").first.click()
+    page.locator(
+        "#appSearchList .shell-search-option:has-text('Routine')"
+    ).first.click()
     page.wait_for_selector(".ai-routine.ai-picked:has-text('Money check')")
     assert "tab=routines" in page.url and "open=" not in page.url
 
     search(page, "planneragent")
-    page.locator("#appSearchList .shell-search-option:has-text('PlannerAgent')").first.click()
+    page.locator(
+        "#appSearchList .shell-search-option:has-text('Agent · Planner')"
+    ).first.click()
     page.wait_for_selector(".modal:has-text('Configure PlannerAgent')")
     assert "tab=agents" in page.url and "open=" not in page.url
     page.keyboard.press("Escape")
     page.wait_for_selector(".modal", state="detached")
 
     search(page, "milk")
-    page.locator("#appSearchList .shell-search-option:has-text('Conversation')").first.click()
+    page.locator(
+        "#appSearchList .shell-search-option:has-text('Conversation')"
+    ).first.click()
     until(page, lambda: "session=" in page.url, what="the conversation")
     page.wait_for_selector(".ai-msg.mine:has-text('Add milk and bread')")
     # The conversation's numbers sit in one slim line under its name.
@@ -152,13 +191,26 @@ def test_ai_new_search_and_folders_in_the_frame(browser, env):
     # Enter shows every match on a results page, activity included, with a way to ask Aira the same words.
     search(page, "milk")
     page.keyboard.press("Enter")
-    until(page, lambda: "tab=results" in page.url and "q=milk" in page.url, what="the search results")
+    until(
+        page,
+        lambda: "tab=results" in page.url and "q=milk" in page.url,
+        what="the search results",
+    )
     page.wait_for_selector("#main .page-head h1:has-text('Search results')")
-    page.wait_for_selector(".ai-hits .ai-hit:has-text('Add milk and bread to the shopping list')")
-    page.wait_for_selector(".suite-section:has-text('Activity') >> text=Add milk, bread to the shopping list")
-    assert page.locator("a.btn:has-text('Ask Aira: “milk”')").get_attribute("href") == "#/ai?tab=chat&ask=milk"
+    page.wait_for_selector(
+        ".ai-hits .ai-hit:has-text('Add milk and bread to the shopping list')"
+    )
+    page.wait_for_selector(
+        ".suite-section:has-text('Activity') >> text=Add milk, bread to the shopping list"
+    )
+    assert (
+        page.locator("a.btn:has-text('Ask Aira: “milk”')").get_attribute("href")
+        == "#/ai?tab=chat&ask=milk"
+    )
     page.locator(".ai-hits .ai-hit").first.click()
-    until(page, lambda: "session=" in page.url, what="the conversation from the results")
+    until(
+        page, lambda: "session=" in page.url, what="the conversation from the results"
+    )
 
     # A search that finds nothing says so and offers the chat.
     search_text = "zebra crossing"
@@ -172,7 +224,9 @@ def test_ai_new_search_and_folders_in_the_frame(browser, env):
 
 def test_ai_in_the_frame_on_a_phone_fits(browser, env):
     kit.forget_schema()
-    context, page, problems = signed_in_page(browser, env, width=390, height=844, dark=True)
+    context, page, problems = signed_in_page(
+        browser, env, width=390, height=844, dark=True
+    )
     seed(context, env)
     # The menu (and its "+ New") is a sheet on a phone, so the tab bar and the head's New conversation stay.
     for hash_ in (
@@ -188,7 +242,9 @@ def test_ai_in_the_frame_on_a_phone_fits(browser, env):
         open_ai(page, env, hash_)
         page.wait_for_timeout(300)
         assert page.locator("#main .ai-page > .tabs").is_visible(), hash_
-        assert not page.evaluate("() => document.documentElement.scrollWidth > window.innerWidth + 2"), hash_
+        assert not page.evaluate(
+            "() => document.documentElement.scrollWidth > window.innerWidth + 2"
+        ), hash_
     open_ai(page, env, "ai?tab=chat")
     assert page.locator("#main .ai-new-chat").is_visible()
     # An agent's consent pills sit on their own line, above the switch, not under it.

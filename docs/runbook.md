@@ -168,4 +168,4 @@ Stop with Ctrl+C. Upgrade by pulling the new source and restarting; migrations a
 
 ## Deployment scope
 
-Supported deployment is a single trusted machine on loopback. The repository's Dockerfile packages the MCP server, not Aira; a containerised Aira would still need the visible LinkedIn sign-in browser and a local Ollama, so it is intentionally out of scope.
+Supported deployment is a single trusted machine on loopback. A containerised Aira would still need the visible LinkedIn sign-in browser and a local Ollama, so it is intentionally out of scope.

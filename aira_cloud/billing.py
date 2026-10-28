@@ -1154,7 +1154,7 @@ class Billing:
         item_id = provider.add_invoice_item(
             subscription["billing_customer_id"],
             amount,
-            "Aira Ads balance top-up",
+            "Monosage Ads balance top-up",
             "usd",
         )
         with self.db.write() as connection:
@@ -1169,7 +1169,7 @@ class Billing:
                     dumps(
                         [
                             {
-                                "description": "Aira Ads balance top-up",
+                                "description": "Monosage Ads balance top-up",
                                 "amount_cents": amount,
                                 "app_id": "ads",
                             }
@@ -2190,7 +2190,7 @@ class Billing:
         ):
             try:
                 self.providers[sub["billing_provider"]].add_invoice_item(
-                    sub["billing_customer_id"], total, f"Aira overage {previous}", "usd"
+                    sub["billing_customer_id"], total, f"Monosage overage {previous}", "usd"
                 )
             except Exception:  # noqa: BLE001
                 logger.exception(

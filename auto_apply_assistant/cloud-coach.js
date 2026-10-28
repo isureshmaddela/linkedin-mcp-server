@@ -113,7 +113,7 @@
     stage.replaceChildren(
       h("div", { class: "page-head" }, h("div", {}, h("h1", { text: `Welcome to ${org}` }), h("p", { text: "Before anything runs for you, here is plainly what happens and what stays yours." }))),
       h("div", { class: "grid sidebar-right" },
-        panel("How this works", null, body(h("p", { text: `${org} pays for Aira so that you have help with your job search. It works from your profile and resume, finds roles, prepares applications and, if its rules allow, submits them for you.` }), form)),
+        panel("How this works", null, body(h("p", { text: `${org} pays for Monosage so that you have help with your job search. It works from your profile and resume, finds roles, prepares applications and, if its rules allow, submits them for you.` }), form)),
         h("div", { class: "grid" },
           panel("Your organization's rules", null, body(rulesList(rules, cloud.me.policy))),
           panel("Your coaches", null, h("div", { class: "list" }, ...coachRows)))));
@@ -212,7 +212,7 @@
     const connected = !!me.linkedin_connected;
     const optedIn = !!(me.workspace && me.workspace.linkedin_opted_in);
     if (!rules.linkedin_allowed) {
-      return panel("LinkedIn (optional)", chip("Off", ""), body(h("p", { class: "muted", text: "Your organization has LinkedIn turned off. Aira finds jobs on the other sources without it." })));
+      return panel("LinkedIn (optional)", chip("Off", ""), body(h("p", { class: "muted", text: "Your organization has LinkedIn turned off. Monosage finds jobs on the other sources without it." })));
     }
     const connect = h("button", { type: "button", class: "btn secondary", text: connected ? "LinkedIn is connected" : "Connect LinkedIn", disabled: connected });
     connect.addEventListener("click", () => Aira.withBusy(connect, async () => {
@@ -223,7 +223,7 @@
         if (result && result.remote_login) {
           // A remote browser on a worker host: a short-lived link opens it in this person's own browser.
           const minutes = Math.max(1, Math.round((result.remote_login.expires_in || 600) / 60));
-          Aira.modal({ title: "Sign in to LinkedIn", body: h("div", {}, h("p", { text: "LinkedIn opens in a private browser that Aira runs for you, shown in a new window. Sign in there yourself, including any security check. Aira does not store or log what you type; it keeps only the signed-in session." }), h("p", { class: "muted", text: `The link works once and expires in ${minutes} minutes. The window closes by itself when you are signed in.` })), actions: [{ label: "Later", kind: "ghost" }, { label: "Open the sign-in window", onClick: () => { window.open(result.remote_login.url, "_blank", "noopener"); } }] });
+          Aira.modal({ title: "Sign in to LinkedIn", body: h("div", {}, h("p", { text: "LinkedIn opens in a private browser that Monosage runs for you, shown in a new window. Sign in there yourself, including any security check. Monosage does not store or log what you type; it keeps only the signed-in session." }), h("p", { class: "muted", text: `The link works once and expires in ${minutes} minutes. The window closes by itself when you are signed in.` })), actions: [{ label: "Later", kind: "ghost" }, { label: "Open the sign-in window", onClick: () => { window.open(result.remote_login.url, "_blank", "noopener"); } }] });
         } else {
           Aira.toast("A LinkedIn sign-in window opens next. Complete it there.", "success");
         }
@@ -239,7 +239,7 @@
       } catch (error) { Aira.reportError(error); }
     }));
     return panel("LinkedIn (optional)", chip(connected ? "Connected" : optedIn ? "Acknowledged" : "Off", connected ? "ok" : ""), body(
-      h("p", { class: "muted", text: "LinkedIn forbids automated access in its User Agreement, so this is your own choice and your own session. Aira works without it." }),
+      h("p", { class: "muted", text: "LinkedIn forbids automated access in its User Agreement, so this is your own choice and your own session. Monosage works without it." }),
       h("div", { class: "btn-row" }, connect, easy)));
   }
 

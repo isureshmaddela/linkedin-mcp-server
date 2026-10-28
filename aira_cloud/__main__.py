@@ -65,7 +65,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
         worker.start()
     scheme = "https" if app.config.tls_cert else "http"
     logging.getLogger("aira_cloud").info(
-        "Aira cloud serving on %s://%s:%d (region %s)",
+        "Monosage cloud serving on %s://%s:%d (region %s)",
         scheme,
         app.config.host,
         server.server_address[1],

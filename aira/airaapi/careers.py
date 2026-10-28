@@ -846,7 +846,7 @@ def build_aira_params(
         for name in ("posted_within", "chips", "uds", "lrad", "next_page_token")
     ):
         warnings.append(
-            "Aira Jobs ignores the Google-only filters (posted within, radius, Google chips); results are newest first."
+            "Jobs ignores the Google-only filters (posted within, radius, Google chips); results are newest first."
         )
     return params, applied, warnings
 

@@ -116,7 +116,7 @@
         ctx.canEdit ? S.button("I got a refill", () => refillMedicine(item, ctx.rerender), { kind: "secondary sm" }) : null));
     }
     body.append(S.section(ctx.canEdit ? "Your medicines today" : `${ctx.person.name}'s medicines today`,
-      slots.length ? h("ul", { class: "care-slots" }, ...slots.map((slot) => slotRow(slot, ctx.canEdit, ctx.rerender))) : Aira.ui.empty("No medicines today", ctx.canEdit ? "Add a medicine and Aira reminds you when it is time." : ""),
+      slots.length ? h("ul", { class: "care-slots" }, ...slots.map((slot) => slotRow(slot, ctx.canEdit, ctx.rerender))) : Aira.ui.empty("No medicines today", ctx.canEdit ? "Add a medicine and Monosage reminds you when it is time." : ""),
       ctx.canEdit ? h("div", { class: "btn-row" }, S.button("Add a medicine", () => editMedicine(null, ctx.rerender), { kind: "secondary" })) : null));
     if (ctx.canEdit && (data.as_needed || []).length) {
       body.append(S.section("When you need them", h("div", { class: "btn-row" }, ...data.as_needed.map((medicine) => big(`I took ${medicine.name}`, async () => {
@@ -148,7 +148,7 @@
         { name: "times", label: "Times of day", placeholder: "08:00, 20:00", hint: "24-hour times, separated by commas." },
         { name: "days", label: "Days", placeholder: "Every day", hint: "Leave empty for every day, or write days like Mon, Wed, Fri." },
         { name: "with_food", label: "Food", placeholder: "With breakfast" },
-        { name: "stock", label: "How many are left", type: "number", min: 0, hint: "Aira counts down as you take them and tells you when to refill." },
+        { name: "stock", label: "How many are left", type: "number", min: 0, hint: "Monosage counts down as you take them and tells you when to refill." },
         { name: "refill_at", label: "Remind me to refill at", type: "number", min: 0, hint: "When this many are left. Leave 0 to be told 5 days before they run out." },
         { name: "min_gap_hours", label: "Hours between doses (for 'when needed')", type: "number", min: 0, max: 72 },
         { name: "start_date", label: "Start", type: "date" },
@@ -345,7 +345,7 @@
         const payload = { ...values, at: toIsoLocal(values.at) };
         if (appointment) await api(`/appointments/${appointment.id}`, { method: "PATCH", body: payload });
         else await api("/appointments", { method: "POST", body: payload });
-        await done("Saved. Aira reminds you the day before and two hours before.");
+        await done("Saved. Monosage reminds you the day before and two hours before.");
         rerender();
       },
     });
@@ -360,7 +360,7 @@
         ctx.canEdit ? S.button("Change", () => editAppointment(a, ctx.rerender), { kind: "secondary sm" }) : null,
         ctx.canEdit && !a.done ? S.button("Done", async () => { await api(`/appointments/${a.id}`, { method: "PATCH", body: { done: true } }); ctx.rerender(); }, { kind: "ghost sm" }) : null,
         ctx.canEdit ? S.button("Delete", async () => { if (await S.confirmDelete("this appointment")) { await api(`/appointments/${a.id}`, { method: "DELETE" }); ctx.rerender(); } }, { kind: "ghost sm" }) : null));
-    body.append(S.section("Coming up", ctx.canEdit ? h("div", { class: "btn-row" }, big("Add an appointment", () => editAppointment(null, ctx.rerender))) : null, data.upcoming.length ? h("div", { class: "care-cards" }, ...data.upcoming.map((a) => card(a, true))) : Aira.ui.empty("No appointments coming up", ctx.canEdit ? "Add your next visit; Aira reminds you the day before and two hours before." : "")));
+    body.append(S.section("Coming up", ctx.canEdit ? h("div", { class: "btn-row" }, big("Add an appointment", () => editAppointment(null, ctx.rerender))) : null, data.upcoming.length ? h("div", { class: "care-cards" }, ...data.upcoming.map((a) => card(a, true))) : Aira.ui.empty("No appointments coming up", ctx.canEdit ? "Add your next visit; Monosage reminds you the day before and two hours before." : "")));
     // The last 12, and an older one the search box found.
     const asked = String((ctx.ask && ctx.ask.open) || "");
     const past = data.past.filter((a, i) => i < 12 || asked === `appointment:${a.id}`);
@@ -607,7 +607,7 @@
         h("div", { class: "care-visit-main" }, h("strong", { text: `${dayWords(v.day)}${v.start ? ` at ${v.start}` : ""} · ${v.client}` }), h("span", { text: `${hours(v.minutes)} · ${money(v.amount_cents)}${v.statement_id ? " · billed" : ""}` }), v.tasks.length ? h("span", { class: "muted small", text: v.tasks.join(", ") }) : null),
         v.statement_id ? null : h("div", { class: "btn-row" }, S.button("Change", () => editVisit(v, data.clients, ctx.rerender, "", ctx.overview.today), { kind: "ghost sm" }), S.button("Delete", async () => { if (await S.confirmDelete("this visit")) { await api(`/work/visits/${v.id}`, { method: "DELETE" }); ctx.rerender(); } }, { kind: "ghost sm" }))))) : Aira.ui.empty(filters.client ? "No visits for this client yet" : "No visits yet", "Record each visit after it happens: the day, how long and what you did.")));
     body.append(S.section("Statements", data.statements.length ? h("div", { class: "care-cards" }, ...data.statements.map((st) => statementCard(st, ctx))) : Aira.ui.empty("No statements yet", "When you have visits to bill, press 'Bill now' on the client.")));
-    body.append(note("Aira does not take payments: clients pay you directly. When you mark a statement paid, it counts in your earnings and in the Business hub."));
+    body.append(note("Monosage does not take payments: clients pay you directly. When you mark a statement paid, it counts in your earnings and in the Business hub."));
   }
 
   // ---------------------------------------------------------------- search (the box across the top)
@@ -715,9 +715,9 @@
   }
 
   // The left menu's folders link to #/care?tab=<id>; while you look at someone else's health they stay with them.
-  function folderLinks(person) {
-    if (!person) return;
-    for (const link of document.querySelectorAll('.shell-subnav[data-section="care"] a.shell-sublink')) link.setAttribute("href", `#/care?tab=${encodeURIComponent(link.dataset.tab)}&person=${encodeURIComponent(person)}`);
+  function folderLinks(items, person) {
+    if (!person) return items;
+    return items.map((item) => ({ ...item, href: `#/care?tab=${encodeURIComponent(item.id)}&person=${encodeURIComponent(person)}` }));
   }
 
   // ---------------------------------------------------------------- the page
@@ -765,7 +765,7 @@
       const subtitle = !canEdit ? `${overview.person.name}'s health. You are their caregiver: you can look, not change.`
         : tab === "search" ? "Medicines, appointments, readings, diary days, care clients and people that match." : meta.about;
       const body = S.page(main, { title, subtitle });
-      document.title = `${title} · Health · Aira`;
+      document.title = `${title} · Health · Monosage`;
       const away = OWN_ONLY.includes(tab) || tab === "search" ? "today" : tab; // where "Showing" and "Back to mine" go
       if (overview.caring_for.length || person) {
         const choose = Aira.ui.select([["", "Me"], ...overview.caring_for.map((p) => [p.id, `${p.emoji} ${p.name}`])], person, { "aria-label": "Whose health" });
@@ -776,7 +776,7 @@
       const strip = Aira.ui.tabs(visible, tab, (id) => nav(id, person));
       strip.classList.add("care-tabstrip"); // a phone's tabs; wider screens have them as the left menu's folders
       body.append(strip);
-      if (Aira.shell && Aira.shell.tabs) { Aira.shell.tabs("care", visible, tab); folderLinks(person); }
+      if (Aira.shell && Aira.shell.tabs) { Aira.shell.tabs("care", folderLinks(visible, person), tab); }
       const panel = h("div", { class: "suite-body" });
       body.append(panel);
       try {

@@ -1720,7 +1720,7 @@
       const code = buildSnippets(engineId(currentEngine), currentParams, { baseUrl: direct ? "https://serpapi.com" : (baseUrl || origin), apiKey: direct ? "YOUR_SERPAPI_API_KEY" : "YOUR_AIRA_API_KEY" });
       for (const button of tabs.children) { const on = button.dataset.lang === lang; button.setAttribute("aria-selected", String(on)); button.tabIndex = on ? 0 : -1; }
       panel.replaceChildren(codeBlock(lang, code[lang]));
-      hint.textContent = direct ? "Calls SerpApi directly and uses your own SerpApi key. Aira is not involved, so nothing is cached or recorded." : "Create an API key on the Keys tab. Calls through Aira are cached, recorded in History and counted in Usage.";
+      hint.textContent = direct ? "Calls SerpApi directly and uses your own SerpApi key. Monosage is not involved, so nothing is cached or recorded." : "Create an API key on the Keys tab. Calls through Monosage are cached, recorded in History and counted in Usage.";
     };
     for (const code of LANGUAGES) {
       tabs.append(h("button", { type: "button", role: "tab", class: "sk-lang-tab", dataset: { lang: code }, text: LANGUAGE_LABELS[code], onclick: () => { lang = code; Aira.remember("serp.lang", code); paint(); } }));

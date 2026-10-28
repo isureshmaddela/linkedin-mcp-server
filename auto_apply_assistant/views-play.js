@@ -819,7 +819,7 @@
     const meta = TABS.find((t) => t.id === query.tab) || TABS[0];
     const title = searching ? (q ? `Results for “${q}”` : "Search") : meta.label;
     const body = S.page(main, { title, subtitle: searching ? "Games, quizzes, the watch list and live games that match." : meta.about });
-    document.title = `${title} · Play · Aira`;
+    document.title = `${title} · Play · Monosage`;
     body.classList.add("play-app");
     const tab = S.tabs(body, route, "play", TABS, searching ? "search" : meta.id);
     const panel = h("div", { class: "suite-body" });

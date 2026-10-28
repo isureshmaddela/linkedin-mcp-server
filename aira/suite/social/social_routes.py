@@ -120,7 +120,7 @@ def me_share(request: Request) -> tuple[int, dict[str, Any]]:
     with _open(request) as (_sc, me):
         if me["age_group"] in ("child", "teen"):
             raise PermissionError(
-                "Young people's profiles are not shared outside Aira."
+                "Young people's profiles are not shared outside Monosage."
             )
         if me["visibility"] != "public":
             raise PermissionError("Make your profile public first.")
@@ -752,7 +752,7 @@ def market_share(request: Request) -> tuple[int, dict[str, Any]]:
         listing = market.mine(sc, me, _id(request))
         if listing["audience"] != "public":
             raise PermissionError(
-                "Only a listing for everyone can be shared outside Aira."
+                "Only a listing for everyone can be shared outside Monosage."
             )
     with closing(_account_db(request)) as connection:
         link = public.create_link(

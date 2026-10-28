@@ -517,7 +517,7 @@
       { name: "timezone", label: "Time zone", placeholder: data.timezone, hint: "Empty uses the Business hub profile. A name like Europe/London or America/New_York." },
       { name: "auto_confirm", label: "Confirm online bookings automatically", type: "checkbox", hint: "Off: online bookings wait for you to confirm them." },
       { name: "max_active_per_customer", label: "Upcoming bookings one customer may hold", type: "number", min: 1, max: 50 },
-      { name: "review_link", label: "Review link", type: "url", placeholder: "https://g.page/r/...", hint: "After a completed appointment, Aira prepares a short review request." },
+      { name: "review_link", label: "Review link", type: "url", placeholder: "https://g.page/r/...", hint: "After a completed appointment, Monosage prepares a short review request." },
       { name: "welcome", label: "Welcome line on the booking page", placeholder: "New clients: please arrive 10 minutes early." },
     ], data.rules);
     body.append(

@@ -415,7 +415,7 @@ def _cef(row: dict[str, Any]) -> str:
         f"rt={row['at'] * 1000} suser={esc(row['actor_label'])} suid={esc(row['actor_id'])} cs1Label=candidate cs1={esc(row['candidate_id'])} "
         f"cs2Label=role cs2={esc(row['actor_role'])} cs3Label=target cs3={target} externalId={row['seq']}"
     )
-    return f"CEF:0|Aira|Career Copilot|1.0|{esc(row['action'], True)}|{esc(row['action'], True)}|3|{extension}"
+    return f"CEF:0|Monosage|Career Copilot|1.0|{esc(row['action'], True)}|{esc(row['action'], True)}|3|{extension}"
 
 
 @cloud_route("GET", r"/api/org/audit/stream")

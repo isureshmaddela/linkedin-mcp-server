@@ -495,7 +495,7 @@ class PlatformAdmin:
         self.app.billing.notice(
             org_id,
             "warning",
-            "Aira support asks for access",
+            "Monosage support asks for access",
             reason[:200],
             "#/org/support",
         )

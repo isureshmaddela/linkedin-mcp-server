@@ -798,7 +798,7 @@ def _checklist(connection: Any) -> list[dict[str, Any]]:
             "lesson",
             "Add a lesson",
             kit.count(connection, "SELECT COUNT(*) FROM ac_lessons") > 0,
-            "Or let Aira draft the outline",
+            "Or let Monosage draft the outline",
         ),
         kit.step(
             "publish",

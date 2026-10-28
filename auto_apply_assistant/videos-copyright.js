@@ -62,7 +62,7 @@
     }
   } },
     h("h1", { text: "Report a copyright problem" }),
-    h("p", { text: "Use this form if a video on Aira copies a film, song, picture or other work that you own, or that you may act for. You do not need an account." }),
+    h("p", { text: "Use this form if a video on Monosage copies a film, song, picture or other work that you own, or that you may act for. You do not need an account." }),
     field("Which video?", video),
     field("Your full name", name),
     field("Your email address", email, "We write to you about this notice only."),
@@ -75,6 +75,6 @@
     h("div", { class: "pub-btn-row" }, send),
     h("p", { class: "pub-muted", text: "A false notice can have legal consequences. The uploader sees the work you describe and your name, not your email address." }),
   );
-  document.title = "Copyright notice · Aira Videos";
+  document.title = "Copyright notice · Monosage Videos";
   main.replaceChildren(form);
 })();

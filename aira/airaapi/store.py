@@ -371,7 +371,7 @@ def _inflate(blob: bytes) -> bytes:
     except zlib.error:
         raise BlobError("The stored result is damaged and cannot be read.") from None
     if len(data) > MAX_INFLATED_BYTES or inflater.unconsumed_tail:
-        raise BlobError("The stored result is larger than Aira stores and was skipped.")
+        raise BlobError("The stored result is larger than Monosage stores and was skipped.")
     return data
 
 

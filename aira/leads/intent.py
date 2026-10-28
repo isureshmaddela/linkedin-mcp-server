@@ -222,7 +222,7 @@ def build_intent_params(
         params,
         applied,
         [
-            "These are public posts. Aira never replies for you: open the post and answer in your own name, following that community's rules.",
+            "These are public posts. Monosage never replies for you: open the post and answer in your own name, following that community's rules.",
         ],
     )
 

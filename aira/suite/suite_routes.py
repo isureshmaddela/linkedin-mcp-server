@@ -353,7 +353,7 @@ def public_query(request: Request) -> tuple[int, dict[str, Any]]:
         name: values[-1] for name, values in request.query.items() if values
     }
     params.pop("secret", None)
-    secret = request.header("Aira-Secret")
+    secret = request.header("Monosage-Secret")
     if secret:
         params["secret"] = secret[:200]
     with request.connect() as connection:

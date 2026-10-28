@@ -64,7 +64,7 @@
         (r.diary.symptoms || []).length ? h("p", { text: `Noticed: ${r.diary.symptoms.map((s) => `${s.name} (${s.days} ${s.days === 1 ? "day" : "days"})`).join(", ")}` }) : null) : null,
       r.next_appointment && r.next_appointment.questions ? h("section", { class: "pub-card" }, h("h2", { text: "Questions for the next visit" }), h("p", { class: "pub-pre", text: r.next_appointment.questions })) : null,
       h("div", { class: "pub-btn-row" }, ctx.button("Print", () => window.print(), "secondary")),
-      h("p", { class: "pub-muted", text: "Recorded by the patient in Aira Health. The numbers are what they wrote down; the notes are general information, not a diagnosis." }),
+      h("p", { class: "pub-muted", text: "Recorded by the patient in Monosage Health. The numbers are what they wrote down; the notes are general information, not a diagnosis." }),
     ].filter(Boolean));
   });
 

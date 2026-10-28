@@ -83,7 +83,6 @@ When adding a section to an existing tool (e.g., adding "certifications" to `get
 ### Docs
 
 - [ ] Update tool table in `README.md`
-- [ ] Update features list in `docs/docker-hub.md`
 - [ ] Update tools array/description in `manifest.json`
 
 ### Verify
@@ -111,7 +110,6 @@ When adding an entirely new MCP tool (e.g., `search_companies`):
 ### Docs
 
 - [ ] Update tool table in `README.md`
-- [ ] Update features list in `docs/docker-hub.md`
 - [ ] Add tool to `tools` array in `manifest.json`
 
 ### Verify

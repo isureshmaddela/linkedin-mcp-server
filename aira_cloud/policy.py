@@ -20,7 +20,7 @@ from dataclasses import dataclass
 from typing import Any
 
 LINKEDIN_NOTICE = (
-    "LinkedIn's User Agreement forbids automated access. Connecting LinkedIn lets Aira search, read and (if you enable it) "
+    "LinkedIn's User Agreement forbids automated access. Connecting LinkedIn lets Monosage search, read and (if you enable it) "
     "apply and reply through your own session, which can lead LinkedIn to restrict your account. "
     "Send acknowledge: true to confirm you understand."
 )
@@ -71,6 +71,7 @@ def _org(permission: str, **kw: Any) -> Rule:
 POLICY: dict[str, Rule] = {
     # -- static and health ---------------------------------------------------------------
     "ui_index": PUBLIC,
+    "ui_app_page": PUBLIC,
     "ui_static": PUBLIC,
     "ui_i18n": PUBLIC,
     "ui_copyright": PUBLIC,  # the Videos copyright notice form (anyone, no account)

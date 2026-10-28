@@ -1,6 +1,6 @@
 /* Aira — API console: overview, engines, history, locations, monitors, account, keys, docs and status.
  *
- * The console is one view (#/airaapi) with a tab per page (?tab=). Every tab is a function in Aira.airaapi.tabs
+ * The console is one view (#/api) with a tab per page (?tab=). Every tab is a function in Aira.airaapi.tabs
  * taking (content, ctx) with ctx = {route, query, tab, content, setQuery(patch)}. The Playground tab hands its
  * content node to Aira.renderPlayground (views-playground.js); another view can add or replace a tab the same way:
  *
@@ -51,10 +51,10 @@
   const TAB_LINES = {
     overview: "Searches, plan and spending at a glance.",
     playground: "Pick an engine, fill in the request and run it. Ctrl+Enter runs it too.",
-    engines: "Every SerpApi engine, plus Aira's own free Aira Jobs engine.",
-    history: "Every search Aira has run, with its result and what it cost.",
+    engines: "Every SerpApi engine, plus Monosage's own free Jobs engine.",
+    history: "Every search Monosage has run, with its result and what it cost.",
     locations: "Exact place names for the location parameter. Free, no key needed.",
-    monitors: "Searches you run often, and the ones Aira re-runs on a schedule.",
+    monitors: "Searches you run often, and the ones Monosage re-runs on a schedule.",
     rank: "Where a website shows up on Google for its keywords, for you or for clients.",
     keys: "Keys for the SerpApi-compatible /v1 endpoint: for your own scripts, or to sell to clients.",
     earnings: "What clients owe you this month, against what their searches cost you.",
@@ -143,7 +143,7 @@
   const fill = (node, ...children) => node.replaceChildren(...children.flat(Infinity).filter((child) => child !== null && child !== undefined && child !== false));
 
   const clean = (obj) => Object.fromEntries(Object.entries(obj || {}).filter(([, v]) => v !== "" && v !== null && v !== undefined && v !== false));
-  const link = (tab, query = {}) => `#/airaapi?${new URLSearchParams({ tab, ...clean(query) })}`;
+  const link = (tab, query = {}) => `#/api?${new URLSearchParams({ tab, ...clean(query) })}`;
   function playgroundLink(engine, params = {}, options = {}) {
     // The Playground owns how a request is written into the URL; use its builder once it has loaded.
     if (typeof Aira.playgroundLink === "function") return Aira.playgroundLink(engine, params, options);
@@ -163,7 +163,7 @@
     for (const [key, value] of Object.entries(patch)) if (value === "" || value === null || value === undefined || value === false) delete next[key];
     const tab = next.tab || "overview";
     delete next.tab;
-    history.replaceState(null, "", `#/airaapi?${new URLSearchParams({ tab, ...next })}`);
+    history.replaceState(null, "", `#/api?${new URLSearchParams({ tab, ...next })}`);
     if (router.current) router.current.query = { tab, ...next };
   }
 
@@ -302,13 +302,13 @@
           h("p", { class: "muted", text: "The console runs searches through your own SerpApi account. Until a key is connected you can still browse engines, read the docs and look up locations." }))),
       h("ol", { class: "aa-steps" },
         step(1, "Get a key", ["Sign in at ", externalLink(SERPAPI_LINKS.dashboard, "serpapi.com"), " and copy the private API key from your dashboard. The free plan includes 250 searches a month."]),
-        step(2, "Paste it into Aira", "Aira checks the key with SerpApi first, then stores it encrypted on this computer. It is never shown again, never logged and never sent to the browser."),
+        step(2, "Paste it into Monosage", "Monosage checks the key with SerpApi first, then stores it encrypted on this computer. It is never shown again, never logged and never sent to the browser."),
         step(3, "Run a search", "Open the Playground, pick any of the engines and press Ctrl+Enter. Identical searches inside the cache window are free.")),
       h("div", { class: "btn-row" },
         btn("Connect key", { icon: "key", kind: "", href: link("account") }),
         btn("Browse engines", { icon: "search", href: link("engines") }),
         btn("Read the docs", { icon: "book", kind: "ghost", href: link("docs") })),
-      h("p", { class: "sk-hint", text: "Prefer a server-wide key? Set SERPAPI_API_KEY in .env and restart Aira. A key saved in Account takes precedence for that account." }));
+      h("p", { class: "sk-hint", text: "Prefer a server-wide key? Set SERPAPI_API_KEY in .env and restart Monosage. A key saved in Account takes precedence for that account." }));
   }
 
   /** An error as a card with the next step for the cases the console can recover from. */
@@ -322,10 +322,10 @@
       invalid_api_key: ["SerpApi rejected the stored key. ", h("a", { href: link("account"), text: "Replace it in Account" }), "."],
       out_of_searches: ["The SerpApi account has no searches left. Cached results still work. ", h("a", { href: link("account"), text: "Check the plan in Account" }), "."],
       rate_limited: ["SerpApi is throttling this account. Wait a few minutes before the next live search."],
-      local_rate_limit: ["Aira's own hourly limit stopped this search. You can raise it in ", h("a", { href: link("account"), text: "Account, Local limits" }), "."],
+      local_rate_limit: ["Monosage's own hourly limit stopped this search. You can raise it in ", h("a", { href: link("account"), text: "Account, Local limits" }), "."],
     };
     if (hints[code]) box.insertBefore(h("p", { class: "muted aa-hint" }, ...hints[code]), box.querySelector(".btn-row"));
-    else if (error && error.status === 0) box.insertBefore(h("p", { class: "muted aa-hint", text: "Check that Aira is still running on this computer, then try again." }), box.querySelector(".btn-row"));
+    else if (error && error.status === 0) box.insertBefore(h("p", { class: "muted aa-hint", text: "Check that Monosage is still running on this computer, then try again." }), box.querySelector(".btn-row"));
     return box;
   }
 
@@ -389,7 +389,7 @@
     const tab = TAB_IDS.includes(route.query.tab) ? route.query.tab : "overview";
     Aira.closeDrawer(); // a drawer from the previous tab must not survive navigation
     const label = (TABS.find(([id]) => id === tab) || TABS[0])[1];
-    document.title = `${label} · API · Aira`;
+    document.title = `${label} · API · Monosage`;
     const crumbs = document.getElementById("crumbs");
     if (crumbs) crumbs.replaceChildren(h("span", { text: "API" }), h("span", { class: "muted", "aria-hidden": "true", text: "/" }), h("span", { text: label }));
 
@@ -811,13 +811,13 @@
     } });
     const xrayReady = XRAY_ENGINES.includes(record.engine) && record.status === "ok" && record.serpapi_id;
     const xrayButton = XRAY_ENGINES.includes(record.engine) ? btn("X-Ray", { icon: "eye", sm: true, disabled: !xrayReady, title: xrayReady ? "See where each result sits on the page and which JSON path holds it" : "X-Ray needs a successful search that SerpApi archived", onClick: () => openXray(record) }) : null;
-    const saveJobs = ["google_jobs", "aira_jobs"].includes(record.engine) && record.result ? btn("Save jobs to Aira", { icon: "download", sm: true, title: "Import the job postings in this search into Jobs, where they are scored against your resume", onClick: async (event) => {
+    const saveJobs = ["google_jobs", "aira_jobs"].includes(record.engine) && record.result ? btn("Save jobs to Monosage", { icon: "download", sm: true, title: "Import the job postings in this search into Jobs, where they are scored against your resume", onClick: async (event) => {
       await run(event.currentTarget, async () => {
         const { jobs } = await api(`${CAREERS}/records/${record.id}/jobs`);
         const fresh = jobs.filter((job) => !job.already_in_aira && job.importable !== false);
         if (!jobs.length) { toast("This search holds no job postings.", "error"); return; }
-        if (!fresh.length) { toast(`All ${pluralize(jobs.length, "job")} are already in Aira.`, "success"); return; }
-        const ok = await Aira.confirm({ title: `Save ${pluralize(fresh.length, "job")} to Aira?`, message: `${jobs.length > fresh.length ? `${pluralize(jobs.length - fresh.length, "job")} in this search ${jobs.length - fresh.length === 1 ? "is" : "are"} already saved or cannot be imported. ` : ""}The others are added to Jobs and scored against your resume. Nothing is applied for you.`, confirmLabel: "Save" });
+        if (!fresh.length) { toast(`All ${pluralize(jobs.length, "job")} are already in Monosage.`, "success"); return; }
+        const ok = await Aira.confirm({ title: `Save ${pluralize(fresh.length, "job")} to Monosage?`, message: `${jobs.length > fresh.length ? `${pluralize(jobs.length - fresh.length, "job")} in this search ${jobs.length - fresh.length === 1 ? "is" : "are"} already saved or cannot be imported. ` : ""}The others are added to Jobs and scored against your resume. Nothing is applied for you.`, confirmLabel: "Save" });
         if (!ok) return;
         let created = 0, merged = 0, failed = 0;
         for (const job of fresh) {
@@ -835,12 +835,12 @@
 
     const notes = [];
     if (record.status === "error") notes.push(h("div", { class: "sk-note error", role: "alert" }, ico("shield"), h("span", {}, h("strong", { text: "This search failed. " }), record.error || "SerpApi returned an error.", " Failed searches are not counted against the plan.")));
-    if (record.cache_hit) notes.push(h("div", { class: "sk-note" }, ico("check"), h("span", { text: "Served from Aira's local cache: no search was used. The data is as old as the original run." })));
+    if (record.cache_hit) notes.push(h("div", { class: "sk-note" }, ico("check"), h("span", { text: "Served from Monosage's local cache: no search was used. The data is as old as the original run." })));
     if (record.result_truncated) notes.push(h("div", { class: "sk-note warn" }, ico("shield"), h("span", { text: "The response was larger than the stored-result limit, so it was returned once but not kept. Raise the limit in Account, Local limits." })));
     if (record.note) notes.push(h("div", { class: "sk-note" }, ico("check"), h("span", { text: record.note })));
 
     const facts = factList([
-      ["Aira id", monoCopy(record.id, "Copy Aira id")],
+      ["Monosage id", monoCopy(record.id, "Copy Monosage id")],
       ["SerpApi id", record.serpapi_id ? monoCopy(record.serpapi_id, "Copy SerpApi search id") : "none (served locally or failed before reaching SerpApi)"],
       ["Source", fmt.title(String(record.source).replaceAll("_", " "))],
       ["HTTP status", record.http_status || "–"],
@@ -986,7 +986,7 @@
 
   function heroPanel(data) {
     const account = data.account;
-    const keyText = data.key && data.key.last4 ? `Key ending ${data.key.last4} · ${data.key.source === "env" ? "from SERPAPI_API_KEY" : "stored encrypted in Aira"}` : "";
+    const keyText = data.key && data.key.last4 ? `Key ending ${data.key.last4} · ${data.key.source === "env" ? "from SERPAPI_API_KEY" : "stored encrypted in Monosage"}` : "";
     if (!account) {
       return h("section", { class: "aa-hero warn", "aria-labelledby": "aaHeroTitle" },
         h("div", { class: "aa-hero-main" },
@@ -1024,7 +1024,7 @@
     const total = a.searches_per_month || 0;
     const left = a.plan_searches_left ?? 0;
     if (total && left / total <= 0.05) out.push(["error", `Only ${num(left)} of your ${num(total)} monthly searches are left. Cached searches are free; keep monitors paused until the plan renews or add credits at SerpApi.`]);
-    else if (total && left / total <= 0.2) out.push(["warn", `${num(left)} of your ${num(total)} monthly searches are left (${Math.round((left / total) * 100)}%). Aira's cache and the cost estimator below can help you stretch them.`]);
+    else if (total && left / total <= 0.2) out.push(["warn", `${num(left)} of your ${num(total)} monthly searches are left (${Math.round((left / total) * 100)}%). Monosage's cache and the cost estimator below can help you stretch them.`]);
     const hourly = a.hourly_rate_limit || 0;
     if (hourly && (a.this_hour_searches || 0) / hourly >= 0.8) out.push(["warn", `This hour you have used ${num(a.this_hour_searches)} of ${num(hourly)} searches. SerpApi answers 429 beyond the limit; spread requests out or wait for the hour to roll over.`]);
     return out;
@@ -1204,7 +1204,7 @@
     const items = [
       ["Open Playground", "Try any engine with a generated form", link("playground"), "play"],
       [`Browse ${num(data.engines)} engines`, "Filter by family, then open one", link("engines"), "search"],
-      ["Create an API key", "Call Aira from scripts through /v1", link("keys"), "key"],
+      ["Create an API key", "Call Monosage from scripts through /v1", link("keys"), "key"],
       ["Look up a location", "Canonical names for the location parameter", link("locations"), "search"],
       ["Search jobs", "Google Jobs with every filter in Careers", "#/careers?tab=jobs", "play"],
       ["Read the docs", "Reference, SDK notes and migration guide", link("docs"), "book"],
@@ -1238,8 +1238,8 @@
       if (statusData) {
         const t = statusData.throttle;
         rows.push(t.hourly_limit
-          ? h("div", { class: "aa-tp" }, h("div", { class: "aa-tp-top" }, h("strong", { text: "Aira local cap" }), h("span", { text: `${num(t.used_this_hour)} of ${num(t.hourly_limit)}` })), meter({ value: t.used_this_hour, max: t.hourly_limit, label: "Live searches this hour against Aira's local hourly cap", tone: t.used_this_hour / t.hourly_limit >= 0.8 ? "warn" : "" }), h("small", { class: "muted", text: "Your own cap protects the plan. Change it in Account, Local limits." }))
-          : h("div", { class: "aa-tp" }, h("div", { class: "aa-tp-top" }, h("strong", { text: "Aira local cap" }), h("span", { text: `${num(t.used_this_hour)} live this hour` })), h("small", { class: "muted" }, "No local cap is set. ", h("a", { href: link("account"), text: "Add one" }), " to stop runaway scripts before they use up the plan.")));
+          ? h("div", { class: "aa-tp" }, h("div", { class: "aa-tp-top" }, h("strong", { text: "Monosage local cap" }), h("span", { text: `${num(t.used_this_hour)} of ${num(t.hourly_limit)}` })), meter({ value: t.used_this_hour, max: t.hourly_limit, label: "Live searches this hour against Monosage's local hourly cap", tone: t.used_this_hour / t.hourly_limit >= 0.8 ? "warn" : "" }), h("small", { class: "muted", text: "Your own cap protects the plan. Change it in Account, Local limits." }))
+          : h("div", { class: "aa-tp" }, h("div", { class: "aa-tp-top" }, h("strong", { text: "Monosage local cap" }), h("span", { text: `${num(t.used_this_hour)} live this hour` })), h("small", { class: "muted" }, "No local cap is set. ", h("a", { href: link("account"), text: "Add one" }), " to stop runaway scripts before they use up the plan.")));
         if (statusData.queue && (statusData.queue.running || statusData.queue.async_pending)) rows.push(h("p", { class: "sk-dim", text: `${statusData.queue.running} running now, ${statusData.queue.async_pending} async pending.` }));
       } else rows.push(h("div", { class: "skeleton", style: { height: "34px" } }));
       throughput.replaceChildren(...rows);
@@ -1273,7 +1273,7 @@
     const flags = [
       engine.deprecated ? h("span", { class: "sk-chip warn", title: "SerpApi has deprecated this engine. It may stop working.", text: "Deprecated" }) : null,
       engine.unlisted ? h("span", { class: "sk-chip", title: "Documented by SerpApi but not listed in their public engine index.", text: "Unlisted" }) : null,
-      engine.provider === "aira" ? h("span", { class: "sk-chip good", title: "Answered by Aira itself from free public job boards: no SerpApi key and no credits.", text: "Aira · free, no key" }) : null,
+      engine.provider === "aira" ? h("span", { class: "sk-chip good", title: "Answered by Monosage itself from free public job boards: no SerpApi key and no credits.", text: "Monosage · free, no key" }) : null,
     ];
     return h("article", { class: `aa-engine${engine.deprecated ? " deprecated" : ""}`, "aria-labelledby": `eng-${engine.id}` },
       h("header", {}, serp.engineBadge(engine), h("code", { class: "aa-engine-id", text: engine.id })),
@@ -1470,7 +1470,7 @@
     pageSize.addEventListener("change", () => { state.limit = Number(pageSize.value); Aira.remember("airaapi.history.limit", state.limit); state.offset = 0; load(); });
     const activeFilters = () => Object.keys(filterEls).filter((k) => state[k] !== "");
     const reset = btn("Reset filters", { kind: "ghost", sm: true, onClick: () => { for (const el of Object.values(filterEls)) el.value = ""; apply(); search.focus(); } });
-    const finder = h("input", { type: "text", id: "aaHistFind", placeholder: "Paste an Aira or SerpApi search id", autocomplete: "off", spellcheck: "false" });
+    const finder = h("input", { type: "text", id: "aaHistFind", placeholder: "Paste a Monosage or SerpApi search id", autocomplete: "off", spellcheck: "false" });
     const findButton = btn("Find", { kind: "secondary", sm: true, icon: "search" });
     const find = async () => {
       const id = finder.value.trim();
@@ -1485,7 +1485,7 @@
         offset += 200;
         if (offset >= page.total) break;
       }
-      toast(`No stored search has the id ${id.length > 24 ? `${id.slice(0, 24)}…` : id}. Aira only keeps searches it ran itself (${num(scanned)} checked), and old ones are removed by the retention setting.`, "error", { timeout: 9000 });
+      toast(`No stored search has the id ${id.length > 24 ? `${id.slice(0, 24)}…` : id}. Monosage only keeps searches it ran itself (${num(scanned)} checked), and old ones are removed by the retention setting.`, "error", { timeout: 9000 });
     };
     findButton.addEventListener("click", () => run(findButton, find));
     finder.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); run(findButton, find); } });
@@ -1515,7 +1515,7 @@
     const paintQueue = (running) => {
       queue.hidden = !running.length;
       if (!running.length) return;
-      queue.replaceChildren(h("div", { class: "aa-queue-head" }, h("span", { class: "sk-pulse", "aria-hidden": "true" }), h("strong", { text: `${pluralize(running.length, "search")} running` }), h("small", { class: "muted", text: "Aira checks SerpApi's archive with a growing delay and shows the result here when it is ready." })),
+      queue.replaceChildren(h("div", { class: "aa-queue-head" }, h("span", { class: "sk-pulse", "aria-hidden": "true" }), h("strong", { text: `${pluralize(running.length, "search")} running` }), h("small", { class: "muted", text: "Monosage checks SerpApi's archive with a growing delay and shows the result here when it is ready." })),
         h("ul", {}, ...running.slice(0, 6).map((r) => h("li", {}, h("button", { type: "button", class: "aa-link", onclick: () => openDetail(r.id, running.map((x) => x.id), { onChange: load }) }, recordTitle(r)), h("span", { class: "sk-dim", text: ` · ${r.engine_name} · started ` }), timeNode(r.created_at)))));
     };
     const pollQueue = async (running) => {
@@ -1665,9 +1665,9 @@
         paintQueue(running.items); pollQueue(running.items);
         if (!items.length) {
           tableHost.replaceChildren(activeFilters().length
-            ? ui.empty(state.q.trim() ? `No stored search matches “${state.q.trim()}”` : "No searches match", state.q.trim() ? "Aira keeps the searches it has run. Look for an engine with that name, or clear the filters to see the full history." : "Loosen a filter, or clear them all to see the full history.",
+            ? ui.empty(state.q.trim() ? `No stored search matches “${state.q.trim()}”` : "No searches match", state.q.trim() ? "Monosage keeps the searches it has run. Look for an engine with that name, or clear the filters to see the full history." : "Loosen a filter, or clear them all to see the full history.",
               h("div", { class: "btn-row" }, btn("Reset filters", { kind: "", onClick: () => reset.click() }), state.q.trim() ? btn("Find engines", { icon: "search", href: link("engines", { q: state.q.trim() }) }) : null))
-            : ui.empty("No searches stored yet", "Every search Aira runs is kept here for the retention period, with its parameters, result and cost. Run one in the Playground to start the archive.", btn("Open Playground", { icon: "play", kind: "", href: link("playground") })));
+            : ui.empty("No searches stored yet", "Every search Monosage runs is kept here for the retention period, with its parameters, result and cost. Run one in the Playground to start the archive.", btn("Open Playground", { icon: "play", kind: "", href: link("playground") })));
         } else paintTable();
         paintPager(); paintBulk();
       } catch (error) {
@@ -1678,7 +1678,7 @@
 
     // -- clean up
     const cleanup = h("details", { class: "aa-cleanup" }, h("summary", { text: "Clean up history" }), h("div", { class: "aa-cleanup-body" },
-      h("p", { class: "muted", text: "Aira keeps searches for the retention period you set in Account (30 days by default) and prunes the oldest beyond the record limit. Pinned searches are always kept unless you say otherwise here." }),
+      h("p", { class: "muted", text: "Monosage keeps searches for the retention period you set in Account (30 days by default) and prunes the oldest beyond the record limit. Pinned searches are always kept unless you say otherwise here." }),
       h("div", { class: "btn-row" },
         btn("Delete older than…", { icon: "trash", kind: "danger secondary", sm: true, onClick: () => cleanupDialog() }),
         btn("Delete every unpinned search", { icon: "trash", kind: "danger secondary", sm: true, onClick: async () => {
@@ -2007,7 +2007,7 @@
   // ===========================================================================
 
   const LIMIT_FIELDS = [
-    { name: "airaapi_cache_ttl_minutes", label: "Cache window (minutes)", min: 0, max: 10080, hint: "Identical searches inside this window are answered from Aira's own copy and cost nothing. 0 turns the cache off." },
+    { name: "airaapi_cache_ttl_minutes", label: "Cache window (minutes)", min: 0, max: 10080, hint: "Identical searches inside this window are answered from Monosage's own copy and cost nothing. 0 turns the cache off." },
     { name: "airaapi_hourly_limit", label: "Live searches per hour", min: 0, max: 100000, hint: "Your own cap, checked before SerpApi is called. 0 means no cap. A cap protects the plan from runaway scripts and monitors." },
     { name: "airaapi_retention_days", label: "Keep history for (days)", min: 1, max: 3650, hint: "Older searches are removed automatically. Pinned searches are kept. SerpApi's own archive keeps 30 days." },
     { name: "airaapi_max_records", label: "Most searches to keep", min: 50, max: 100000, hint: "When the history grows past this, the oldest unpinned searches go first." },
@@ -2026,7 +2026,7 @@
     submit.type = "submit";
     const form = h("form", { class: "aa-keyform", novalidate: true, autocomplete: "off" },
       h("div", { class: "field" }, h("label", { for: "aaKeyInput", text: "SerpApi private API key" }), input,
-        h("span", { class: "hint", text: "Aira checks the key with SerpApi before saving it. It is stored encrypted on this computer and is never shown again, logged, or sent to your browser." })),
+        h("span", { class: "hint", text: "Monosage checks the key with SerpApi before saving it. It is stored encrypted on this computer and is never shown again, logged, or sent to your browser." })),
       message, h("div", { class: "btn-row" }, submit));
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
@@ -2059,7 +2059,7 @@
       const src = data.key.source;
       rows.push(h("div", { class: "aa-keystate" },
         h("span", { class: "aa-keystate-dot", "aria-hidden": "true" }),
-        h("div", {}, h("strong", { text: "Connected" }), h("p", { class: "muted", text: `Key ending ${data.key.last4 || "••••"}. ${src === "env" ? "It comes from SERPAPI_API_KEY in the server environment." : "Stored encrypted in Aira for this account."}` }))));
+        h("div", {}, h("strong", { text: "Connected" }), h("p", { class: "muted", text: `Key ending ${data.key.last4 || "••••"}. ${src === "env" ? "It comes from SERPAPI_API_KEY in the server environment." : "Stored encrypted in Monosage for this account."}` }))));
       if (data.account_error) rows.push(h("div", { class: "sk-note warn", role: "alert" }, ico("shield"), h("span", { text: `SerpApi did not accept or answer the account check: ${data.account_error}` })));
     } else {
       rows.push(h("div", { class: "aa-keystate off" }, h("span", { class: "aa-keystate-dot", "aria-hidden": "true" }), h("div", {}, h("strong", { text: "Not connected" }), h("p", { class: "muted", text: data.key_error || "Paste a key below to unlock searches. Browsing engines, docs and locations works without one." }))));
@@ -2068,7 +2068,7 @@
     if (configured) {
       actions.push(btn("Check again", { icon: "refresh", sm: true, onClick: (event) => run(event.currentTarget, async () => { await api(`${BASE}/account?refresh=1`); toast("Account refreshed.", "success", { timeout: 2000 }); afterChange(); }) }));
       actions.push(btn("Remove key", { icon: "trash", sm: true, kind: "danger secondary", onClick: async (event) => {
-        if (data.key.source === "env") { toast("This key comes from SERPAPI_API_KEY. Remove it from .env and restart Aira.", "error", { timeout: 7000 }); return; }
+        if (data.key.source === "env") { toast("This key comes from SERPAPI_API_KEY. Remove it from .env and restart Monosage.", "error", { timeout: 7000 }); return; }
         const ok = await Aira.confirm({ title: "Remove the SerpApi key?", message: "Searches stop working until a key is connected again. Stored history, saved searches and monitors stay. Monitors are skipped while there is no key.", confirmLabel: "Remove key", danger: true });
         if (!ok) return;
         await run(event.currentTarget, async () => { await api(`${BASE}/key`, { method: "DELETE" }); toast("SerpApi key removed.", "success"); afterChange(); });
@@ -2076,7 +2076,7 @@
     }
     return panel("SerpApi key", { sub: "the account every search is billed to", aside: h("div", { class: "btn-row" }, ...actions), body: panelBody(...rows,
       configured ? h("details", { class: "aa-replace" }, h("summary", { text: "Replace the key" }), form) : form,
-      h("p", { class: "sk-hint", text: "A key saved here takes precedence over SERPAPI_API_KEY for this account. Lost your key? Copy it from your SerpApi dashboard; Aira cannot show it back to you." }),
+      h("p", { class: "sk-hint", text: "A key saved here takes precedence over SERPAPI_API_KEY for this account. Lost your key? Copy it from your SerpApi dashboard; Monosage cannot show it back to you." }),
       h("div", { class: "btn-row" }, btn("Open SerpApi dashboard", { icon: "external", kind: "ghost", sm: true, href: SERPAPI_LINKS.dashboard, external: true }))) });
   }
 
@@ -2101,12 +2101,12 @@
         hourly ? row("Searches this hour", h("strong", { text: `${num(a.this_hour_searches)} of ${num(hourly)}` })) : null,
         hourly ? meter({ value: a.this_hour_searches || 0, max: hourly, label: "Searches this hour", tone: (a.this_hour_searches || 0) / hourly >= 0.8 ? "warn" : "" }) : null,
         row("Searches last hour", h("strong", { text: num(a.last_hour_searches) }))),
-      h("p", { class: "sk-dim", text: `Aira has counted ${num(data.usage.credits_used_30d)} credits of live searches in the last 30 days. SerpApi's own meter above is the authority for billing.` }),
+      h("p", { class: "sk-dim", text: `Monosage has counted ${num(data.usage.credits_used_30d)} credits of live searches in the last 30 days. SerpApi's own meter above is the authority for billing.` }),
       h("div", { class: "btn-row" },
         btn("Change plan or renew", { icon: "external", sm: true, href: SERPAPI_LINKS.plan, external: true }),
         btn("Buy extra credits", { icon: "external", sm: true, href: SERPAPI_LINKS.pricing, external: true }),
         btn("Billing and profile", { icon: "external", sm: true, kind: "ghost", href: SERPAPI_LINKS.dashboard, external: true })),
-      h("p", { class: "sk-hint", text: "Plan changes, refunds, invoices and team seats are handled by SerpApi, so those buttons open serpapi.com in a new tab. Aira only reads the plan and usage." })) });
+      h("p", { class: "sk-hint", text: "Plan changes, refunds, invoices and team seats are handled by SerpApi, so those buttons open serpapi.com in a new tab. Monosage only reads the plan and usage." })) });
   }
 
   function plansTable(platform, account) {
@@ -2145,7 +2145,7 @@
       try { const data = await api("/api/settings", { method: "POST", body }); Aira.state.settings = data.settings; message.className = "aa-keymsg good"; message.textContent = "Limits saved."; toast("Local limits saved.", "success", { timeout: 2200 }); afterSave(data.settings); }
       catch (error) { message.className = "aa-keymsg bad"; message.textContent = error.message; }
     }));
-    return panel("Local limits and retention", { sub: "how Aira protects your plan and your disk", body: panelBody(h("div", { class: "form-grid aa-limits" }, ...fields), message, h("div", { class: "btn-row" }, save)) });
+    return panel("Local limits and retention", { sub: "how Monosage protects your plan and your disk", body: panelBody(h("div", { class: "form-grid aa-limits" }, ...fields), message, h("div", { class: "btn-row" }, save)) });
   }
 
   tabs.account = async (content) => {
@@ -2159,7 +2159,7 @@
         h("div", { class: "aa-cols even" }, limitsPanel(settingsData.settings, () => {}), panel("How the key is protected", { body: panelBody(h("ul", { class: "inline-list aa-secure" },
           h("li", { text: "The key is encrypted with a key file that sits beside your database (airaapi.key). Back that file up with the database or the key cannot be read." }),
           h("li", { text: "The browser only ever learns whether a key is connected and its last four characters." }),
-          h("li", { text: "Aira talks to SerpApi over HTTPS and refuses redirects, so the key cannot be forwarded elsewhere." }),
+          h("li", { text: "Monosage talks to SerpApi over HTTPS and refuses redirects, so the key cannot be forwarded elsewhere." }),
           h("li", { text: "Logs, errors, stored searches and exports have the key removed." }),
           h("li", { text: "Other programs on this computer use API keys instead (API keys tab). They never see the SerpApi key." }))) })),
         ...[plansTable(platform, data.account)].filter(Boolean));
@@ -2179,7 +2179,7 @@
     const sample = `curl "${origin}/search.json?engine=google&q=coffee&api_key=${secret}"`;
     const stored = h("input", { type: "checkbox", id: "aaKeyStored" });
     const body = h("div", { class: "aa-newkey" },
-      h("div", { class: "sk-note warn", role: "alert" }, ico("shield"), h("span", {}, h("strong", { text: "This is the only time the full key is shown. " }), "Aira keeps just a hash of it, so it cannot be recovered. Copy it into your password manager or secrets store now.")),
+      h("div", { class: "sk-note warn", role: "alert" }, ico("shield"), h("span", {}, h("strong", { text: "This is the only time the full key is shown. " }), "Monosage keeps just a hash of it, so it cannot be recovered. Copy it into your password manager or secrets store now.")),
       h("div", { class: "field" }, h("label", { for: "aaNewKeyField", text: `Key "${created.key.name}"` }), h("div", { class: "aa-secret-row" }, Object.assign(field, { id: "aaNewKeyField" }), serp.copyButton(secret, { label: "Copy key", message: "Key copied", sm: false, text: true }))),
       h("div", { class: "field" }, h("span", { class: "label", text: "Try it" }), serp.codeBlock("curl", sample, { label: "cURL" })),
       h("label", { class: "check" }, stored, "I have stored this key somewhere safe"));
@@ -2205,7 +2205,7 @@
     create.type = "submit";
     const terms = keyTermFields();
     const sell = h("details", { class: "aa-sell" }, h("summary", { text: "Selling access to a client? (optional)" }),
-      h("p", { class: "sk-dim", text: "Give the key to a customer and Aira counts what they use, stops them at their monthly allowance and builds their statement on the Earnings tab. Answers from the cache cost you nothing, so they are pure profit." }),
+      h("p", { class: "sk-dim", text: "Give the key to a customer and Monosage counts what they use, stops them at their monthly allowance and builds their statement on the Earnings tab. Answers from the cache cost you nothing, so they are pure profit." }),
       terms.node);
     const form = h("form", { class: "aa-keycreate", novalidate: true },
       ui.field("Name", name, "Something you will recognise in the list."),
@@ -2248,7 +2248,7 @@
       ? h("div", { class: "table-wrap aa-table-wrap" }, h("table", { class: "table aa-table aa-keys-table" }, h("caption", { class: "visually-hidden", text: "API keys" }),
         h("thead", {}, h("tr", {}, h("th", { scope: "col", text: "Key" }), h("th", { scope: "col", class: "hide-sm", text: "Status" }), h("th", { scope: "col", class: "hide-md", text: "Created" }), h("th", { scope: "col", class: "hide-sm", text: "Last used" }), h("th", { scope: "col", class: "hide-sm", text: "Usage" }), h("th", { scope: "col" }, h("span", { class: "visually-hidden", text: "Actions" })))),
         h("tbody", {}, ...rows)))
-      : ui.empty("No API keys yet", "Create one to call Aira from scripts, spreadsheets or automations with the same requests you would send to SerpApi.");
+      : ui.empty("No API keys yet", "Create one to call Monosage from scripts, spreadsheets or automations with the same requests you would send to SerpApi.");
 
     fill(content,
       h("div", { class: "stats aa-stats" },
@@ -2259,11 +2259,11 @@
       overview && !overview.configured ? h("div", { class: "sk-note warn", role: "status" }, ico("key"), h("span", {}, "No SerpApi key is connected yet, so /v1 searches answer 409 until you ", h("a", { href: link("account"), text: "connect one" }), ". You can still create keys now.")) : null,
       h("div", { class: "aa-cols" },
         panel("Create an API key", { sub: "for the SerpApi-compatible /v1 endpoint", body: panelBody(form) }),
-        panel("How to call Aira", { body: panelBody(
+        panel("How to call Monosage", { body: panelBody(
           h("dl", { class: "kv aa-facts" }, h("dt", { text: "Base URL" }), h("dd", {}, monoCopy(`${location.origin}/v1`, "Copy base URL")), h("dt", { text: "Auth" }), h("dd", { text: "api_key=aira_… or Authorization: Bearer aira_…" }), h("dt", { text: "Scope" }), h("dd", { text: "This account only. Keys never expose the SerpApi key." })),
           h("p", { class: "sk-dim" }, "Moving from SerpApi? Change the base URL and the key, nothing else. ", h("a", { href: link("docs", { page: "migrate" }), text: "Migration guide" }))) })),
       panel("Your keys", { sub: "secrets are stored as hashes and shown once", body: table }),
-      panel("Code samples", { sub: "against this Aira server", body: panelBody(serp.snippetPanel("google", { q: "coffee" })) }));
+      panel("Code samples", { sub: "against this Monosage server", body: panelBody(serp.snippetPanel("google", { q: "coffee" })) }));
   };
 
   // ===========================================================================
@@ -2531,7 +2531,7 @@
       h("section", { "aria-labelledby": "aaRankTitle" },
         h("div", { class: "aa-sec-head" }, h("h2", { id: "aaRankTitle", text: "Projects" }), Object.assign(btn("New project", { icon: "plus", kind: "", sm: true, onClick: create }), { id: "aaRankNew" })),
         projects.length ? h("div", { class: "aa-card-grid" }, ...projects.map(card))
-          : ui.empty("Track where a website shows up on Google", "Add a website and the keywords it should win. Aira checks its position on a schedule, shows what moved and builds a report you can send. Agencies and freelancers sell this to clients every month.", btn("New project", { icon: "plus", kind: "", onClick: create }))));
+          : ui.empty("Track where a website shows up on Google", "Add a website and the keywords it should win. Monosage checks its position on a schedule, shows what moved and builds a report you can send. Agencies and freelancers sell this to clients every month.", btn("New project", { icon: "plus", kind: "", onClick: create }))));
   };
 
   // ---- Earnings ------------------------------------------------------------------------------------------------------
@@ -2620,19 +2620,19 @@
     dashboard: { status: "built", where: "Overview", href: link("overview"), how: "Plan, searches left as a ring gauge, hourly throughput, 30-day chart, top engines, error and cache rates, recent searches, plus a cost estimator and monitor health." },
     playground: { status: "built", where: "Playground", href: link("playground"), how: "Engine picker, generated parameter form, options, code in 8 languages, result tabs, diff against the previous run." },
     "my-searches": { status: "built", where: "History", href: link("history"), how: "Filters, text search, sorting, multi-select, compare two runs, export, pin, re-run and bulk delete. Kept as long as you set, not just 30 days." },
-    "search-archive": { status: "built", where: "History, Find by search id", href: link("history"), how: "Open any stored search by its Aira or SerpApi id, as JSON or as the archived HTML page; the same ids work on /searches/{id}.json and .html. A deleted or expired id answers 410 for 31 days, like SerpApi. json_with_pixel_position is read from SerpApi's archive by X-Ray, and Export offers the result as Markdown." },
-    "api-key": { status: "built", where: "Account and API keys", href: link("account"), how: "Connect, replace or remove the SerpApi key (never shown back), and create or revoke Aira keys. Regenerating the SerpApi key itself happens on serpapi.com." },
+    "search-archive": { status: "built", where: "History, Find by search id", href: link("history"), how: "Open any stored search by its Monosage or SerpApi id, as JSON or as the archived HTML page; the same ids work on /searches/{id}.json and .html. A deleted or expired id answers 410 for 31 days, like SerpApi. json_with_pixel_position is read from SerpApi's archive by X-Ray, and Export offers the result as Markdown." },
+    "api-key": { status: "built", where: "Account and API keys", href: link("account"), how: "Connect, replace or remove the SerpApi key (never shown back), and create or revoke Monosage keys. Regenerating the SerpApi key itself happens on serpapi.com." },
     plan: { status: "partial", where: "Account", href: link("account"), how: "Plan, renewal date, usage meters and a plan comparison. Changing, cancelling or renewing a plan, Ludicrous Speed and refunds are billing actions at SerpApi, so buttons open serpapi.com." },
     "extra-credits": { status: "partial", where: "Account", href: link("account"), how: "The extra-credit balance is shown. Buying credits happens on serpapi.com." },
     "account-settings": { status: "partial", where: "Account", href: link("account"), how: "Email and account status are shown. Profile, password and 2FA are managed at SerpApi." },
-    team: { status: "na", where: "Not applicable", how: "SerpApi teams share one plan across people. Aira is a local app: each Aira account has its own database and SerpApi key, and API keys separate your own scripts from each other." },
+    team: { status: "na", where: "Not applicable", how: "SerpApi teams share one plan across people. Monosage is a local app: each Monosage account has its own database and SerpApi key, and API keys separate your own scripts from each other." },
     usage: { status: "built", where: "Overview and Account", href: link("overview"), how: "Daily stacked chart (live, cached, errors), SerpApi's monthly and hourly meters, per-engine and per-source breakdowns." },
     status: { status: "built", where: "Status", href: link("status"), how: "Computed from your own run logs: success rate and latency per engine, SerpApi reachability, hourly cap and async queue. Incident subscriptions stay on SerpApi's status page." },
-    webhooks: { status: "na", where: "In-app notifications", href: link("monitors"), how: "SerpApi has no webhooks and neither does Aira: async searches are polled and finish as a toast, and monitors raise in-app notifications. An outgoing webhook was left out on purpose, because a local app that posts to arbitrary URLs is a data-leak risk." },
+    webhooks: { status: "na", where: "In-app notifications", href: link("monitors"), how: "SerpApi has no webhooks and neither does Monosage: async searches are polled and finish as a toast, and monitors raise in-app notifications. An outgoing webhook was left out on purpose, because a local app that posts to arbitrary URLs is a data-leak risk." },
     "locations-tool": { status: "built", where: "Locations", href: link("locations"), how: "Search, copy the canonical name or id, open the point on a map, and use it in the Playground." },
     docs: { status: "built", where: "This Docs page", href: link("docs"), how: "Reference for /v1, one page per engine generated from the catalog, country, language and domain lists, copy as Markdown." },
-    changelog: { status: "na", where: "SerpApi release notes", external: SERPAPI_LINKS.releases, how: "Release notes are a web page at SerpApi and Aira does not mirror them. The catalog marks deprecated engines." },
-    sdks: { status: "built", where: "Docs, SDKs and libraries", href: link("docs", { page: "sdks" }), how: "Official client libraries are listed. Aira's own snippets use plain HTTP in 8 languages." },
+    changelog: { status: "na", where: "SerpApi release notes", external: SERPAPI_LINKS.releases, how: "Release notes are a web page at SerpApi and Monosage does not mirror them. The catalog marks deprecated engines." },
+    sdks: { status: "built", where: "Docs, SDKs and libraries", href: link("docs", { page: "sdks" }), how: "Official client libraries are listed. Monosage's own snippets use plain HTTP in 8 languages." },
     xray: { status: "built", where: "History detail, X-Ray", href: link("history"), how: "For Google Search and Google Ads, X-Ray reads SerpApi's pixel positions from the archive (no search used) and draws every measured element on a map of the page, optionally over the stored HTML. Pick a box or a list entry to see its JSON path, fields, size and json_restrictor path. The JSON tree also copies the path of any value for every engine." },
   };
   const IDEAS = [
@@ -2645,20 +2645,20 @@
     ["Local history with search", "built", "Search covers queries, labels, engines and errors, and with Inside results also the titles, snippets and links of every stored result, with the match highlighted. Kept for as long as you set."],
     ["Usage dashboard", "built", "Overview and Account, with an early warning at 80% of the hourly limit and 20% of the plan."],
     ["Async job board", "built", "History shows running async searches, polls with backoff and announces when each finishes."],
-    ["Result-to-action pipeline", "built", "History detail of a Google Jobs search has Save jobs to Aira (imported, scored, duplicates merged); Careers does the same per job. The json_restrictor builder is the path picker. Drafting outreach is not part of it."],
+    ["Result-to-action pipeline", "built", "History detail of a Google Jobs search has Save jobs to Monosage (imported, scored, duplicates merged); Careers does the same per job. The json_restrictor builder is the path picker. Drafting outreach is not part of it."],
   ];
   const STATUS_LABEL = { built: "Built", partial: "Partly", no: "Not built", na: "Not applicable" };
   /** Common parameters of the Search API and how Aira treats each one (checked against the running app). */
   const PARAMETERS = [
-    ["api_key", "built", "/v1 and the SerpApi-compatible paths take an Aira key (aira_...); the SerpApi key stays encrypted on this computer."],
-    ["engine", "built", "All 136 SerpApi catalog engines, each with its own generated parameter form, plus Aira's own aira_jobs engine (free public job boards, no key, no credits)."],
+    ["api_key", "built", "/v1 and the SerpApi-compatible paths take a Monosage key (aira_...); the SerpApi key stays encrypted on this computer."],
+    ["engine", "built", "All 136 SerpApi catalog engines, each with its own generated parameter form, plus Monosage's own aira_jobs engine (free public job boards, no key, no credits)."],
     ["output=json", "built", "Default everywhere."],
     ["output=html", "built", "Playground Raw HTML option, /search.html and /v1; the page is stored and shown in the HTML tab."],
     ["output=md", "built", "Playground Markdown option, /search.json?output=md and /v1 (text/markdown); the stored text is shown formatted in the page tab with a source toggle."],
     ["json_restrictor", "built", "Playground option, /v1, and a visual builder in History detail."],
     ["no_cache", "built", "Playground (Skip the cache), Run fresh, /v1. Refused together with async, as SerpApi does."],
     ["async", "built", "Playground option and /v1; History polls the archive with backoff and announces completion."],
-    ["zero_trace", "partial", "Forwarded to SerpApi (enterprise plans). Aira still keeps its own local history record of the run; delete it from History if you do not want it stored."],
+    ["zero_trace", "partial", "Forwarded to SerpApi (enterprise plans). Monosage still keeps its own local history record of the run; delete it from History if you do not want it stored."],
     ["device, location, uule, lat/lon, radius", "built", "Per-engine forms from the catalog. location together with uule is refused, like SerpApi."],
     ["gl, hl, google_domain, lr, cr, safe, nfpr, filter, start, tbm, tbs", "built", "Offered on the engines that document them, with the country, language and domain lists in Docs."],
     ["Unknown parameters", "built", "Passed through like SerpApi (its SDKs add source=); allow_unknown=false makes them an error."],
@@ -2669,22 +2669,22 @@
     ["Search API (/search, /search.json, /search.html)", "built", "Answered on SerpApi's own paths and under /v1; cached, counted per key, 1 credit per live search (extract in crawl mode: one per page)."],
     ["Account API (/account.json)", "built", "Free, cached for 60 seconds; the Account page and the API show plan, usage and throughput."],
     ["Locations API (/locations.json)", "built", "No key needed, limit 1 to 10, cached for 24 hours; Locations page with copy and map link."],
-    ["Search Archive API (/searches/{id}.json and .html)", "built", "By Aira id or SerpApi id, JSON or HTML. X-Ray reads the .json_with_pixel_position copy and keeps it with the search."],
+    ["Search Archive API (/searches/{id}.json and .html)", "built", "By Monosage id or SerpApi id, JSON or HTML. X-Ray reads the .json_with_pixel_position copy and keeps it with the search."],
     ["Async searches and archive polling", "built", "async=true returns Queued at once; the archive answers Queued, then Success. History shows running searches."],
-    ["Webhooks", "na", "SerpApi has none and neither does Aira; completion is polling plus in-app notifications."],
+    ["Webhooks", "na", "SerpApi has none and neither does Monosage; completion is polling plus in-app notifications."],
     ["Bulk search / scheduled searches", "partial", "SerpApi's bulk API is only on its roadmap. Monitors and Careers alerts are the scheduled equivalent, from every hour, with no budget caps."],
   ];
   /** Every documented error and what Aira does with it. */
   const ERRORS = [
     ["200 with no results", "built", "Shown as a note, never an error, and not billed."],
     ["400 Missing or bad parameter", "built", "Validated before SerpApi is called (required, enums, combinations), so it costs nothing."],
-    ["401 Invalid API key", "partial", "A bad Aira key answers 401 invalid_aira_key. A rejected SerpApi key answers 422 invalid_api_key, so the browser does not mistake it for a signed-out session."],
+    ["401 Invalid API key", "partial", "A bad Monosage key answers 401 invalid_aira_key. A rejected SerpApi key answers 422 invalid_api_key, so the browser does not mistake it for a signed-out session."],
     ["403 Forbidden", "na", "Not reachable locally; a deleted SerpApi account shows as a rejected key."],
     ["404 Not Found", "built", "Unknown engine, search id or route."],
     ["410 Gone (expired archive)", "partial", "Expired records are deleted at the retention limit, so the answer is 404 Search not found."],
     ["429 Hourly limit or out of searches", "partial", "Local cap and per-key limit answer 429 local_rate_limit; SerpApi's own 429 keeps its message as rate_limited, and no searches left is answered 402 out_of_searches."],
     ["500 and 503", "partial", "Retried once, then answered 502 upstream_error with the record id."],
-    ["200 with status Error", "partial", "Not billed. Aira answers 502 search_failed (not 200) and records the attempt in History."],
+    ["200 with status Error", "partial", "Not billed. Monosage answers 502 search_failed (not 200) and records the attempt in History."],
   ];
 
   function paramRows(entry, filterText) {
@@ -2734,7 +2734,7 @@
 
   function engineMarkdown(entry) {
     const lines = [`# ${entry.name} (\`${entry.id}\`)`, "", entry.description, ""];
-    if (entry.aira_use) lines.push(`**How Aira uses it:** ${entry.aira_use}`, "");
+    if (entry.aira_use) lines.push(`**How Monosage uses it:** ${entry.aira_use}`, "");
     lines.push(`Endpoint: \`${entry.endpoint}?engine=${entry.id}\``, "", "## Parameters", "", "| Parameter | Type | Required | Description |", "| --- | --- | --- | --- |");
     for (const p of entry.params) lines.push(`| \`${p.name}\` | ${p.type} | ${p.required ? "yes" : p.requires_one_of ? `one of ${p.requires_one_of}` : "no"} | ${(p.help || p.label || "").replaceAll("|", "\\|").replaceAll("\n", " ")} |`);
     if (entry.result_keys.length) lines.push("", "## Result keys", "", entry.result_keys.map((k) => `\`${k}\``).join(", "));
@@ -2762,9 +2762,9 @@
           entry.docs_url ? btn("serpapi.com", { icon: "external", kind: "ghost", href: entry.docs_url, external: true, title: "SerpApi's own page for this engine" }) : null)),
       entry.deprecated ? h("div", { class: "sk-note warn", role: "note" }, ico("shield"), h("span", { text: entry.deprecated_reason || "SerpApi has deprecated this engine. It may stop working." })) : null,
       h("p", { class: "aa-lede", text: entry.description }),
-      entry.aira_use ? h("div", { class: "sk-note" }, ico("check"), h("span", {}, h("strong", { text: "In Aira: " }), entry.aira_use)) : null,
+      entry.aira_use ? h("div", { class: "sk-note" }, ico("check"), h("span", {}, h("strong", { text: "In Monosage: " }), entry.aira_use)) : null,
       h("section", {}, h("h3", { text: "Request" }),
-        h("p", {}, "Send a GET to ", h("code", { text: `${location.origin}/v1/search.json` }), " with ", h("code", { text: `engine=${entry.id}` }), " and an Aira key. Straight to SerpApi the endpoint is ", h("code", { text: `${entry.endpoint}` }), "."),
+        h("p", {}, "Send a GET to ", h("code", { text: `${location.origin}/v1/search.json` }), " with ", h("code", { text: `engine=${entry.id}` }), " and a Monosage key. Straight to SerpApi the endpoint is ", h("code", { text: `${entry.endpoint}` }), "."),
         h("ul", { class: "inline-list" },
           entry.required.length ? h("li", {}, "Required: ", ...entry.required.flatMap((n, i) => [i ? ", " : "", h("code", { text: n })])) : h("li", { text: "No parameter is strictly required." }),
           ...anyOf.map((g) => h("li", {}, "At least one of: ", ...g.flatMap((n, i) => [i ? ", " : "", h("code", { text: n })]))),
@@ -2798,20 +2798,20 @@
     const wrap = (title, lede, ...parts) => h("article", { class: "aa-doc" }, h("h2", { text: title }), lede ? h("p", { class: "aa-lede", text: lede }) : null, ...parts);
     switch (id) {
       case "start":
-        return wrap("Getting started", "Aira exposes a SerpApi-compatible API on this computer. Your scripts call Aira; Aira calls SerpApi with your key, caches the answer and keeps the history.",
+        return wrap("Getting started", "Monosage exposes a SerpApi-compatible API on this computer. Your scripts call Monosage; Monosage calls SerpApi with your key, caches the answer and keeps the history.",
           h("ol", { class: "aa-steps" },
-            h("li", { class: "aa-step" }, h("span", { class: "aa-step-n", text: "1" }), h("div", {}, h("strong", { text: "Connect your SerpApi key" }), h("p", {}, "In ", h("a", { href: link("account"), text: "Account" }), ". Aira stores it encrypted and never shows it again."))),
+            h("li", { class: "aa-step" }, h("span", { class: "aa-step-n", text: "1" }), h("div", {}, h("strong", { text: "Connect your SerpApi key" }), h("p", {}, "In ", h("a", { href: link("account"), text: "Account" }), ". Monosage stores it encrypted and never shows it again."))),
             h("li", { class: "aa-step" }, h("span", { class: "aa-step-n", text: "2" }), h("div", {}, h("strong", { text: "Create an API key" }), h("p", {}, "On the ", h("a", { href: link("keys"), text: "API keys" }), " tab. It looks like aira_ followed by 40 characters and is shown once."))),
             h("li", { class: "aa-step" }, h("span", { class: "aa-step-n", text: "3" }), h("div", {}, h("strong", { text: "Call it like SerpApi" }), h("p", {}, "Use ", h("code", { text: docs.base_url }), " in place of https://serpapi.com. Parameters, responses and errors match.")))),
           section("Example", serp.snippetPanel("google", { q: "coffee" })),
-          section("Why go through Aira?", h("ul", { class: "inline-list" }, h("li", { text: "Identical searches inside the cache window cost nothing and return instantly." }), h("li", { text: "Every call is stored with its parameters, cost and result, so you can search, compare and export them." }), h("li", { text: "Per-key hourly limits and a global cap protect your plan from runaway scripts." }), h("li", { text: "Saved searches and monitors turn any query into an alert." }))));
+          section("Why go through Monosage?", h("ul", { class: "inline-list" }, h("li", { text: "Identical searches inside the cache window cost nothing and return instantly." }), h("li", { text: "Every call is stored with its parameters, cost and result, so you can search, compare and export them." }), h("li", { text: "Per-key hourly limits and a global cap protect your plan from runaway scripts." }), h("li", { text: "Saved searches and monitors turn any query into an alert." }))));
       case "auth":
         return wrap("Authentication", docs.auth.summary,
           section("Key format", h("p", { text: docs.auth.key_format })), section("Scope", h("p", { text: docs.auth.scope })),
           section("Examples", h("p", {}, "Query parameter: ", h("code", { text: "GET /v1/search.json?engine=google&q=coffee&api_key=aira_…" })), h("p", {}, "Header: ", h("code", { text: "Authorization: Bearer aira_…" })), h("p", { class: "sk-dim", text: "A bad, unknown or revoked key answers 401 with code invalid_aira_key. The server listens on 127.0.0.1 only and sends no CORS headers." })));
       case "endpoints":
-        return wrap("Endpoints", `Base URL ${docs.base_url}. All endpoints are GET and need an Aira key.`,
-          simpleTable("Aira /v1 endpoints", ["Endpoint", "What it does", "Returns"], docs.endpoints.map((e) => [h("span", {}, h("code", { text: e.path }), e.alias ? h("div", { class: "sk-dim" }, "alias ", h("code", { text: e.alias })) : null), e.description, e.returns])));
+        return wrap("Endpoints", `Base URL ${docs.base_url}. All endpoints are GET and need a Monosage key.`,
+          simpleTable("Monosage /v1 endpoints", ["Endpoint", "What it does", "Returns"], docs.endpoints.map((e) => [h("span", {}, h("code", { text: e.path }), e.alias ? h("div", { class: "sk-dim" }, "alias ", h("code", { text: e.alias })) : null), e.description, e.returns])));
       case "parameters":
         return wrap("Common parameters", "Accepted by /v1/search.json on every engine. Engine-specific parameters are on each engine page.",
           simpleTable("Common parameters", ["Parameter", "Type", "Description"], [...docs.parameters, ...(docs.aira_parameters || [])].map((x) => [h("span", {}, h("code", { text: x.name }), x.required ? h("span", { class: "sk-chip warn", text: "required" }) : null), x.type || "", h("div", {}, x.description, x.values ? h("div", { class: "sk-chips" }, ...x.values.map((v) => serp.chip(v))) : null)])));
@@ -2819,39 +2819,39 @@
         const md = (p.metadata_fields && p.metadata_fields.search_metadata) || [];
         return wrap("Responses and metadata", "JSON by default. output=html returns the raw page and output=md a Markdown version for language models.",
           section("search_metadata", p.metadata_fields && p.metadata_fields.note ? h("p", { class: "sk-dim", text: p.metadata_fields.note }) : null, md.length ? simpleTable("search_metadata fields", ["Field", "Type", "Meaning"], md.map((f) => [h("code", { text: f.field }), f.type || "", f.description])) : null,
-            h("p", {}, "Aira adds ", h("code", { text: "search_metadata.aira = {id, cache_hit}" }), " to every /v1 response so you can find the stored copy.")),
+            h("p", {}, "Monosage adds ", h("code", { text: "search_metadata.aira = {id, cache_hit}" }), " to every /v1 response so you can find the stored copy.")),
           section("Trimming responses", h("p", {}, "Pass ", h("code", { text: "json_restrictor=organic_results[].title,organic_results[].link" }), " to keep only some fields. The History detail has a builder that writes the value for you.")),
           p.metadata_fields && p.metadata_fields.top_level_error_key ? section("Errors inside a 200", h("p", { text: p.metadata_fields.top_level_error_key })) : null);
       }
       case "errors": {
         const rows = (list) => list.map((e) => [String(e.http_status), e.code ? h("code", { text: e.code }) : "", e.message, e.meaning, e.advice]);
-        return wrap("Errors", "Aira answers in SerpApi's shape: {\"error\": \"…\"} with a matching HTTP status, plus a code where Aira adds one.",
-          section("Aira errors", simpleTable("Aira errors", ["Status", "Code", "Message", "Meaning", "What to do"], rows(docs.errors))),
+        return wrap("Errors", "Monosage answers in SerpApi's shape: {\"error\": \"…\"} with a matching HTTP status, plus a code where Monosage adds one.",
+          section("Monosage errors", simpleTable("Monosage errors", ["Status", "Code", "Message", "Meaning", "What to do"], rows(docs.errors))),
           docs.upstream_errors.length ? section("SerpApi errors passed through", simpleTable("SerpApi errors", ["Status", "Code", "Message", "Meaning", "What to do"], rows(docs.upstream_errors))) : null);
       }
       case "async": {
         const a = p.async_and_webhooks || {};
-        return wrap("Async searches", "Send async=true to get a queued search back immediately and collect it later. Aira polls SerpApi's archive for you.",
+        return wrap("Async searches", "Send async=true to get a queued search back immediately and collect it later. Monosage polls SerpApi's archive for you.",
           a.flow ? section("Flow", h("ol", { class: "inline-list" }, ...a.flow.map((s) => h("li", { text: s })))) : null,
           a.rules ? section("Rules", h("ul", { class: "inline-list" }, ...a.rules.map((s) => h("li", { text: s })))) : null,
           a.polling_advice ? section("Polling", h("p", { text: a.polling_advice })) : null,
-          a.webhooks ? section("Webhooks", h("p", { text: a.webhooks }), h("p", { class: "sk-dim", text: "Aira does not send webhooks either. History lists running async searches and tells you when each one finishes." })) : null);
+          a.webhooks ? section("Webhooks", h("p", { text: a.webhooks }), h("p", { class: "sk-dim", text: "Monosage does not send webhooks either. History lists running async searches and tells you when each one finishes." })) : null);
       }
       case "billing":
         return wrap("Billing and caching", "What counts against your SerpApi plan, and what does not.",
           section("SerpApi billing rules", h("ul", { class: "inline-list" }, ...(p.billing_rules || []).map((r) => h("li", { text: r })))),
-          section("What Aira adds", h("ul", { class: "inline-list" }, h("li", { text: "A local cache: an identical search inside the cache window (60 minutes by default) is answered from Aira's copy, shown as cached and costs nothing. no_cache=true skips it." }), h("li", { text: "Engine rules: extract in crawl mode costs one credit per page allowed; every other engine costs one." }), h("li", { text: "A local hourly cap and a per-key hourly limit, so a loop cannot burn the plan." }))),
+          section("What Monosage adds", h("ul", { class: "inline-list" }, h("li", { text: "A local cache: an identical search inside the cache window (60 minutes by default) is answered from Monosage's copy, shown as cached and costs nothing. no_cache=true skips it." }), h("li", { text: "Engine rules: extract in crawl mode costs one credit per page allowed; every other engine costs one." }), h("li", { text: "A local hourly cap and a per-key hourly limit, so a loop cannot burn the plan." }))),
           h("p", {}, "See ", h("a", { href: link("account"), text: "Account" }), " for the plan table and your limits."));
       case "sdks":
-        return wrap("SDKs and libraries", "SerpApi publishes client libraries for many languages. Aira's snippets use plain HTTP, which works everywhere.",
+        return wrap("SDKs and libraries", "SerpApi publishes client libraries for many languages. Monosage's snippets use plain HTTP, which works everywhere.",
           h("div", { class: "aa-sdk-grid" }, ...(p.sdks || []).map((s) => h("article", { class: "aa-sdk" }, h("h4", { text: s.language }), h("p", { class: "sk-dim", text: s.package }), s.repo ? externalLink(s.repo, "Repository") : null))),
-          h("p", { class: "sk-hint", text: "Each library targets serpapi.com. Aira answers on SerpApi's own paths, so the official libraries work once their base URL points at Aira and they use an API key. Examples for the Python libraries:" }),
+          h("p", { class: "sk-hint", text: "Each library targets serpapi.com. Monosage answers on SerpApi's own paths, so the official libraries work once their base URL points at Monosage and they use an API key. Examples for the Python libraries:" }),
           ...Object.entries(docs.sdk || {}).map(([name, code]) => h("div", { class: "field" }, h("span", { class: "label", text: name }), serp.codeBlock("python", code, { label: name }))),
           h("p", {}, externalLink(SERPAPI_LINKS.integrations, "All integrations on serpapi.com")));
       case "migrate":
-        return wrap("Migrate from SerpApi", "Moving an existing script to Aira takes two edits.",
+        return wrap("Migrate from SerpApi", "Moving an existing script to Monosage takes two edits.",
           h("ol", { class: "aa-steps" }, ...docs.migrate.map((s, i) => h("li", { class: "aa-step" }, h("span", { class: "aa-step-n", text: String(i + 1) }), h("div", {}, h("p", { text: s }))))),
-          section("Before and after", simpleTable("Before and after", ["", "SerpApi", "Aira"], [["Base URL", h("code", { text: "https://serpapi.com/search.json" }), h("code", { text: `${docs.root_url || docs.base_url}/search.json` })], ["Key", "SerpApi private key", "API key (aira_…)"], ["Everything else", "same", "same"]])));
+          section("Before and after", simpleTable("Before and after", ["", "SerpApi", "Monosage"], [["Base URL", h("code", { text: "https://serpapi.com/search.json" }), h("code", { text: `${docs.root_url || docs.base_url}/search.json` })], ["Key", "SerpApi private key", "API key (aira_…)"], ["Everything else", "same", "same"]])));
       case "coverage": {
         const pages = p.dashboard_pages || [];
         const rows = pages.map((page) => {
@@ -2859,11 +2859,11 @@
           const target = c.href ? h("a", { href: c.href, text: c.where }) : c.external ? externalLink(c.external, c.where) : c.where;
           return [h("div", {}, h("strong", { text: page.title }), h("p", { class: "sk-dim", text: (page.purpose || "").split(". ")[0] })), h("div", {}, target, h("p", { class: "sk-dim", text: c.how })), h("span", { class: `badge aa-cov ${c.status}`, text: STATUS_LABEL[c.status] })];
         });
-        return wrap("SerpApi dashboard coverage", "Every page and feature of the SerpApi dashboard, and where it lives in Aira. Billing and account administration stay with SerpApi.",
-          pages.length ? simpleTable("Dashboard coverage", ["SerpApi page", "In Aira", "Status"], rows, { cls: "aa-coverage" }) : ui.empty("Reference not loaded", "The platform reference could not be read."),
-          section("Common parameters", simpleTable("Common parameters", ["Parameter", "Status", "In Aira"], PARAMETERS.map(([name, status, where]) => [h("code", { text: name }), h("span", { class: `badge aa-cov ${status}`, text: STATUS_LABEL[status] }), where]), { cls: "aa-coverage" })),
-          section("APIs", simpleTable("APIs", ["API", "Status", "In Aira"], APIS.map(([name, status, where]) => [name, h("span", { class: `badge aa-cov ${status}`, text: STATUS_LABEL[status] }), where]), { cls: "aa-coverage" })),
-          section("Documented errors", simpleTable("Errors", ["Error", "Status", "In Aira"], ERRORS.map(([name, status, where]) => [name, h("span", { class: `badge aa-cov ${status}`, text: STATUS_LABEL[status] }), where]), { cls: "aa-coverage" })),
+        return wrap("SerpApi dashboard coverage", "Every page and feature of the SerpApi dashboard, and where it lives in Monosage. Billing and account administration stay with SerpApi.",
+          pages.length ? simpleTable("Dashboard coverage", ["SerpApi page", "In Monosage", "Status"], rows, { cls: "aa-coverage" }) : ui.empty("Reference not loaded", "The platform reference could not be read."),
+          section("Common parameters", simpleTable("Common parameters", ["Parameter", "Status", "In Monosage"], PARAMETERS.map(([name, status, where]) => [h("code", { text: name }), h("span", { class: `badge aa-cov ${status}`, text: STATUS_LABEL[status] }), where]), { cls: "aa-coverage" })),
+          section("APIs", simpleTable("APIs", ["API", "Status", "In Monosage"], APIS.map(([name, status, where]) => [name, h("span", { class: `badge aa-cov ${status}`, text: STATUS_LABEL[status] }), where]), { cls: "aa-coverage" })),
+          section("Documented errors", simpleTable("Errors", ["Error", "Status", "In Monosage"], ERRORS.map(([name, status, where]) => [name, h("span", { class: `badge aa-cov ${status}`, text: STATUS_LABEL[status] }), where]), { cls: "aa-coverage" })),
           section("Improvements beyond the dashboard", simpleTable("Improvements", ["Idea", "Status", "Where"], IDEAS.map(([name, status, where]) => [name, h("span", { class: `badge aa-cov ${status}`, text: STATUS_LABEL[status] }), where]), { cls: "aa-coverage" })));
       }
       default:
@@ -2954,7 +2954,7 @@
       if (!local.db_ok) problems.push("The local database did not answer.");
       if (!sp.reachable) problems.push(`SerpApi is not reachable${sp.error ? `: ${sp.error}` : ""}.`);
       if (key.state === "rejected") problems.push("SerpApi rejected the stored key.");
-      if (throttle.hourly_limit && throttle.used_this_hour >= throttle.hourly_limit) problems.push("Aira's hourly cap is used up: live searches are refused until the hour rolls over.");
+      if (throttle.hourly_limit && throttle.used_this_hour >= throttle.hourly_limit) problems.push("Monosage's hourly cap is used up: live searches are refused until the hour rolls over.");
       const banner = problems.length
         ? h("div", { class: "aa-banner bad", role: "alert" }, ico("shield"), h("div", {}, h("strong", { text: problems.length === 1 ? "One thing needs attention" : `${problems.length} things need attention` }), h("ul", {}, ...problems.map((p) => h("li", { text: p })))))
         : h("div", { class: "aa-banner good", role: "status" }, ico("check"), h("div", {}, h("strong", { text: "Everything is working" }), h("p", { text: "The local server, database and SerpApi all answered." })));
@@ -2984,14 +2984,14 @@
       const health = rows.length
         ? simpleTable("Engine health from your recent searches", ["Engine", { label: "Live runs", num: true }, { label: "Success", num: true }, { label: "Median", num: true }, { label: "Slowest 5%", num: true }, "Last error"],
           rows.map((r) => [h("a", { href: link("history", { engine: r.id }), text: r.name }), num(r.runs), h("span", { class: r.rate < 0.9 ? "aa-bad-text" : "", text: percent(r.rate, r.rate < 1 ? 1 : 0) }), ms(r.p50), ms(r.p95), r.lastError ? h("span", { class: "aa-err-cell", title: r.lastError.error, text: `${fmt.ago(r.lastError.created_at)}: ${r.lastError.error}`.slice(0, 90) }) : h("span", { class: "sk-dim", text: "none" })]))
-        : ui.empty("No live searches yet", "Success rate and latency per engine are computed from the searches Aira ran itself. Run a few and they appear here.");
+        : ui.empty("No live searches yet", "Success rate and latency per engine are computed from the searches Monosage ran itself. Run a few and they appear here.");
       const series = live.filter((r) => r.status === "ok" && r.duration_ms).slice(0, 60).reverse();
       const chart = series.length >= 3
         ? serp.lineChart({ series: [{ name: "Response time", values: series.map((r) => r.duration_ms) }], labels: series.map((r) => new Date(r.created_at).toLocaleTimeString([], { hour: "numeric", minute: "2-digit", second: "2-digit" })), height: 190, format: (v) => ms(v), area: true, ariaLabel: "Response time of the last live searches", tableLabel: "Search" })
         : h("p", { class: "sk-dim", text: "A latency chart appears after a few live searches." });
       host.replaceChildren(banner, cards,
         h("div", { class: "aa-cols" }, panel("Engine health", { sub: `last ${num(live.length)} live searches, cache hits excluded`, body: health }), panel("Response time", { sub: "most recent live searches", body: panelBody(chart) })),
-        panel("SerpApi's own status", { body: panelBody(h("p", { class: "muted", text: "SerpApi publishes no status API, so Aira computes health from its own run logs and the reachability probe above. For platform-wide incidents and hourly metrics for every engine, use SerpApi's pages." }),
+        panel("SerpApi's own status", { body: panelBody(h("p", { class: "muted", text: "SerpApi publishes no status API, so Monosage computes health from its own run logs and the reachability probe above. For platform-wide incidents and hourly metrics for every engine, use SerpApi's pages." }),
           h("div", { class: "btn-row" }, btn("API metrics", { icon: "external", sm: true, href: SERPAPI_LINKS.status, external: true }), btn("Incident page and alerts", { icon: "external", sm: true, href: SERPAPI_LINKS.incidents, external: true }))) }));
     }
     const refreshButton = btn("Check now", { icon: "refresh", kind: "", onClick: (event) => run(event.currentTarget, async () => { await load(true); }) });

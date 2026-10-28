@@ -326,7 +326,7 @@ class StripeProvider:
                 "currency": currency,
                 "unit_amount": seat_cents,
                 "recurring": {"interval": "month"},
-                "product_data": {"name": f"Aira {plan_name} (per candidate seat)"},
+                "product_data": {"name": f"Monosage {plan_name} (per candidate seat)"},
             },
             "quantity": seats,
         }
@@ -344,7 +344,7 @@ class StripeProvider:
             price_data["product"] = product
         else:
             price_data["product_data"] = {
-                "name": f"Aira {addon['name']} add-on (per candidate seat)"
+                "name": f"Monosage {addon['name']} add-on (per candidate seat)"
             }
         return {
             "price_data": price_data,
@@ -417,7 +417,7 @@ class StripeProvider:
         # price_data on an existing subscription item must name a product (product_data is only
         # accepted when creating a Checkout session), so make one for the new plan.
         product = self._product(
-            f"Aira {plan_name} (per candidate seat)", {"plan_id": plan_id}
+            f"Monosage {plan_name} (per candidate seat)", {"plan_id": plan_id}
         )
         price = self._price(plan_name, seats, seat_cents, currency)
         price["price_data"].pop("product_data", None)
@@ -426,7 +426,7 @@ class StripeProvider:
         wanted = {str(a["app_id"]): a for a in addons}
         for app_id, addon in wanted.items():
             addon_product = self._product(
-                f"Aira {addon['name']} add-on (per candidate seat)", {"app_id": app_id}
+                f"Monosage {addon['name']} add-on (per candidate seat)", {"app_id": app_id}
             )
             entry = self._addon_item(addon, currency, addon_product)
             if app_id in by_app:

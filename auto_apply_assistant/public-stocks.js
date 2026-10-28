@@ -50,7 +50,7 @@
           h("div", { class: "pub-item" }, h("span", { class: "pub-muted", text: "Win rate" }), h("strong", { class: "pub-price", text: r.win_rate_pct === null ? "-" : `${r.win_rate_pct}%` }), h("span", { class: "pub-muted pub-hint", text: r.closed ? `${r.wins} of ${r.closed} closed ideas made money` : "No closed ideas yet" })),
           h("div", { class: "pub-item" }, h("span", { class: "pub-muted", text: "Average return" }), h("strong", { class: "pub-price" }, ret(r.average_return_pct)), h("span", { class: "pub-muted pub-hint", text: r.best_pct === null ? "" : `Best ${signedPct(r.best_pct)}, worst ${signedPct(r.worst_pct)}` })),
           h("div", { class: "pub-item" }, h("span", { class: "pub-muted", text: "Followers paying" }), h("strong", { class: "pub-price", text: String(page.subscribers) })))),
-      h("p", { class: "pub-notice", role: "note", text: `${page.disclaimer} Aira tracks every idea automatically from the day it is published.` }),
+      h("p", { class: "pub-notice", role: "note", text: `${page.disclaimer} Monosage tracks every idea automatically from the day it is published.` }),
       h("section", { class: "pub-card" }, h("h2", { text: "Open free ideas" }), ideaTable(page.free, false)));
 
     const paidCard = h("section", { class: "pub-card" });

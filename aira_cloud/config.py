@@ -94,7 +94,7 @@ class CloudConfig:
     email_token_ttl: int = DAY
     max_failed_logins: int = 8
     lockout_seconds: int = 15 * 60
-    mfa_issuer: str = "Aira Career Copilot"
+    mfa_issuer: str = "Monosage Career Copilot"
 
     # subscription lifecycle (days)
     trial_days: int = 14
@@ -108,7 +108,7 @@ class CloudConfig:
     # collaborators
     mail_from: str = field(
         default_factory=lambda: _env(
-            "AIRA_CLOUD_MAIL_FROM", "Aira <no-reply@aira.invalid>"
+            "AIRA_CLOUD_MAIL_FROM", "Monosage <no-reply@aira.invalid>"
         )
     )
     smtp_url: str = field(default_factory=lambda: _env("AIRA_CLOUD_SMTP_URL"))

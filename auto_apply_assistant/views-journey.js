@@ -92,8 +92,8 @@
       { name: "unit", label: "Unit", placeholder: "km, books, hours" },
       { name: "target", label: "Target", placeholder: "100", hint: "The number you want to reach." },
       editing ? null : { name: "current", label: "What you have so far (optional)", placeholder: "0" },
-      earnings.allowed ? { name: "source", label: "Count what my Aira apps earn", type: "checkbox", hint: `Paid invoices, orders, bookings, tickets, courses and video earnings count by themselves from today.${earnings.this_month && earnings.this_month.cents ? ` This month so far: ${S.money(earnings.this_month.cents, earnings.currency)}.` : ""}` } : null,
-      { name: "target_date", label: "Target date", type: "date", hint: "Optional. Aira tells you when you fall behind." },
+      earnings.allowed ? { name: "source", label: "Count what my apps earn", type: "checkbox", hint: `Paid invoices, orders, bookings, tickets, courses and video earnings count by themselves from today.${earnings.this_month && earnings.this_month.cents ? ` This month so far: ${S.money(earnings.this_month.cents, earnings.currency)}.` : ""}` } : null,
+      { name: "target_date", label: "Target date", type: "date", hint: "Optional. Monosage tells you when you fall behind." },
       { name: "description", label: "Why it matters", type: "textarea", rows: 3 },
       editing ? { name: "status", label: "Status", type: "select", options: STATUSES } : { name: "steps", label: "Steps (one per line)", type: "textarea", rows: 4, hint: "Progress follows the steps you tick. Leave empty to set progress yourself." },
     ].filter(Boolean);
@@ -131,7 +131,7 @@
           const have = box.value.split("\n").map((line) => line.trim()).filter(Boolean);
           const fresh = result.steps.filter((step) => !have.some((line) => line.toLowerCase() === step.toLowerCase()));
           box.value = [...have, ...fresh].join("\n");
-          note.textContent = result.source === "model" ? "Steps from Aira's writing helper. Change them as you like." : "Ideas to start from. Change them as you like.";
+          note.textContent = result.source === "model" ? "Steps from Monosage's writing helper. Change them as you like." : "Ideas to start from. Change them as you like.";
         } catch (error) { note.textContent = ""; form.setError(error.message); }
       }, { kind: "secondary sm" });
       ideasRow = h("div", { class: "btn-row jr-ideas" }, ideas, note);
@@ -233,7 +233,7 @@
       } catch (err) { error.textContent = err.message; error.hidden = false; }
     };
     const settings = h("div", { class: "jr-support-form" },
-      Aira.ui.field("Payment link (optional)", link, "Your own page to be paid: PayPal.me, a UPI or Stripe link. Aira never takes the money."),
+      Aira.ui.field("Payment link (optional)", link, "Your own page to be paid: PayPal.me, a UPI or Stripe link. Monosage never takes the money."),
       Aira.ui.field("How to pay you (optional)", note, "Shown on the goal's page, for example bank details or \"cash when we meet\"."),
       error,
       h("div", { class: "btn-row" }, current.support
@@ -311,7 +311,7 @@
       const suggest = async () => {
         const result = await api("/goals/suggest", { method: "POST", body: { title: current.title, category: current.category, description: current.description } });
         ideas = result.steps.filter((idea) => !current.steps.some((step) => step.title.toLowerCase() === idea.toLowerCase()));
-        ideasNote = result.source === "model" ? "Steps from Aira's writing helper." : "Ideas to start from.";
+        ideasNote = result.source === "model" ? "Steps from Monosage's writing helper." : "Ideas to start from.";
         if (!ideas.length) Aira.toast("Your steps already cover these ideas. Add your own below.", "info");
         draw();
       };
@@ -579,7 +579,7 @@
       { name: "number", label: "Document number (optional)", type: "password", hint: doc && doc.number_hint ? `Saved: ${doc.number_hint}. Leave empty to keep it.` : "Kept encrypted. Only you can see it." },
       doc && doc.number_hint ? { name: "remove_number", label: "Remove the saved number", type: "checkbox" } : null,
       { name: "issued_on", label: "Issued on", type: "date" },
-      { name: "expires_on", label: "Expires on", type: "date", hint: "Aira reminds you 30 days, 7 days and 1 day before." },
+      { name: "expires_on", label: "Expires on", type: "date", hint: "Monosage reminds you 30 days, 7 days and 1 day before." },
       { name: "tags", label: "Tags (comma separated)", placeholder: "travel, identity" },
       { name: "notes", label: "Notes", type: "textarea", rows: 2 },
       doc && doc.file ? { name: "remove_file", label: `Remove the scan (${doc.file.name})`, type: "checkbox" } : null,
@@ -710,7 +710,7 @@
           doc.file ? S.button("Download", () => openFile(doc, "download"), { kind: "secondary sm" }) : null,
           S.button("Edit", () => documentForm(doc, rerender), { kind: "ghost sm" }),
           S.button("Delete", async () => { if (await S.confirmDelete(`"${doc.title}"`)) { await api(`/documents/${doc.id}`, { method: "DELETE" }); rerender(); } }, { kind: "ghost sm" })))))
-        : Aira.ui.empty(filtered ? "No documents match" : "Your vault is empty", filtered ? "Try another kind, state or search." : "Keep your passport, certificates and insurance cards here with their expiry dates. Aira reminds you before they run out.", filtered ? S.button("Show all documents", () => go({ kind: "", state: "", q: "" }), { kind: "secondary" }) : S.button("Add your first document", () => documentForm(null, rerender))));
+        : Aira.ui.empty(filtered ? "No documents match" : "Your vault is empty", filtered ? "Try another kind, state or search." : "Keep your passport, certificates and insurance cards here with their expiry dates. Monosage reminds you before they run out.", filtered ? S.button("Show all documents", () => go({ kind: "", state: "", q: "" }), { kind: "secondary" }) : S.button("Add your first document", () => documentForm(null, rerender))));
     if (/^[0-9a-f]{32}$/.test(q.doc || "") && opened !== `doc:${q.doc}`) {
       opened = `doc:${q.doc}`;
       documentDetail({ id: q.doc }, rerender).catch((error) => Aira.reportError(error));
@@ -905,7 +905,7 @@
         h("div", { class: "btn-row" },
           S.button("Save for something", () => newGoal(rerender, { measure: "money", category: "money" }), { kind: "secondary sm" }),
           data.may_count_earnings && !hasEarning ? S.button("Set an earning goal", () => newGoal(rerender, { measure: "money", category: "career", source: "earnings" }), { kind: "secondary sm" }) : null),
-        data.may_count_earnings && !hasEarning ? h("p", { class: "muted small", text: "An earning goal counts what you earn in Aira's apps by itself: paid invoices in Sales, shop orders, bookings, event tickets, courses and your share of the ads on your videos." }) : null,
+        data.may_count_earnings && !hasEarning ? h("p", { class: "muted small", text: "An earning goal counts what you earn in Monosage's apps by itself: paid invoices in Sales, shop orders, bookings, event tickets, courses and your share of the ads on your videos." }) : null,
         data.support.supporters ? h("p", { class: "jr-amount" }, h("strong", { text: plural(data.support.supporters, "supporter", "supporters") }), h("span", { class: "muted", text: ` · ${data.support.totals.map((t) => `${t.received_label} received, ${t.promised_label} promised`).join(" · ")}` })) : null,
         data.may_take_support && !data.support.goals ? h("p", { class: "muted small", text: "Need help reaching a goal? Open it and turn on Supporters: family and friends back it from its page and pay you through your own link." }) : null) : null,
       data.categories.length ? S.section("Progress by area of life", h("ul", { class: "jr-areas" }, ...data.categories.map((c) => h("li", { class: "jr-area" },
@@ -1015,7 +1015,7 @@
   // ---------------------------------------------------------------- the page
   const TABS = [
     { id: "overview", label: "Overview", icon: "dashboard", about: "Your goals, habits, journal, your story and the papers that matter, at a glance." },
-    { id: "goals", label: "Goals", icon: "jr-goal", about: "Big or small: tick off steps, count a number, save money, or earn it with your Aira apps." },
+    { id: "goals", label: "Goals", icon: "jr-goal", about: "Big or small: tick off steps, count a number, save money, or earn it with your apps." },
     { id: "habits", label: "Habits", icon: "jr-habit", about: "Small things you do often. Tick them here or on Today and watch your streak grow." },
     { id: "journal", label: "Journal", icon: "jr-journal", about: "How each day went, in a mood and a few lines. Only you can read it." },
     { id: "timeline", label: "Timeline", icon: "jr-timeline", about: "The moments that shaped your life, year by year." },
@@ -1044,7 +1044,7 @@
     const meta = TABS.find((t) => t.id === tab);
     const title = tab === "search" ? (query ? `Results for “${query}”` : "Search") : meta.label;
     const body = S.page(main, { title, subtitle: tab === "search" ? "Goals, habits, journal days, timeline events and documents that match." : meta.about });
-    document.title = `${title} · Life · Aira`;
+    document.title = `${title} · Life · Monosage`;
     if (!route.query.goal && !route.query.doc) opened = "";
     const strip = Aira.ui.tabs(TABS, tab, (id) => Aira.router.go(["journey"], { tab: id }));
     strip.classList.add("jr-tabstrip"); // a phone's tabs; wider screens have them as the left menu's folders

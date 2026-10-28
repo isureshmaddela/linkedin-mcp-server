@@ -58,7 +58,7 @@
       const limit = ui.select([["0", "No daily limit"], ...[1, 2, 3, 5, 10, 15, 20, 30, 50].map((n) => [String(n), `${n} a day`])], String(s.daily_limit), { "aria-label": "Daily application limit" });
       if (![...limit.options].some((o) => o.value === String(s.daily_limit))) limit.append(h("option", { value: String(s.daily_limit), text: `${s.daily_limit} a day`, selected: true }));
       limit.addEventListener("change", async () => { try { await api(`${BASE}/settings`, { method: "POST", body: { daily_application_limit: Number(limit.value) } }); toast("Daily limit saved.", "success"); load({ quiet: true }); } catch (error) { Aira.reportError(error); } });
-      const browser = toggle("Show the browser while applying", s.show_browser, async (on) => { try { await api(`${BASE}/settings`, { method: "POST", body: { apply_show_browser: on } }); } catch (error) { browser.set(!on); Aira.reportError(error); } }, { hint: "Watch Aira fill each form" });
+      const browser = toggle("Show the browser while applying", s.show_browser, async (on) => { try { await api(`${BASE}/settings`, { method: "POST", body: { apply_show_browser: on } }); } catch (error) { browser.set(!on); Aira.reportError(error); } }, { hint: "Watch Monosage fill each form" });
       const sentText = s.daily_limit ? `${s.sent_today} of ${s.daily_limit} applications sent today` : `${s.sent_today} application${s.sent_today === 1 ? "" : "s"} sent today`;
       return h("section", { class: `aap-hero${s.paused ? " paused" : ""}`, "aria-label": "Auto-apply status" },
         h("div", { class: "aap-hero-main" },
@@ -76,8 +76,8 @@
       const problems = items.filter((item) => !item.ok || item.warn);
       if (!problems.length && data.plans.length) return null;
       return h("section", { class: "card aap-ready", "aria-labelledby": "aapReadyTitle" },
-        h("div", { class: "aap-sec-head" }, h("h2", { id: "aapReadyTitle", text: "Before Aira applies for you" }), h("button", { type: "button", class: "btn secondary sm", text: "Your answers", onclick: answersDialog })),
-        h("p", { class: "muted", text: "Aira only fills what it knows. Anything a form asks that is not covered here waits for you; nothing is guessed." }),
+        h("div", { class: "aap-sec-head" }, h("h2", { id: "aapReadyTitle", text: "Before Monosage applies for you" }), h("button", { type: "button", class: "btn secondary sm", text: "Your answers", onclick: answersDialog })),
+        h("p", { class: "muted", text: "Monosage only fills what it knows. Anything a form asks that is not covered here waits for you; nothing is guessed." }),
         h("ul", { class: "aap-checks" }, ...items.map((item) => h("li", { class: item.ok ? (item.warn ? "warn" : "ok") : item.required ? "bad" : "warn" },
           h("span", { class: "aap-check-icon", "aria-hidden": "true", text: item.ok && !item.warn ? "✓" : "!" }),
           h("div", {}, h("strong", { text: item.label }), h("span", { text: item.detail })),
@@ -97,12 +97,12 @@
       const actions = h("div", { class: "btn-row" });
       const body = h("div", { class: "aap-open-body" });
       const head = h("header", {}, h("div", {}, h("button", { type: "button", class: "aap-job-link", text: jobLabel(run), onclick: () => Aira.openJob(run.job_id) }), h("div", { class: "aap-meta" }, statusBadge(run.status), run.score != null ? h("span", { class: "badge", text: `${Math.round(run.score)}% match` }) : null, run.ats ? h("span", { class: "badge source", text: run.ats }) : null, h("small", { class: "muted", text: fmt.ago(run.finished_at || run.created_at) }))));
-      const skip = h("button", { type: "button", class: "btn ghost sm", text: "Skip this job", onclick: (event) => withBusy(event.currentTarget, async () => { await api(`${BASE}/runs/${run.run_id}/skip`, { method: "POST", body: {} }); toast("Skipped. Aira will not apply to it.", "success"); load(); }) });
+      const skip = h("button", { type: "button", class: "btn ghost sm", text: "Skip this job", onclick: (event) => withBusy(event.currentTarget, async () => { await api(`${BASE}/runs/${run.run_id}/skip`, { method: "POST", body: {} }); toast("Skipped. Monosage will not apply to it.", "success"); load(); }) });
       if (run.status === "ready") {
-        body.append(h("p", { text: "Aira filled the whole form. Look it over, then submit it with one click." }));
+        body.append(h("p", { text: "Monosage filled the whole form. Look it over, then submit it with one click." }));
         const submit = h("button", { type: "button", class: "btn", text: "Submit application" });
         submit.addEventListener("click", () => withBusy(submit, async () => {
-          if (!(await Aira.confirm({ title: "Submit this application?", message: `${jobLabel(run)}. Aira fills the form again with the same answers and presses Submit.`, confirmLabel: "Submit" }))) return;
+          if (!(await Aira.confirm({ title: "Submit this application?", message: `${jobLabel(run)}. Monosage fills the form again with the same answers and presses Submit.`, confirmLabel: "Submit" }))) return;
           await api(`${BASE}/runs/${run.run_id}/submit`, { method: "POST", body: {} });
           afterStart("Submitting… the result appears here in a moment.");
         }));
@@ -144,18 +144,18 @@
       return h("section", { "aria-labelledby": "aapPlansTitle" },
         h("div", { class: "aap-sec-head" }, h("h2", { id: "aapPlansTitle", text: "Search plans" }), data.plans.length ? h("button", { type: "button", class: "btn secondary sm", text: "New search plan", onclick: () => planEditor(null) }) : null),
         data.plans.length ? h("div", { class: "aap-plans" }, ...data.plans.map(planCard))
-          : ui.empty("Tell Aira what you are looking for", "A search plan names the positions you want, where to look and how good a match must be. On its schedule Aira searches, scores every job against your profile and applies to the best matches, up to your limits.", h("button", { type: "button", class: "btn", text: "Create your first search plan", onclick: () => planEditor(null) })));
+          : ui.empty("Tell Monosage what you are looking for", "A search plan names the positions you want, where to look and how good a match must be. On its schedule Monosage searches, scores every job against your profile and applies to the best matches, up to your limits.", h("button", { type: "button", class: "btn", text: "Create your first search plan", onclick: () => planEditor(null) })));
     }
 
     function planCard(plan) {
-      const where = [...plan.sources.map((s) => ({ linkedin: "LinkedIn", aira_jobs: "Aira Jobs", google_jobs: "Google Jobs" }[s] || s)), ...plan.boards.map((b) => `${BOARD_LABELS[b.source]}: ${b.identifier}`)];
+      const where = [...plan.sources.map((s) => ({ linkedin: "LinkedIn", aira_jobs: "Jobs", google_jobs: "Google Jobs" }[s] || s)), ...plan.boards.map((b) => `${BOARD_LABELS[b.source]}: ${b.identifier}`)];
       const enabled = toggle(plan.enabled ? "On schedule" : "Off", plan.enabled, async (on) => {
         try { await api(`${BASE}/plans/${plan.plan_id}`, { method: "PATCH", body: { enabled: on } }); toast(on ? "Plan on. Its first run starts within a minute." : "Plan off.", "success"); load({ quiet: true }); }
         catch (error) { enabled.set(!on); Aira.reportError(error); }
       });
       const runNow = h("button", { type: "button", class: "btn sm", text: "Run now", disabled: Boolean(data.status.running) });
       runNow.addEventListener("click", () => withBusy(runNow, async () => {
-        if (plan.mode === "apply" && !(await Aira.confirm({ title: `Run "${plan.name}" now?`, message: `Aira searches ${where.join(", ")} for ${plan.positions.join(", ")} and applies to up to ${plan.max_per_run} matching job${plan.max_per_run === 1 ? "" : "s"} scoring ${plan.min_score}% or more.`, confirmLabel: "Run now" }))) return;
+        if (plan.mode === "apply" && !(await Aira.confirm({ title: `Run "${plan.name}" now?`, message: `Monosage searches ${where.join(", ")} for ${plan.positions.join(", ")} and applies to up to ${plan.max_per_run} matching job${plan.max_per_run === 1 ? "" : "s"} scoring ${plan.min_score}% or more.`, confirmLabel: "Run now" }))) return;
         await api(`${BASE}/plans/${plan.plan_id}/run`, { method: "POST", body: {} });
         afterStart("Running… results appear below as they come in.");
       }));
@@ -218,21 +218,21 @@
       const titleMatch = h("input", { type: "checkbox", checked: p.match_title });
       const excludeWords = h("input", { type: "text", maxlength: 600, value: p.exclude_keywords.join(", "), placeholder: "e.g. clearance, unpaid, commission" });
       const excludeCompanies = h("input", { type: "text", maxlength: 1500, value: p.exclude_companies.join(", "), placeholder: "Companies to never apply to" });
-      const easyWarn = h("p", { class: "note warn", hidden: !easy.checked, text: "LinkedIn does not allow automated applications in its User Agreement and may restrict accounts that use them. Turn this on only if you accept that risk; Aira still never guesses an answer." });
+      const easyWarn = h("p", { class: "note warn", hidden: !easy.checked, text: "LinkedIn does not allow automated applications in its User Agreement and may restrict accounts that use them. Turn this on only if you accept that risk; Monosage still never guesses an answer." });
       easy.addEventListener("change", () => { easyWarn.hidden = !easy.checked; });
       const body = h("div", { class: "aap-editor" },
         h("div", { class: "form-grid" }, ui.field("Plan name", name), ui.field("Location", location, "Leave empty for anywhere")),
-        ui.field("Positions you are looking for", positions, "Aira searches each one and only applies when the job title matches."),
+        ui.field("Positions you are looking for", positions, "Monosage searches each one and only applies when the job title matches."),
         h("div", { class: "form-grid" }, ui.field("Arrangement", workplace), ui.field("Employment type", jobType)),
         h("fieldset", { class: "aap-fieldset" }, h("legend", { text: "Where to search" }),
           h("label", { class: "check" }, linkedin, "LinkedIn (needs LinkedIn connected)"),
-          h("label", { class: "check" }, airaJobs, "Aira Jobs: free job boards (Himalayas, The Muse, Remotive, Jobicy, Arbeitnow), no key needed"),
+          h("label", { class: "check" }, airaJobs, "Jobs: free job boards (Himalayas, The Muse, Remotive, Jobicy, Arbeitnow), no key needed"),
           h("label", { class: "check" }, google, "Google Jobs (uses one SerpApi search per position per run)"),
           ui.field("Company boards", boards, "Greenhouse, Lever, Ashby or SmartRecruiters, as source: identifier")),
         h("fieldset", { class: "aap-fieldset" }, h("legend", { text: "When to apply" }),
           h("div", { class: "form-grid" }, ui.field("Minimum match", minScore), ui.field("Applications per run", perRun), ui.field("Run", every)),
-          h("label", { class: "check" }, modeApply, h("span", {}, h("strong", { text: "Apply automatically. " }), "Aira submits forms it can fill completely; anything else waits for you.")),
-          h("label", { class: "check" }, modeReview, h("span", {}, h("strong", { text: "Ask me first. " }), "Aira fills each form and waits for your one-click OK before submitting."))),
+          h("label", { class: "check" }, modeApply, h("span", {}, h("strong", { text: "Apply automatically. " }), "Monosage submits forms it can fill completely; anything else waits for you.")),
+          h("label", { class: "check" }, modeReview, h("span", {}, h("strong", { text: "Ask me first. " }), "Monosage fills each form and waits for your one-click OK before submitting."))),
         h("details", { class: "aap-more" }, h("summary", { text: "More options" }),
           ui.field("Never apply when the job mentions", excludeWords),
           ui.field("Never apply to these companies", excludeCompanies),
@@ -250,7 +250,7 @@
             min_score: Number(minScore.value), max_per_run: Number(perRun.value), interval_minutes: Number(every.value), mode: modeReview.checked ? "review" : "apply",
             exclude_keywords: parseList(excludeWords.value), exclude_companies: parseList(excludeCompanies.value), match_title: titleMatch.checked, cover_letters: letters.checked, linkedin_easy_apply: easy.checked,
           };
-          if (!plan && payload.mode === "apply" && !(await Aira.confirm({ title: "Let Aira apply for you?", message: `Every ${intervalLabel(payload.interval_minutes).replace(/^Every /, "").toLowerCase()}, Aira searches for ${payload.positions.join(", ") || "your positions"} and submits applications to up to ${payload.max_per_run} jobs scoring ${payload.min_score}% or more, with your profile and confirmed answers. You can pause at any time.`, confirmLabel: "Yes, apply for me" }))) return false;
+          if (!plan && payload.mode === "apply" && !(await Aira.confirm({ title: "Let Monosage apply for you?", message: `Every ${intervalLabel(payload.interval_minutes).replace(/^Every /, "").toLowerCase()}, Monosage searches for ${payload.positions.join(", ") || "your positions"} and submits applications to up to ${payload.max_per_run} jobs scoring ${payload.min_score}% or more, with your profile and confirmed answers. You can pause at any time.`, confirmLabel: "Yes, apply for me" }))) return false;
           try {
             await api(plan ? `${BASE}/plans/${plan.plan_id}` : `${BASE}/plans`, { method: plan ? "PATCH" : "POST", body: payload });
             toast(plan ? "Plan saved." : "Plan created. Its first run starts within a minute.", "success");
@@ -272,7 +272,7 @@
       const paintRemembered = () => remembered.replaceChildren(...(data.remembered.length ? [h("h3", { text: "Answers you saved while applying" }), ...data.remembered.map((item) => h("div", { class: "row" }, h("div", {}, h("span", { class: "title", text: item.label }), h("span", { class: "sub", text: item.value })), h("button", { type: "button", class: "btn ghost sm danger", text: "Forget", onclick: (event) => withBusy(event.currentTarget, async () => { await api(`${BASE}/answers/${encodeURIComponent(item.label_key)}`, { method: "DELETE" }); data.remembered = data.remembered.filter((x) => x.label_key !== item.label_key); paintRemembered(); }) })))] : []));
       paintRemembered();
       const body = h("div", { class: "aap-answers" },
-        h("p", { class: "muted", text: "Saving an answer confirms it: Aira uses it on every form that asks the same question. Sensitive answers (work authorization, sponsorship, attestations) are only ever filled from here." }),
+        h("p", { class: "muted", text: "Saving an answer confirms it: Monosage uses it on every form that asks the same question. Sensitive answers (work authorization, sponsorship, attestations) are only ever filled from here." }),
         ...rows.map(({ answer, input }) => ui.field(answer.label, input, answer.sensitivity === "sensitive" ? "Sensitive" : null)),
         h("p", { class: "muted", style: { fontSize: "12.5px" } }, "Demographic and other questions can be answered in ", h("a", { href: "#/settings/answers", text: "Settings > Standard answers" }), "."),
         remembered);
@@ -315,7 +315,7 @@
         ui.kv([["Mode", run.mode === "apply" ? "Apply automatically" : "Ask before submitting"], ["Started by", run.trigger === "user" ? "You" : "Schedule"], ["Form", run.ats || run.route || "—"], ["Confirmation", run.confirmation_number || (run.status === "submitted" ? "Shown on the page (see screenshot)" : "—")], ["Started", fmt.datetime(run.started_at || run.created_at)], ["Finished", run.finished_at ? fmt.datetime(run.finished_at) : "—"]]),
         shot,
         questions.length ? h("div", { class: "card", style: { marginTop: "12px" } }, h("h3", { text: `Questions on the form (${questions.length})` }), h("ul", { class: "aap-qlist" }, ...questions.map((q) => h("li", { class: q.status }, h("span", { text: q.label + (q.required ? " *" : "") }), h("span", { class: "muted", text: q.value ? `${q.value}` : q.message || fmt.stage(q.status) }))))) : null,
-        (run.steps || []).length ? h("details", { class: "aap-steps", open: run.status !== "submitted" }, h("summary", { text: `What Aira did (${run.steps.length} steps)` }), h("ol", {}, ...run.steps.map((step) => h("li", { text: step })))) : null);
+        (run.steps || []).length ? h("details", { class: "aap-steps", open: run.status !== "submitted" }, h("summary", { text: `What Monosage did (${run.steps.length} steps)` }), h("ol", {}, ...run.steps.map((step) => h("li", { text: step })))) : null);
     }
 
     async function passesDrawer(plan) {
@@ -334,17 +334,17 @@
   Aira.renderAutoApplyCard = (job, reload) => {
     const runs = job.auto_runs || [];
     const active = runs.find((run) => ["queued", "running", "needs_review", "ready"].includes(run.status));
-    const card = h("div", { class: "card aap-jobcard" }, h("h3", { text: "Let Aira apply" }));
+    const card = h("div", { class: "card aap-jobcard" }, h("h3", { text: "Let Monosage apply" }));
     if (job.submission) { card.append(h("p", { class: "muted", text: "This job already has a recorded application." })); return card; }
     if (active) {
-      card.append(h("p", {}, statusBadge(active.status), " ", active.status === "running" || active.status === "queued" ? "Aira is working on it." : "It waits for you in Jobs > Auto-apply."), h("a", { class: "btn secondary sm", href: "#/jobs/autopilot", text: "Open Auto-apply" }));
+      card.append(h("p", {}, statusBadge(active.status), " ", active.status === "running" || active.status === "queued" ? "Monosage is working on it." : "It waits for you in Jobs > Auto-apply."), h("a", { class: "btn secondary sm", href: "#/jobs/autopilot", text: "Open Auto-apply" }));
       return card;
     }
     const last = runs[0];
     if (last) card.append(h("p", { class: "muted" }, "Last attempt: ", statusBadge(last.status), last.error ? ` ${last.error}` : ""));
-    card.append(h("p", { class: "muted", text: "Aira fills the employer's form with your profile and confirmed answers. Questions it cannot answer come back to you; nothing is guessed." }));
+    card.append(h("p", { class: "muted", text: "Monosage fills the employer's form with your profile and confirmed answers. Questions it cannot answer come back to you; nothing is guessed." }));
     const start = (mode) => async (event) => withBusy(event.currentTarget, async () => {
-      if (mode === "apply" && !(await Aira.confirm({ title: "Apply to this job now?", message: `${job.title || "This job"}${job.company ? ` at ${job.company}` : ""}. Aira submits the application if it can answer every required question.`, confirmLabel: "Apply for me" }))) return;
+      if (mode === "apply" && !(await Aira.confirm({ title: "Apply to this job now?", message: `${job.title || "This job"}${job.company ? ` at ${job.company}` : ""}. Monosage submits the application if it can answer every required question.`, confirmLabel: "Apply for me" }))) return;
       await api(`/api/jobs/${encodeURIComponent(job.job_id)}/auto-apply`, { method: "POST", body: { mode } });
       toast(mode === "apply" ? "Applying… follow it in Jobs > Auto-apply." : "Filling the form… it will wait for your OK.", "success");
       setTimeout(() => reload("apply"), 1500);

@@ -484,8 +484,8 @@ def _check_new_password(password: str) -> None:
 RESET_CODE_ALPHABET = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"  # no 0/O or 1/I/L to misread
 RESET_CODE_TTL_SECONDS = 15 * 60
 RESET_CODE_MAX_ATTEMPTS = 5
-RESET_CODE_REQUESTED = "If that email has an Aira account here, a reset code is now shown in the window where Aira is running. It works once, for 15 minutes."
-RESET_CODE_EMAILED = "If that email has an Aira account here, we emailed it a reset code (it is also shown in the window where Aira is running). It works once, for 15 minutes."
+RESET_CODE_REQUESTED = "If that email has a Monosage account here, a reset code is now shown in the window where Monosage is running. It works once, for 15 minutes."
+RESET_CODE_EMAILED = "If that email has a Monosage account here, we emailed it a reset code (it is also shown in the window where Monosage is running). It works once, for 15 minutes."
 RESET_CODE_WRONG = "That reset code is wrong or has expired. Ask for a new one."
 
 
@@ -567,10 +567,10 @@ def _change_password(
     """A signed-in password change; other sessions of the account are signed out, this one stays."""
     if _account_linked(user):
         raise ValueError(
-            "This account signs in with your Aira account and has no password here."
+            "This account signs in with your Monosage account and has no password here."
         )
     if not _password_matches(current, user["password_hash"]):
-        raise ValueError("Your current Aira password is incorrect.")
+        raise ValueError("Your current Monosage password is incorrect.")
     _check_new_password(new)
     with _auth_connect() as connection:
         connection.execute(
@@ -627,7 +627,7 @@ def _reset_mail_env() -> dict[str, Any] | None:
         or "starttls",
         "smtp_username": username,
         "from_email": os.getenv("AIRA_SMTP_FROM", "").strip() or username,
-        "from_name": os.getenv("AIRA_SMTP_FROM_NAME", "Aira").strip() or "Aira",
+        "from_name": os.getenv("AIRA_SMTP_FROM_NAME", "Monosage").strip() or "Monosage",
         "password": os.getenv("AIRA_SMTP_PASSWORD", ""),
         "source": "env",
     }
@@ -660,7 +660,7 @@ def _reset_mail_summary(user: dict[str, Any]) -> dict[str, Any]:
     can_edit = str(user.get("data_path") or "") == str(DB_PATH)
     if settings is None:
         return {"configured": False, "source": "none", "can_edit": can_edit, **GMAIL_SMTP, "provider": "gmail",
-                "smtp_username": "", "from_email": "", "from_name": "Aira", "has_password": False}  # fmt: skip
+                "smtp_username": "", "from_email": "", "from_name": "Monosage", "has_password": False}  # fmt: skip
     password = settings.pop("password", "")
     settings.pop("id", None)
     settings.pop("updated_at", None)
@@ -708,8 +708,8 @@ def _save_reset_mail(user: dict[str, Any], payload: Mapping[str, Any]) -> None:
     if not EMAIL_RE.fullmatch(from_email.lower()):
         raise ValueError("Enter the address the codes are sent from.")
     from_name = (
-        re.sub(r"[\r\n]", " ", str(payload.get("from_name") or "Aira")).strip()[:100]
-        or "Aira"
+        re.sub(r"[\r\n]", " ", str(payload.get("from_name") or "Monosage")).strip()[:100]
+        or "Monosage"
     )
     password = str(payload.get("password") or "")
     if len(password) > 1024:
@@ -778,7 +778,7 @@ def _send_reset_mail(
     message["Message-ID"] = make_msgid(
         domain=str(settings["from_email"]).split("@")[-1]
     )
-    message["X-Mailer"] = "Aira"
+    message["X-Mailer"] = "Monosage"
     message.set_content(body)
     leads_mail.smtp_send(settings, str(settings.get("password") or ""), message)
 
@@ -788,9 +788,9 @@ def _email_reset_code(email: str, code: str) -> None:
     try:
         _send_reset_mail(
             email,
-            "Your Aira password reset code",
-            f"Your Aira password reset code is {code}\n\n"
-            f"It works once, for {RESET_CODE_TTL_SECONDS // 60} minutes. Enter it on the Aira sign-in screen with a new password.\n\n"
+            "Your Monosage password reset code",
+            f"Your Monosage password reset code is {code}\n\n"
+            f"It works once, for {RESET_CODE_TTL_SECONDS // 60} minutes. Enter it on the Monosage sign-in screen with a new password.\n\n"
             "If you did not ask to reset your password, ignore this email. Your password stays the same.\n",
         )
         logger.info("Reset code emailed to %s", email)
@@ -802,7 +802,7 @@ def _email_reset_code(email: str, code: str) -> None:
 
 # --- the Aira account (the hosted build) as the sign-in for this installation -------------------
 
-ACCOUNT_LINK_MESSAGE = 'This account signs in with your Aira account. Use "Sign in with your Aira account".'
+ACCOUNT_LINK_MESSAGE = 'This account signs in with your Monosage account. Use "Sign in with your Monosage account".'
 ACCOUNT_LINK_PURPOSE = "launch"
 ACCOUNT_SECRET_MIN_CHARS = 32
 
@@ -890,12 +890,12 @@ def _validate_launch_token(token: str) -> dict[str, Any]:
     """Ask the account who this one-time launch token signs in."""
     if not _account_link_available():
         raise ValueError(
-            "Signing in with an Aira account is not set up on this installation (AIRA_ACCOUNT_URL and AIRA_ACCOUNT_SECRET)."
+            "Signing in with a Monosage account is not set up on this installation (AIRA_ACCOUNT_URL and AIRA_ACCOUNT_SECRET)."
         )
     token = str(token or "").strip()
     if not token or len(token) > 200 or not re.fullmatch(r"[A-Za-z0-9_\-]+", token):
         raise ValueError(
-            "The launch link is not valid. Start again from your Aira account."
+            "The launch link is not valid. Start again from your Monosage account."
         )
     url = _account_url()
     _check_account_url(url)
@@ -917,27 +917,27 @@ def _validate_launch_token(token: str) -> dict[str, Any]:
         message = str(detail.get("error") or "")
         if error.code == 401:
             raise RuntimeError(
-                "The Aira account refused this installation's signature: AIRA_ACCOUNT_SECRET does not match its AIRA_CLOUD_LAUNCH_SECRET."
+                "The Monosage account refused this installation's signature: AIRA_ACCOUNT_SECRET does not match its AIRA_CLOUD_LAUNCH_SECRET."
             ) from None
         if error.code in {404, 410}:
             raise ValueError(
                 message
-                or "The launch link is not valid or has expired. Start again from your Aira account."
+                or "The launch link is not valid or has expired. Start again from your Monosage account."
             ) from None
         if error.code in {402, 403, 409}:
             raise PermissionError(
-                message or "Your Aira account cannot open this installation right now."
+                message or "Your Monosage account cannot open this installation right now."
             ) from None
         raise RuntimeError(
-            f"The Aira account answered HTTP {error.code}{': ' + message if message else ''}."
+            f"The Monosage account answered HTTP {error.code}{': ' + message if message else ''}."
         ) from None
     except (URLError, TimeoutError, OSError, ValueError) as error:
         raise RuntimeError(
-            f"The Aira account at {url} could not be reached ({type(error).__name__})."
+            f"The Monosage account at {url} could not be reached ({type(error).__name__})."
         ) from None
     email = str(data.get("email") or "").strip().lower()
     if len(email) > 254 or not EMAIL_RE.fullmatch(email):
-        raise RuntimeError("The Aira account did not name a valid email address.")
+        raise RuntimeError("The Monosage account did not name a valid email address.")
     data["email"] = email
     return data
 
@@ -3420,11 +3420,11 @@ def _open_conversation(
     if not rows and not (thread or {}).get("raw_text"):
         if not connected:
             note = (
-                "This conversation is not saved in Aira yet and LinkedIn is not connected. "
+                "This conversation is not saved in Monosage yet and LinkedIn is not connected. "
                 "Connect LinkedIn in Settings > Integrations to load it."
             )
         elif live_error:
-            note = "Aira could not load this conversation from LinkedIn just now. Try Refresh in a moment."
+            note = "Monosage could not load this conversation from LinkedIn just now. Try Refresh in a moment."
         else:
             note = "This conversation has no messages yet."
     with _connect() as connection:
@@ -3507,7 +3507,7 @@ def _inbox_payload(
         message = "No conversations match your search or filter."
     elif connected:
         message = (
-            "Your inbox is not saved in Aira yet. Aira is loading it from LinkedIn."
+            "Your inbox is not saved in Monosage yet. Monosage is loading it from LinkedIn."
         )
     else:
         message = "LinkedIn is not connected, and no conversations are saved yet. Connect LinkedIn in Settings > Integrations."
@@ -3730,7 +3730,7 @@ def _start_inbox_sync(
         return outcome(
             False,
             "not_connected",
-            "LinkedIn is not connected. Aira is showing the conversations it saved earlier.",
+            "LinkedIn is not connected. Monosage is showing the conversations it saved earlier.",
         )
     if trigger not in INBOX_SYNC_TRIGGERS:
         trigger = "manual"
@@ -3757,7 +3757,7 @@ def _start_inbox_sync(
             return outcome(
                 False,
                 "busy",
-                "An inbox check or another automation is running. Aira saves what it reads, so your conversations update when it finishes.",
+                "An inbox check or another automation is running. Monosage saves what it reads, so your conversations update when it finishes.",
             )
         _inbox_sync_running.add(owner)
     try:
@@ -5572,7 +5572,7 @@ def _edit_manual_job(job_id: str, changes: Any) -> None:
     url = values.pop("url")
     if careers_tracker.has_posting(url) and _job_at_link(url, other_than=job_id):
         raise ValueError(
-            "Aira already tracks another job at this link. Open that one, or use a different link."
+            "Monosage already tracks another job at this link. Open that one, or use a different link."
         )
     with _connect() as connection:
         connection.execute(
@@ -5995,7 +5995,7 @@ def _autopilot_search(
     where = {
         "linkedin": "LinkedIn",
         "google_jobs": "Google Jobs",
-        "aira_jobs": "Aira Jobs",
+        "aira_jobs": "Jobs",
     }.get(source, f"{source} {identifier}".strip())
     _autopilot_progress(f"Searching {where} for {position}")
     result = _unified_search(
@@ -6377,7 +6377,7 @@ def _autopilot_apply(
                 "status": "unsupported",
                 "route": "form",
                 "url": url,
-                "error": f"This job applies through its {label} page, which does not lead to a form Aira can fill. Open it to apply.",
+                "error": f"This job applies through its {label} page, which does not lead to a form Monosage can fill. Open it to apply.",
             }
         url = employer
     if detect_ats(url) == "linkedin":
@@ -6862,7 +6862,7 @@ def _autopilot_apply_job_now(
     if job is None:
         raise LookupError("Job not found.")
     if job.get("submission"):
-        raise ValueError("Aira already recorded an application for this job.")
+        raise ValueError("Monosage already recorded an application for this job.")
     with _connect() as connection:
         active = connection.execute(
             "SELECT 1 FROM application_runs WHERE job_id = ? AND status IN ('queued', 'running', 'ready', 'needs_review')",
@@ -7577,10 +7577,10 @@ def _export_account() -> dict[str, Any]:
 def _delete_account(user: dict[str, Any], password: str) -> None:
     if _account_linked(user):
         raise ValueError(
-            "This account signs in with your Aira account and has no password here. Remove the person from the organization in the Aira account instead."
+            "This account signs in with your Monosage account and has no password here. Remove the person from the organization in the Monosage account instead."
         )
     if not _password_matches(password, user["password_hash"]):
-        raise ValueError("Enter your current Aira password to delete the account.")
+        raise ValueError("Enter your current Monosage password to delete the account.")
     user_id = user["user_id"]
     with _process_lock:
         for registry in (_login_processes, _worker_processes):
@@ -7880,7 +7880,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             if not airaapi_http.host_is_local(host):
                 self._reject(
                     403,
-                    "This request did not address Aira by a loopback name "
+                    "This request did not address Monosage by a loopback name "
                     "(127.0.0.1 or localhost). Set AIRA_ALLOWED_HOSTS to allow another.",
                 )
                 return
@@ -7948,7 +7948,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             self._send_json(
                 500,
                 {
-                    "error": f"Something went wrong: {type(error).__name__}. Check the Aira log with the request ID."
+                    "error": f"Something went wrong: {type(error).__name__}. Check the Monosage log with the request ID."
                 },
             )
         finally:
@@ -8439,8 +8439,8 @@ class RequestHandler(BaseHTTPRequestHandler):
         try:
             _send_reset_mail(
                 user["email"],
-                "Aira test email",
-                "This is a test from Aira. Password reset codes will be sent from this address.\n",
+                "Monosage test email",
+                "This is a test from Monosage. Password reset codes will be sent from this address.\n",
             )
         except leads_mail.SendError as error:
             raise ValueError(str(error)) from None
@@ -10506,7 +10506,7 @@ def _airaapi_handler(
             self._send_json(
                 403,
                 {
-                    "error": "This request did not address Aira by a loopback name "
+                    "error": "This request did not address Monosage by a loopback name "
                     "(127.0.0.1 or localhost). Set AIRA_ALLOWED_HOSTS to allow another."
                 },
             )
@@ -10629,11 +10629,11 @@ def _careers_person_check(handler: Any, route_name: str) -> None:
     if not header:
         if not owner["pin_hash"] or route_name in _CAREERS_BEFORE_PROFILE:
             return  # without a PIN anyone may pick the owner's profile anyway
-        raise suite_life.ProfileRequired("Choose who is using Aira.")
+        raise suite_life.ProfileRequired("Choose who is using Monosage.")
     profile_id, _, token = header.partition(".")
     chosen = next((person for person in people if person["id"] == profile_id), None)
     if chosen is None:
-        raise suite_life.ProfileRequired("Choose who is using Aira.")
+        raise suite_life.ProfileRequired("Choose who is using Monosage.")
     if chosen["pin_hash"] and not hmac.compare_digest(
         token, suite_life.unlock_token(chosen)
     ):
@@ -10811,14 +10811,14 @@ def main() -> None:
     port = int(os.getenv("AUTO_APPLY_PORT", "8765"))
     server = ThreadingHTTPServer(("127.0.0.1", port), RequestHandler)
     server.daemon_threads = True
-    logger.info("Aira Career Copilot %s at http://127.0.0.1:%d", AIRA_VERSION, port)
+    logger.info("Monosage Career Copilot %s at http://127.0.0.1:%d", AIRA_VERSION, port)
     threading.Thread(
         target=_scheduler_loop, daemon=True, name="schedule-runner"
     ).start()
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        logger.info("Stopping Aira")
+        logger.info("Stopping Monosage")
     finally:
         server.server_close()
 

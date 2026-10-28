@@ -182,7 +182,7 @@ def save(
     if given("prompt"):
         values["prompt"] = kit.text(
             raw.get("prompt"),
-            "what Aira should do",
+            "what Monosage should do",
             max_len=MAX_PROMPT,
             required=True,
             multiline=True,

@@ -72,7 +72,7 @@
   const change = (value, label) => h("span", { class: `st-chg ${toneOf(value)}` }, h("span", { class: "st-arrow", "aria-hidden": "true", text: arrow(value) }), h("span", { text: label }));
   const quoteChange = (q) => change(q.change_pct, `${q.index ? `${q.change_cents > 0 ? "+" : ""}${num(q.change_cents / 100)}` : signedMoney(q.change_cents, q.currency)} (${signedPct(q.change_pct)})`);
   const pill = (text, tone = "") => h("span", { class: `suite-pill as-written ${tone}`, text });
-  const DISCLAIMER = "Not financial advice. Forecasts are estimates and are often wrong. Aira never buys or sells real shares.";
+  const DISCLAIMER = "Not financial advice. Forecasts are estimates and are often wrong. Monosage never buys or sells real shares.";
   const disclaimer = (text) => h("p", { class: "st-disclaimer", role: "note" }, h("strong", { text: "Please note: " }), h("span", { text: text || DISCLAIMER }));
   const stockLink = (symbol, label) => h("a", { href: `#/stocks?symbol=${enc(symbol)}`, class: "st-link", text: label || symbol });
 
@@ -242,7 +242,7 @@
         const body = { ...form };
         if (body.kind === "dividend") { delete body.quantity; delete body.price; delete body.fees; } else delete body.amount;
         if (existing) { delete body.symbol; await api(`/real/transactions/${existing.id}`, { method: "PATCH", body }); } else await api("/real/transactions", { method: "POST", body });
-        Aira.toast(existing ? "Trade changed." : "Recorded. Aira did not trade anything: this is your record.", "success");
+        Aira.toast(existing ? "Trade changed." : "Recorded. Monosage did not trade anything: this is your record.", "success");
         if (rerender) rerender();
       },
     });
@@ -601,7 +601,7 @@
     } else {
       hooks.real = (ask) => realTrade(ask.symbol ? { symbol: ask.symbol } : {}, rerender);
       put(body,
-        h("p", { class: "st-note", role: "note", text: "Aira never buys or sells shares. Record here what you did with your own broker, and Aira works out your profit and loss." }),
+        h("p", { class: "st-note", role: "note", text: "Monosage never buys or sells shares. Record here what you did with your own broker, and Monosage works out your profit and loss." }),
         h("div", { class: "btn-row" }, S.button("Record a real trade", () => realTrade({}, rerender)), data.accounts.length ? S.button("Export CSV", () => Aira.download("/api/stocks/export/transactions?kind=real", "stock-real-transactions.csv"), { kind: "ghost" }) : null));
       if (!data.accounts.length) body.append(Aira.ui.empty("No holdings recorded", "Add the shares you own: what you bought, when, at what price and the fees. Sells, partial sells and dividends work too.", S.button("Record your first trade", () => realTrade({}, rerender))));
       for (const account of data.accounts) body.append(accountSection(account, rerender));
@@ -678,7 +678,7 @@
         h("div", { class: "btn-row" }, S.button("Explain in plain words", async () => { const again = await api(`/predict?symbol=${enc(q.symbol)}&explain=1`); explain.textContent = again.explanation.text; }, { kind: "secondary" })),
         explain),
       S.section("Track record: how often were the models right?",
-        h("p", { class: "muted", text: `Aira replayed the past: on ${data.backtest["5"].tests} past days it forecast with only what was known then, and compared with what really happened. "No change" is the baseline: a model is only useful if it misses by less.` }),
+        h("p", { class: "muted", text: `Monosage replayed the past: on ${data.backtest["5"].tests} past days it forecast with only what was known then, and compared with what really happened. "No change" is the baseline: a model is only useful if it misses by less.` }),
         S.grid(h("div", {}, h("h3", { class: "suite-h3", text: "5 trading days ahead" }), recordTable("5")), h("div", {}, h("h3", { class: "suite-h3", text: "20 trading days ahead" }), recordTable("20"))),
         h("p", { class: "muted small", text: `For comparison, the price simply went up over 20 days ${data.backtest["20"].went_up_pct}% of the time.` })),
       S.section("Indicators", S.table({
@@ -691,7 +691,7 @@
         rows: indicatorRows,
       })),
       S.section("Make your own prediction",
-        h("p", { class: "muted", text: "Say where you think the price goes. Aira checks it on the date you choose and keeps your score next to the models'." }),
+        h("p", { class: "muted", text: "Say where you think the price goes. Monosage checks it on the date you choose and keeps your score next to the models'." }),
         h("div", { class: "btn-row" },
           S.button(`I think ${q.symbol} goes up`, () => predictForm(q, "up", rerender)),
           S.button(`I think ${q.symbol} goes down`, () => predictForm(q, "down", rerender), { kind: "secondary" }))));
@@ -710,7 +710,7 @@
       ].filter(Boolean),
       values: { target_date: inMonth, direction: "up" },
       submitLabel: "Save my prediction",
-      onSave: async (form) => { await api("/predictions", { method: "POST", body: { ...form, symbol: q.symbol, direction: direction || form.direction } }); Aira.toast("Saved. Aira checks it on that date.", "success"); rerender(); },
+      onSave: async (form) => { await api("/predictions", { method: "POST", body: { ...form, symbol: q.symbol, direction: direction || form.direction } }); Aira.toast("Saved. Monosage checks it on that date.", "success"); rerender(); },
     });
   }
 
@@ -761,7 +761,7 @@
         { name: "bio", label: "About you", type: "textarea", rows: 3, placeholder: "What you look for in a stock, how long you hold." },
         { name: "price_cents", label: "Monthly price for paid ideas", type: "money", hint: "0 means everything you publish is free." },
         { name: "currency", label: "Currency", type: "select", options: Object.keys(SYMBOLS).map((code) => [code, code]) },
-        { name: "payment_link", label: "Your payment link", placeholder: "https://...", hint: "Your own Stripe, PayPal, Razorpay or UPI page. Aira does not take payments." },
+        { name: "payment_link", label: "Your payment link", placeholder: "https://...", hint: "Your own Stripe, PayPal, Razorpay or UPI page. Monosage does not take payments." },
         { name: "payment_instructions", label: "Or payment instructions", type: "textarea", rows: 2, placeholder: "UPI id, bank details" },
         { name: "accepting", label: "Take new subscribers", type: "checkbox" },
       ],
@@ -783,7 +783,7 @@
       ],
       values: { side: "buy", access: "free", horizon_days: 30 },
       submitLabel: "Publish",
-      onSave: async (form) => { await api("/ideas", { method: "POST", body: form }); Aira.toast("Published. Aira tracks it every day.", "success"); rerender(); },
+      onSave: async (form) => { await api("/ideas", { method: "POST", body: form }); Aira.toast("Published. Monosage tracks it every day.", "success"); rerender(); },
     });
     const editReasoning = (idea) => edit({
       title: `Why: ${idea.side === "buy" ? "Buy" : "Sell"} ${idea.symbol}`,
@@ -810,7 +810,7 @@
     });
     const showCode = (sub, code) => Aira.modal({
       title: `Access code for ${sub.name}`,
-      body: h("div", { class: "suite-body st-app" }, h("p", { text: "Aira put an email with this code in your outbox (Business hub > Outbox). You can also send it yourself. It is shown only now." }), h("p", { class: "st-code", text: code }), S.button("Copy code", () => S.copy(code), { kind: "secondary" })),
+      body: h("div", { class: "suite-body st-app" }, h("p", { text: "Monosage put an email with this code in your outbox (Business hub > Outbox). You can also send it yourself. It is shown only now." }), h("p", { class: "st-code", text: code }), S.button("Copy code", () => S.copy(code), { kind: "secondary" })),
       actions: [{ label: "Done", kind: "primary" }],
     });
     hooks.idea = publish;
@@ -819,10 +819,10 @@
       h("section", { class: "card st-earn" },
         h("h2", { class: "suite-h2", text: "Earn from your stock ideas" }),
         h("ol", { class: "st-steps" },
-          h("li", { text: "Publish ideas with an entry, a target and a stop. Aira tracks every one, so your record is real." }),
+          h("li", { text: "Publish ideas with an entry, a target and a stop. Monosage tracks every one, so your record is real." }),
           h("li", { text: "Share your analyst page. Anyone can see your track record and your free ideas." }),
           h("li", { text: "Set a monthly price. Followers pay you through your own payment link; you confirm the payment and they get a code for your paid ideas." })),
-        h("p", { class: "muted small", text: "Aira does not move money: it records what you confirm. Ideas are opinions, not financial advice." })),
+        h("p", { class: "muted small", text: "Monosage does not move money: it records what you confirm. Ideas are opinions, not financial advice." })),
       S.kpis([
         { label: "Received in total", value: money(e.total_cents, e.currency), hint: `${e.payments} payments` },
         { label: "This month", value: money(e.this_month_cents, e.currency) },
@@ -838,7 +838,7 @@
           S.kpis([
             { label: "Ideas", value: r.ideas, hint: `${r.open} open` },
             { label: "Win rate", value: r.win_rate_pct === null ? "-" : `${r.win_rate_pct}%`, hint: r.closed ? `${r.wins} of ${r.closed} closed ideas` : "No closed ideas yet" },
-            { label: "Average return", value: signedPct(r.average_return_pct), tone: r.average_return_pct > 0 ? "good" : r.average_return_pct < 0 ? "bad" : "" },
+            { label: "Average return", value: r.average_return_pct === null || r.average_return_pct === undefined ? "-" : signedPct(r.average_return_pct), tone: r.average_return_pct > 0 ? "good" : r.average_return_pct < 0 ? "bad" : "" },
             { label: "Best / worst", value: r.best_pct === null ? "-" : `${signedPct(r.best_pct)} / ${signedPct(r.worst_pct)}` },
           ]))),
       S.section("Your ideas",
@@ -885,7 +885,7 @@
     hooks.alert = (ask) => newAlert(ask.symbol || "", rerender);
     put(body,
       h("div", { class: "btn-row" }, S.button("New alert", () => newAlert("", rerender)), S.button("Check now", async () => { const result = await api("/alerts/check", { method: "POST", body: {} }); Aira.toast(result.fired.length ? `${result.fired.length} alert${result.fired.length === 1 ? "" : "s"} fired.` : "No alert fired.", result.fired.length ? "success" : ""); rerender(); }, { kind: "secondary" })),
-      h("p", { class: "muted", text: "Aira checks your alerts every few minutes and tells you on Today and with a message on screen." }),
+      h("p", { class: "muted", text: "Monosage checks your alerts every few minutes and tells you on Today and with a message on screen." }),
       S.table({
         caption: "Price alerts",
         columns: [
@@ -911,7 +911,7 @@
     const watching = new Set(((watch && watch.lists) || []).flatMap((list) => list.items.map((item) => item.symbol)));
     const rows = found.results.map((r) => ({ ...r, quote: quotes.get(r.symbol) || null }));
     put(body,
-      rows.length ? h("p", { class: "muted", text: `${rows.length} stock${rows.length === 1 ? "" : "s"} match “${found.query}”.` }) : null,
+      rows.length ? h("p", { class: "muted", text: `${rows.length} ${rows.length === 1 ? "match" : "matches"} for “${found.query}”.` }) : null,
       S.table({
         caption: `Stocks matching ${found.query}`,
         columns: [

@@ -997,10 +997,10 @@ SOURCE_CATALOG: tuple[SourceDescriptor, ...] = (
     ),
     SourceDescriptor(
         source="aira_jobs",
-        label="Aira Jobs",
+        label="Jobs",
         group="aira",
         status="available",
-        access_method="Aira's own job search over free public job-board APIs (Himalayas, The Muse, Remotive, Jobicy, Arbeitnow); no key, no credits",
+        access_method="Monosage's own job search over free public job-board APIs (Himalayas, The Muse, Remotive, Jobicy, Arbeitnow); no key, no credits",
         identifier_label="",
         identifier_help="No identifier or key is needed.",
         capabilities=JobSourceCapabilities(

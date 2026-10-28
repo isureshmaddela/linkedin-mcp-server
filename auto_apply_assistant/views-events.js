@@ -501,7 +501,7 @@
       about: tabId === "search" ? "Courses, events, students, ticket orders and partners that match." : meta.about,
       phoneNew: tabId === "events" ? null : S.button("New event", createEvent, { icon: "plus" }),
     });
-    document.title = `${title} · Courses & Events · Aira`;
+    document.title = `${title} · Courses & Events · Monosage`;
     const tab = S.tabs(body, route, "events", TABS, tabId);
     const panel = h("div", { class: "suite-body" });
     body.append(panel);

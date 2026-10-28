@@ -1598,7 +1598,7 @@ class Sso:
                 # An email change is a password-reset takeover: provisioning must not be able to
                 # reroute the account of someone who administers the organization.
                 raise Forbidden(
-                    "Owner and admin sign-in addresses are changed in Aira, not through provisioning.",
+                    "Owner and admin sign-in addresses are changed in Monosage, not through provisioning.",
                     scim_type="mutability",
                 )
             email = crypto.normalize_email(changes["userName"])

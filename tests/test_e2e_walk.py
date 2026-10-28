@@ -230,7 +230,7 @@ def test_a_hosted_member_uploads_a_video_and_another_organization_watches_it(
     page.locator("p", has_text="harbour.webm").first.wait_for(timeout=20000)
     page.fill("input[name=title]", "Harbour at dusk")
     page.locator("select[name=kind]").select_option("video")
-    page.locator("button:has-text('Upload')").last.click()
+    page.locator("#vidUpload button:has-text('Upload')").first.click()
     page.wait_for_url("**watch=*", timeout=60000)
     page.wait_for_selector("h1:has-text('Harbour at dusk')")
     assert "/api/videos/media/" in plays(page).evaluate("v => v.currentSrc")

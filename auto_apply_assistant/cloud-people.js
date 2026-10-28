@@ -187,20 +187,20 @@
     mode.review.checked = policy.submission_mode === "review"; mode.auto.checked = policy.submission_mode === "auto";
     if (!features.has("automation.submit")) { mode.auto.disabled = true; mode.review.checked = true; mode.auto.checked = false; }
     const radio = (input, title, text, locked) => h("label", { class: `adm-radio${input.checked ? " on" : ""}`, for: input.id }, input, h("span", { class: "what" }, h("b", { text: title }), h("span", { text: text }), locked ? h("span", { text: locked }) : null));
-    const modeBox = h("div", { class: "adm-choices", role: "radiogroup", "aria-label": "Submission mode" }, radio(mode.review, "Review before submit", "Aira fills each application and a person (the candidate, or a coach with approve scope) submits it.", ""),
-      radio(mode.auto, "Automatic submission", "Aira submits matches on its own within the limits below. A candidate must also turn it on in their own search plan.", features.has("automation.submit") ? "" : upgrade("automation.submit")));
+    const modeBox = h("div", { class: "adm-choices", role: "radiogroup", "aria-label": "Submission mode" }, radio(mode.review, "Review before submit", "Monosage fills each application and a person (the candidate, or a coach with approve scope) submits it.", ""),
+      radio(mode.auto, "Automatic submission", "Monosage submits matches on its own within the limits below. A candidate must also turn it on in their own search plan.", features.has("automation.submit") ? "" : upgrade("automation.submit")));
     modeBox.addEventListener("change", () => { for (const label of modeBox.querySelectorAll(".adm-radio")) label.classList.toggle("on", label.querySelector("input").checked); });
 
     const daily = h("input", { type: "number", min: "1", max: String(dailyMax), value: String(policy.daily_cap_per_candidate), id: "polDaily" });
     const retention = h("input", { type: "number", min: "30", max: String(retentionMax), value: String(policy.retention_days), id: "polRetention" });
-    const sourceDefs = [["aira_jobs", "Aira Jobs", "Free job boards"], ["company_boards", "Company boards", "Greenhouse, Lever, Ashby, SmartRecruiters"], ["google_jobs", "Google Jobs", "Needs your organization's SerpApi key"], ["linkedin", "LinkedIn", "The candidate's own session, with the User Agreement warning"]];
+    const sourceDefs = [["aira_jobs", "Jobs", "Free job boards"], ["company_boards", "Company boards", "Greenhouse, Lever, Ashby, SmartRecruiters"], ["google_jobs", "Google Jobs", "Needs your organization's SerpApi key"], ["linkedin", "LinkedIn", "The candidate's own session, with the User Agreement warning"]];
     const sources = sourceDefs.map(([key, label, hint]) => check(`polSrc-${key}`, label, hint, policy.allowed_sources.includes(key), { disabled: !features.has(`sources.${key}`), lockedHint: upgrade(`sources.${key}`) }));
     const linkedin = check("polLinkedin", "LinkedIn allowed", "Candidates may connect their own LinkedIn session. LinkedIn forbids automated access; each candidate must turn it on with the risk notice.", policy.linkedin_allowed, { disabled: !features.has("sources.linkedin"), lockedHint: upgrade("sources.linkedin") });
     const easy = check("polEasy", "LinkedIn Easy Apply allowed", "Candidates may enable Easy Apply in their own plans. Off by default.", policy.easy_apply_allowed, { disabled: !features.has("sources.linkedin"), lockedHint: upgrade("sources.linkedin") });
     const covers = check("polCovers", "AI cover letters", "Cover letters are drafted by the model gateway; sensitive profile fields are never sent.", policy.cover_letters, { disabled: !features.has("ai.cover_letters"), lockedHint: upgrade("ai.cover_letters") });
     const sensitive = check("polSensitive", "Coaches may see sensitive profile values", "Only for an assigned coach, and only for a candidate who consented at onboarding. Never editable by anyone but the candidate.", policy.coach_sees_sensitive);
     const mfa = check("polMfa", "Require MFA for all staff", "Owners and admins already need MFA on Team and Enterprise. This adds coaches, billing contacts and auditors.", policy.require_mfa_staff);
-    const pooled = check("polPooled", "Use Aira's pooled SerpApi searches", "A metered add-on for when you have no SerpApi key of your own.", policy.use_pooled_serpapi, { disabled: !features.has("pooled_serpapi"), lockedHint: upgrade("pooled_serpapi") });
+    const pooled = check("polPooled", "Use Monosage's pooled SerpApi searches", "A metered add-on for when you have no SerpApi key of your own.", policy.use_pooled_serpapi, { disabled: !features.has("pooled_serpapi"), lockedHint: upgrade("pooled_serpapi") });
     const messages = ui.select([["off", "Candidate only (default)"], ["view", "Assigned coaches can read"], ["act", "Assigned coaches can read and reply (act scope)"]], policy.coach_messages);
     const regions = h("textarea", { rows: 2, id: "polRegions", placeholder: "For example: California, Germany, New York City", "aria-label": "Regions needing human review" }); regions.value = (policy.review_required_regions || []).join(", ");
     const dataPolicy = { keeps: h("input", { type: "radio", name: "dp", value: "candidate_keeps", id: "dpKeeps" }), org: h("input", { type: "radio", name: "dp", value: "organization_keeps", id: "dpOrg" }) };
@@ -302,7 +302,7 @@
     const s = data.serpapi;
     const key = h("input", { type: "password", autocomplete: "off", placeholder: "Paste a SerpApi key", id: "serpKey", "aria-label": "SerpApi key", ...(s.available && manage ? {} : { disabled: true }) });
     const error = inlineError();
-    const status = s.configured ? h("div", { class: "adm-note" }, `A key ending in ${s.last4} is stored encrypted. It is used for Google Jobs, Careers and the API console.`) : s.source === "pooled" ? h("div", { class: "adm-note", text: "No key of your own: searches use Aira's pooled allowance (metered)." }) : h("div", { class: "adm-note warn", text: "No key yet. Google Jobs and Careers need your organization's SerpApi key." });
+    const status = s.configured ? h("div", { class: "adm-note" }, `A key ending in ${s.last4} is stored encrypted. It is used for Google Jobs, Careers and the API console.`) : s.source === "pooled" ? h("div", { class: "adm-note", text: "No key of your own: searches use Monosage's pooled allowance (metered)." }) : h("div", { class: "adm-note warn", text: "No key yet. Google Jobs and Careers need your organization's SerpApi key." });
     const body = h("div", { class: "panel-body adm-form" }, status,
       !s.available ? h("div", { class: "adm-note", text: `Google Jobs is included from the ${planWith("sources.google_jobs")} plan.` }) : null,
       manage && s.available ? h("div", { class: "adm-form" }, ui.field(s.configured ? "Replace the key" : "SerpApi key", key, "The key is checked with SerpApi before it is saved. Never put it in an environment file."), error,
@@ -315,7 +315,7 @@
     const a = data.api;
     return A.panel("API", h("div", { class: "panel-body adm-form" },
       h("dl", { class: "adm-dl" }, h("dt", { text: "Console (history, read-only)" }), h("dd", { text: a.console ? "Included" : "Not included" }), h("dt", { text: "Live searches from the console" }), h("dd", { text: a.searches ? "Included" : `From the ${planWith("api.searches")} plan` }), h("dt", { text: "SerpApi-compatible /v1 and keys" }), h("dd", { text: a.v1 ? `${a.keys} of ${a.v1_limit ?? "unlimited"} keys in use` : `From the ${planWith("api.v1")} plan` })),
-      manage && a.console ? h("div", { class: "adm-btnrow" }, h("a", { class: "btn secondary", href: "#/airaapi", text: "Open the API console" })) : null,
+      manage && a.console ? h("div", { class: "adm-btnrow" }, h("a", { class: "btn secondary", href: "#/api", text: "Open the API console" })) : null,
       h("p", { class: "adm-sub", text: "API keys, per-key limits and the monthly search allowance are managed in the console. Keys belong to the organization, not to a person." })), { sub: a.v1 ? "Keys enabled" : "No /v1" });
   }
 
@@ -326,7 +326,7 @@
     const model = h("input", { type: "text", placeholder: "model name", id: "modelName", value: m.model || "", ...(m.byo_available && manage ? {} : { disabled: true }) });
     const error = inlineError();
     return A.panel("Model endpoint", h("div", { class: "panel-body adm-form" },
-      m.configured ? h("div", { class: "adm-note" }, `Your own endpoint (${m.url}, model ${m.model}) answers prompts. Sensitive profile fields are still never sent.`) : h("div", { class: "adm-note", text: `Aira's hosted model (${m.provider}) answers prompts by default.` }),
+      m.configured ? h("div", { class: "adm-note" }, `Your own endpoint (${m.url}, model ${m.model}) answers prompts. Sensitive profile fields are still never sent.`) : h("div", { class: "adm-note", text: `Monosage's hosted model (${m.provider}) answers prompts by default.` }),
       m.byo_available ? null : h("div", { class: "adm-note", text: `Bring-your-own model endpoint is included from the ${planWith("byo_model")} plan.` }),
       manage && m.byo_available ? h("div", { class: "adm-form" }, h("div", { class: "adm-fields" }, ui.field("OpenAI-compatible endpoint (https)", url), ui.field("Model", model), ui.field("API key", key)), error,
         h("div", { class: "adm-btnrow" }, h("button", { type: "button", class: "btn", text: "Save endpoint", onclick: (e) => Aira.withBusy(e.currentTarget, async () => { error.textContent = ""; try { await api("/api/org/integrations/model", { method: "PUT", body: { url: url.value.trim(), api_key: key.value, model: model.value.trim() } }); Aira.toast("Model endpoint saved.", "success"); reload(); } catch (err) { showError(error, err); } }) }),
@@ -399,7 +399,7 @@
   // --------------------------------------------------------------------------------------------
   // Audit log
   // --------------------------------------------------------------------------------------------
-  const ACTION_GROUPS = [["", "Any action"], ["member.", "Members"], ["coach.", "Coach assignments"], ["org.", "Organization and policy"], ["automation.", "Pause and resume"], ["application.", "Applications"], ["held.", "Held questions"], ["consent.", "Consent"], ["auth.", "Sign-in and MFA"], ["billing.", "Billing"], ["subscription.", "Subscription state"], ["data.", "Exports and deletion"], ["support.", "Aira support access"], ["candidate.", "Candidate workspace changes"], ["integrations.", "Integrations"], ["sso.", "Single sign-on"]];
+  const ACTION_GROUPS = [["", "Any action"], ["member.", "Members"], ["coach.", "Coach assignments"], ["org.", "Organization and policy"], ["automation.", "Pause and resume"], ["application.", "Applications"], ["held.", "Held questions"], ["consent.", "Consent"], ["auth.", "Sign-in and MFA"], ["billing.", "Billing"], ["subscription.", "Subscription state"], ["data.", "Exports and deletion"], ["support.", "Monosage support access"], ["candidate.", "Candidate workspace changes"], ["integrations.", "Integrations"], ["sso.", "Single sign-on"]];
 
   A.pages.audit = async (stage, route) => {
     A.crumbs("Audit log");
@@ -488,7 +488,7 @@
   }
 
   function supportPanel(result, reload) {
-    if (!result.ok) return A.panel("Aira support access", h("div", { class: "panel-body" }, h("div", { class: "adm-note", text: A.message(result.error) })));
+    if (!result.ok) return A.panel("Monosage support access", h("div", { class: "panel-body" }, h("div", { class: "adm-note", text: A.message(result.error) })));
     const requests = result.data.requests || [];
     const hours = ui.select([["1", "1 hour"], ["4", "4 hours"], ["8", "8 hours"], ["24", "24 hours"]], "24");
     const rows = requests.length ? h("div", { class: "adm-list" }, ...requests.map((r) => {
@@ -498,8 +498,8 @@
           h("button", { type: "button", class: "btn sm", text: "Approve", onclick: (e) => Aira.withBusy(e.currentTarget, async () => { await api(`/api/org/support/${r.access_id}/approve`, { method: "POST", body: { hours: Number(hours.value) } }); Aira.toast("Access approved.", "success"); cloud.refreshBanners(); reload(); }) }),
           h("button", { type: "button", class: "btn ghost sm", text: "Deny", onclick: (e) => Aira.withBusy(e.currentTarget, async () => { await api(`/api/org/support/${r.access_id}/deny`, { method: "POST", body: {} }); Aira.toast("Request denied.", "success"); reload(); }) })]
           : active ? [A.badge("Active", "warn"), h("button", { type: "button", class: "btn danger secondary sm", text: "Revoke now", onclick: (e) => Aira.withBusy(e.currentTarget, async () => { await api(`/api/org/support/${r.access_id}/revoke`, { method: "POST", body: {} }); Aira.toast("Access revoked.", "success"); cloud.refreshBanners(); reload(); }) })] : A.badge(A.titleCase(r.status), r.status === "denied" ? "bad" : "")));
-    })) : A.empty("Aira support has not asked for access.");
-    return A.panel("Aira support access", h("div", {}, h("div", { class: "panel-body adm-form" }, h("p", { class: "adm-sub", text: "Support sees your organization only if you approve, for at most 24 hours. Your members see a banner while it is active and every step is audited." }), h("div", { class: "adm-fields" }, ui.field("Approve for", hours))), rows), { sub: "Owner only" });
+    })) : A.empty("Monosage support has not asked for access.");
+    return A.panel("Monosage support access", h("div", {}, h("div", { class: "panel-body adm-form" }, h("p", { class: "adm-sub", text: "Support sees your organization only if you approve, for at most 24 hours. Your members see a banner while it is active and every step is audited." }), h("div", { class: "adm-fields" }, ui.field("Approve for", hours))), rows), { sub: "Owner only" });
   }
 
   function noticesPanel(data, reload) {
