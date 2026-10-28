@@ -129,7 +129,9 @@ body {
   min-height: 100%;
   min-width: 320px;
   color: var(--ink);
-  background: radial-gradient(ellipse at 0% 0%, var(--bg-accent), transparent 38rem), var(--bg);
+  /* One flat colour: a tint in the top-left corner sat behind the see-through left menu and scrolled away under it,
+     so the menu changed colour as the page moved. */
+  background: var(--bg);
   font: 14.5px/1.5 var(--font);
   -webkit-font-smoothing: antialiased;
 }
@@ -2252,6 +2254,8 @@ a.dw-stat:hover { border-color: var(--brand); }
 .aap-qlist { list-style: none; margin: 0; padding: 0; display: grid; gap: 4px; font-size: 13px; }
 .aap-qlist li { display: grid; grid-template-columns: minmax(0, 1.2fr) minmax(0, 1fr); gap: 10px; padding: 5px 0; border-bottom: 1px solid var(--line); overflow-wrap: anywhere; }
 .aap-qlist li.missing, .aap-qlist li.unknown, .aap-qlist li.needs_confirmation { color: var(--warning); }
+.aap-drafted-badge { margin-left: 6px; font-size: 11px; vertical-align: 1px; }
+.aap-questions .aap-drafted :is(input, select, textarea) { border-color: var(--brand); background: var(--brand-soft); color: var(--ink); }
 .aap-steps { margin-top: 12px; }
 .aap-steps summary { cursor: pointer; font-weight: 700; font-size: 13px; }
 .aap-steps ol { margin: 8px 0 0; padding-left: 20px; font-size: 13px; display: grid; gap: 3px; }
@@ -2655,7 +2659,15 @@ body.less-motion .ai-typing span { animation: none; opacity: .7; }
   .topbar .account-name { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
 }
 @media (max-width: 900px) { .topbar { --bar-side: 150px; } }
-@media (max-width: 600px) { .topbar { --bar-side: 122px; } }
+/* A phone: the search box takes what the two sides leave (it must never shrink to nothing). Monosage's column is as
+   wide as the right-hand buttons so the box stays in the middle; easy mode's bigger buttons need that room, and
+   its language choice stays in Display and reading. */
+@media (max-width: 600px) {
+  .topbar { --bar-side: 122px; grid-template-columns: auto minmax(0, 1fr) auto; }
+  .topbar > .app-brand { min-width: var(--bar-side); }
+  body.easy .topbar > .app-brand { min-width: 0; }
+  body.easy .topbar .lang-btn { display: none; }
+}
 .topbar > .app-brand { justify-self: start; }
 .topbar-end { display: flex; align-items: center; justify-content: flex-end; gap: inherit; min-width: 0; justify-self: end; }
 
@@ -2756,3 +2768,66 @@ body.less-motion .ai-typing span { animation: none; opacity: .7; }
 .account-menu { width: 320px; }
 .account-manage { display: flex; justify-content: center; margin: 2px 8px 8px; border-radius: 999px; }
 .account-menu a.menu-item[aria-current="page"] { background: var(--app-soft); color: var(--app-ink); }
+
+/* Careers: the resume editor in the job drawer's Documents tab (views-applications.js renderResumeEditor) and the
+   tracking summary on top of Applications > Pipeline (every application, sent by you or automatically). */
+.cre-in-use { margin: 10px 0 12px; }
+.cre-in-use div { margin-top: 4px; }
+.cre-editor { display: grid; grid-template-columns: minmax(0, 1.25fr) minmax(0, 1fr); gap: 14px; align-items: start; }
+.cre-docs { min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.cre-toolbar { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+.cre-switch { display: inline-flex; padding: 3px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-2); }
+.cre-switch-btn { border: 0; background: transparent; color: var(--ink-2); padding: 6px 14px; border-radius: 999px; font: inherit; font-size: 13px; font-weight: 600; cursor: pointer; }
+.cre-switch-btn.on { background: var(--surface); color: var(--ink); box-shadow: var(--shadow); }
+.cre-switch-btn:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+.cre-dirty { flex: 1; color: var(--warning); font-size: 12.5px; font-weight: 600; }
+.cre-text { min-height: 440px; font: 13px/1.6 var(--font); }
+.cre-approve { display: flex; flex-direction: column; gap: 8px; padding: 12px; border-radius: var(--radius); background: var(--surface-2); }
+.cre-hint { margin: 0; font-size: 12.5px; }
+.cre-jd { position: sticky; top: 56px; min-width: 0; display: flex; flex-direction: column; gap: 8px; }
+.cre-jd h3 { margin: 6px 0 0; }
+.cre-jd-text { max-height: 560px; overflow: auto; padding: 14px; border: 1px solid var(--line); border-radius: var(--radius-sm); background: var(--surface-2); white-space: pre-wrap; overflow-wrap: anywhere; font-size: 13px; line-height: 1.6; }
+.cre-notes { margin-top: 14px; }
+.cre-notes summary { cursor: pointer; font-weight: 700; }
+.cre-notes p { font-size: 12.5px; }
+.cre-notes-row { align-items: flex-end; margin-top: 10px; }
+.cre-model { min-width: 200px; }
+.cre-versions { margin-top: 12px; }
+.cre-version-list { list-style: none; margin: 0; padding: 0; }
+.cre-version { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 8px 0; border-bottom: 1px solid var(--line); }
+.cre-version:last-child { border-bottom: 0; }
+.cre-version-main { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 8px; min-width: 0; font-size: 13px; }
+.cre-version-notes { flex-basis: 100%; color: var(--muted); font-size: 12.5px; overflow-wrap: anywhere; }
+@media (max-width: 760px) {
+  .cre-editor { grid-template-columns: minmax(0, 1fr); }
+  .cre-jd { position: static; order: -1; }
+  .cre-jd-text { max-height: 220px; }
+  .cre-text { min-height: 320px; }
+}
+.cas { margin-bottom: 16px; }
+.cas-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px 14px; margin-bottom: 10px; }
+.cas-head h2 { margin: 0; font-size: 18px; }
+.cas-total { margin: 0; color: var(--muted); font-size: 13px; }
+.cas-total a { color: inherit; }
+.cas-total a[aria-current], .cas-via[aria-current] { color: var(--brand-ink); font-weight: 700; }
+.cas-total strong { color: var(--ink); font: 600 16px/1 var(--font-num); }
+.cas-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 10px; }
+.cas-tile { display: flex; flex-direction: column; border: 1px solid var(--line); border-radius: var(--radius); background: var(--surface); }
+.cas-tile:hover, .cas-tile.on { border-color: var(--brand); }
+.cas-tile.on { background: var(--brand-soft); }
+.cas-main { flex: 1; display: flex; flex-direction: column; gap: 3px; padding: 12px 14px 8px; color: inherit; text-decoration: none; border-radius: var(--radius) var(--radius) 0 0; }
+.cas-main:focus-visible, .cas-via:focus-visible { outline: 2px solid var(--brand); outline-offset: -2px; }
+.cas-label { color: var(--muted); font-size: 11.5px; font-weight: 700; text-transform: uppercase; letter-spacing: 0.05em; }
+.cas-value { font: 600 28px/1.1 var(--font-num); }
+.cas-hint { color: var(--muted); font-size: 12px; }
+.cas-split { display: flex; flex-wrap: wrap; gap: 2px 10px; padding: 7px 14px 10px; border-top: 1px solid var(--line); font-size: 12px; }
+.cas-via { color: var(--ink-2); text-decoration: none; }
+.cas-via:hover { color: var(--brand-ink); text-decoration: underline; }
+.cas-list .panel-head { flex-wrap: wrap; }
+.cas-list .panel-head h3 { flex: 1; }
+.cas-error { color: var(--danger); }
+@media (max-width: 600px) {
+  .cas-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .cas-value { font-size: 24px; }
+  .cas-row { grid-template-columns: minmax(0, 1fr); }
+}

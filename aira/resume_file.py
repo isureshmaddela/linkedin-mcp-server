@@ -76,11 +76,19 @@ def resume_for_upload(
 ) -> tuple[Path, Callable[[], None]]:
     """Return ``(path, cleanup)`` for the file to attach as the resume.
 
-    Preference order: the newest readable ``master_resume`` document with a
-    ``.pdf``/``.docx`` name (decrypted to a temp file keeping its original
-    name), then a PDF rendered from ``job["resume_draft"]``, then a PDF from
-    ``profile_resume_text``. Raises ``LookupError`` when none of those exist.
+    Preference order: a PDF of ``job["approved_resume"]`` (the tailored resume
+    the person approved for this job in the resume editor), then the newest
+    readable ``master_resume`` document with a ``.pdf``/``.docx`` name
+    (decrypted to a temp file keeping its original name), then a PDF rendered
+    from ``job["resume_draft"]``, then a PDF from ``profile_resume_text``.
+    Raises ``LookupError`` when none of those exist.
     """
+    approved = str(job.get("approved_resume") or "").strip()
+    if approved:
+        name = _display_name(job, "Resume")
+        return _write_temp(
+            f"{_safe_name(name, 'Resume')}.pdf", text_to_pdf(approved, name)
+        )
     store.ensure_schema(connection)
     records = store.list(
         connection, owner_id=owner_id, kind=RESUME_DOCUMENT_KIND, limit=_MAX_CANDIDATES

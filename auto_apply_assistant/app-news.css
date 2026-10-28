@@ -1,6 +1,19 @@
 /* Styles for the news app only. Loaded on every page: scope every selector to the app's own class names. */
-/* Headlines read best in a column about as wide as a newspaper's, not stretched across a wide screen. */
-.nw-list { display: grid; gap: 12px; max-width: 880px; }
+/* The headlines fill the page like the other apps: one column on a phone or tablet, then as many columns of
+   newspaper-width cards as fit, so no line of text stretches across a wide screen. */
+.nw-list { display: grid; gap: 12px; grid-template-columns: repeat(auto-fill, minmax(min(100%, 420px), 1fr)); align-items: start; }
+/* List: one headline per row across the page, the picture beside it. */
+.nw-page.nw-as-list .nw-list { grid-template-columns: minmax(0, 1fr); }
+
+/* The grid or list switch beside the page title. */
+.nw-layout { display: inline-flex; padding: 3px; gap: 2px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface); }
+.nw-layout-btn { display: grid; place-items: center; width: 38px; height: 34px; border: 0; border-radius: 999px; background: transparent; color: var(--muted); cursor: pointer; }
+.nw-layout-btn svg { width: 18px; height: 18px; stroke: currentColor; fill: none; stroke-width: 1.8; stroke-linejoin: round; }
+.nw-layout-btn:hover { background: var(--surface-2); color: var(--ink); }
+.nw-layout-btn[aria-checked="true"] { background: var(--app-soft, var(--brand-soft)); color: var(--app-ink, var(--brand-ink)); }
+.nw-layout-btn:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+/* Too narrow for two cards side by side: grid and list look the same, so the switch steps aside. */
+@media (max-width: 1119px) { .nw-layout { display: none; } }
 .nw-article { display: grid; gap: 10px; min-width: 0; padding: 16px 18px; }
 .nw-article.nw-read .nw-title { color: var(--muted); }
 .nw-article-main { display: flex; align-items: flex-start; gap: 16px; min-width: 0; }
@@ -13,9 +26,9 @@
 .nw-actions .btn { min-height: 44px; }
 .nw-actions a.btn { padding-inline: 20px; }
 .nw-empty-actions { justify-content: center; margin-top: 12px; }
-.nw-search { align-items: stretch; flex-wrap: wrap; max-width: 880px; }
+.nw-search { align-items: stretch; flex-wrap: wrap; }
 .nw-search input[type="search"] { width: auto; }
-.nw-search-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; max-width: 880px; }
+.nw-search-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
 .nw-ideas { margin: 0; padding-left: 20px; display: grid; gap: 4px; }
 .nw-letter-head { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: 8px; }
 .nw-letter-head p { margin: 0; }

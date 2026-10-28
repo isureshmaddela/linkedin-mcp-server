@@ -60,6 +60,7 @@ EXEMPT_GROUPS = {
     r"[A-Za-z0-9_-]{1,80}": "SerpApi search ids resolved inside the caller's own workspace",
     r"[a-z0-9%]{1,720}": "custom-answer keys are labels the caller saved in their own workspace",
     r"[a-z-]{3,40}": "legal document names are a fixed, public list",
+    r"[a-z0-9.-]{4,253}": "Workday site hosts are keys in the caller's own workspace (their saved Workday accounts)",
     r"[a-z0-9_-]+": "app ids are a fixed catalog (careers, leads, api)",
     r"[a-z_]{2,40}": "public page action names are a fixed vocabulary per page kind",
     r"[a-z]{2}": "language codes of the screens' translations are a fixed public list",

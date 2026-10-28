@@ -142,6 +142,8 @@ class ApplyRequest:
     screenshot_dir: str | None = None
     timeout_seconds: int = 120
     extra_answers: Mapping[str, str] = field(default_factory=dict)
+    # Workday only: the tenant's candidate account (aira.workday.WorkdayAccount), or None.
+    workday_account: Any = None
 
 
 @dataclass(slots=True)
@@ -1554,14 +1556,13 @@ def run(request: ApplyRequest, *, browser: Browser | None = None) -> ApplyOutcom
             "failed", "generic", request, "The job has no application URL."
         )
     ats = _resolve_ats(request)
-    if ats == "workday":
-        return _static_outcome(
-            "unsupported",
-            ats,
-            request,
-            "Workday applications are not supported in this build (multi-step "
-            f"account-based flow). Apply manually at {request.application_url}",
-        )
+    if ats == "workday" or (
+        ats == "generic" and str(request.source or "").strip().casefold() == "workday"
+    ):
+        # Account-based and multi-step: its own runner (aira/workday.py).
+        from aira.workday import run_workday
+
+        return run_workday(request, browser=browser)
     if ats == "linkedin":
         return _static_outcome(
             "unsupported",

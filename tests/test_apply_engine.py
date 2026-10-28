@@ -214,7 +214,9 @@ def test_static_routing():
         "",
         True,
     )
-    assert run(workday).status == "unsupported"
+    # Workday has its own runner; without a saved account it holds before any browser starts.
+    held = run(workday)
+    assert held.status == "needs_review" and "Workday accounts" in held.error
     linkedin = ApplyRequest(
         "l:1",
         "",

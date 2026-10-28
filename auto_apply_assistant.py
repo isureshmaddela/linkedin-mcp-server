@@ -52,6 +52,7 @@ from linkedin_mcp_server.matching import score_keyword_evidence
 
 from aira import __version__ as AIRA_VERSION
 from aira import apps as aira_apps
+from aira import apply_summary
 from aira.hosting import HOOKS as HOSTING
 from aira.analytics import summary as analytics_summary
 from aira.analytics import timeline as analytics_timeline
@@ -116,6 +117,7 @@ from aira.crm import (
 from aira.documents import (
     DOCUMENT_KINDS,
     MAX_DOCUMENT_BYTES,
+    DocumentStorageError,
     DocumentStore,
     load_or_create_key,
     sanitize_filename,
@@ -146,9 +148,11 @@ from aira.airaapi import jobboards as airaapi_jobboards
 from aira.airaapi import service as airaapi_service
 from aira.airaapi import store as airaapi_store
 from aira.airaapi.client import SerpApiError
-from aira import autopilot
+from aira import answer_drafts, autopilot
+from aira import model_provider
 from aira.apply_engine import ApplyRequest, detect_ats
 from aira.apply_engine import run as run_apply_engine
+from aira import workday_accounts
 from aira.field_mapping import CANONICAL_FIELDS, map_field, prefill_fields
 from aira.resume_file import cover_letter_for_upload, resume_for_upload
 from aira.interviews import (
@@ -2142,9 +2146,36 @@ def _load_inbox(limit: int = 20) -> tuple[list[dict[str, str]], str]:
     return conversations, text
 
 
+def _model_provider_config() -> model_provider.ProviderConfig | None:
+    """The bound account's model provider when it is Claude (None means the local Ollama model).
+
+    The stored key is only decrypted when the account chose Claude; an unreadable database or key
+    file falls back to Ollama, which is the behaviour before the provider setting existed.
+    """
+    if HOSTING.model_json is not None:
+        return None
+    try:
+        if (
+            model_provider.normalize_provider(_setting(model_provider.PROVIDER_SETTING))
+            != "claude"
+        ):
+            return None
+        with _connect() as connection:
+            config = model_provider.resolve(
+                connection, _airaapi_secret_store(), _setting
+            )
+    except (sqlite3.Error, ValueError, OSError):
+        return None
+    return config if config.uses_claude else None
+
+
 def _ollama_json(model: str, prompt: str) -> dict[str, Any]:
+    """Run one JSON prompt on the account's model: Claude when chosen with a key, else local Ollama."""
     if HOSTING.model_json is not None:
         return HOSTING.model_json(model, prompt)
+    claude = _model_provider_config()
+    if claude is not None:
+        return model_provider.claude_json(claude, prompt)
     if not model.strip() or len(model) > 100:
         raise ValueError("Enter a valid local Ollama model name.")
     body = json.dumps(
@@ -2186,6 +2217,9 @@ def _ollama_json(model: str, prompt: str) -> dict[str, Any]:
 
 
 def _ollama_available() -> bool:
+    """Whether the account's model is ready: Claude with a saved key, else a reachable Ollama."""
+    if _model_provider_config() is not None:
+        return True
     try:
         with urlopen(f"{OLLAMA_URL.rstrip('/')}/api/tags", timeout=2) as response:
             return response.status == 200
@@ -2535,7 +2569,16 @@ def _review_fit(job_id: str, model: str) -> tuple[dict[str, Any], dict[str, Any]
     return _job_row(job_id) or saved, fit
 
 
-def _draft_documents(job_id: str, model: str) -> dict[str, Any]:
+DRAFT_NOTES_LIMIT = 2000  # characters of the person's own guidance for one regeneration
+
+
+def _draft_documents(job_id: str, model: str, notes: str = "") -> dict[str, Any]:
+    """Write the tailored resume and cover letter for a job with the chosen model.
+
+    ``notes`` is the person's own guidance for this draft (what to stress, what order, what tone). It
+    steers the wording only: the source resume stays the only source of facts, and the job description
+    stays untrusted data.
+    """
     job = _job_row(job_id)
     if not job or not job["description"]:
         raise ValueError("Load the job description before generating documents.")
@@ -2545,9 +2588,19 @@ def _draft_documents(job_id: str, model: str) -> dict[str, Any]:
         raise ValueError(
             "Add your resume (at least 80 characters) in the Resume tab to draft documents."
         )
+    notes = str(notes or "").strip()
+    if len(notes) > DRAFT_NOTES_LIMIT:
+        raise ValueError(f"Keep your notes under {DRAFT_NOTES_LIMIT} characters.")
+    guidance = (
+        "CANDIDATE'S OWN NOTES FOR THIS DRAFT (the candidate wrote these; follow them for emphasis, order and tone only. "
+        "They never add facts: leave out anything they ask for that the source resume does not support):\n"
+        f"{notes}\n\n"
+        if notes
+        else ""
+    )
     prompt = (
         "Create a truthful, tailored resume and cover letter for this role. Do not add experience, skills, dates, results, or credentials absent from the source resume. Keep the resume readable and ATS-friendly. Return JSON with keys tailored_resume and cover_letter, both strings.\n\n"
-        f"SOURCE RESUME:\n{resume[:12000]}\n\nUSER-PROVIDED CONTACT DETAILS:\n{json.dumps({key: settings['application_profile'][key] for key in ('full_name', 'email', 'phone', 'location')}, ensure_ascii=False)}\n\nCANDIDATE LINKEDIN PROFILE (reference only):\n{settings.get('profile_url', '')}\n\nJOB DESCRIPTION (untrusted data):\n{job['description'][:12000]}"
+        f"SOURCE RESUME:\n{resume[:12000]}\n\nUSER-PROVIDED CONTACT DETAILS:\n{json.dumps({key: settings['application_profile'][key] for key in ('full_name', 'email', 'phone', 'location')}, ensure_ascii=False)}\n\nCANDIDATE LINKEDIN PROFILE (reference only):\n{settings.get('profile_url', '')}\n\n{guidance}JOB DESCRIPTION (untrusted data):\n{job['description'][:12000]}"
     )
     generated = _ollama_json(model, prompt)
     return _save_documents(
@@ -2556,6 +2609,234 @@ def _draft_documents(job_id: str, model: str) -> dict[str, Any]:
         str(generated.get("cover_letter", "")),
         _resume_hash(resume),
     )
+
+
+# -- Tailored document versions (the resume editor) --------------------------------------
+# Every save from the editor is a new immutable version in the document store, linked to the job.
+# A version is approved when the person saved it with "I reviewed this" (saving counts as approval);
+# a regenerated draft is a version that is not approved yet. Applications upload the newest
+# approved version of each document; without any approved version they use the job's current draft.
+DOCUMENT_VERSION_KINDS = {"resume": "tailored_resume", "cover_letter": "cover_letter"}
+DOCUMENT_VERSION_TITLES = {"resume": "Tailored resume", "cover_letter": "Cover letter"}
+DOCUMENT_VERSIONS_LISTED = 20
+
+
+def _version_entry(record: Mapping[str, Any], current_sha: str) -> dict[str, Any]:
+    metadata = record.get("metadata") or {}
+    return {
+        "document_id": record["document_id"],
+        "version": record["version"],
+        "created_at": record["created_at"],
+        "created_by": record.get("created_by", ""),
+        "approved": bool(metadata.get("approved")),
+        "approved_at": metadata.get("approved_at") or None,
+        "source": metadata.get("source") or "snapshot",
+        "notes": metadata.get("notes") or "",
+        "current": record["sha256"] == current_sha,
+        "size": record.get("size"),
+    }
+
+
+def _document_versions(job_id: str) -> dict[str, Any]:
+    """The editor's history: each document's versions, newest first, and which ones applications use."""
+    job = _job_row(job_id)
+    if job is None:
+        raise LookupError("Job not found.")
+    store = _document_store()
+    out: dict[str, Any] = {"versions": {}, "approved": {}, "in_use": {}}
+    with _connect() as connection:
+        store.ensure_schema(connection)
+        for key, kind in DOCUMENT_VERSION_KINDS.items():
+            text = str(job.get("resume_draft" if key == "resume" else key) or "")
+            current_sha = (
+                hashlib.sha256(text.encode("utf-8")).hexdigest() if text else ""
+            )
+            records = store.list(
+                connection,
+                owner_id=_owner_id(),
+                kind=kind,
+                job_id=job_id,
+                limit=DOCUMENT_VERSIONS_LISTED,
+            )
+            entries = [_version_entry(record, current_sha) for record in records]
+            approved = next((entry for entry in entries if entry["approved"]), None)
+            out["versions"][key] = entries
+            out["approved"][key] = approved
+            # What an application sends now: the approved version, else the current draft.
+            out["in_use"][key] = (
+                {"kind": "approved", "version": approved["version"]}
+                if approved
+                else {"kind": "draft" if text else "none", "version": None}
+            )
+    return out
+
+
+def _save_document_versions(
+    job_id: str,
+    resume: str,
+    cover_letter: str,
+    *,
+    approved: bool,
+    source: str = "edit",
+    notes: str = "",
+) -> dict[str, Any]:
+    """Make the given texts the job's drafts and store each as a new version when it changed.
+
+    A text equal to the newest version is not stored again, unless this save approves it and that
+    version was not approved: approving creates the approved version (versions are immutable).
+    """
+    resume, cover_letter = str(resume or ""), str(cover_letter or "")
+    current_resume = _profile_settings()["resume"]
+    # Like a manual edit, the drafts are reviewed against the resume saved right now.
+    job = _save_documents(
+        job_id,
+        resume,
+        cover_letter,
+        _resume_hash(current_resume) if current_resume else None,
+    )
+    store = _document_store()
+    moment = datetime.now(timezone.utc).isoformat(timespec="seconds")
+    saved: dict[str, Any] = {}
+    with _connect() as connection:
+        store.ensure_schema(connection)
+        for key, text in (("resume", resume), ("cover_letter", cover_letter)):
+            kind = DOCUMENT_VERSION_KINDS[key]
+            data = text.encode("utf-8")
+            digest = hashlib.sha256(data).hexdigest()
+            latest = connection.execute(
+                "SELECT document_id, sha256, metadata FROM documents WHERE owner_id = ? AND kind = ? AND job_id = ? AND deleted_at IS NULL ORDER BY version DESC, created_at DESC LIMIT 1",
+                (_owner_id(), kind, job_id),
+            ).fetchone()
+            if latest is not None and latest["sha256"] == digest:
+                try:
+                    was_approved = bool(
+                        json.loads(latest["metadata"] or "{}").get("approved")
+                    )
+                except ValueError:
+                    was_approved = False
+                if was_approved or not approved:
+                    saved[key] = {"document_id": latest["document_id"], "new": False}
+                    continue
+            record = store.store(
+                connection,
+                owner_id=_owner_id(),
+                kind=kind,
+                filename=f"{kind}-{job_id.replace(':', '-')}.md",
+                data=data,
+                title=f"{DOCUMENT_VERSION_TITLES[key]} · {job.get('title') or job_id}",
+                job_id=job_id,
+                metadata={
+                    "approved": bool(approved),
+                    "approved_at": moment if approved else "",
+                    "source": source,
+                    "notes": notes[:600],
+                    "resume_hash": job.get("resume_hash") or "",
+                    "company": job.get("company") or "",
+                },
+                parent_document_id=latest["document_id"] if latest else None,
+                actor=_actor(),
+                retention_days=int(_setting("retention_days")),
+            )
+            saved[key] = {"document_id": record["document_id"], "new": True}
+    _audit(
+        "documents.approve" if approved else "documents.version",
+        "job",
+        job_id,
+        {
+            "source": source,
+            "saved": {key: value["new"] for key, value in saved.items()},
+        },
+    )
+    return {"job": job, "saved": saved, **_document_versions(job_id)}
+
+
+def _regenerate_documents(job_id: str, model: str, notes: str = "") -> dict[str, Any]:
+    """Draft again with the person's notes and keep the result as a version that still needs approving."""
+    job = _draft_documents(job_id, model, notes=notes)
+    return _save_document_versions(
+        job_id,
+        str(job.get("resume_draft") or ""),
+        str(job.get("cover_letter") or ""),
+        approved=False,
+        source="regenerated" if notes.strip() else "generated",
+        notes=notes.strip(),
+    )
+
+
+def _document_version_text(job_id: str, document_id: str) -> dict[str, Any]:
+    store = _document_store()
+    with _connect() as connection:
+        store.ensure_schema(connection)
+        record = store.get(connection, owner_id=_owner_id(), document_id=document_id)
+        if (
+            record is None
+            or record["job_id"] != job_id
+            or record["kind"] not in DOCUMENT_VERSION_KINDS.values()
+        ):
+            raise LookupError("Document version not found.")
+        record, data = store.read(
+            connection, owner_id=_owner_id(), document_id=document_id, actor=_actor()
+        )
+    key = "resume" if record["kind"] == "tailored_resume" else "cover_letter"
+    return {
+        "document": _version_entry(record, ""),
+        "key": key,
+        "text": data.decode("utf-8", errors="replace"),
+    }
+
+
+def _approved_document_texts(job_id: str) -> dict[str, str]:
+    """The newest approved resume and cover letter text for a job (keys present only when approved)."""
+    store = _document_store()
+    found: dict[str, str] = {}
+    with _connect() as connection:
+        store.ensure_schema(connection)
+        for key, kind in DOCUMENT_VERSION_KINDS.items():
+            for record in store.list(
+                connection,
+                owner_id=_owner_id(),
+                kind=kind,
+                job_id=job_id,
+                limit=DOCUMENT_VERSIONS_LISTED * 5,
+            ):
+                if not (record.get("metadata") or {}).get("approved"):
+                    continue
+                try:
+                    _, data = store.read(
+                        connection,
+                        owner_id=_owner_id(),
+                        document_id=record["document_id"],
+                        actor="aira-apply",
+                    )
+                except (LookupError, PermissionError, ValueError, DocumentStorageError):
+                    continue  # unreadable: an older approved version may still work
+                text = data.decode("utf-8", errors="replace").strip()
+                if text:
+                    found[key] = text
+                    break
+    return found
+
+
+def _with_approved_documents(job: dict[str, Any]) -> dict[str, Any]:
+    """The job as an application sends it: the newest approved versions replace the current drafts.
+
+    ``approved_resume`` tells :func:`aira.resume_file.resume_for_upload` to upload that text as the
+    resume, ahead of the master resume file.
+    """
+    try:
+        approved = _approved_document_texts(job["job_id"])
+    except Exception:  # noqa: BLE001 - the store being unavailable must not stop an application
+        logger.warning("Approved document versions unavailable", exc_info=True)
+        return job
+    if not approved:
+        return job
+    out = dict(job)
+    if approved.get("resume"):
+        out["resume_draft"] = approved["resume"]
+        out["approved_resume"] = approved["resume"]
+    if approved.get("cover_letter"):
+        out["cover_letter"] = approved["cover_letter"]
+    return out
 
 
 def _draft_thread_reply(
@@ -4545,6 +4826,7 @@ DEFAULT_SETTINGS = {
     "linkedin_show_browser": "0",
     "auto_apply_paused": "0",
     "apply_show_browser": "0",
+    "review_drafted_answers": "1",
 }
 DEFAULT_SETTINGS.update(
     {name: str(bounds[0]) for name, bounds in airaapi_service.SETTING_BOUNDS.items()}
@@ -4693,7 +4975,7 @@ def _save_settings(payload: dict[str, Any]) -> dict[str, str]:
         values["linkedin_show_browser"] = (
             "1" if payload["linkedin_show_browser"] in (True, "1", 1, "true") else "0"
         )
-    for flag in ("auto_apply_paused", "apply_show_browser"):
+    for flag in ("auto_apply_paused", "apply_show_browser", "review_drafted_answers"):
         if flag in payload:
             values[flag] = "1" if payload[flag] in (True, "1", 1, "true") else "0"
     if "email_confidence_threshold" in payload:
@@ -5024,6 +5306,7 @@ def _job_detail(job_id: str) -> dict[str, Any]:
             job.get("application_url") or job.get("job_url")
         )
         job["auto_runs"] = autopilot.list_runs(connection, job_id=job_id, limit=10)
+        job["auto_review_drafts"] = _setting("review_drafted_answers") != "0"
         job["recruiters"] = [
             dict(row)
             for row in connection.execute(
@@ -6139,6 +6422,7 @@ def _apply_with_engine(
     answers: Mapping[str, str],
     submit: bool,
 ) -> dict[str, Any]:
+    job = _with_approved_documents(job)  # upload the newest approved resume and letter
     state = _profile_state()
     profile = dict(state["candidate_profile"])
     profile.setdefault(
@@ -6192,6 +6476,13 @@ def _apply_with_engine(
                     or 150,
                 ),
                 extra_answers={**remembered, **answers},
+                workday_account=workday_accounts.credentials_for_run(
+                    _connect,
+                    _airaapi_secret_store,
+                    url,
+                    source=source,
+                    profile_email=str(profile.get("email") or ""),
+                ),
             )
         )
         shot_id = None
@@ -6243,6 +6534,7 @@ def _apply_with_linkedin(
     answers: Mapping[str, str],
     submit: bool,
 ) -> dict[str, Any]:
+    job = _with_approved_documents(job)  # upload the newest approved resume
     state = _profile_state()
     profile = {key: value for key, value in state["candidate_profile"].items() if value}
     with _connect() as connection:
@@ -6456,9 +6748,34 @@ def _autopilot_on_submitted(
     if submission.get("duplicate"):
         return
     _move_stage_along(job["job_id"], "applied", "Applied automatically by Auto-apply")
+    drafted = len(run.get("drafted_answers") or [])
     _after_submission(
         job,
-        f"Applied automatically ({outcome.get('ats') or outcome.get('route') or 'form'})",
+        f"Applied automatically ({outcome.get('ats') or outcome.get('route') or 'form'})"
+        + (f"; {drafted} answer(s) drafted by the model" if drafted else ""),
+    )
+
+
+def _autopilot_draft_answers(
+    job: dict[str, Any], questions: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    """Draft answers to a held run's questions from the resume (see ``aira.answer_drafts``)."""
+    if HOSTING.model_json is None and not _ollama_available():
+        return []  # no model ready: the questions simply wait for the person
+    state = _profile_state()
+    profile = {
+        name: state["candidate_profile"].get(name, "")
+        for name in PROMPT_SAFE_FIELDS
+        if name not in {"email", "phone"}
+    }
+    _autopilot_progress(f"Drafting answers for {job.get('title') or 'the job'}")
+    model = _setting("default_model") or DEFAULT_MODEL
+    return answer_drafts.draft_answers(
+        questions,
+        resume_text=str(state["resume"] or ""),
+        profile=profile,
+        job_description=str(job.get("description") or ""),
+        model_call=lambda prompt: _ollama_json(model, prompt),
     )
 
 
@@ -6493,6 +6810,8 @@ def _local_autopilot_services(user: dict[str, Any]) -> autopilot.Services:
         paused=lambda: _setting("auto_apply_paused") == "1",
         notify=_autopilot_notify,
         unavailable=_autopilot_unavailable(user),
+        draft_answers=_autopilot_draft_answers,
+        review_drafts=lambda: _setting("review_drafted_answers") != "0",
     )
 
 
@@ -6634,12 +6953,17 @@ def _autopilot_readiness(
             }
         )
     ollama = _ollama_available()
+    on_claude = _model_provider_config() is not None
     items.append(
         {
             "id": "ollama",
-            "label": "Cover letters (local AI)",
+            "label": "Cover letters (Claude)"
+            if on_claude
+            else "Cover letters (local AI)",
             "ok": ollama,
-            "detail": "Ollama is running: each application gets a tailored cover letter."
+            "detail": "Claude is set up: each application gets a tailored cover letter."
+            if on_claude
+            else "Ollama is running: each application gets a tailored cover letter."
             if ollama
             else "Ollama is off: applications go without a tailored cover letter.",
             "action": "",
@@ -6697,6 +7021,7 @@ def _autopilot_overview(user: dict[str, Any]) -> dict[str, Any]:
             "remaining_today": None if not limit else max(0, limit - sent_today),
             "auto_today": today.get("submitted", 0),
             "show_browser": _setting("apply_show_browser") == "1",
+            "review_drafts": _setting("review_drafted_answers") != "0",
             "running": running,
         },
         "readiness": _autopilot_readiness(plans, user),
@@ -8558,6 +8883,10 @@ class RequestHandler(BaseHTTPRequestHandler):
             {
                 "mcp": mcp_ok,
                 "ollama": ollama,
+                # which model "ollama" (model ready) refers to: the local model or Claude
+                "model_provider": "claude"
+                if _model_provider_config() is not None
+                else "ollama",
                 "tracked_jobs": len(_list_jobs()),
                 "google_jobs": bool(_serpapi_key()),
             },
@@ -9011,6 +9340,15 @@ class RequestHandler(BaseHTTPRequestHandler):
         if payload.get("kind") == "negotiation":
             self._send_json(200, {"draft": _negotiation_draft(match.group(1), payload)})
             return
+        if "notes" in payload:
+            # The resume editor: "Regenerate with my notes" keeps the draft as a version to approve.
+            result = _regenerate_documents(
+                match.group(1),
+                str(payload.get("model", _setting("default_model"))),
+                str(payload.get("notes") or ""),
+            )
+            self._send_json(200, {**result, "job": _decode_job(result["job"])})
+            return
         job = _draft_documents(
             match.group(1), str(payload.get("model", _setting("default_model")))
         )
@@ -9073,6 +9411,44 @@ class RequestHandler(BaseHTTPRequestHandler):
         _audit("documents.edit", "job", match.group(1))
         self._send_json(200, {"job": job})
 
+    @route("GET", rf"/api/jobs/({JOB_KEY_PATTERN})/documents/versions")
+    def api_job_document_versions(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        self._send_json(200, _document_versions(match.group(1)))
+
+    @route("POST", rf"/api/jobs/({JOB_KEY_PATTERN})/documents/versions")
+    def api_job_document_versions_save(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        # {resume, cover_letter, approve}: approve true means "I reviewed this", and saving approves it.
+        result = _save_document_versions(
+            match.group(1),
+            str(payload.get("resume", "")),
+            str(payload.get("cover_letter", "")),
+            approved=payload.get("approve") is True,
+            source="edit",
+        )
+        self._send_json(201, {**result, "job": _decode_job(result["job"])})
+
+    @route("GET", rf"/api/jobs/({JOB_KEY_PATTERN})/documents/versions/([0-9a-f]{{32}})")
+    def api_job_document_version_text(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        self._send_json(200, _document_version_text(match.group(1), match.group(2)))
+
     @route("PATCH", rf"/api/jobs/({JOB_KEY_PATTERN})/notes")
     def api_job_notes(
         self,
@@ -9114,6 +9490,29 @@ class RequestHandler(BaseHTTPRequestHandler):
     ) -> None:
         self._send_json(200, _application_queue())
 
+    @route("GET", r"/api/applications/summary")
+    def api_applications_summary(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        # Every application in one count, manual and automatic; ?bucket=&via= also lists the ones behind a count.
+        bucket = (query.get("bucket") or [""])[0]
+        via = (query.get("via") or [""])[0]
+        with _connect() as connection:
+            result = apply_summary.summary(connection)
+            if bucket or via or (query.get("list") or [""])[0] == "1":
+                result["items"] = apply_summary.applications(
+                    connection,
+                    bucket=bucket,
+                    via=via,
+                    limit=_query_int(query, "limit", 100, 1, 200),
+                )
+                result["filter"] = {"bucket": bucket, "via": via}
+        self._send_json(200, result)
+
     # -- Auto-apply ------------------------------------------------------------
 
     @route("GET", r"/api/autopilot")
@@ -9135,11 +9534,16 @@ class RequestHandler(BaseHTTPRequestHandler):
         query: dict[str, list[str]],
         user: dict[str, Any] | None,
     ) -> None:
-        allowed = {"auto_apply_paused", "apply_show_browser", "daily_application_limit"}
+        allowed = {
+            "auto_apply_paused",
+            "apply_show_browser",
+            "daily_application_limit",
+            "review_drafted_answers",
+        }
         values = {key: payload[key] for key in allowed if key in payload}
         if not values:
             raise ValueError(
-                "Send auto_apply_paused, apply_show_browser or daily_application_limit."
+                "Send auto_apply_paused, apply_show_browser, daily_application_limit or review_drafted_answers."
             )
         _save_settings(values)
         assert user is not None

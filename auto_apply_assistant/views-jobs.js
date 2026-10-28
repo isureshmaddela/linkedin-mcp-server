@@ -441,27 +441,9 @@
     pane.append(scoreBox, dimensionList, aiBox);
   }
 
-  function renderDocuments({ job, reload, pane }) {
-    const stale = job.resume_draft && job.resume_hash && Aira.state.profile && Aira.state.profile.resume_hash && job.resume_hash !== Aira.state.profile.resume_hash;
-    const model = h("input", { type: "text", value: (Aira.state.settings && Aira.state.settings.default_model) || "qwen3.5:4b", maxlength: 100 });
-    const resume = h("textarea", { class: "textarea doc-editor", placeholder: "Tailored resume appears here after generation. Edit freely." }, job.resume_draft || "");
-    const letter = h("textarea", { class: "textarea doc-editor", placeholder: "Cover letter appears here after generation." }, job.cover_letter || "");
-    const confirm = h("input", { type: "checkbox" });
-    pane.append(
-      h("p", { class: "note", text: "Drafts use only facts from your saved resume and profile. Review every line, then approve to move the job to Ready to Apply." }),
-      stale ? h("p", { class: "note warn", text: "Your master resume changed after these drafts were written. Regenerate them before approving." }) : null,
-      h("div", { class: "btn-row", style: { margin: "12px 0" } }, h("div", { class: "field", style: { minWidth: "200px" } }, h("label", { for: "docModel", text: "Ollama model" }), Object.assign(model, { id: "docModel" })), h("button", { type: "button", class: "btn", text: job.resume_draft ? "Regenerate drafts" : "Generate tailored drafts", disabled: !job.description, onclick: (event) => withBusy(event.currentTarget, async () => { event.currentTarget.textContent = "Drafting…"; await api(`/api/jobs/${encodeURIComponent(job.job_id)}/generate`, { method: "POST", body: { model: model.value } }); toast("Drafts generated. Review before approving.", "success"); reload("documents"); }) })),
-      h("div", { class: "grid cols-2" }, docEditor("Tailored resume", resume), docEditor("Cover letter", letter)),
-      h("div", { class: "btn-row", style: { marginTop: "12px" } },
-        h("button", { type: "button", class: "btn secondary", text: "Save edits", onclick: (event) => withBusy(event.currentTarget, async () => { await api(`/api/jobs/${encodeURIComponent(job.job_id)}/documents`, { method: "PATCH", body: { resume: resume.value, cover_letter: letter.value } }); toast("Edits saved.", "success"); reload("documents"); }) }),
-        h("button", { type: "button", class: "btn secondary", text: "Save to Documents", onclick: (event) => withBusy(event.currentTarget, async () => { await api(`/api/jobs/${encodeURIComponent(job.job_id)}/documents`, { method: "PATCH", body: { resume: resume.value, cover_letter: letter.value } }); await api(`/api/jobs/${encodeURIComponent(job.job_id)}/documents/snapshot`, { method: "POST", body: {} }); toast("Saved as versioned documents.", "success"); }) }),
-      ),
-      h("div", { class: "card", style: { marginTop: "14px", background: "var(--surface-2)" } }, h("h3", { text: "Approval checkpoint" }), h("label", { class: "check" }, confirm, "I reviewed both drafts and verified every claim is true."), h("div", { class: "btn-row", style: { marginTop: "10px" } }, h("button", { type: "button", class: "btn", text: "Approve drafts → Ready to apply", onclick: (event) => withBusy(event.currentTarget, async () => { if (!confirm.checked) { toast("Confirm you reviewed both drafts first.", "error"); return; } await api(`/api/jobs/${encodeURIComponent(job.job_id)}/documents`, { method: "PATCH", body: { resume: resume.value, cover_letter: letter.value } }); await api(`/api/jobs/${encodeURIComponent(job.job_id)}/stage`, { method: "PATCH", body: { stage: "ready_to_apply", reason: "Drafts approved" } }); toast("Approved. Continue in the Apply tab.", "success"); reload("apply"); }) }))),
-    );
-  }
-  function docEditor(label, area) {
-    return h("div", { class: "field" }, h("div", { class: "btn-row", style: { justifyContent: "space-between" } }, h("label", { text: label, for: area.id || (area.id = `doc${Math.random().toString(36).slice(2, 7)}`) }), h("button", { type: "button", class: "btn ghost sm", text: "Copy", onclick: async () => { await navigator.clipboard.writeText(area.value); toast(`${label} copied.`, "success"); } })), area);
-  }
+  // The Documents tab is the resume editor (views-applications.js): the drafts beside the job description,
+  // saved as versions, approved, and rewritten with the person's notes.
+  function renderDocuments(ctx) { Aira.renderResumeEditor(ctx); }
 
   function renderHistory({ job, pane }) {
     const events = job.events || [];

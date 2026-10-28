@@ -220,6 +220,8 @@ ROUTE_MODULES = (
     "aira.airaapi.routes",
     "aira.airaapi.careers_routes",
     "aira.airaapi.leads_routes",
+    "aira.model_provider",  # Settings > Integrations > Claude (the model provider and its key)
+    "aira.workday_accounts",  # Settings > Integrations > Workday accounts
 )
 
 

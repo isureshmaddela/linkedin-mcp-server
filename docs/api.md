@@ -58,13 +58,16 @@ Base URL: `http://127.0.0.1:8765` (loopback only). All responses are JSON unless
 | POST | `/api/jobs/{id}/details` | `{}` | Read the posting from LinkedIn (LinkedIn jobs only) and score. |
 | POST | `/api/jobs/{id}/score` | `{}` | Force rescore. |
 | POST | `/api/jobs/{id}/evaluate` | `{model}` | Local Ollama fit review. |
-| POST | `/api/jobs/{id}/generate` | `{model}` | Tailored resume + cover letter drafts (no fabrication prompt). |
+| POST | `/api/jobs/{id}/generate` | `{model, notes?}` | Tailored resume + cover letter drafts (no fabrication prompt). With `notes` (the person's own guidance, at most 2000 characters) the drafts are also kept as versions that still need approving. |
 | POST | `/api/jobs/{id}/save` | `{saved}` | Star/unstar; moves discovered ⇄ saved. |
 | POST | `/api/jobs/{id}/archive` | `{}` | Soft delete. |
 | PATCH | `/api/jobs/{id}/stage` | `{stage, reason}` | Guarded transition; records an event and audit row. |
 | PATCH | `/api/jobs/{id}/documents` | `{resume, cover_letter}` | Saves drafts and stamps the current resume version. |
 | PATCH | `/api/jobs/{id}/notes` | `{notes, follow_up_at}` | Follow-up creates a task. |
 | POST | `/api/jobs/{id}/documents/snapshot` | `{}` | Store drafts as versioned encrypted documents. |
+| GET | `/api/jobs/{id}/documents/versions` | | Resume editor history: versions of the tailored resume and cover letter, newest first, with `approved` and what applications send now (`in_use`). |
+| POST | `/api/jobs/{id}/documents/versions` | `{resume, cover_letter, approve}` | Saves the texts as the drafts and as new versions when they changed; `approve: true` ("I reviewed this") makes them the approved versions that applications upload. |
+| GET | `/api/jobs/{id}/documents/versions/{document_id}` | | One version's text. |
 | POST | `/api/search`, `/api/search/greenhouse`, `/api/search/google` | | Legacy single-source search routes (kept for compatibility). |
 
 ## Applications
@@ -72,6 +75,7 @@ Base URL: `http://127.0.0.1:8765` (loopback only). All responses are JSON unless
 | Method | Path | Body | Notes |
 |---|---|---|---|
 | GET | `/api/applications/queue` | | Ready, needs-review, in-progress lists; daily budget; auto-submit policy. |
+| GET | `/api/applications/summary` | `?bucket=submitted\|in_process\|needs_you\|failed\|interviews&via=manual\|auto` | Every application counted once (manual and automatic): `total`, `counts`, `by_via`; with a filter (or `list=1`) also `items`. Definitions in `aira/apply_summary.py`. |
 | POST | `/api/jobs/{id}/prepare` | `{}` | Build the packet: maps portal questions (Greenhouse) or standard questions to the profile, prefills non-sensitive confirmed values, flags sensitive/unknown/missing. |
 | GET | `/api/jobs/{id}/preparation` | | Latest packet. |
 | PATCH | `/api/preparations/{prep_id}` | `{answers: {field_id_or_label: value}, notes, remember_answers}` | User review; confirmed answers can be remembered as standard answers. |

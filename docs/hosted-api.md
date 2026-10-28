@@ -335,6 +335,7 @@ Which workspace: a candidate's own, or `X-Aira-Candidate: <member id>` for staff
 | GET | `/api/jobs/([A-Za-z0-9][A-Za-z0-9_.:-]{0,255})` | `api_job_detail` |  |
 | GET | `/api/jobs/([A-Za-z0-9][A-Za-z0-9_.:-]{0,255})/events` | `api_job_events` |  |
 | GET | `/api/applications/queue` | `api_applications_queue` |  |
+| GET | `/api/applications/summary` | `api_applications_summary` |  |
 | GET | `/api/autopilot` | `api_autopilot` | sensitive answers masked |
 | GET | `/api/autopilot/plans/([0-9a-f]{32})/passes` | `api_autopilot_plan_passes` |  |
 | GET | `/api/autopilot/runs` | `api_autopilot_runs` | sensitive answers masked |
@@ -366,6 +367,8 @@ Which workspace: a candidate's own, or `X-Aira-Candidate: <member id>` for staff
 | GET | `/api/documents/([0-9a-f]{32})/download` | `api_document_download` |  |
 | GET | `/api/documents/([0-9a-f]{32})/versions` | `api_document_versions` |  |
 | POST | `/api/jobs/([A-Za-z0-9][A-Za-z0-9_.:-]{0,255})/documents/snapshot` | `api_job_documents_snapshot` |  |
+| GET | `/api/jobs/([A-Za-z0-9][A-Za-z0-9_.:-]{0,255})/documents/versions` | `api_job_document_versions` |  |
+| GET | `/api/jobs/([A-Za-z0-9][A-Za-z0-9_.:-]{0,255})/documents/versions/([0-9a-f]{32})` | `api_job_document_version_text` |  |
 
 ### Candidate workspace, edits (`candidates.write`, a coach needs `act`)
 
@@ -381,6 +384,7 @@ Which workspace: a candidate's own, or `X-Aira-Candidate: <member id>` for staff
 | POST | `/api/jobs/([A-Za-z0-9][A-Za-z0-9_.:-]{0,255})/archive` | `api_job_archive` |  |
 | PATCH | `/api/jobs/([A-Za-z0-9][A-Za-z0-9_.:-]{0,255})/stage` | `api_job_stage` |  |
 | PATCH | `/api/jobs/([A-Za-z0-9][A-Za-z0-9_.:-]{0,255})/documents` | `api_job_documents` |  |
+| POST | `/api/jobs/([A-Za-z0-9][A-Za-z0-9_.:-]{0,255})/documents/versions` | `api_job_document_versions_save` |  |
 | PATCH | `/api/jobs/([A-Za-z0-9][A-Za-z0-9_.:-]{0,255})/notes` | `api_job_notes` |  |
 | POST | `/api/interviews` | `api_interviews_create` |  |
 | PATCH | `/api/interviews/([0-9a-f]{32})` | `api_interview_update` |  |

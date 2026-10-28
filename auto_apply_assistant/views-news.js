@@ -29,6 +29,8 @@
     "nw-letter": '<svg viewBox="0 0 24 24"><rect x="3" y="5" width="18" height="14" rx="2"/><path d="M3.5 6.5l8.5 6.5 8.5-6.5"/></svg>',
     "nw-source": '<svg viewBox="0 0 24 24"><path d="M5 4a15 15 0 0 1 15 15M5 10a9 9 0 0 1 9 9"/><circle cx="6" cy="18" r="1.6"/></svg>',
     "nw-reader": '<svg viewBox="0 0 24 24"><circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/></svg>',
+    "nw-grid": '<svg viewBox="0 0 24 24"><rect x="4" y="4" width="7" height="7" rx="1.5"/><rect x="13" y="4" width="7" height="7" rx="1.5"/><rect x="4" y="13" width="7" height="7" rx="1.5"/><rect x="13" y="13" width="7" height="7" rx="1.5"/></svg>',
+    "nw-rows": '<svg viewBox="0 0 24 24"><rect x="4" y="4.5" width="16" height="6" rx="1.5"/><rect x="4" y="13.5" width="16" height="6" rx="1.5"/></svg>',
   };
   for (const [name, svg] of Object.entries(GLYPHS)) if (Aira.ICONS && !Aira.ICONS[name]) Aira.ICONS[name] = svg;
   // about: the line under the page title. headlines: the tab lists today's headlines (Listen reads them out).
@@ -161,6 +163,36 @@
         image),
       h("div", { class: "btn-row nw-actions" }, read, saveButton, listen, ...more.filter(Boolean)));
     return node;
+  }
+
+  // Grid (cards side by side) or list (one headline per row): the person's choice, kept on this device.
+  const LAYOUTS = [["grid", "Grid", "nw-grid"], ["list", "List", "nw-rows"]];
+  const layout = () => (Aira.recall("newsLayout", "grid") === "list" ? "list" : "grid");
+  function layoutSwitch(page) {
+    const group = h("div", { class: "nw-layout", role: "radiogroup", "aria-label": "Show headlines as" });
+    const draw = () => {
+      const chosen = layout();
+      page.classList.toggle("nw-as-list", chosen === "list");
+      for (const button of group.children) {
+        const on = button.dataset.layout === chosen;
+        button.setAttribute("aria-checked", String(on));
+        button.tabIndex = on ? 0 : -1;
+      }
+    };
+    const choose = (value) => { Aira.remember("newsLayout", value); draw(); };
+    for (const [value, label, icon] of LAYOUTS) {
+      group.append(h("button", { type: "button", role: "radio", class: "nw-layout-btn", dataset: { layout: value }, title: label, "aria-label": label, onclick: () => choose(value) }, Aira.icon(icon)));
+    }
+    // Arrow keys move between the two, like any radio group.
+    group.addEventListener("keydown", (event) => {
+      if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return;
+      event.preventDefault();
+      const next = layout() === "grid" ? "list" : "grid";
+      choose(next);
+      [...group.children].find((button) => button.dataset.layout === next).focus();
+    });
+    draw();
+    return group;
   }
 
   // ctx.empty: what to do next when there are no headlines (a button or a link), under the empty message.
@@ -677,8 +709,12 @@
       listenButton = h("button", { type: "button", class: "btn secondary nw-listen" }, Aira.icon("speaker"), h("span", { text: "Listen to today's headlines" }));
       listenButton.addEventListener("click", () => listenToHeadlines(listenButton));
     }
-    const body = S.page(main, { title: current.label, subtitle: current.about, actions: [listenButton] });
+    // Tabs that list headlines (Search and Saved too) can show them as a grid or a list.
+    const listsHeadlines = current.headlines || current.id === "search" || current.id === "saved";
+    const layoutHolder = listsHeadlines ? h("div", { class: "nw-layout-holder" }) : null;
+    const body = S.page(main, { title: current.label, subtitle: current.about, actions: [listenButton, layoutHolder] });
     body.classList.add("nw-page");
+    if (layoutHolder) layoutHolder.replaceWith(layoutSwitch(body));
     const tab = S.tabs(body, route, "news", tabs, current.id);
     const panel = h("div", { class: "suite-body" }, Aira.ui.skeleton(4));
     body.append(panel);

@@ -40,6 +40,7 @@ class ApplyRequest:
     screenshot_dir: str | None = None
     timeout_seconds: int = 120
     extra_answers: Mapping[str, str] = field(default_factory=dict)   # label -> value answered by the user for this run (review answers)
+    workday_account: Any = None       # Workday only: aira.workday.WorkdayAccount (decrypted for this run), see section 2a
 
 @dataclass(slots=True)
 class FormQuestion:
@@ -79,8 +80,8 @@ def run(request: ApplyRequest) -> ApplyOutcome
 Behaviour:
 * `detect_ats` by host/path: `boards.greenhouse.io`, `job-boards.greenhouse.io`, `boards.eu.greenhouse.io` ->
   greenhouse; `jobs.lever.co` -> lever; `jobs.ashbyhq.com` -> ashby; `jobs.smartrecruiters.com` -> smartrecruiters;
-  `myworkdayjobs.com` -> workday (unsupported in this build: return `unsupported` with a reason and the URL);
-  otherwise generic.
+  `myworkdayjobs.com` / `myworkdaysite.com` (or source `workday` on another host) -> workday, run by
+  `aira.workday.run_workday` (section 2a); otherwise generic.
 * Each ATS adapter knows its field names/ids/labels and its custom-question markup; the generic adapter maps by
   `<label for>`, `aria-label`, `aria-labelledby`, `placeholder` and `name`. Values come from, in order: the packet
   field with the same label/provider id, `extra_answers` by label, `aira.field_mapping.map_field` on the live label
@@ -96,6 +97,40 @@ Behaviour:
   extract a confirmation number when one is shown (regex over the page text), return `submitted`.
   No success marker within the timeout -> `failed` with the page text in evidence (never claim success).
 * Never follow links off the form page; never open a new tab; headless by default.
+
+## 2a. Workday (`aira/workday.py`, accounts in `aira/workday_accounts.py`)
+
+Workday is account-based and multi-step: each employer's tenant (`acme.wd5.myworkdayjobs.com`) has its own
+candidate accounts, and an application is a sequence of pages.
+
+* Accounts: one per tenant host, password Fernet-encrypted at rest with the SerpApi key's secret store
+  (`workday_accounts` table, `password_ciphertext`). Either the person's own email and password, or "create it
+  for me": the profile email and a generated strong password, saved before the account form is filled. A
+  preference (`workday_preferences.auto_create`) creates accounts on new tenants automatically. The last run's
+  state is remembered: `new`, `active`, `verification_needed`, `sign_in_failed`, `exists`. Passwords are never
+  returned by the API (emails are masked), logged, audited or left in steps and errors.
+* `credentials_for_run(connect, store, url, source=, profile_email=)` decrypts the account into
+  `ApplyRequest.workday_account` (`WorkdayAccount(host, email, password, create, on_result)`); without one,
+  `run` returns `needs_review` before any browser starts.
+* The run: job page -> `adventureButton` (Apply) -> `applyManually`; sign in (`signInLink`, `email`, `password`,
+  `signInSubmitButton`) or create the account (`createAccountLink`, `verifyPassword`, `createAccountCheckbox`,
+  `createAccountSubmitButton`; an existing account falls back to signing in). Then one page at a time, named by
+  `progressBarActiveStep`, inside `applyFlowPage`: the form engine's discovery and answers for native controls,
+  Workday's listbox dropdowns (`button[aria-haspopup=listbox]` -> `role=option`), the resume on
+  `file-upload-input-ref` (values Workday's parsing filled in are kept), then `bottom-navigation-next-button`
+  (or `pageFooterNextButton`); a Workday error banner after Save and Continue holds with its text.
+* Voluntary Disclosures and Self Identify (and any page asking a demographic question): answered only from the
+  person's answers for the run or confirmed saved standard answers ("I do not wish to answer" matches the page's own
+  decline wording); never from the profile or a packet; every open question there holds, required or not.
+* Holds (`needs_review`): unanswered required or sensitive questions, a verification email, a CAPTCHA, a rejected
+  password, account terms without a confirmed legal attestation, a second sign-in prompt.
+* `submit=False` stops at Review with a screenshot (`filled`; Workday has saved each page as a draft).
+  `submit=True` presses Submit on Review and waits for the confirmation like the other adapters.
+* API (session, owner-only, same-origin): `GET/POST /api/autopilot/workday-accounts`,
+  `PATCH/DELETE /api/autopilot/workday-accounts/<host>`, `POST /api/autopilot/workday-settings`. UI: Settings >
+  Integrations > Workday accounts (`views-workday.js`, via `Aira.settingsCards(tab)`).
+* Limits: English step names and notices; hierarchical dropdowns and multi-select prompt inputs are not chosen
+  automatically (they hold as questions); tests run against `tests/workday_stub.py`, never a real tenant.
 
 ## 3. Files for upload (`aira/resume_file.py` and `aira/pdf_text.py`, new)
 

@@ -34,6 +34,150 @@
     if (submission) pane.append(h("div", { class: "card", style: { marginTop: "14px" } }, h("h3", { text: "Submitted" }), ui.kv([["Recorded", fmt.datetime(submission.submitted_at)], ["Confirmation #", submission.confirmation_number || "—"], ["Notes", submission.confirmation_text || "—"], ["Evidence", submission.evidence_document_id ? "Stored in Documents" : "None"]]), h("div", { class: "btn-row", style: { marginTop: "10px" } }, h("a", { class: "btn secondary sm", href: "#/interviews", text: "Track interviews" }), h("a", { class: "btn ghost sm", href: "#/applications?tab=email", text: "Import a status email" }))));
   };
 
+  // -------------------------------------------------------------------------
+  // Documents tab inside the job drawer: the resume editor
+  // The tailored resume and cover letter on one side, the job description beside them. Each save is a new
+  // version; "Approve and save" (with "I reviewed this") is the approval, and applications upload the
+  // newest approved version. "Regenerate with my notes" drafts again from the saved resume, steered by the
+  // person's notes; a regenerated draft still needs approving.
+  // -------------------------------------------------------------------------
+  const DOC_KEYS = [["resume", "Resume"], ["cover_letter", "Cover letter"]];
+  const VERSION_SOURCES = { edit: "Edited by you", regenerated: "Rewritten with your notes", generated: "Written by Monosage", snapshot: "Saved with the packet" };
+
+  Aira.renderResumeEditor = ({ job, reload, pane }) => {
+    const id = encodeURIComponent(job.job_id);
+    const stale = job.resume_draft && job.resume_hash && Aira.state.profile && Aira.state.profile.resume_hash && job.resume_hash !== Aira.state.profile.resume_hash;
+    const original = { resume: job.resume_draft || "", cover_letter: job.cover_letter || "" };
+    const areas = {
+      resume: h("textarea", { class: "textarea cre-text", id: "creResume", "aria-label": "Tailored resume", spellcheck: "true", placeholder: "Your tailored resume appears here after it is written. Edit it freely." }, original.resume),
+      cover_letter: h("textarea", { class: "textarea cre-text", id: "creLetter", "aria-label": "Cover letter", spellcheck: "true", placeholder: "Your cover letter appears here after it is written." }, original.cover_letter),
+    };
+    let active = "resume";
+    let versions = null;
+    const dirtyNote = h("span", { class: "cre-dirty", role: "status", "aria-live": "polite" });
+    const isDirty = () => DOC_KEYS.some(([key]) => areas[key].value !== original[key]);
+    const syncDirty = () => { dirtyNote.textContent = isDirty() ? "Unsaved changes" : ""; };
+    for (const [key] of DOC_KEYS) areas[key].addEventListener("input", syncDirty);
+
+    const switchButtons = DOC_KEYS.map(([key, label]) => h("button", { type: "button", role: "tab", class: "cre-switch-btn", "data-doc": key, "aria-controls": areas[key].id, text: label, onclick: () => show(key) }));
+    const copyBtn = h("button", { type: "button", class: "btn ghost sm", text: "Copy", onclick: async () => { await navigator.clipboard.writeText(areas[active].value); toast(`${active === "resume" ? "Resume" : "Cover letter"} copied.`, "success"); } });
+    const history = h("div", { class: "cre-history", "aria-label": "Saved versions" }, ui.skeleton(2));
+    const inUse = h("div", { class: "cre-in-use", role: "status" });
+    function show(key) {
+      active = key;
+      for (const button of switchButtons) { const on = button.dataset.doc === key; button.setAttribute("aria-selected", on ? "true" : "false"); button.classList.toggle("on", on); }
+      for (const [other] of DOC_KEYS) areas[other].hidden = other !== key;
+      paintHistory();
+    }
+
+    // The job description beside the editor (untrusted text, shown as text only).
+    const skills = (job.required_skills || []).slice(0, 16);
+    const description = h("aside", { class: "cre-jd", "aria-label": "Job description" },
+      h("h3", { text: "Job description" }),
+      job.description ? h("div", { class: "cre-jd-text", tabindex: "0", text: job.description }) : h("div", { class: "empty" }, h("strong", { text: "No description yet" }), h("span", { text: "Load the description in the Overview tab before writing drafts." })),
+      skills.length ? h("div", { class: "chips cre-jd-skills" }, ...skills.map((skill) => h("span", { class: "chip", text: fmt.stage(skill) }))) : null,
+    );
+
+    // Regenerate with my notes
+    const model = h("input", { type: "text", id: "creModel", value: (Aira.state.settings && Aira.state.settings.default_model) || "qwen3.5:4b", maxlength: 100 });
+    const notes = h("textarea", { class: "textarea", id: "creNotes", rows: 3, maxlength: 2000, placeholder: "e.g. Lead with my Kubernetes migration work. Keep it to one page. Warmer tone in the letter." });
+    const hasDrafts = Boolean(original.resume || original.cover_letter);
+    const regenerate = h("button", { type: "button", class: "btn secondary", text: hasDrafts ? "Regenerate with my notes" : "Write tailored drafts", disabled: !job.description });
+    regenerate.addEventListener("click", () => withBusy(regenerate, async () => {
+      if (isDirty() && !(await Aira.confirm({ title: "Replace your unsaved edits?", message: "New drafts replace the text in the editor. Save your edits first if you want to keep them as a version.", confirmLabel: "Write new drafts" }))) return;
+      regenerate.textContent = "Writing…";
+      await api(`/api/jobs/${id}/generate`, { method: "POST", body: { model: model.value, notes: notes.value } });
+      toast("New drafts written. Review them, then approve.", "success");
+      reload("documents");
+    }));
+    const notesBox = h("details", { class: "card cre-notes", open: !hasDrafts },
+      h("summary", { text: hasDrafts ? "Regenerate with my notes" : "Write tailored drafts" }),
+      h("p", { class: "muted", text: "Your notes steer what to stress, the order and the tone. Monosage still uses only facts from your saved resume: anything it cannot back up is left out." }),
+      ui.field("Your notes (optional)", notes),
+      h("div", { class: "btn-row cre-notes-row" }, h("div", { class: "field cre-model" }, h("label", { for: "creModel", text: "Model" }), model), regenerate),
+    );
+
+    // Save and approve
+    const reviewed = h("input", { type: "checkbox", id: "creReviewed" });
+    const body = () => ({ resume: areas.resume.value, cover_letter: areas.cover_letter.value });
+    const saveDraft = h("button", { type: "button", class: "btn secondary", text: "Save as a draft version" });
+    saveDraft.addEventListener("click", () => withBusy(saveDraft, async () => {
+      await api(`/api/jobs/${id}/documents/versions`, { method: "POST", body: { ...body(), approve: false } });
+      toast("Saved as a new version. Approve it before you apply.", "success");
+      reload("documents");
+    }));
+    const approve = h("button", { type: "button", class: "btn", text: "Approve and save" });
+    approve.addEventListener("click", () => withBusy(approve, async () => {
+      if (!reviewed.checked) { toast("Tick “I reviewed both” first: approving says every claim is true.", "error"); reviewed.focus(); return; }
+      await api(`/api/jobs/${id}/documents/versions`, { method: "POST", body: { ...body(), approve: true } });
+      const canMove = (job.allowed_stages || []).includes("ready_to_apply");
+      if (canMove) {
+        try { await api(`/api/jobs/${id}/stage`, { method: "PATCH", body: { stage: "ready_to_apply", reason: "Drafts approved" } }); }
+        catch (error) { Aira.reportError(error); }
+      }
+      toast(canMove ? "Approved. Applications send this version. Continue in the Apply tab." : "Approved. Applications send this version.", "success");
+      reload(canMove ? "apply" : "documents");
+    }));
+
+    pane.append(...[
+      h("p", { class: "note", text: "Drafts use only facts from your saved resume and profile. Edit them here with the job beside you; every save is a version you can go back to." }),
+      stale ? h("p", { class: "note warn", text: "Your master resume changed after these drafts were written. Regenerate them before approving." }) : null,
+      inUse,
+      h("div", { class: "cre-editor" },
+        h("div", { class: "cre-docs" },
+          h("div", { class: "cre-toolbar" }, h("div", { class: "cre-switch", role: "tablist", "aria-label": "Document" }, ...switchButtons), dirtyNote, copyBtn),
+          areas.resume, areas.cover_letter,
+          h("div", { class: "cre-approve" },
+            h("label", { class: "check" }, reviewed, "I reviewed both and every claim is true."),
+            h("p", { class: "muted cre-hint", text: "Approving saves a version and makes it the one your applications upload, also when Auto-apply sends them." }),
+            h("div", { class: "btn-row" }, approve, saveDraft),
+          ),
+        ),
+        description,
+      ),
+      notesBox,
+      h("div", { class: "card cre-versions" }, h("h3", { text: "Saved versions" }), history),
+    ].filter(Boolean));
+    show("resume");
+
+    function paintInUse() {
+      if (!versions) return;
+      const parts = DOC_KEYS.map(([key, label]) => {
+        const use = versions.in_use[key] || { kind: "none" };
+        const list = versions.versions[key] || [];
+        const currentApproved = list.some((v) => v.current && v.approved);
+        const text = use.kind === "approved" ? `${label}: version ${use.version}, approved` : use.kind === "draft" ? `${label}: the current draft (not approved yet)` : `${label}: none yet`;
+        return { text, waiting: use.kind === "approved" && !currentApproved && Boolean(original[key]) };
+      });
+      const waiting = parts.some((p) => p.waiting);
+      inUse.className = `cre-in-use note${waiting ? " warn" : ""}`;
+      inUse.replaceChildren(h("strong", { text: "Applications send: " }), h("span", { text: parts.map((p) => p.text).join(" · ") }), ...(waiting ? [h("div", { text: "The text in the editor has changes that are not approved. Approve it to send it instead." })] : []));
+    }
+    function paintHistory() {
+      if (!versions) return;
+      const list = versions.versions[active] || [];
+      if (!list.length) { history.replaceChildren(h("p", { class: "muted", text: "No saved versions yet. Save or approve to keep one." })); return; }
+      history.replaceChildren(h("ul", { class: "cre-version-list" }, ...list.map((v) => h("li", { class: `cre-version${v.current ? " current" : ""}` },
+        h("div", { class: "cre-version-main" },
+          h("strong", { text: `Version ${v.version}` }),
+          v.approved ? h("span", { class: "badge stage ready_to_apply", text: "Approved" }) : h("span", { class: "badge", text: "Draft" }),
+          v.current ? h("span", { class: "badge", text: "In the editor" }) : null,
+          h("span", { class: "muted", text: `${VERSION_SOURCES[v.source] || fmt.stage(v.source)} · ${fmt.ago(v.created_at)}` }),
+          v.notes ? h("div", { class: "cre-version-notes", text: `Your notes: ${v.notes}` }) : null,
+        ),
+        v.current ? null : h("button", { type: "button", class: "btn ghost sm", text: "Open in editor", "aria-label": `Open version ${v.version} in the editor`, onclick: (event) => withBusy(event.currentTarget, async () => {
+          const data = await api(`/api/jobs/${id}/documents/versions/${v.document_id}`);
+          areas[data.key].value = data.text;
+          syncDirty();
+          show(data.key);
+          areas[data.key].focus();
+          toast(`Version ${v.version} is in the editor. Save or approve it to use it.`, "success");
+        }) }),
+      ))));
+    }
+    api(`/api/jobs/${id}/documents/versions`).then((data) => { versions = data; paintInUse(); paintHistory(); }).catch((error) => history.replaceChildren(ui.error(error)));
+  };
+
   function renderPacket(job, prep, reload) {
     const answers = {};
     const list = h("div", {});
@@ -157,7 +301,7 @@
     const load = async () => {
       content.replaceChildren(ui.skeleton(5));
       try {
-        if (tab === "pipeline") await renderPipeline(content);
+        if (tab === "pipeline") await renderPipeline(content, route);
         else if (tab === "queue") await renderQueue(content);
         else if (tab === "offers") await renderOffers(content);
         else await renderEmail(content, route);
@@ -167,7 +311,80 @@
     await load();
   };
 
-  async function renderPipeline(content) {
+  // -------------------------------------------------------------------------
+  // Tracking summary: every application in one count, sent by you or by Monosage (GET /api/applications/summary)
+  // -------------------------------------------------------------------------
+  const TRACK_BUCKETS = [
+    { id: "submitted", label: "Submitted", hint: "Sent to the employer" },
+    { id: "in_process", label: "In process", hint: "Being filled in or queued" },
+    { id: "needs_you", label: "Needs you", hint: "Held for your answers or your click" },
+    { id: "failed", label: "Failed", hint: "Nothing was sent" },
+    { id: "interviews", label: "Interviews", hint: "Submitted and reached an interview" },
+  ];
+  const TRACK_VIAS = { manual: "by you", auto: "automatically" };
+  const trackHref = (bucket, via) => `#/applications?${new URLSearchParams({ tab: "pipeline", ...(bucket ? { show: bucket } : {}), ...(via ? { via } : {}) })}`;
+  function trackingFilter(query) {
+    const bucket = query.show === "all" || TRACK_BUCKETS.some((b) => b.id === query.show) ? query.show : "";
+    const via = TRACK_VIAS[query.via] ? query.via : "";
+    return bucket || via ? { bucket, via } : null;
+  }
+  async function loadTracking() {
+    try { return trackingNode(await api("/api/applications/summary"), null); }
+    catch (error) { Aira.reportError(error); return null; } // the board still shows without the summary
+  }
+  function trackingNode(data, filter) {
+    const isOn = (bucket, via) => Boolean(filter) && filter.bucket === bucket && filter.via === via;
+    const current = (bucket, via) => (isOn(bucket, via) ? "page" : null);
+    const tiles = TRACK_BUCKETS.map((b) => {
+      const split = data.by_via || {};
+      return h("div", { class: `cas-tile${filter && filter.bucket === b.id ? " on" : ""}`, "data-bucket": b.id },
+        h("a", { class: "cas-main", href: trackHref(b.id, ""), "aria-current": current(b.id, ""), "aria-label": `${b.label}: ${data.counts[b.id]}. ${b.hint}. Show the list.` },
+          h("span", { class: "cas-label", text: b.label }),
+          h("span", { class: "cas-value", text: String(data.counts[b.id]) }),
+          h("span", { class: "cas-hint", text: b.hint })),
+        h("div", { class: "cas-split" }, ...Object.entries(TRACK_VIAS).map(([via, text]) => h("a", { class: "cas-via", "data-via": via, href: trackHref(b.id, via), "aria-current": current(b.id, via), text: `${(split[via] || {})[b.id] || 0} ${text}` }))),
+      );
+    });
+    const totals = data.totals_by_via || {};
+    return h("section", { class: "cas", "aria-label": "Your applications" },
+      h("div", { class: "cas-head" },
+        h("h2", { text: "Your applications" }),
+        h("p", { class: "cas-total" },
+          h("a", { class: "cas-total-all", href: trackHref("all", ""), "aria-current": current("all", "") }, h("strong", { text: String(data.total) }), " in all"),
+          " · ", h("a", { href: trackHref("", "manual"), "aria-current": current("", "manual"), text: `${totals.manual || 0} sent by you` }),
+          " · ", h("a", { href: trackHref("", "auto"), "aria-current": current("", "auto"), text: `${totals.auto || 0} sent automatically` })),
+        data.searching ? h("span", { class: "badge cas-live", text: "Auto-apply is searching now" }) : null),
+      h("div", { class: "cas-grid" }, ...tiles),
+    );
+  }
+  async function renderTrackedList(content, filter) {
+    const query = new URLSearchParams({ list: "1", ...(filter.bucket && filter.bucket !== "all" ? { bucket: filter.bucket } : {}), ...(filter.via ? { via: filter.via } : {}), limit: "200" });
+    const data = await api(`/api/applications/summary?${query}`);
+    const bucket = TRACK_BUCKETS.find((b) => b.id === filter.bucket);
+    const title = [bucket ? bucket.label : "All applications", filter.via ? `sent ${TRACK_VIAS[filter.via]}` : ""].filter(Boolean).join(", ");
+    const items = data.items || [];
+    const row = (item) => {
+      const meta = [item.company, `${item.via === "auto" ? "Sent automatically" : "Sent by you"}`, item.at ? fmt.ago(item.at) : "", item.confirmation_number ? `#${item.confirmation_number}` : ""].filter(Boolean).join(" · ");
+      return h("div", { class: "row cas-row", "data-job": item.job_id },
+        h("div", {}, h("span", { class: "title", text: item.title || item.job_id }), h("span", { class: "sub", text: meta }), item.bucket === "failed" && item.run_error ? h("span", { class: "sub cas-error", text: item.run_error }) : null),
+        h("div", { class: "btn-row" }, ui.stage(item.stage), item.interview ? h("span", { class: "badge stage recruiter_screen", text: "Interview" }) : null,
+          item.bucket === "needs_you" && item.run_id ? h("a", { class: "btn sm", href: "#/jobs/autopilot", text: "Answer" }) : null,
+          h("button", { type: "button", class: "btn secondary sm", text: "Open", onclick: () => Aira.openJob(item.job_id, { tab: "apply" }) })),
+      );
+    };
+    content.replaceChildren(
+      trackingNode(data, filter),
+      h("div", { class: "panel cas-list" },
+        h("div", { class: "panel-head" }, h("h3", { text: title }), h("small", { class: "muted", text: String(items.length) }), h("a", { class: "btn ghost sm cas-back", href: "#/applications?tab=pipeline", text: "Back to the board" })),
+        items.length ? h("div", { class: "list" }, ...items.map(row)) : h("div", { class: "empty" }, h("strong", { text: "Nothing here" }), h("div", { text: "No application is in this state right now." }))),
+    );
+  }
+
+  async function renderPipeline(content, route = { query: {} }) {
+    // The tracking summary sits on top; one of its counts opens the list behind it instead of the board.
+    const filter = trackingFilter(route.query || {});
+    if (filter) { await renderTrackedList(content, filter); return; }
+    const tracking = await loadTracking();
     // Only jobs in the pipeline are fetched, so a long list of discovered jobs cannot push applications off the
     // board. They come a page at a time (most recently updated first); each column counts every job in it.
     const PAGE = 200;
@@ -198,7 +415,7 @@
         draw();
       }) }) : null;
       const summary = h("p", { class: "muted", style: { marginTop: "10px", fontSize: "12.5px" }, text: `Showing ${jobs.length} of ${data.total} applications, most recently updated first. ${discovered} more jobs are discovered or saved and not yet in the pipeline.` });
-      content.replaceChildren(...(jobs.length ? [board, summary, ...(more ? [h("div", { class: "btn-row", style: { marginTop: "10px" } }, more)] : [])] : [ui.empty("No applications in progress", `${discovered} discovered or saved jobs are waiting in Jobs. Prepare one to start the pipeline.`, h("a", { class: "btn", href: "#/jobs/recommended", text: "Pick a recommended job" }))]));
+      content.replaceChildren(...(tracking ? [tracking] : []), ...(jobs.length ? [board, summary, ...(more ? [h("div", { class: "btn-row", style: { marginTop: "10px" } }, more)] : [])] : [ui.empty("No applications in progress", `${discovered} discovered or saved jobs are waiting in Jobs. Prepare one to start the pipeline.`, h("a", { class: "btn", href: "#/jobs/recommended", text: "Pick a recommended job" }))]));
     };
     draw();
   }

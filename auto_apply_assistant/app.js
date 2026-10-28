@@ -824,7 +824,9 @@ async function refreshStatus() {
     const pill = (ok, label, title, warn = false, href = "#/settings/integrations") => h("a", { class: "status-pill", href, title }, h("i", { class: ok ? "ok" : warn ? "warn" : "" }), h("span", { text: label }));
     strip.replaceChildren(
       pill(linkedin.state === "connected", linkedin.state === "connected" ? "LinkedIn connected" : linkedin.state === "login" || linkedin.state === "starting" ? "LinkedIn connecting" : "LinkedIn off", linkedin.message, linkedin.state === "login" || linkedin.state === "starting"),
-      pill(status.ollama, status.ollama ? "Ollama ready" : "Ollama offline", status.ollama ? "Local model available for reviews and drafts" : "Start Ollama to review fit and generate drafts"),
+      status.model_provider === "claude"
+        ? pill(true, "Claude ready", "Claude writes fit reviews and drafts with your Anthropic API key")
+        : pill(status.ollama, status.ollama ? "Ollama ready" : "Ollama offline", status.ollama ? "Local model available for reviews and drafts" : "Start Ollama, or add an Anthropic API key in Settings > Integrations, to review fit and generate drafts"),
       pill(status.google_jobs, status.google_jobs ? "SerpApi ready" : "SerpApi off", status.google_jobs ? "A SerpApi key is connected: Google Jobs, Careers and the API console can search" : "Connect a SerpApi key in API > Account to use Google Jobs, Careers and the API console", false, "#/api?tab=account"),
     );
     if (linkedin.state === "login" || linkedin.state === "starting") setTimeout(refreshStatus, 3000);

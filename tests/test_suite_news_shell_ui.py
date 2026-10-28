@@ -303,6 +303,32 @@ def test_the_left_menu_shows_the_news_folders_and_each_opens_its_tab(browser, en
     context.close()
 
 
+def test_headlines_show_as_a_grid_or_a_list_and_the_choice_stays(browser, env):
+    context, page, problems = opened(browser, env, width=1440, height=900)
+    open_news(page, env, "news?tab=top")
+    page.wait_for_selector("#main .nw-list article")
+    columns = "() => getComputedStyle(document.querySelector('.nw-list')).gridTemplateColumns.split(' ').length"
+    switch = page.locator("#main .page-head .nw-layout[role='radiogroup']")
+    assert switch.locator("[role='radio'][aria-checked='true']").get_attribute("aria-label") == "Grid"
+    assert page.evaluate(columns) >= 2
+    switch.locator("[aria-label='List']").click()
+    assert page.evaluate(columns) == 1
+    assert switch.locator("[aria-label='List']").get_attribute("aria-checked") == "true"
+    shot(page, "07-list")
+    # The choice stays on this device: another tab and a reload keep the list; arrow keys switch back.
+    open_news(page, env, "news?tab=saved")
+    page.reload()
+    open_news(page, env, "news?tab=top")
+    page.wait_for_selector("#main .nw-list article")
+    assert page.evaluate(columns) == 1
+    page.locator("#main .nw-layout [aria-checked='true']").focus()
+    page.keyboard.press("ArrowLeft")
+    assert page.evaluate(columns) >= 2
+    assert "nw-layout-btn" in page.evaluate("() => document.activeElement.className")
+    assert not problems, problems
+    context.close()
+
+
 def test_a_phone_in_dark_mode_has_no_sideways_scroll(browser, env):
     context, page, problems = opened(browser, env, width=390, height=844, dark=True)
     for tab in [

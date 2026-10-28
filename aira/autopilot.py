@@ -36,6 +36,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from aira import answer_drafts
 from aira.hosting import HOOKS
 
 __all__ = [
@@ -524,6 +525,7 @@ def run_view(row: sqlite3.Row | Mapping[str, Any]) -> dict[str, Any]:
     for name, default in _JSON_RUN_FIELDS.items():
         run[name] = _loads(run.get(name), json.loads(default))
     run["open"] = run["status"] in OPEN_STATUSES
+    run["drafted_answers"] = answer_drafts.drafted_answers(run["questions"])
     return run
 
 
@@ -876,6 +878,12 @@ class Services:
     # whether a run may submit on its own (a hosted organization can require a person to click first);
     # a person's explicit approval of a filled form always submits
     submit_allowed: Callable[[], bool] = lambda: True
+    # (job, unanswered questions) -> model drafts (aira.answer_drafts.draft_answers); None = no drafting
+    draft_answers: (
+        Callable[[dict[str, Any], list[dict[str, Any]]], list[dict[str, Any]]] | None
+    ) = None
+    # "Review drafted answers": True holds drafts for the person; False uses confident ones
+    review_drafts: Callable[[], bool] = lambda: True
     log: list[str] = field(default_factory=list)
 
 
@@ -979,6 +987,45 @@ def execute_run(
         outcome = normalize_outcome(
             {"status": "failed", "error": f"{type(error).__name__}: {error}"}
         )
+    # Questions nothing could answer: let the model draft answers (aira.answer_drafts).
+    used_drafts: dict[str, dict[str, Any]] = {}
+    if (
+        services.draft_answers is not None
+        and outcome["status"] == "needs_review"
+        and outcome["unanswered"]
+    ):
+        drafter = services.draft_answers
+        drafting = answer_drafts.review_plan(
+            lambda questions: drafter(job, questions),
+            outcome["unanswered"],
+            review=services.review_drafts(),
+            known=run["unanswered"],
+        )
+        outcome["unanswered"] = drafting.unanswered
+        outcome["steps"] = [*outcome["steps"], *drafting.steps][-STEPS_KEPT:]
+        if drafting.use:
+            merged_answers = {**merged_answers, **drafting.use}
+            used_drafts = drafting.used
+            try:
+                retried = normalize_outcome(
+                    services.apply(job, run, merged_answers, do_submit, plan)
+                )
+            except Exception as error:  # noqa: BLE001 - same rule as the first attempt
+                retried = normalize_outcome(
+                    {"status": "failed", "error": f"{type(error).__name__}: {error}"}
+                )
+            retried["steps"] = [*outcome["steps"], *retried["steps"]][-STEPS_KEPT:]
+            retried["unanswered"] = answer_drafts.attach_drafts(
+                retried["unanswered"], answer_drafts.drafts_of(drafting.unanswered)
+            )
+            outcome = retried
+    outcome["questions"] = answer_drafts.mark_drafted(
+        outcome["questions"],
+        used=used_drafts,
+        offered=run["unanswered"],
+        earlier=run["questions"],
+        answers=answers,
+    )
     status = OUTCOME_TO_STATUS[outcome["status"]]
     if outcome["status"] == "filled" and do_submit:
         status = "failed"  # the engine never reports "filled" when asked to submit
@@ -1003,6 +1050,7 @@ def execute_run(
                 "evidence_document_id": outcome["evidence_document_id"],
                 "screenshot_document_id": outcome["screenshot_document_id"],
                 "application_url": outcome["url"] or run["application_url"],
+                "answers": merged_answers,
                 "finished_at": _iso(services.now()),
             },
         )

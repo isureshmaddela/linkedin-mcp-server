@@ -59,6 +59,7 @@
       if (![...limit.options].some((o) => o.value === String(s.daily_limit))) limit.append(h("option", { value: String(s.daily_limit), text: `${s.daily_limit} a day`, selected: true }));
       limit.addEventListener("change", async () => { try { await api(`${BASE}/settings`, { method: "POST", body: { daily_application_limit: Number(limit.value) } }); toast("Daily limit saved.", "success"); load({ quiet: true }); } catch (error) { Aira.reportError(error); } });
       const browser = toggle("Show the browser while applying", s.show_browser, async (on) => { try { await api(`${BASE}/settings`, { method: "POST", body: { apply_show_browser: on } }); } catch (error) { browser.set(!on); Aira.reportError(error); } }, { hint: "Watch Monosage fill each form" });
+      const drafts = toggle("Review drafted answers", s.review_drafts !== false, async (on) => { try { await api(`${BASE}/settings`, { method: "POST", body: { review_drafted_answers: on } }); toast(on ? "Drafted answers now wait for your review." : "Confident drafted answers are now submitted; the rest wait for you.", "success"); } catch (error) { drafts.set(!on); Aira.reportError(error); } }, { hint: "On: answers the AI drafts from your resume wait for your OK. Off: confident ones are submitted. Sensitive questions always wait for you." });
       const sentText = s.daily_limit ? `${s.sent_today} of ${s.daily_limit} applications sent today` : `${s.sent_today} application${s.sent_today === 1 ? "" : "s"} sent today`;
       return h("section", { class: `aap-hero${s.paused ? " paused" : ""}`, "aria-label": "Auto-apply status" },
         h("div", { class: "aap-hero-main" },
@@ -67,7 +68,7 @@
           running),
         h("div", { class: "aap-hero-actions" },
           h("div", { class: "btn-row" }, h("button", { type: "button", class: "btn", text: "New search plan", onclick: () => planEditor(null) }), pause),
-          h("div", { class: "aap-hero-settings" }, ui.field("Daily limit", limit), browser.node)));
+          h("div", { class: "aap-hero-settings" }, ui.field("Daily limit", limit), browser.node, drafts.node)));
     }
 
     // ---- readiness ---------------------------------------------------------------------------
@@ -109,21 +110,26 @@
         actions.append(submit, run.screenshot_document_id ? h("button", { type: "button", class: "btn secondary sm", text: "See the filled form", onclick: () => runDrawer(run.run_id) }) : null, skip);
       } else {
         const questions = (run.unanswered || []).filter((q) => q.label);
+        const drafted = questions.filter((q) => q.draft && q.draft.value);
         if (run.error && !questions.length) body.append(h("p", { class: "note warn", text: run.error }));
+        if (drafted.length) body.append(h("p", { class: "note", text: `Monosage drafted ${drafted.length} answer${drafted.length === 1 ? "" : "s"} from your resume. Check and edit ${drafted.length === 1 ? "it" : "them"}, then approve.` }));
         const inputs = new Map();
         const form = h("form", { class: "aap-questions" });
         for (const q of questions) {
           const id = `q${Math.random().toString(36).slice(2, 8)}`;
           let input;
-          if (q.options && q.options.length) input = ui.select([["", "Choose…"], ...q.options.map((o) => [o, o])], "", { id });
-          else if (q.kind === "textarea" || q.label.length > 90) input = h("textarea", { id, rows: 2, maxlength: 4000 });
-          else input = h("input", { id, type: q.kind === "number" ? "number" : "text", maxlength: 4000 });
+          const draft = q.draft && q.draft.value && !q.sensitive ? q.draft : null;
+          if (q.options && q.options.length) input = ui.select([["", "Choose…"], ...q.options.map((o) => [o, o])], draft && q.options.includes(draft.value) ? draft.value : "", { id });
+          else if (q.kind === "textarea" || q.label.length > 90) input = h("textarea", { id, rows: 2, maxlength: 4000 }, draft ? draft.value : "");
+          else input = h("input", { id, type: q.kind === "number" ? "number" : "text", maxlength: 4000, value: draft ? draft.value : "" });
           inputs.set(q.label, input);
-          form.append(h("div", { class: "field" }, h("label", { for: id, text: q.label + (q.required ? " *" : "") }), input, q.message ? h("span", { class: "hint", text: q.message }) : null));
+          const hint = q.sensitive ? "Sensitive: Monosage never drafts this. Answer it yourself."
+            : draft ? `Drafted by the AI · ${draft.confidence} confidence${draft.based_on ? ` · based on ${draft.based_on}` : ""}` : q.draft_note || q.message;
+          form.append(h("div", { class: `field${draft ? " aap-drafted" : ""}` }, h("label", { for: id, text: q.label + (q.required ? " *" : "") }), input, hint ? h("span", { class: "hint", text: hint }) : null));
         }
         const remember = h("input", { type: "checkbox", checked: true });
         if (questions.length) form.append(h("label", { class: "check" }, remember, "Remember these answers for future applications"));
-        const go = h("button", { type: "submit", class: "btn", text: run.mode === "review" ? "Answer and fill the form" : "Answer and apply" });
+        const go = h("button", { type: "submit", class: "btn", text: drafted.length ? (run.mode === "review" ? "Approve and fill the form" : "Approve and apply") : run.mode === "review" ? "Answer and fill the form" : "Answer and apply" });
         form.addEventListener("submit", (event) => {
           event.preventDefault();
           withBusy(go, async () => {
@@ -309,12 +315,14 @@
         }) }));
       }
       const questions = run.questions || [];
+      const drafted = run.drafted_answers || [];
       body.replaceChildren(
         h("div", { class: "btn-row", style: { marginBottom: "12px" } }, statusBadge(run.status), h("button", { type: "button", class: "btn secondary sm", text: "Open job", onclick: () => Aira.openJob(run.job_id) }), run.application_url ? h("a", { class: "btn ghost sm", href: run.application_url, target: "_blank", rel: "noopener noreferrer", text: "Application page ↗" }) : null),
         run.error ? h("p", { class: `note ${run.status === "submitted" ? "" : "warn"}`, text: run.error }) : null,
         ui.kv([["Mode", run.mode === "apply" ? "Apply automatically" : "Ask before submitting"], ["Started by", run.trigger === "user" ? "You" : "Schedule"], ["Form", run.ats || run.route || "—"], ["Confirmation", run.confirmation_number || (run.status === "submitted" ? "Shown on the page (see screenshot)" : "—")], ["Started", fmt.datetime(run.started_at || run.created_at)], ["Finished", run.finished_at ? fmt.datetime(run.finished_at) : "—"]]),
         shot,
-        questions.length ? h("div", { class: "card", style: { marginTop: "12px" } }, h("h3", { text: `Questions on the form (${questions.length})` }), h("ul", { class: "aap-qlist" }, ...questions.map((q) => h("li", { class: q.status }, h("span", { text: q.label + (q.required ? " *" : "") }), h("span", { class: "muted", text: q.value ? `${q.value}` : q.message || fmt.stage(q.status) }))))) : null,
+        drafted.length ? h("p", { class: "note" }, h("span", { text: drafted.length === 1 ? "1 answer was drafted by the AI from your resume." : `${drafted.length} answers were drafted by the AI from your resume.` }), " ", h("span", { text: drafted.every((d) => d.approved_by === "you") ? "You approved them." : drafted.some((d) => d.approved_by === "auto") ? "Confident ones were used without review." : "" })) : null,
+        questions.length ? h("div", { class: "card", style: { marginTop: "12px" } }, h("h3", { text: `Questions on the form (${questions.length})` }), h("ul", { class: "aap-qlist" }, ...questions.map((q) => h("li", { class: q.status }, h("span", {}, q.label + (q.required ? " *" : ""), q.drafted ? h("span", { class: "badge aap-drafted-badge", title: q.drafted.based_on || "", text: q.drafted.approved_by === "auto" ? "AI-drafted" : q.drafted.edited ? "AI-drafted, edited by you" : "AI-drafted, approved by you" }) : null), h("span", { class: "muted", text: q.value ? `${q.value}` : q.message || fmt.stage(q.status) }))))) : null,
         (run.steps || []).length ? h("details", { class: "aap-steps", open: run.status !== "submitted" }, h("summary", { text: `What Monosage did (${run.steps.length} steps)` }), h("ol", {}, ...run.steps.map((step) => h("li", { text: step })))) : null);
     }
 
@@ -335,14 +343,20 @@
     const runs = job.auto_runs || [];
     const active = runs.find((run) => ["queued", "running", "needs_review", "ready"].includes(run.status));
     const card = h("div", { class: "card aap-jobcard" }, h("h3", { text: "Let Monosage apply" }));
-    if (job.submission) { card.append(h("p", { class: "muted", text: "This job already has a recorded application." })); return card; }
+    if (job.submission) {
+      const sent = runs.find((run) => run.status === "submitted");
+      const drafted = sent ? (sent.drafted_answers || []).length : 0;
+      card.append(h("p", { class: "muted", text: "This job already has a recorded application." }), drafted ? h("p", { class: "muted", text: drafted === 1 ? "1 answer was drafted by the AI from your resume." : `${drafted} answers were drafted by the AI from your resume.` }) : null);
+      return card;
+    }
     if (active) {
       card.append(h("p", {}, statusBadge(active.status), " ", active.status === "running" || active.status === "queued" ? "Monosage is working on it." : "It waits for you in Jobs > Auto-apply."), h("a", { class: "btn secondary sm", href: "#/jobs/autopilot", text: "Open Auto-apply" }));
       return card;
     }
     const last = runs[0];
     if (last) card.append(h("p", { class: "muted" }, "Last attempt: ", statusBadge(last.status), last.error ? ` ${last.error}` : ""));
-    card.append(h("p", { class: "muted", text: "Monosage fills the employer's form with your profile and confirmed answers. Questions it cannot answer come back to you; nothing is guessed." }));
+    card.append(h("p", { class: "muted", text: "Monosage fills the employer's form with your profile and confirmed answers. Questions it cannot answer come back to you; nothing is guessed." }),
+      h("p", { class: "muted", text: job.auto_review_drafts === false ? "The AI drafts answers from your resume for the rest; confident ones are submitted. Sensitive questions always wait for you." : "The AI drafts answers from your resume for the rest; you review them before anything is sent. Sensitive questions always wait for you." }));
     const start = (mode) => async (event) => withBusy(event.currentTarget, async () => {
       if (mode === "apply" && !(await Aira.confirm({ title: "Apply to this job now?", message: `${job.title || "This job"}${job.company ? ` at ${job.company}` : ""}. Monosage submits the application if it can answer every required question.`, confirmLabel: "Apply for me" }))) return;
       await api(`/api/jobs/${encodeURIComponent(job.job_id)}/auto-apply`, { method: "POST", body: { mode } });
