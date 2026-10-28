@@ -205,7 +205,7 @@
       panel.replaceChildren(Aira.ui.skeleton(3));
       try {
         data = await Aira.api("/api/developers/overview", { silent: true });
-        if (tab === "Apps") await apps(holder, data, render);
+        if (tab === "apps") await apps(holder, data, render);
         else if (tab === "tokens") await tokens(holder, data, render);
         else if (tab === "webhooks") await webhooks(holder, data, render);
         else if (tab === "connected") await connected(holder, data, render);

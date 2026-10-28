@@ -120,7 +120,7 @@
     { id: "org-audit", page: "audit", label: "Audit log", icon: "documents", key: "t", roles: READERS },
     { id: "org-data", page: "data", label: "Data & closure", icon: "analytics", key: "x", roles: READERS },
     // The apps the organization subscribes to (cloud-apps.js draws the page; a plain list stands in until it loads).
-    { id: "org-apps", page: "Apps", label: "Apps", icon: "more", key: "z", roles: [...READERS, "billing"] },
+    { id: "org-apps", page: "apps", label: "Apps", icon: "more", key: "z", roles: [...READERS, "billing"] },
   ];
   const ALIASES = { dashboard: "", support: "data" };
 
@@ -131,7 +131,7 @@
     const render = A.pages[page];
     A.setCurrent(page);
     if (!render) { stage.replaceChildren(ui.empty("Page not found", "Choose a page from the navigation.")); return; }
-    if (!READERS.includes(cloud.role()) && !(page === "Apps" && cloud.role() === "billing")) { stage.replaceChildren(ui.empty("Not available", "Organization administration is for owners, administrators and auditors.")); return; }
+    if (!READERS.includes(cloud.role()) && !(page === "apps" && cloud.role() === "billing")) { stage.replaceChildren(ui.empty("Not available", "Organization administration is for owners, administrators and auditors.")); return; }
     if (["members", "coaches", "policy"].includes(page) && !STAFF.includes(cloud.role())) { stage.replaceChildren(ui.empty("Not available for your role", "Members, coach assignments and policy are managed by owners and administrators. Auditors have read-only access to the rest of the organization.")); return; }
     await render(stage, route);
   }

@@ -86,7 +86,7 @@ def test_the_switcher_lists_the_apps_and_each_app_shows_only_its_sections(browse
     assert page.locator("#brandApp").inner_text() == "Careers"
     assert page.locator("#navAppHead strong").inner_text() == "Careers"
     assert page.locator("#navAppHead .muted").inner_text() == "Find, apply and track"
-    assert page.locator(".nav-label").all_text_contents() == ["Careers", "Account"]
+    assert page.locator(".nav-label").all_text_contents() == ["Careers"]
     shot(page, "01-careers")
 
     switcher = open_switcher(page)
@@ -124,7 +124,7 @@ def test_the_switcher_lists_the_apps_and_each_app_shows_only_its_sections(browse
         == "careers"
     )
     assert switcher.locator(".app-tile.disabled").count() == 0
-    assert switcher.locator(".popover-title").text_content() == "apps"
+    assert switcher.locator(".popover-title").text_content() == "Apps"
     shot(page, "02-switcher")
 
     # Marketing holds Leads: two sections, and the account group stays.

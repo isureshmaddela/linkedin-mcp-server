@@ -167,7 +167,7 @@
   const NAV_DEFS = [
     { sub: "tenants", id: "ptenants", label: "Tenants", icon: "dashboard", key: "t", quick: true },
     { sub: "plans", id: "pplans", label: "Plans", icon: "settings", key: "l" },
-    { sub: "Apps", id: "papps", label: "Apps", icon: "hub", key: "p" },
+    { sub: "apps", id: "papps", label: "Apps", icon: "hub", key: "p" },
     { sub: "flags", id: "pflags", label: "Feature flags", icon: "airaapi", key: "f" },
     { sub: "support", id: "psupport", label: "Support access", icon: "recruiters", key: "u", quick: true },
     { sub: "announcements", id: "pannounce", label: "Announcements", icon: "more", key: "n" },

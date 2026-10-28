@@ -589,6 +589,27 @@ def test_moving_a_routine_later_today_runs_it_again(db, people, clock):
     assert routines.get(db, pat, routine["id"])["ran_today"]
 
 
+def test_a_routine_added_after_its_time_waits_for_its_next_day(db, people, clock):
+    pat = people["pat"]
+    clock.set(2026, 10, 27, 14, 0)
+    routine = routines.save(
+        db, pat, {"prompt": "Give me my morning brief", "at": "07:00"}
+    )
+    assert ai_routes._pulse(db, pat, "")["alerts"] == []
+    assert not routines.get(db, pat, routine["id"])["ran_today"]
+    assert not any(
+        c["title"] == "Monosage's routines today" for c in ai_routes._today(db, pat)
+    )
+    # Moved to later today, it runs today after all; and the next morning as usual.
+    routines.save(db, pat, {"at": "15:00"}, routine["id"])
+    clock.set(2026, 10, 27, 15, 1)
+    ai_routes._pulse(db, pat, "")
+    assert routines.get(db, pat, routine["id"])["ran_today"]
+    clock.set(2026, 10, 28, 15, 2)
+    ai_routes._pulse(db, pat, "")
+    assert routines.get(db, pat, routine["id"])["last_run_on"] == "2026-10-28"
+
+
 # ---------------------------------------------------------------------------
 # earn
 # ---------------------------------------------------------------------------

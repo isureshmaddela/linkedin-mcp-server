@@ -554,10 +554,9 @@ const apps = (Aira.apps = {
     return apps.locked({ app: id, kind: error.code === "app_disabled" ? "disabled" : "off", reason: error.message });
   },
 });
-// Phones open the sidebar as a sheet (menu button or More); this keeps both triggers and the sheet in step.
+// Phones open the sidebar as a sheet (More in the bottom bar); this keeps the trigger and the sheet in step.
 function setSidebarOpen(open) {
   $("sidebar").classList.toggle("open", open);
-  $("menuBtn").setAttribute("aria-expanded", String(open));
   const more = document.querySelector('#bottomNav a[data-section="more"]');
   if (more) more.setAttribute("aria-expanded", String(open));
 }
@@ -986,8 +985,7 @@ document.addEventListener("DOMContentLoaded", () => {
     applyTheme(effectiveDark ? "light" : "dark");
   });
   $("shortcutsBtn").addEventListener("click", () => { closeMenus(); showShortcuts(); });
-  $("menuBtn").addEventListener("click", () => setSidebarOpen(!$("sidebar").classList.contains("open")));
-  document.addEventListener("click", (event) => { if (window.innerWidth <= 900 && $("sidebar").classList.contains("open") && !event.target.closest("#sidebar, #menuBtn, #bottomNav, .popover")) setSidebarOpen(false); });
+  document.addEventListener("click", (event) => { if (window.innerWidth <= 900 && $("sidebar").classList.contains("open") && !event.target.closest("#sidebar, #bottomNav, .popover")) setSidebarOpen(false); });
   $("logoutBtn").addEventListener("click", async () => { try { await api("/api/auth/logout", { method: "POST", body: {} }); } finally { location.hash = ""; location.reload(); } });
   // The app switcher opens from the top bar (desktop) or the More sheet (phones); the account menu from the avatar.
   Aira.switcherMenu = popover([$("appSwitcherBtn"), $("appSwitcherSideBtn")], $("appSwitcher"), { render: renderSwitcher, onClose: () => { if (window.innerWidth <= 900) setSidebarOpen(false); } });

@@ -95,7 +95,9 @@ def open_app(page, env, hash_="shop"):
 def test_new_search_and_folders_in_the_frame(browser, env):
     context, page, problems, made = seeded(browser, env)
     open_app(page, env)
-    assert page.locator("#appBrandName").inner_text().strip() == "Commerce"
+    # The top bar says only Monosage; the app is named for screen readers and in its menu below.
+    assert page.locator("#appBrand").inner_text().strip() == "Monosage"
+    assert page.locator("#appBrand").get_attribute("aria-label") == "Monosage Commerce: home"
 
     # "+ New": the app's main creates, each opening its form; the address forgets the request.
     page.click(".shell-new")
@@ -181,7 +183,7 @@ def test_new_search_and_folders_in_the_frame(browser, env):
     box.press("Enter")
     page.wait_for_selector("#main .empty:has-text('Nothing in Commerce matches')")
 
-    # The left menu: both sections' tabs as folders, with icons; a folder opens its tab.
+    # The left menu: each section's tabs as folders, with icons; a folder opens its tab.
     shop_folders = page.locator(".shell-subnav[data-section='shop'] .shell-sublink")
     booking_folders = page.locator(
         ".shell-subnav[data-section='bookings'] .shell-sublink"
@@ -201,6 +203,11 @@ def test_new_search_and_folders_in_the_frame(browser, env):
     assert (
         shop_folders.filter(has_text="Products").get_attribute("aria-current") == "page"
     )
+    # Only the open section's folders show (like Gmail); open Bookings to reach its folders.
+    assert page.locator(".shell-subnav[data-section='bookings']").is_hidden()
+    page.click("#primaryNav a[data-section='bookings']")
+    page.wait_for_selector(".shell-subnav[data-section='bookings'] .shell-sublink")
+    assert page.locator(".shell-subnav[data-section='shop']").is_hidden()
     booking_folders.filter(has_text="Services").click()
     page.wait_for_selector("#main tr.suite-row:has-text('Haircut')")
     assert "#/bookings?tab=services" in page.url

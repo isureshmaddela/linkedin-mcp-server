@@ -798,7 +798,7 @@ def process_monitor_run(
         notify(
             f"{project['domain']} {'climbed' if better else 'slipped'} for “{keyword['keyword']}”",
             f"{summary} on Google.",
-            f"#/airaapi?tab=rank&project={project['id']}",
+            f"#/api?tab=rank&project={project['id']}",
         )
     return summary
 

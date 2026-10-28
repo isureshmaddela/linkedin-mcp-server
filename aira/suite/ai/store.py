@@ -104,6 +104,9 @@ COLUMNS = {
         ("reply", "TEXT NOT NULL DEFAULT ''"),
         ("rating", "INTEGER NOT NULL DEFAULT 0"),
     ),
+    # ``starts_on``: the first day (account clock) a routine may run; a routine added after its time today waits
+    # for its next day instead of answering at once ('' : from the day it was added).
+    "ai_routines": (("starts_on", "TEXT NOT NULL DEFAULT ''"),),
 }
 
 

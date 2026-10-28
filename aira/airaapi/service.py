@@ -2249,7 +2249,7 @@ def run_monitor(
             notify(
                 f"Monitor paused: {monitor['saved_name']}",
                 f"The run failed ({message[:160]}) and the monitor is set to pause on error.",
-                "#/airaapi?tab=monitors",
+                "#/api?tab=monitors",
             )
         raise
     diff: dict[str, Any] | None = None
@@ -2293,7 +2293,7 @@ def run_monitor(
         notify(
             f"Monitor changed: {monitor['saved_name']}",
             f"{summary}.",
-            f"#/airaapi?tab=history&search={record['id']}",
+            f"#/api?tab=history&search={record['id']}",
         )
     return {"record": record, "diff": diff, "summary": summary}
 

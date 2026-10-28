@@ -161,7 +161,9 @@ def test_find_services_people_asking_and_gaps(browser, env):
     assert page.locator("#ldWhere-reddit").is_checked()
     assert page.locator("#ldWhere-web").is_checked()
     assert not page.locator("#ldWhere-quora").is_checked()
-    assert "Monosage never replies for you" in page.locator("#ldRequestNote").inner_text()
+    assert (
+        "Monosage never replies for you" in page.locator("#ldRequestNote").inner_text()
+    )
     shot(page, "o-01-find-requests-form")
     page.click("#ldSearchBtn")
     dialog = page.locator(".modal")
@@ -201,7 +203,9 @@ def test_find_services_people_asking_and_gaps(browser, env):
     page.locator(".ld-open").first.click()
     page.wait_for_selector(".ld-drawer")
     drawer = page.locator(".ld-drawer").inner_text()
-    assert "The post" in drawer and "Monosage has no way to post, email or call" in drawer
+    assert (
+        "The post" in drawer and "Monosage has no way to post, email or call" in drawer
+    )
     assert page.locator("#ldCall").count() == 0, "a post has no phone to call"
     assert page.locator("#ldEmail").count() == 0
     shot(page, "o-03-request-drawer")
@@ -559,7 +563,8 @@ def test_the_drawer_prepares_a_call_but_never_places_one(browser, env, site, smt
     shot(page, "o-22-follow-ups")
     page.locator("#ldFollowList").get_by_role("button", name=re.compile("Open")).click()
     page.wait_for_selector(".ld-drawer")
-    assert "Bright Dental" in page.locator(".ld-drawer").inner_text()
+    # the lead's name is the drawer's title (its head, outside the .ld-drawer body)
+    assert "Bright Dental" in page.locator(".drawer-head h2").inner_text()
 
     # ---- someone who asks not to be called goes on the list, and the number is then blocked ----
     page.select_option("#ldCallOutcome", "do_not_call")

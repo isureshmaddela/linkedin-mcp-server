@@ -58,9 +58,8 @@
     const brand = $("appBrand");
     if (brand) {
       brand.href = entry.path ? appHref(entry) : "#/";
+      // Only the word Monosage shows: the app's own name and icon head its menu and page below the bar.
       brand.setAttribute("aria-label", `Monosage ${entry.name}: home`);
-      $("appBrandIcon").replaceChildren(Aira.icon(entry.icon || "dashboard"));
-      $("appBrandName").textContent = entry.name;
     }
     const input = $("appSearchInput");
     if (input) {

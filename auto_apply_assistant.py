@@ -6629,7 +6629,7 @@ def _autopilot_readiness(
                 "detail": "Key connected."
                 if configured
                 else "No SerpApi key: Google Jobs searches are skipped.",
-                "action": "#/airaapi?tab=account",
+                "action": "#/api?tab=account",
                 "required": False,
             }
         )

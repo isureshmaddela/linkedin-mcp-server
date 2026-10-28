@@ -1431,7 +1431,8 @@
   const fold = (text) => String(text || "").toLowerCase().normalize("NFKD").replace(/[̀-ͯ]/g, "");
   Aira.appSearch.videos = {
     // a phone's box shows about a dozen letters: the logo beside it already says which app this is
-    get placeholder() { return window.matchMedia && window.matchMedia("(max-width: 600px)").matches ? "Search" : "Search videos"; },
+    placeholder: "Search videos",
+    placeholderShort: "Search",
     // Up to six: channels, videos everyone can find and your own (private, link only, scheduled), your playlists.
     async suggest(query) {
       const q = query.trim().slice(0, 100);

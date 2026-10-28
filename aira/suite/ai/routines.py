@@ -10,7 +10,7 @@ writing model too. Commands in a routine pass the same consent gate as the chat.
 from __future__ import annotations
 
 import sqlite3
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
 
@@ -117,6 +117,7 @@ def view(row: dict[str, Any], today: str) -> dict[str, Any]:
         "session_id": row["session_id"],
         "last_run_on": row["last_run_on"],
         "ran_today": row["last_run_on"] == today,
+        "starts_on": row.get("starts_on") or "",
         "last_answer": row["last_answer"],
         "created_at": row["created_at"],
     }
@@ -202,11 +203,18 @@ def save(
     if given("alert"):
         values["alert"] = 1 if kit.flag(raw.get("alert", True)) else 0
     stamp = kit.now()
+    now = local_now(connection)
     if current is None:
         routine_id = kit.new_id()
+        # Added after its time today: it first runs on its next day, not at once (Run now is there for that).
+        starts_on = (
+            (now.date() + timedelta(days=1)).isoformat()
+            if values["at"] <= now.strftime("%H:%M")
+            else ""
+        )
         connection.execute(
-            """INSERT INTO ai_routines (id, owner_id, title, prompt, at, days, enabled, alert, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            """INSERT INTO ai_routines (id, owner_id, title, prompt, at, days, enabled, alert, starts_on, created_at,
+            updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 routine_id,
                 me["id"],
@@ -216,6 +224,7 @@ def save(
                 values["days"],
                 values["enabled"],
                 values["alert"],
+                starts_on,
                 stamp,
                 stamp,
             ),
@@ -223,11 +232,10 @@ def save(
     elif values:
         if "at" in values and values["at"] != current["at"]:
             # A new time today runs again today if it has not come yet.
-            values["last_run_on"] = (
-                current["last_run_on"]
-                if values["at"] <= local_now(connection).strftime("%H:%M")
-                else ""
-            )
+            later = values["at"] > now.strftime("%H:%M")
+            values["last_run_on"] = "" if later else current["last_run_on"]
+            if later:
+                values["starts_on"] = ""
         kit.update_row(
             connection, "ai_routines", routine_id, {**values, "updated_at": stamp}
         )
@@ -296,8 +304,8 @@ def run_due(connection: sqlite3.Connection, me: dict[str, Any]) -> list[str]:
     for row in kit.fetch_all(
         connection,
         """SELECT * FROM ai_routines WHERE owner_id = ? AND enabled = 1 AND last_run_on != ? AND at <= ?
-        ORDER BY at LIMIT 5""",
-        (me["id"], today, clock),
+        AND starts_on <= ? ORDER BY at LIMIT 5""",
+        (me["id"], today, clock, today),
     ):
         if weekday not in str(row["days"]).split(","):
             continue
@@ -332,11 +340,13 @@ def today_runs(
 ) -> list[dict[str, Any]]:
     """Routines due today (run or still to come), for Today."""
     now = local_now(connection)
-    weekday = now.weekday()
+    weekday, today = now.weekday(), now.date().isoformat()
     return [
         routine
         for routine in list_routines(connection, me)
-        if routine["enabled"] and weekday in routine["days"]
+        if routine["enabled"]
+        and weekday in routine["days"]
+        and routine["starts_on"] <= today
     ]
 
 

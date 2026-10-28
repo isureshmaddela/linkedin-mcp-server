@@ -130,7 +130,7 @@ def test_every_nav_section_has_a_registered_view() -> None:
         for path in [*STATIC.glob("views-*.js"), STATIC / "life.js"]
     )
     for item in _nav():
-        assert re.search(rf"Monosage\.views\.{item['id']}\s*=", scripts), item["id"]
+        assert re.search(rf"Aira\.views\.{item['id']}\s*=", scripts), item["id"]
 
 
 def test_script_order_and_every_script_exists() -> None:

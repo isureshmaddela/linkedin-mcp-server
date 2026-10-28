@@ -77,7 +77,9 @@ def options(page):
 def test_new_search_and_folders_in_the_frame(browser, env):
     context, page, problems, made = seeded(browser, env)
     open_app(page, env)
-    assert page.locator("#appBrandName").inner_text().strip() == "Videos"
+    # The top bar says only Monosage; the app is named for screen readers and in its menu below.
+    assert page.locator("#appBrand").inner_text().strip() == "Monosage"
+    assert page.locator("#appBrand").get_attribute("aria-label") == "Monosage Videos: home"
     # The page is named after its tab, not the app again.
     assert page.locator("#main .page-head h1").inner_text().strip() == "Home"
 

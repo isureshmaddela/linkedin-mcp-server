@@ -420,3 +420,11 @@ app working end to end with one account, tests per app, more features where they
   stays in the launcher as "Your organization online".
 - **Theme:** a sun/moon button in the top bar (moon in the light theme, sun in the dark one) replaces the "Theme" menu
   item; it follows the system theme until clicked.
+- **Fixes after the rename (2026-10-28):** the hosted tab-title watcher (`cloud-boot.js`) still replaced `/· Aira$/`
+  while checking for "· Monosage", so it rewrote the title forever and froze every hosted member page (the hung
+  browser tests). The renamer had also capitalised four route ids (`"apps"` → `"Apps"` in cloud-org.js,
+  cloud-platform.js, views-developers.js), which broke the org and console Apps pages; both are fixed, with the
+  tests that the renamer had changed. Server-made links now say `#/api`. Videos has a phone placeholder
+  ("Search"). An AI routine added after its time today first runs the next day (`ai_routines.starts_on`), so
+  saving one no longer pops its answer over the page at once. Full suite: 3309 passed; the 16 that failed under load
+  or after the changes were fixed and pass (91 passed in the re-run).
