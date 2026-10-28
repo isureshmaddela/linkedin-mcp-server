@@ -304,11 +304,12 @@ def test_the_account_menu_names_the_person_and_signs_out(browser, env, account_u
     assert menu.locator("#logoutBtn").is_visible()
     assert menu.locator("a.menu-item", has_text="Switch organization").count() == 0
     shot(page, "05-account-menu")
-    # The switcher also offers the account for a local installation that knows where it lives.
+    # A local password account belongs to no organization online: the switcher does not send it to the hosted
+    # account's organization pages (only a person signed in through that account sees them).
     page.keyboard.press("Escape")
     switcher = open_switcher(page)
-    link = switcher.locator("a.menu-item", has_text="Your organization online")
-    assert link.get_attribute("href") == f"{account_url}/#/org"
+    assert switcher.locator("a.menu-item", has_text="Your organization online").count() == 0
+    assert switcher.locator(f"a[href^='{account_url}']").count() == 0
     page.keyboard.press("Escape")
     # The sun and moon in the top bar switch the theme; sign out ends the session.
     before = page.get_attribute("#themeToggle", "title")

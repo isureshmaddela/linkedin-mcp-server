@@ -458,7 +458,7 @@ const apps = (Aira.apps = {
   catalog: APPS,
   // Apps a build adds for sections that are not products: the hosted Account (organization) pages, Coaching, the Admin console.
   pseudo: {},
-  state: { enabled: {}, reasons: {}, switchedOff: {}, accountUrl: "", localUrl: "", installation: "local", loaded: false, extra: [] },
+  state: { enabled: {}, reasons: {}, switchedOff: {}, accountUrl: "", accountLinked: false, localUrl: "", installation: "local", loaded: false, extra: [] },
   decorate: null, // a build may adjust the list the switcher shows: (entries) => entries
   async load() {
     try {
@@ -469,6 +469,8 @@ const apps = (Aira.apps = {
         apps.state.switchedOff[item.id] = !!item.switched_off;
       }
       apps.state.accountUrl = String(data.account_url || "");
+      // Only a person who signed in through a Monosage account belongs to an organization online.
+      apps.state.accountLinked = !!(data.account && data.account.linked);
       apps.state.localUrl = String(data.local_url || "");
       apps.state.installation = data.installation || (Aira.cloud ? "hosted" : "local");
       apps.state.loaded = true;
@@ -761,7 +763,9 @@ function renderSwitcher(panel) {
   const industry = entries.filter((entry) => entry.category === "industry");
   const links = [];
   const local = apps.state.installation === "local";
-  if (local && apps.state.accountUrl) links.push(h("a", { class: "menu-item", role: "menuitem", tabindex: "-1", href: `${apps.state.accountUrl}/#/org`, target: "_blank", rel: "noopener noreferrer" }, Aira.icon("recruiters"), h("span", { text: "Your organization online" })));
+  // The organization (members, billing, its apps) lives on the hosted account, not in this installation: only a
+  // person signed in through that account has one, so a local password account never sees the link.
+  if (local && apps.state.accountLinked && apps.state.accountUrl) links.push(h("a", { class: "menu-item", role: "menuitem", tabindex: "-1", href: `${apps.state.accountUrl}/#/org`, target: "_blank", rel: "noopener noreferrer" }, Aira.icon("recruiters"), h("span", { text: "Your organization online" })));
   if (!local && apps.state.localUrl) links.push(h("a", { class: "menu-item", role: "menuitem", tabindex: "-1", href: apps.state.localUrl, target: "_blank", rel: "noopener noreferrer" }, Aira.icon("dashboard"), h("span", { text: "Local workspace" })));
   const can = Aira.cloud && Aira.cloud.can;
   if (!local && can && (can("billing.manage") || can("org.settings"))) links.push(h("a", { class: "menu-item", role: "menuitem", tabindex: "-1", href: "#/org/apps" }, Aira.icon("more"), h("span", { text: "More apps" })));
