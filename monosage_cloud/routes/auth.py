@@ -176,6 +176,12 @@ def cloud_config(req: Req):  # noqa: ANN201
         "billing_provider": config.billing_provider,
         "trial_days": config.trial_days,
         "plans": req.app.billing.public_plans(),
+        # What a new organization starts on (the superadmin's choice): the sign-up page says so.
+        "signup": {
+            key: value
+            for key, value in req.app.billing.signup_default().items()
+            if key in ("plan_id", "plan_name", "trial_days")
+        },
     }
 
 

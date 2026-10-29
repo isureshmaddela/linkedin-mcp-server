@@ -306,7 +306,9 @@
         } catch (error) { say(notice, error.message); }
       });
     });
-    show("Create your organization", `Start a ${trial}-day trial. Your organization's candidates, coaches and administrators join by invitation.`, form, swap("Already registered? ", link("Sign in", "#/login")));
+    const offer = (cloud.config && cloud.config.signup) || null;
+    const start = offer && offer.trial_days > 0 ? `Start a ${offer.trial_days}-day trial of ${offer.plan_name}.` : offer ? `Start on ${offer.plan_name}: every app and feature it includes, from the first day.` : `Start a ${trial}-day trial.`;
+    show("Create your organization", `${start} Your organization's members and administrators join by invitation.`, form, swap("Already registered? ", link("Sign in", "#/login")));
   }
 
   function renderCheckEmail(address) {
