@@ -540,3 +540,49 @@ app working end to end with one account, tests per app, more features where they
   still import real names).
 - **Validation:** full suite 3434 passed, 28 skipped, 2 failed: `test_suite_play.py` plans a watch for 23:00 UTC
   "today", which has passed between 23:00 and midnight UTC (time-of-day dependent, unrelated). JS tests: 69 passed.
+
+## Sites: describe a website, get it built (2026-10-29)
+Request: a website-design app like manus.im / Replit, where a prompt builds a site with a local LLM, Claude, Gemini
+and others, tested end to end, pushable to git and deployable to any cloud. Built as the business app **Sites**
+(`sites`, `/sites`, `aira/suite/sites/`, `views-sites.js`, `app-sites.css`, `public-sites.js`; guide
+`docs/apps/sites.md`). Catalog, pricing ($5/$4 per seat, Enterprise and trial), hosted policy and gating are derived.
+- **Models** (`providers.py`, streaming for every API family): offline designer (`designer.py`, 13 kinds of site,
+  spec-based edits), Ollama (NDJSON, `think: false`, `num_ctx` 16384, picks an installed model when none is saved),
+  LM Studio and any OpenAI-compatible server (SSE), Claude (Messages SSE, default `claude-sonnet-5-5`, falls back to
+  the Settings key), Gemini (`streamGenerateContent?alt=sse`, thought parts skipped), OpenAI, OpenRouter, and hosted
+  the organization's platform model (JSON replayed as the tagged format). Keys encrypted (`sites_key_<id>`), never
+  returned or logged; friendly errors (401/404/429/5xx/unreachable) with the key scrubbed. Hosted: no local providers;
+  custom addresses must be public https and resolve to global IPs (`AIRA_SITES_ALLOW_LOCAL_URLS=1` for tests).
+- **Runs**: one POST builds; the answer streams into `sb_runs.output` (every 0.3 s) and the page reads
+  `GET /runs/{id}?from=N` (agent steps, the file being written, live code). Stop, one build at a time per site, stale
+  runs failed after 30 min, the page keeps reading if a proxy cuts the request. Answer format `<plan>`, `<file path>`,
+  `<delete path/>`, `<summary>`; fallbacks for fences and a bare document; plan/summary read outside file blocks
+  (a FAQ's `<summary>` was taken as the reply before the fix).
+- **Workspace UI**: chat with steps beside Preview (sandboxed iframe on the preview link, desktop/tablet/phone,
+  pages), Code (tree, editor with line numbers, Ctrl+S, images), History (preview/restore/publish/ZIP per version),
+  Deploy (public link, ZIP + kit, GitHub, Netlify, Vercel, client payment, recent deploys); Build home with model
+  picker (a bottom sheet on phones), stack, images, ideas, 12 templates, live thumbnails; Models; All sites + CSV;
+  `+ New`, search, folders.
+- **Serving**: `/api/public/<token>/w/<path>` (preview link: working copy; site link: published version) and
+  `/v/<n>/` (preview link only), root links rewritten relative, `about` → `about.html`, 404 page, 301 to the slash.
+  Responses carry `Content-Security-Policy: sandbox allow-scripts ...` (no `allow-same-origin`), CORP cross-origin,
+  ACAO `*`. Platform change: `airaapi_http.sandboxed()`; `extra_headers` skips the untrusted-page CSP for such pages;
+  the local `_write_headers` lets them replace CSP/CORP and drops X-Frame-Options (their frame-ancestors decides);
+  the hosted gateway already let a response set those headers.
+- **Deploy** (`deploy.py`): kit (Dockerfile + nginx on 8080, netlify.toml, vercel.json, wrangler.toml, firebase.json,
+  staticwebapp.config.json, amplify.yml, render.yaml, Pages workflow, .nojekyll, README) never over site files;
+  GitHub via the Git Data API (create repo with auto_init, empty-repo start through contents API, one commit of the
+  whole tree, optional Pages; the workflow file is left out of pushes), Netlify zip deploys reusing the site id,
+  Vercel v13 inline files. API bases overridable (`AIRA_GITHUB_API_URL`, `AIRA_NETLIFY_API_URL`, `AIRA_VERCEL_API_URL`).
+- **Earning**: client + price per site, mark paid → `kit.record_revenue` (void on unpaid); hub summary and checklist.
+- **Platform files touched**: `aira/apps.py`, `aira/suite/__init__.py`, `aira/airaapi/http.py`,
+  `auto_apply_assistant.py` (`_write_headers`), `app.js` (icon, APPS, NAV), `index.html`, `public.html`,
+  `scripts/i18n_extract.py` (`NOT_SCREEN_TEXT`: the designer's site copy is not screen text),
+  `deploy/k8s/ingress.yaml` (proxy timeouts 900 s), app-list tests, `tests/test_cloud_isolation.py` (4 exempt groups).
+- **i18n**: 371 new strings in Telugu and Hindi (two translator agents), `i18n_check` te/hi clean (17,361 strings).
+- **Tests**: `tests/test_suite_sites.py` (18), `tests/test_suite_sites_ui.py` (3, real Chromium), stand-ins in
+  `tests/sites_stubs.py` (Ollama/OpenAI/Anthropic/Gemini streaming, GitHub/Netlify/Vercel). Live check with the real
+  local model: Ollama `qwen3.5:4b` wrote Ember & Oak (3 files, 20 KB) in about 21 minutes on this machine, streamed
+  step by step. `qwen2.5-coder:7b` is listed by this machine's Ollama but cannot load ("not found, try pulling it").
+- **Not built**: server code/forms inbox for generated sites, custom domains, Cloudflare Pages direct upload (kit +
+  wrangler command instead), multi-person editing of one file, image generation.

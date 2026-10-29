@@ -159,6 +159,7 @@ def test_a_launch_token_creates_a_local_account_with_no_password_and_signs_in(
         "commerce",
         "experiences",
         "ads",
+        "sites",
         "social",
         "care",
         "learn",

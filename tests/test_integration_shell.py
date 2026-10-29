@@ -73,13 +73,14 @@ def test_new_sections_are_in_the_navigation_with_icons_and_chords() -> None:
         "ai": {"ai"},
         "stocks": {"stocks"},
         "ads": {"ads"},
+        "sites": {"sites"},
     }
     for app_id, ids in sections_of.items():
         assert {i for i, item in nav.items() if item["app"] == app_id} == ids, app_id
         for section in ids - {"leads"}:
             assert "key" not in nav[section], section
     assert nav["today"]["app"] == "account" and nav["display"]["app"] == "account"
-    assert len(nav) == 39
+    assert len(nav) == 40
     keys = [item["key"] for item in nav.values() if "key" in item]
     assert len(set(keys)) == len(keys), "two sections share a g-chord"
     for item in nav.values():

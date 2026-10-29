@@ -2,7 +2,7 @@
 
 An *account* is the organization in the hosted build, or the local sign-in in the single-user build. An *app*
 is a product the account can use: Careers (the job-search workspace), Developers (the search console, ``/v1``
-and connected apps), the business apps (Sales, Marketing with Leads, Service, Commerce, Courses & Events) and the
+and connected apps), the business apps (Sales, Marketing with Leads, Service, Commerce, Courses & Events, Sites) and the
 everyday apps (Social, Health, Learn, Play, Planner, News, Videos, Life, AI, Stocks), with Ads among the business apps. Like the clouds of a CRM suite, one app holds several
 sections: Commerce is Shop and Bookings, Marketing includes Leads, Social includes Family. The hosted build sells each app as a subscription the organization's admin
 turns on from the account's Apps page; the local build has every app installed.
@@ -261,6 +261,24 @@ ADS = _industry(
     ),
 )
 
+SITES = _industry(
+    "sites",
+    "Sites",
+    "Describe a website, get it built",
+    "",
+    "Freelancers, agencies, small businesses and anyone who needs a website",
+    "Build websites by describing them: an AI builder (Monosage's offline designer, Ollama or LM Studio on your "
+    "computer, Claude, Gemini, OpenAI or any compatible model) writes the pages while you watch, then you chat to "
+    "change them, edit the code, go back to any version, publish to a link, download a ZIP ready for any cloud, push "
+    "to GitHub or deploy to Netlify and Vercel, and bill clients for the sites you build.",
+    (
+        "Describe it, watch it being built",
+        "Your choice of model, local or cloud",
+        "Live preview, code editor and versions",
+        "Publish, push to GitHub or deploy anywhere",
+    ),
+)
+
 INDUSTRY_APPS: tuple[App, ...] = (
     STUDIO,
     MARKETING,
@@ -268,6 +286,7 @@ INDUSTRY_APPS: tuple[App, ...] = (
     COMMERCE,
     EXPERIENCES,
     ADS,
+    SITES,
 )
 
 
@@ -483,6 +502,7 @@ APP_PATHS: dict[str, str] = {
     "commerce": "commerce",
     "experiences": "courses",
     "ads": "ads",
+    "sites": "sites",
     "social": "social",
     "care": "health",
     "learn": "learn",

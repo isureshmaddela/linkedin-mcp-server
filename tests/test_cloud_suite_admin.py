@@ -142,6 +142,7 @@ def test_the_catalog_combines_sections_into_fewer_apps():
         "commerce",
         "experiences",
         "ads",
+        "sites",
         "social",
         "care",
         "learn",

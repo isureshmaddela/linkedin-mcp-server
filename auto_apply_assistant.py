@@ -8126,10 +8126,21 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.send_header("Content-Length", str(length))
         # Every response gets the security headers; only Cache-Control may be set by the response itself (the
         # page's static files are revalidated with an ETag, "no-cache", instead of "no-store").
-        cached = any(name.lower() == "cache-control" for name, _value in extra or ())
+        own = {name.lower() for name, _value in extra or ()}
+        # A sandboxed site page (Sites' preview and published sites) brings its own page and resource policies in
+        # place of the app's, and its frame-ancestors decides who may frame it (see airaapi_http.sandboxed); every
+        # other header is always sent.
+        sandboxed = airaapi_http.sandboxed(extra or ())
         for name, value in SECURITY_HEADERS:
-            if not (cached and name.lower() == "cache-control"):
-                self.send_header(name, value)
+            key = name.lower()
+            if key in own and (
+                key == "cache-control"
+                or (sandboxed and key in {"content-security-policy", "cross-origin-resource-policy"})
+            ):
+                continue
+            if sandboxed and key == "x-frame-options":
+                continue
+            self.send_header(name, value)
         correlation = getattr(_request_context, "correlation_id", None)
         if correlation:
             self.send_header("X-Request-ID", str(correlation))

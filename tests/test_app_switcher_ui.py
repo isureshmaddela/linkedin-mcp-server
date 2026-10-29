@@ -119,6 +119,7 @@ def test_the_switcher_lists_the_apps_and_each_app_shows_only_its_sections(browse
         "commerce",
         "experiences",
         "ads",
+        "sites",
     ]
     assert [
         t.lower() for t in switcher.locator(".popover-subtitle").all_inner_texts()
@@ -266,7 +267,7 @@ def test_the_switcher_works_from_the_keyboard(browser, env):
     assert page.evaluate("document.activeElement.dataset.app") == "care"
     page.keyboard.press("End")
     assert (
-        page.evaluate("document.activeElement.dataset.app") == "ads"
+        page.evaluate("document.activeElement.dataset.app") == "sites"
     )  # the last business app
     page.keyboard.press("Home")
     assert page.evaluate("document.activeElement.dataset.app") == "home"

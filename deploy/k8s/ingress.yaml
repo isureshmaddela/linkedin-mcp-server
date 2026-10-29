@@ -9,7 +9,10 @@ metadata:
   annotations:
     nginx.ingress.kubernetes.io/ssl-redirect: "true"
     nginx.ingress.kubernetes.io/proxy-body-size: 25m
-    nginx.ingress.kubernetes.io/proxy-read-timeout: "120"
+    # A Sites build is one request that answers when the whole site is written (minutes with a large model); the
+    # page also reads the run while it works and recovers if a proxy cuts the request, but keep this generous.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "900"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "900"
     # cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
   ingressClassName: nginx

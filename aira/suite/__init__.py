@@ -118,6 +118,7 @@ INDUSTRY_PACKAGES = (
     "marketing",
     "service",
     "ads",
+    "sites",
 )
 # The life apps (everyday use by every person; aira.suite.life is their shared core).
 LIFE_PACKAGES = (

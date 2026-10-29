@@ -66,6 +66,10 @@ EXEMPT_GROUPS = {
     r"[a-z]{2}": "language codes of the screens' translations are a fixed public list",
     r"[a-z]{2,20}": "AI agent ids are a fixed catalog (life, planner, ...); their settings are the caller's own",
     r"[A-Za-z0-9_-]{40,64}": "public link tokens: possession is the credential (aira.suite.public), and each resolves to its own organization",
+    r"[A-Za-z0-9._-]{1,80}": "Sites image names, looked up inside the project the path's own id names",
+    r"[0-9]{1,6}": "Sites version numbers, inside the project the path's own id (or public link token) names",
+    r"github|netlify|vercel": "Sites deploy targets are a fixed vocabulary; the tokens saved for them are the caller's own",
+    r"/.*": "a file inside the site the public link token names",
 }
 # Routes with no tenant selector in the path; mutating ones are covered by body-identifier tests below.
 PUBLIC_OR_OWN_SESSION = {

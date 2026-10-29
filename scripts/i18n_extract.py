@@ -499,6 +499,10 @@ def stage_labels() -> list[str]:
 # ---------------------------------------------------------------------------
 
 
+# Text written into a person's own website (Sites' offline designer), never shown on Monosage's screens.
+NOT_SCREEN_TEXT = {"aira/suite/sites/designer.py"}
+
+
 def collect() -> list[str]:
     strings: set[str] = set()
     for path in sorted(STATIC.glob("*.js")):
@@ -511,7 +515,10 @@ def collect() -> list[str]:
         *sorted((ROOT / "aira_cloud").rglob("*.py")),
     ]
     for path in python_files:
-        if "tests" in path.parts:
+        if (
+            "tests" in path.parts
+            or path.relative_to(ROOT).as_posix() in NOT_SCREEN_TEXT
+        ):
             continue
         broad = "suite" in path.parts
         for text in from_python(path, broad=broad):

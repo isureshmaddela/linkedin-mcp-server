@@ -126,10 +126,23 @@ UNTRUSTED_PAGE_HEADERS: tuple[tuple[str, str], ...] = (
 )
 
 
+def sandboxed(headers: tuple[tuple[str, str], ...] | list[tuple[str, str]]) -> bool:
+    """Whether a response is a page that runs its own scripts in a sandbox (a site built in Sites): its policy
+    starts with ``sandbox allow-scripts`` and has no ``allow-same-origin``, so the scripts run in an opaque origin
+    and can never reach the signed-in session. Such a page replaces the app's own CSP, frame and resource policies
+    with the ones it sends. Any other page (an untrusted saved page: ``sandbox`` with no scripts) keeps them all."""
+    return any(
+        name.lower() == "content-security-policy"
+        and value.lstrip().startswith("sandbox allow-scripts")
+        and "allow-same-origin" not in value
+        for name, value in headers
+    )
+
+
 def extra_headers(outcome: Raw) -> tuple[tuple[str, str], ...]:
     """Headers to add to a :class:`Raw` response (the route's own plus page safety)."""
     kind = outcome.content_type.split(";", 1)[0].strip().lower()
-    if kind in {"text/html", "application/xhtml+xml", "image/svg+xml"}:
+    if kind in {"text/html", "application/xhtml+xml", "image/svg+xml"} and not sandboxed(outcome.headers):
         return (*UNTRUSTED_PAGE_HEADERS, *outcome.headers)
     return outcome.headers
 

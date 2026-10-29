@@ -71,6 +71,7 @@ const ICONS = {
   experiences: '<svg viewBox="0 0 24 24"><path d="m2 8 8-4 8 4-8 4z"/><path d="M5 10v4c0 1.4 2.2 2.5 5 2.5s5-1.1 5-2.5v-4"/><path d="M15 15h5a2 2 0 0 0 2-2v-1a2 2 0 0 1 0-4V7"/></svg>',
   news: '<svg viewBox="0 0 24 24"><path d="M4 5h13v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2z"/><path d="M17 9h3v10a2 2 0 0 1-2 2"/><path d="M7 9h7M7 13h7M7 17h4"/></svg>',
   videos: '<svg viewBox="0 0 24 24"><rect x="2.5" y="5" width="19" height="14" rx="3"/><path d="m10 9 5 3-5 3z"/></svg>',
+  sites: '<svg viewBox="0 0 24 24"><rect x="2.5" y="4" width="19" height="16" rx="2.5"/><path d="M2.5 8.5h19"/><circle cx="5.5" cy="6.3" r=".6"/><circle cx="7.6" cy="6.3" r=".6"/><path d="m9 12.5-2.5 2.5L9 17.5M15 12.5l2.5 2.5-2.5 2.5M13 11.5l-2 7"/></svg>',
   ads: '<svg viewBox="0 0 24 24"><path d="M3 10v4a1 1 0 0 0 1 1h2l5 4V5L6 9H4a1 1 0 0 0-1 1z"/><path d="M15 9.5a3.5 3.5 0 0 1 0 5"/><circle cx="19" cy="7" r="2.2"/><path d="M19 6.2v1.6M18.2 7h1.6"/></svg>',
   journey: '<svg viewBox="0 0 24 24"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="5"/><circle cx="12" cy="12" r="1.5"/><path d="m15.5 8.5 4-4M17 4.5h2.5V7"/></svg>',
   ai: '<svg viewBox="0 0 24 24"><rect x="4" y="7" width="16" height="12" rx="3"/><path d="M12 7V4M9 3.5h6"/><circle cx="9" cy="12.5" r="1.2"/><circle cx="15" cy="12.5" r="1.2"/><path d="M9.5 16h5M2 12v3M22 12v3"/></svg>',
@@ -398,6 +399,7 @@ const APPS = [
   { id: "commerce", name: "Commerce", tagline: "Sell products and appointments", icon: "commerce", home: "shop", path: "commerce", key: "4", category: "industry", scope: "org" },
   { id: "experiences", name: "Courses & Events", tagline: "Teach, sell tickets and check in", icon: "experiences", home: "academy", path: "courses", key: "5", category: "industry", scope: "org" },
   { id: "ads", name: "Ads", tagline: "Advertise on videos, pay creators", icon: "ads", home: "ads", path: "ads", category: "industry", scope: "org" },
+  { id: "sites", name: "Sites", tagline: "Describe a website, get it built", icon: "sites", home: "sites", path: "sites", category: "industry", scope: "org" },
   // Everyday apps (aira/suite/life.py): every person, each with their own profile. Social holds Family too.
   { id: "social", name: "Social", tagline: "Friends, family, chats and photos", icon: "social", home: "social", path: "social", key: "6", category: "life", scope: "org" },
   { id: "care", name: "Health", tagline: "Medicines, check-ups and wellbeing", icon: "care", home: "care", path: "health", key: "7", category: "life", scope: "org" },
@@ -441,6 +443,7 @@ const NAV = [
   { id: "academy", label: "Courses", icon: "academy", app: "experiences", group: "Courses & Events", quick: true },
   { id: "events", label: "Events", icon: "events", app: "experiences", group: "Courses & Events", quick: true },
   { id: "ads", label: "Ads", icon: "ads", app: "ads", group: "Ads", quick: true },
+  { id: "sites", label: "Sites", icon: "sites", app: "sites", group: "Sites", quick: true },
   { id: "social", label: "Social", icon: "social", app: "social", group: "Social", quick: true },
   { id: "family", label: "Family", icon: "family", app: "social", group: "Social", quick: true },
   { id: "care", label: "Health", icon: "care", app: "care", group: "Health", quick: true },
