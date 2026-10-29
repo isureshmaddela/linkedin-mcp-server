@@ -5,6 +5,9 @@
 * ``claude`` (Anthropic Messages API), ``gemini`` (Google's Generative Language API), ``openai``, ``openrouter`` and
   ``custom`` (any OpenAI-compatible server: vLLM, Groq, Together, DeepSeek, a company gateway, ...).
 * ``platform`` (hosted build only): the organization's model the platform provides, through the suite gateway.
+* ``server`` (hosted build only, when the operator runs the platform model on Ollama): the Ollama models
+  installed on the Monosage Cloud server, streamed like the local ``ollama``. Its address is the operator's setting,
+  never one a member types, so it cannot be pointed at another machine on the server's network.
 
 Every call streams: :func:`stream` hands each piece of text to ``on_text`` as it arrives and checks ``should_stop``
 between pieces, so the page can show the code being written and a person can stop a run. Keys are secrets kept in
@@ -57,6 +60,9 @@ class Provider:
     help: str = ""
     key_url: str = ""
     hosted_only: bool = False
+    fixed_address: bool = (
+        False  # the server decides the address; the page does not ask for one
+    )
     extra_headers: tuple[tuple[str, str], ...] = field(default_factory=tuple)
 
     def public(self) -> dict[str, Any]:
@@ -72,6 +78,7 @@ class Provider:
             "models": list(self.models),
             "help": self.help,
             "key_url": self.key_url,
+            "fixed_address": self.fixed_address,
         }
 
 
@@ -179,6 +186,16 @@ PROVIDERS: dict[str, Provider] = {
             "(ending in /v1), a model name and a key if it needs one.",
         ),
         Provider(
+            "server",
+            "Ollama on the Monosage server",
+            "ollama",
+            default_model="qwen2.5-coder:7b",
+            hosted_only=True,
+            fixed_address=True,
+            help="Free and private: the models installed on the server that runs Monosage. Pick one of them; "
+            "nothing to set up.",
+        ),
+        Provider(
             "platform",
             "Your organization's model",
             "platform",
@@ -198,13 +215,25 @@ def hosted() -> bool:
     return HOOKS.model_json is not None
 
 
+def server_ollama_url() -> str:
+    """The Monosage Cloud server's own Ollama, when the operator offers it to organizations ('' otherwise)."""
+    from aira.hosting import HOOKS
+
+    if not hosted() or HOOKS.server_ollama_url is None:
+        return ""
+    return str(HOOKS.server_ollama_url() or "").rstrip("/")
+
+
 def offered() -> list[Provider]:
     """The providers this build offers, in the order the page lists them."""
     is_hosted = hosted()
+    server = server_ollama_url() if is_hosted else ""
     return [
         p
         for p in PROVIDERS.values()
-        if (not p.hosted_only or is_hosted) and not (p.local and is_hosted)
+        if (not p.hosted_only or is_hosted)
+        and not (p.local and is_hosted)
+        and (p.id != "server" or bool(server))
     ]
 
 
@@ -232,8 +261,8 @@ class Config:
 def check_base_url(provider: Provider, value: Any) -> str:
     """An address the provider may be called at: http(s) here; hosted, a public https address only."""
     text = str(value or "").strip().rstrip("/")
-    if not text:
-        return ""
+    if not text or provider.fixed_address:
+        return ""  # a fixed address is the server's: what the page sends is ignored
     parts = urlsplit(text)
     if (
         parts.scheme not in ("http", "https")
@@ -258,6 +287,9 @@ def _check_public_host(url: str) -> None:
     """Hosted: refuse an address that resolves to a private, loopback or link-local machine (no SSRF)."""
     if not hosted() or os.getenv(ALLOW_LOCAL_ENV) == "1":
         return
+    server = server_ollama_url()
+    if server and (url == server or url.startswith(server + "/")):
+        return  # the operator's own Ollama (the address comes from the server's settings, not from a member)
     host = urlsplit(url).hostname or ""
     try:
         infos = socket.getaddrinfo(host, None, type=socket.SOCK_STREAM)
@@ -296,7 +328,11 @@ def load_config(
                 )  # the key saved in Settings
         except Exception:  # noqa: BLE001 - an unreadable key reads as no key; the page asks for one again
             key = None
-    base = str(row.get("base_url") or "") or provider.base_url
+    base = (
+        server_ollama_url()
+        if provider.fixed_address
+        else str(row.get("base_url") or "") or provider.base_url
+    )
     chosen = str(model or row.get("model") or "").strip()
     if not chosen and provider.kind == "ollama":
         chosen = installed_ollama_model(base.rstrip("/"))
@@ -321,7 +357,27 @@ def installed_ollama_model(base_url: str) -> str:
             name,
         )
     )
-    return names[0] if names else ""
+    # Ollama can list a model whose files are gone ("not found, try pulling it"): take the first that opens.
+    return next((name for name in names[:6] if ollama_model_opens(base_url, name)), "")
+
+
+def ollama_model_opens(base_url: str, name: str) -> bool:
+    """Ollama can read this model's files (its details answer): a listed but broken model does not."""
+    request = urllib.request.Request(
+        f"{base_url}/api/show",
+        data=json.dumps({"model": name}).encode("utf-8"),
+        method="POST",
+    )
+    request.add_header("Content-Type", "application/json")
+    try:
+        with urllib.request.urlopen(request, timeout=5) as response:  # noqa: S310 - the account's own Ollama
+            return "error" not in (json.loads(response.read() or b"{}") or {})
+    except urllib.error.HTTPError as error:
+        # 500 is Ollama failing to read the model's files; anything else (an older server without the call, a
+        # name it does not know) is left for the run to report.
+        return error.code != 500
+    except (OSError, ValueError):
+        return True
 
 
 # ---------------------------------------------------------------------------
@@ -693,9 +749,13 @@ def list_models(config: Config) -> list[str]:
         )
         with response:
             data = json.loads(response.read() or b"{}")
-        return sorted(
+        names = sorted(
             str(m.get("name")) for m in data.get("models") or [] if m.get("name")
         )
+        # Leave out a listed model Ollama cannot open (its files were removed): picking it could only fail.
+        return [
+            name for name in names if ollama_model_opens(config.base_url, name)
+        ] or names
     if kind == "anthropic":
         headers["anthropic-version"] = "2023-06-01"
         url = f"{config.base_url}/v1/models?limit=100"

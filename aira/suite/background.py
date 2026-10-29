@@ -63,15 +63,16 @@ def run(connection: sqlite3.Connection, secret_store: Any) -> dict[str, Any]:
             suite.logger.exception("Background task for %s failed", app_id)
             result["tasks"][app_id] = "failed"
     settings = kit.email_settings(connection)
-    if settings.get("smtp_host") and settings.get("from_email"):
+    # its own mail server, or (hosted, a member's own space) the organization's it is lent
+    if (settings.get("smtp_host") and settings.get("from_email")) or kit.lent_mail():
         due = connection.execute(
             "SELECT 1 FROM suite_outbox WHERE status = 'approved' AND (send_after IS NULL OR send_after <= ?) LIMIT 1",
             (kit.now(),),
         ).fetchone()
         if due:
             try:
-                password = secret_store.get(connection, kit.SMTP_PASSWORD_SECRET) or ""
-                sent = kit.send_outbox(connection, password)
+                settings, password, _lent = kit.outgoing_mail(connection, secret_store)
+                sent = kit.send_outbox(connection, password, mail_settings=settings)
                 result["mail"] = {"sent": sent["sent"], "failed": sent["failed"]}
             except Exception:  # noqa: BLE001
                 suite.logger.exception("Sending due messages failed")

@@ -350,6 +350,8 @@
             h("a", { class: "btn ghost", href: "#/display", text: "Display and reading" }))),
         ...birthdays,
         remindersOff ? h("div", { class: "cloud-banner info", role: "status" }, h("strong", { text: "Get reminders on this device" }), h("span", { text: "Monosage can show your medicine and chore reminders even when this tab is in the background." }), h("button", { type: "button", class: "btn secondary sm", text: "Turn on", onclick: async () => { try { await Notification.requestPermission(); } catch { /* ignored */ } render(); } })) : null,
+        // A build's own cards for this person (the hosted build: what they earned this month, their organization).
+        ...(Aira.todayCards ? Aira.todayCards() : []),
         data.cards.length ? h("div", { class: "life-cards" }, ...data.cards.map((card) => cardNode(card, render))) : null,
         !data.apps.length ? Aira.ui.empty("No everyday apps yet", hosted() ? "Ask your organization's owner to turn on Family, Health, Learn, Play or Planner." : "The everyday apps appear here when they are installed.") : null,
         tiles.length ? h("section", { class: "life-tiles-wrap" }, h("h2", { class: "suite-h2", text: "Your apps" }), h("div", { class: "life-tiles" }, ...tiles)) : null,

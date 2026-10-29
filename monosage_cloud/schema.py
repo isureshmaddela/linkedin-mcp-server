@@ -744,6 +744,14 @@ CREATE TABLE platform_apps (
 );
 """
 
+# Member spaces (monosage_cloud/spaces.py): a public link made inside a member's own business apps names that member,
+# so a customer's request runs in the member's database (tenants/<org>/<member>/apps.sqlite3), not the organization's.
+# '' is the organization's own apps (every link made before spaces).
+_V9 = """
+ALTER TABLE public_links ADD COLUMN member_id TEXT NOT NULL DEFAULT '';
+CREATE INDEX public_links_member ON public_links (org_id, member_id);
+"""
+
 # (version, name, SQL script)
 MIGRATIONS: list[tuple[int, str, str]] = [
     (1, "initial", _V1),
@@ -754,4 +762,5 @@ MIGRATIONS: list[tuple[int, str, str]] = [
     (6, "public_links", _V6),
     (7, "developer_platform", _V7),
     (8, "platform_apps", _V8),
+    (9, "public_link_members", _V9),
 ]

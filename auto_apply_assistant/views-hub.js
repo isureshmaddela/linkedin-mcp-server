@@ -22,6 +22,10 @@
     { id: "email", label: "Email" },
   ];
 
+  // The apps this person can open here: on for the organization and, hosted, in their menu (a member's own space
+  // has the business apps but not Ads, which stays the organization's).
+  const opens = (app) => Aira.apps.state.enabled[app.id] !== false && (!Aira.cloud || Aira.NAV.some((item) => item.app === app.id));
+
   async function overview(body) {
     const data = await Aira.api("/api/suite/home");
     S._business = data.business;
@@ -46,7 +50,7 @@
         ? S.table({ columns: [{ key: "app", label: "App", render: (r) => APP_NAMES[r.app] || r.app }, { key: "cents", label: "Revenue", num: true, render: (r) => S.money(r.cents, revenue.currency) }], rows: Object.entries(revenue.by_app).map(([app, cents]) => ({ app, cents })).sort((a, b) => b.cents - a.cents) })
         : Aira.ui.empty("No payments yet", "Payments from invoices, orders, bookings, tickets and courses add up here.")),
     ));
-    const installed = data.apps.filter((app) => Aira.apps.state.enabled[app.id] !== false);
+    const installed = data.apps.filter(opens);
     parts.push(S.section("Your apps", h("div", { class: "suite-app-cards" }, ...installed.map((app) => h("article", { class: "suite-app-card" },
       h("header", {}, h("span", { class: "app-tile-icon" }, Aira.icon(app.id)), h("div", {}, h("strong", { text: app.name }), h("div", { class: "muted small", text: app.tagline }))),
       app.cards.length ? S.kpis(app.cards.slice(0, 4)) : null,
@@ -69,7 +73,7 @@
 
   // A new business picks what it does; each answer opens the app made for it.
   function startHere(apps) {
-    const enabled = apps.filter((app) => Aira.apps.state.enabled[app.id] !== false);
+    const enabled = apps.filter(opens);
     if (!enabled.length) return null;
     return S.section("Start here: what kind of business are you?", h("p", { class: "muted", text: "Open the app made for your work. You can use several: they share your customers, revenue and email." }),
       h("div", { class: "suite-app-cards" }, ...enabled.map((app) => h("a", { class: "suite-app-card", href: `#/${app.home || app.id}`, style: { textDecoration: "none", color: "inherit" } },

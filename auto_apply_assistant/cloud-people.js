@@ -88,6 +88,7 @@
       if (!(await Aira.confirm({ title: "Reset MFA", message: `${member.name || member.email} is signed out everywhere and sets up MFA again at the next sign-in.`, confirmLabel: "Reset MFA", danger: true }))) return;
       try { await api(`/api/org/members/${member.member_id}/mfa-reset`, { method: "POST", body: {} }); Aira.toast("MFA reset.", "success"); reload(); } catch (e) { Aira.reportError(e); }
     } }));
+    if (A.can("members.manage") && (!isOwner || canOwners)) actions.push(h("button", { type: "button", class: "btn ghost sm", "data-action": "member-apps", text: "Apps", onclick: () => memberApps(member) }));
     if (!isOwner || canOwners) actions.push(h("button", { type: "button", class: "btn ghost sm", text: "Remove", onclick: () => removeMember(member, org, reload) }));
     return h("div", { class: "adm-item" },
       h("div", {}, h("div", { class: "title", text: `${member.name || member.email}${mine ? " (you)" : ""}` }), h("div", { class: "sub", text: member.name ? member.email : "" }),
@@ -101,6 +102,38 @@
     const error = inlineError();
     Aira.modal({ title: `Change role for ${member.name || member.email}`, body: h("div", { class: "adm-form" }, ui.field("Role", select), h("p", { class: "adm-sub", text: "They are signed out of every device and sign in again with the new role. A coach changed to another role loses their assignments. A candidate cannot change role: remove them and invite them again." }), error),
       actions: [{ label: "Cancel", kind: "ghost" }, { label: "Change role", onClick: async (close) => { try { await api(`/api/org/members/${member.member_id}`, { method: "PATCH", body: { role: select.value } }); Aira.toast("Role changed.", "success"); close(); reload(); return false; } catch (e) { if (e.status !== 402) showError(error, e); else close(); return false; } } }] });
+  }
+
+  // Which apps one person may open: their role's apps (the Apps page), plus apps given to them or taken from them.
+  async function memberApps(member) {
+    let data;
+    try { data = await api(`/api/org/members/${member.member_id}/apps`); } catch (e) { Aira.reportError(e); return; }
+    const who = member.name || member.email;
+    const rows = data.apps.map((app) => {
+      const roleWord = app.by_role ? "Yes, with their role" : "No, not with their role";
+      const select = ui.select([["role", roleWord], ["allow", "Give it to them"], ["deny", "Take it away"]], app.setting, { "aria-label": `${app.name} for ${who}`, "data-app": app.id });
+      if (app.locked || !data.can_change) select.disabled = true;
+      const note = app.locked ? "A candidate's own workspace: they always keep it." : app.subscribed ? "" : "Your organization has not turned it on.";
+      return { app, select, node: h("div", { class: "adm-item ca-member-app", "data-app": app.id },
+        h("div", {}, h("div", { class: "title", text: app.name }), note ? h("div", { class: "sub", text: note }) : null),
+        h("div", { class: "aside" }, select)) };
+    });
+    const error = inlineError();
+    Aira.modal({
+      title: `Apps for ${who}`,
+      wide: true,
+      body: h("div", { class: "adm-form" },
+        h("p", { class: "adm-sub", text: "By default a person has the apps their role has (choose those on the Apps page). Give an app to this person or take one away here." }),
+        h("div", { class: "adm-list ca-member-apps" }, ...rows.map((row) => row.node)),
+        error),
+      actions: data.can_change ? [{ label: "Cancel", kind: "ghost" }, { label: "Save", onClick: async (close) => {
+        const pick = (value) => rows.filter((row) => row.select.value === value && !row.app.locked).map((row) => row.app.id);
+        try { await api(`/api/org/members/${member.member_id}/apps`, { method: "PUT", body: { allow: pick("allow"), deny: pick("deny") } }); } catch (e) { showError(error, e); return false; }
+        Aira.toast(`Saved ${who}'s apps.`, "success");
+        close();
+        return false;
+      } }] : [{ label: "Close", kind: "ghost" }],
+    });
   }
 
   async function removeMember(member, org, reload) {

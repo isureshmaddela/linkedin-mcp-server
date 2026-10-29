@@ -114,17 +114,31 @@ class Scheduler:
         queued = 0
         for org in orgs:
             org_id = org["org_id"]
-            if not self.app.workspaces.org_api_path(org_id).exists():
+            members = self.app.workspaces.member_apps_paths(org_id)
+            if not members and not self.app.workspaces.org_api_path(org_id).exists():
                 continue
             if not suite_apps & set(self.app.entitlements.resolve(org_id).apps):
                 continue
-            if self.app.queue.enqueue(
+            has_org_apps = self.app.workspaces.org_api_path(org_id).exists()
+            if has_org_apps and self.app.queue.enqueue(
                 org_id,
                 "suite.tick",
                 dedupe_key=f"suite.tick:{org_id}:{window}",
                 priority=7,
             ):
                 queued += 1
+            # each member's own business apps (monosage_cloud/spaces.py) have reminders and due mail of their own
+            for member_id, _path in members:
+                if not self.app.workspaces.member_apps_live(org_id, member_id):
+                    continue  # removed, or the organization works in shared apps now
+                if self.app.queue.enqueue(
+                    org_id,
+                    "suite.tick",
+                    payload={"member_id": member_id},
+                    dedupe_key=f"suite.tick:{org_id}:{member_id}:{window}",
+                    priority=7,
+                ):
+                    queued += 1
         return queued
 
     def _enqueue_org_monitors(self, now_iso: str, blocked_orgs: dict[str, bool]) -> int:

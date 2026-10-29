@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 from aira import apps as app_catalog
+from monosage_cloud import app_access
 from monosage_cloud.errors import NotFound, ValidationFailed
+from monosage_cloud.rbac import ORG_ROLES
 from monosage_cloud.webio import Req, cloud_route
 
 
@@ -15,15 +17,22 @@ def apps_catalog(req: Req):  # noqa: ANN201
     enabled = {
         a["id"]: a for a in app.billing.apps_for_member(principal.org_id, entitlements)
     }
+    policy = app.tenancy.policy(principal.org_id)
     apps = []
     for entry in app_catalog.catalog():
         member = enabled.get(entry["id"], {})
+        # ``enabled``: the organization has the app; ``allowed``: it has given it to this member (app_access.py)
+        allowed = app_access.may_open(policy, principal, str(entry["id"]))
         apps.append(
             {
                 **entry,
                 "enabled": bool(member.get("enabled")),
                 "reason": member.get("reason", ""),
                 "switched_off": bool(member.get("switched_off")),
+                "allowed": allowed,
+                "allowed_reason": ""
+                if allowed
+                else app_access.denied_message(str(entry["id"])),
             }
         )
     return 200, {
@@ -53,7 +62,42 @@ def org_apps(req: Req):  # noqa: ANN201
         "addons_monthly_cents": summary["addons_monthly_cents"],
         "currency": "usd",
         "can_manage": app.authz.can(principal, "billing.manage"),
+        # who may use each app (roles; None is everyone), and whether this person may change it
+        "access": app_access.app_rows(
+            app.tenancy.policy(principal.org_id),
+            app.entitlements.resolve(principal.org_id),
+        ),
+        "roles": list(ORG_ROLES),
+        "can_manage_access": app.authz.can(principal, "org.settings"),
+        "can_manage_owners": app.authz.can(principal, "members.manage_owners"),
     }
+
+
+@cloud_route("PUT", r"/api/org/apps/([a-z0-9_-]+)/access", writes=True)
+def org_app_access(req: Req):  # noqa: ANN201
+    """Who may use one app: ``{"roles": [...]}``, or ``{"roles": null}`` for everyone (``org.settings``)."""
+    body = req.body()
+    if "roles" not in body:
+        raise ValidationFailed(
+            "Send the roles that may use the app, or null for everyone."
+        )
+    return 200, app_access.set_app_roles(
+        req.app, req.principal, _app_id(req), body["roles"]
+    )
+
+
+@cloud_route("GET", r"/api/org/members/([0-9a-f]{32})/apps")
+def member_apps_get(req: Req):  # noqa: ANN201
+    """Every app with whether this member may open it, and why (``members.manage``)."""
+    return 200, app_access.member_view(req.app, req.principal, req.group())
+
+
+@cloud_route("PUT", r"/api/org/members/([0-9a-f]{32})/apps", writes=True)
+def member_apps_put(req: Req):  # noqa: ANN201
+    """One member's exceptions: ``{"allow": [app ids], "deny": [app ids]}`` (``members.manage``)."""
+    return 200, app_access.set_member_apps(
+        req.app, req.principal, req.group(), req.body()
+    )
 
 
 def _app_id(req: Req) -> str:

@@ -59,6 +59,17 @@ DEFAULT_POLICY: dict[str, Any] = {
     "review_required_regions": [],
     "use_pooled_serpapi": False,
     "legal_hold": False,
+    # How members use the business apps (Studio, Marketing, Service, Commerce, Courses & Events, Sites and the
+    # Business hub): "personal" gives every member a space of their own (their business, their customers, what they
+    # earn); "shared" is everyone working in the organization's (the behaviour before spaces). Organizations made
+    # before spaces existed keep "shared"; a new organization starts "personal" (default_policy).
+    "apps_space": "shared",
+    # With "personal": the members (besides owners, admins and coaches) who may also open the organization's apps.
+    "company_members": [],
+    # Who may open which app, on top of the subscriptions (monosage_cloud/app_access.py): {app_id: [roles]} (an app
+    # not listed is for every role), and per-member exceptions {member_id: {"allow": [...], "deny": [...]}}.
+    "app_roles": {},
+    "member_apps": {},
 }
 
 
@@ -78,7 +89,8 @@ class Tenancy:
     # ------------------------------------------------------------------ organizations
 
     def default_policy(self) -> dict[str, Any]:
-        return dict(DEFAULT_POLICY)
+        """A new organization's policy: every member has their own business apps and keeps what they earn."""
+        return {**DEFAULT_POLICY, "apps_space": "personal"}
 
     def org(self, org_id: str) -> dict[str, Any]:
         with self.db.read() as connection:
@@ -166,6 +178,9 @@ class Tenancy:
         self.app.authz.require(actor, "org.settings")
         self.app.entitlements.require_state(actor.org_id, write=True)
         current = self.org(actor.org_id)["policy"]
+        from monosage_cloud.app_access import guard_policy_patch
+
+        guard_policy_patch(self.app, actor, patch)
         cleaned = self._validate_policy(actor.org_id, patch)
         updated = {**current, **cleaned}
         changes = {
@@ -293,6 +308,42 @@ class Tenancy:
                 flag = self._bool(value, key)
                 ent.require_feature(org_id, "legal_hold", label="Legal hold")
                 cleaned[key] = flag
+            elif key == "apps_space":
+                if value not in ("personal", "shared"):
+                    raise ValidationFailed(
+                        "Choose personal (each member has their own apps) or shared (everyone works in the organization's)."
+                    )
+                cleaned[key] = value
+            elif key == "company_members":
+                if not isinstance(value, list) or not all(
+                    isinstance(v, str) for v in value
+                ):
+                    raise ValidationFailed(
+                        "Company members must be a list of member ids."
+                    )
+                with self.db.read() as connection:
+                    known = {
+                        row["member_id"]
+                        for row in many(
+                            connection,
+                            "SELECT member_id FROM members WHERE org_id = ? AND removed_at IS NULL AND status = 'active'",
+                            (org_id,),
+                        )
+                    }
+                unknown_members = [v for v in value if v not in known]
+                if unknown_members:
+                    raise ValidationFailed("Choose members of this organization.")
+                cleaned[key] = sorted(set(value))
+            elif key == "app_roles":
+                from monosage_cloud import app_access
+
+                cleaned[key] = app_access.clean_app_roles(value)
+            elif key == "member_apps":
+                from monosage_cloud import app_access
+
+                cleaned[key] = app_access.clean_member_apps(
+                    value, app_access.active_members(self.db, org_id)
+                )
             elif key == "use_pooled_serpapi":
                 flag = self._bool(value, key)
                 if flag:
@@ -629,13 +680,50 @@ class Tenancy:
                     (org_id, member_id),
                 )
             return "archived"  # nothing is deleted while a legal hold is in place
-        self.app.workspaces.delete(org_id, member_id)
+        # only the careers workspace: the member's own business apps stay theirs (removal handles them)
+        self.app.workspaces.delete(org_id, member_id, keep_member_apps=True)
         with self.db.write() as connection:
             connection.execute(
                 "DELETE FROM consents WHERE org_id = ? AND candidate_id = ?",
                 (org_id, member_id),
             )
         return "deleted"
+
+    def _depart_member_space(
+        self, actor: Principal, target: dict[str, Any]
+    ) -> dict[str, Any]:
+        """A leaving member's own business apps follow the organization's data policy, as a candidate's workspace
+        does: with "organization_keeps" (or a legal hold) the space stays (its links and reminders stop, since
+        the person is no longer a member); with "candidate_keeps" it goes to the person (a download link by
+        email) and is deleted. A candidate's departure export already carries it."""
+        org_id, member_id = actor.org_id, target["member_id"]
+        if not self.app.workspaces.member_apps_path(org_id, member_id).exists():
+            return {}
+        policy = self.policy(org_id)["candidate_data_policy"]
+        if self.app.lifecycle.on_legal_hold(org_id) or policy == "organization_keeps":
+            return {"business_apps": "kept"}
+        outcome: dict[str, Any] = {"business_apps": "deleted"}
+        # a candidate's hand-over (with the space) was already made by _offboard_candidate
+        if target["role"] != CANDIDATE:
+            export = self.app.lifecycle.create_export(
+                org_id,
+                candidate_id=member_id,
+                kind="candidate_departure",
+                created_by=actor.actor_id,
+                recipient=target["email"],
+                principal=actor,
+                full=True,  # the member's own business, on its way to them
+            )
+            self.app.mail.send(
+                org_id,
+                target["email"],
+                "data_export_ready",
+                org=self.org(org_id)["name"],
+                link=f"{self.app.config.base_url}/api/exports/download/{export['token']}",
+            )
+            outcome["export_id"] = export["export_id"]
+        self.app.workspaces.delete_member_apps(org_id, member_id)
+        return outcome
 
     def _owner_count(self, org_id: str) -> int:
         with self.db.read() as connection:
@@ -673,6 +761,7 @@ class Tenancy:
             result["personal_workspace"] = self._close_personal_workspace(
                 actor.org_id, member_id
             )
+        result.update(self._depart_member_space(actor, target))
         with self.db.write() as connection:
             connection.execute(
                 "UPDATE members SET status = 'removed', removed_at = ?, password_hash = '' WHERE member_id = ? AND org_id = ?",

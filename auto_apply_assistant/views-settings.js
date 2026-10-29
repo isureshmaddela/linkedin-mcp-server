@@ -125,6 +125,21 @@
     content.replaceChildren(h("div", { class: "sensitive-note" }, h("span", { text: "⚠" }), h("span", { text: "Monosage prefills an application answer only when you have confirmed it here. Sensitive answers (work authorization, visa, salary, demographics, legal attestations) are never guessed and never sent to the local model." })), h("div", { class: "card" }, ...rows));
   }
 
+  // Hosted, LinkedIn needs a plan that includes it and the organization's policy to allow it: say which is missing
+  // and who can change it, instead of a Connect button that can only be refused.
+  function linkedinBlocked() {
+    const cloud = Aira.cloud;
+    if (!cloud || !cloud.me) return null;
+    const staff = (permission, href, label) => cloud.can(permission) ? h("div", { class: "btn-row" }, h("a", { class: "btn secondary sm", href, text: label })) : h("p", { class: "muted", text: "Ask your organization's owner or admin." });
+    if (!cloud.has("sources.linkedin")) {
+      return [h("p", { class: "muted", text: "LinkedIn is part of the Team and Enterprise plans; your organization's plan does not include it. Jobs from the other sources work as usual." }), staff("billing.manage", "#/org/billing", "See plans")];
+    }
+    if (cloud.me.policy && cloud.me.policy.linkedin_allowed === false) {
+      return [h("p", { class: "muted", text: "Your organization has LinkedIn turned off. Jobs from the other sources work as usual." }), staff("org.settings", "#/org/policy", "Open Policy")];
+    }
+    return null;
+  }
+
   // -------------------------------------------------------------------------
   async function renderIntegrations(content) {
     const [sources, linkedin, status, settings, serp, resetMail, provider] = await Promise.all([api("/api/sources"), api("/api/linkedin/status"), api("/api/status"), api("/api/settings"), api("/api/airaapi/overview").catch(() => null), Aira.cloud ? null : api("/api/settings/reset-mail", { silent: true }).catch(() => null), api("/api/settings/model-provider", { silent: true }).catch(() => null)]);
@@ -133,7 +148,11 @@
     const orgModel = provider && provider.scope === "organization";
     Aira.state.sources = sources.sources;
     const connectBtn = h("button", { type: "button", class: "btn", text: linkedin.state === "connected" ? "LinkedIn connected" : linkedin.state === "login" ? "Waiting for sign-in…" : "Connect LinkedIn", disabled: ["connected", "login", "starting"].includes(linkedin.state) });
-    connectBtn.addEventListener("click", () => withBusy(connectBtn, async () => { const result = await api("/api/linkedin/connect", { method: "POST", body: {} }); toast(result.state === "login" ? "A LinkedIn sign-in window opened. Complete it in that browser." : "Resuming your saved LinkedIn session.", "success"); setTimeout(() => router.render(), 3000); }));
+    connectBtn.addEventListener("click", () => withBusy(connectBtn, async () => {
+      // Hosted, connecting is the member's agreement to the LinkedIn notice (the same one the dashboard shows).
+      const hosted = Aira.cloud && Aira.cloud.auth && Aira.cloud.auth.confirmLinkedIn;
+      if (hosted && !(await Aira.cloud.auth.confirmLinkedIn())) return;
+      const result = await api("/api/linkedin/connect", { method: "POST", body: hosted ? { acknowledge: true } : {} }); toast(result.state === "login" ? "A LinkedIn sign-in window opened. Complete it in that browser." : "Resuming your saved LinkedIn session.", "success"); setTimeout(() => router.render(), 3000); }));
     const restartBtn = h("button", { type: "button", class: "btn secondary sm", text: "Restart LinkedIn session" });
     restartBtn.addEventListener("click", () => withBusy(restartBtn, async () => { await api("/api/linkedin/restart", { method: "POST", body: {} }); toast("Restarting your LinkedIn session. It is ready in a few seconds.", "success"); setTimeout(() => router.render(), 4000); }));
     const freshBtn = h("button", { type: "button", class: "btn ghost sm", text: "Sign in again" });
@@ -165,7 +184,7 @@
     });
     const browserRow = h("label", { class: "check", style: { marginTop: "10px" }, title: "Restarts the LinkedIn session so you can watch it work" }, showBrowser, "Show the LinkedIn browser while Monosage works (off by default; Monosage runs it in the background)");
     const cards = h("div", { class: "grid cols-2" },
-      h("div", { class: "card" }, h("h3", { text: "LinkedIn" }), h("p", { class: "muted", text: linkedin.message }), h("div", { class: "btn-row" }, connectBtn, linkedin.state === "connected" ? restartBtn : null, freshBtn), browserRow, h("p", { class: "muted", style: { fontSize: "12px", marginTop: "8px" }, text: "Monosage opens LinkedIn in an isolated browser profile for this account. Sign in there; Monosage never sees your LinkedIn password and never bypasses verification steps. Restart the session after updating Monosage so new features such as sending replies are available." })),
+      h("div", { class: "card" }, h("h3", { text: "LinkedIn" }), ...(linkedinBlocked() || [h("p", { class: "muted", text: linkedin.message }), h("div", { class: "btn-row" }, connectBtn, linkedin.state === "connected" ? restartBtn : null, freshBtn), browserRow]), h("p", { class: "muted", style: { fontSize: "12px", marginTop: "8px" }, text: "Monosage opens LinkedIn in an isolated browser profile for this account. Sign in there; Monosage never sees your LinkedIn password and never bypasses verification steps. Restart the session after updating Monosage so new features such as sending replies are available." })),
       orgModel ? orgModelCard(provider) : h("div", { class: "card" }, h("h3", { text: "Ollama (local AI)" }), h("p", { class: "muted", text: onClaude ? "Not in use: Claude writes fit reviews, drafts, and reply suggestions. Choose Local model in the Claude card to switch back." : status.ollama ? "Reachable. Fit reviews, drafts, and reply suggestions run locally." : "Not reachable. Start Ollama and pull a chat model (for example qwen3.5:4b), or use Claude with an Anthropic API key." }), h("div", { class: "btn-row" }, h("div", { class: "field", style: { minWidth: "220px" } }, h("label", { for: "defaultModel", text: "Default model" }), Object.assign(model, { id: "defaultModel" })), saveModel)),
       provider && !provider.hosted ? claudeCard(provider) : null,
       googleCard(serp, status),

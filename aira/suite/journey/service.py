@@ -302,7 +302,9 @@ def earnings(
     if end:
         sql += " AND at < ?"
         params.append((date.fromisoformat(end) + timedelta(days=1)).isoformat())
-    rows = kit.fetch_all(connection, sql + " GROUP BY app ORDER BY total DESC", params)
+    with kit.earnings_source(connection) as source:
+        kit.ensure_core(source)
+        rows = kit.fetch_all(source, sql + " GROUP BY app ORDER BY total DESC", params)
     by_app = [
         {
             "app": row["app"],

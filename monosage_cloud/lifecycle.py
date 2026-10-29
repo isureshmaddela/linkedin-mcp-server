@@ -327,7 +327,7 @@ class Lifecycle:
             for candidate in candidates:
                 try:
                     blob = self.app.workspaces.export_zip(
-                        org_id, candidate["candidate_id"], principal
+                        org_id, candidate["candidate_id"], principal, own_space=False
                     )
                 except Exception:  # noqa: BLE001 - one broken workspace must not fail the whole export
                     logger.warning(
@@ -337,7 +337,34 @@ class Lifecycle:
                     )
                     continue
                 archive.writestr(f"candidates/{candidate['candidate_id']}.zip", blob)
+            # Members' own business apps are private while they are members: an organization export carries only
+            # the spaces of people who left and whose data the organization kept (candidate_data_policy
+            # "organization_keeps", or a legal hold); with "candidate_keeps" those went to the person and were deleted.
+            removed = {row["member_id"] for row in self._removed_members(org_id)}
+            for member_id, _path in self.app.workspaces.member_apps_paths(org_id):
+                if member_id not in removed:
+                    continue
+                try:
+                    space = self.app.workspaces.member_apps_export(org_id, member_id)
+                except Exception:  # noqa: BLE001 - one broken space must not fail the whole export
+                    logger.warning(
+                        "Could not export member space %s", member_id, exc_info=True
+                    )
+                    continue
+                if space is not None:
+                    archive.writestr(
+                        f"member_spaces/{member_id}.json",
+                        json.dumps(space, ensure_ascii=False, indent=2, default=str),
+                    )
         return buffer.getvalue()
+
+    def _removed_members(self, org_id: str) -> list[dict[str, Any]]:
+        with self.db.read() as connection:
+            return many(
+                connection,
+                "SELECT member_id FROM members WHERE org_id = ? AND removed_at IS NOT NULL",
+                (org_id,),
+            )
 
     def export_by_token(self, token: str) -> tuple[dict[str, Any], bytes]:
         """The one-time-link download a departed candidate uses; no session is involved."""
@@ -777,27 +804,38 @@ class Lifecycle:
             ]
 
     def _reencrypt_api_secrets(self, org_id: str, fernet: Any) -> int:
+        """``airaapi_secrets`` under the new key: the organization's database (its SerpApi key, Business hub
+        mail password and payment keys) and every member's own space (the mail password and payment keys a
+        member saved for their own business)."""
         import sqlite3
 
-        path = self.app.workspaces.org_api_path(org_id)
-        if not path.exists():
-            return 0
-        connection = sqlite3.connect(path, timeout=15)
-        try:
-            rows = connection.execute(
-                "SELECT name, ciphertext FROM airaapi_secrets"
-            ).fetchall()
-            for name, ciphertext in rows:
-                connection.execute(
-                    "UPDATE airaapi_secrets SET ciphertext = ? WHERE name = ?",
-                    (fernet.rotate(bytes(ciphertext)), name),
-                )
-            connection.commit()
-            return len(rows)
-        except sqlite3.OperationalError:
-            return 0
-        finally:
-            connection.close()
+        paths = [self.app.workspaces.org_api_path(org_id)] + [
+            path for _member, path in self.app.workspaces.member_apps_paths(org_id)
+        ]
+        count = 0
+        for path in paths:
+            if not path.exists():
+                continue
+            connection = sqlite3.connect(path, timeout=15)
+            try:
+                if not connection.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'airaapi_secrets'"
+                ).fetchone():
+                    continue  # no secret was ever saved there
+                # Any other failure propagates, so the old keys are not retired while a secret still needs them.
+                rows = connection.execute(
+                    "SELECT name, ciphertext FROM airaapi_secrets"
+                ).fetchall()
+                for name, ciphertext in rows:
+                    connection.execute(
+                        "UPDATE airaapi_secrets SET ciphertext = ? WHERE name = ?",
+                        (fernet.rotate(bytes(ciphertext)), name),
+                    )
+                connection.commit()
+                count += len(rows)
+            finally:
+                connection.close()
+        return count
 
     def _reencrypt_documents(self, org_id: str, fernet: Any) -> int:
         import sqlite3
@@ -905,7 +943,12 @@ class Lifecycle:
         if kind == "export":
             exports = []
             for membership in memberships:
-                if membership["role"] == "candidate":
+                if (
+                    membership["role"] == "candidate"
+                    or self.app.workspaces.member_apps_path(
+                        membership["org_id"], membership["member_id"]
+                    ).exists()
+                ):  # a candidate's workspace, or anyone's own business apps
                     exports.append(
                         self.create_export(
                             membership["org_id"],
@@ -971,6 +1014,8 @@ class Lifecycle:
         if membership["role"] == "candidate":
             self.app.workspaces.stop_automation(org_id, member_id)
             self.app.workspaces.delete(org_id, member_id)
+        # anyone's own business apps, whatever their role
+        self.app.workspaces.delete_member_apps(org_id, member_id)
         with self.db.write() as connection:
             connection.execute(
                 "UPDATE members SET status = 'removed', removed_at = ?, password_hash = '', email = ?, name = '' WHERE member_id = ? AND org_id = ?",

@@ -45,6 +45,14 @@ A missing feature carries `feature` instead of `limit` (for example `sources.lin
 
 Every route an app owns (`route_prefixes` in `aira/apps.py`: `/api/leads/*` for Leads, `/api/airaapi/*` and `/v1/*` for API) answers this until the organization has the app: included in its plan, bought under Apps (`POST /api/org/apps/<app>/subscribe`), or granted by an operator. `required_plan` names the cheapest plan that sells the app when the current one does not (the API app on Starter). Careers' routes and the organization's SerpApi key routes are never gated. A candidate's message states the organization's rule and carries no sales prompt.
 
+### `403 app_not_allowed`
+
+```json
+{"error": "Your organization has not given you Health. Ask an owner or admin.", "code": "app_not_allowed", "app": "care", "name": "Health"}
+```
+
+The organization has the app, but not for this member (`monosage_cloud/app_access.py`). Owners and admins say which roles may use each app (policy `app_roles`: `{app_id: [roles]}`, an app not listed is for every role) and give or take an app from one person (policy `member_apps`: `{member_id: {"allow": [...], "deny": [...]}}`). A deny wins, then an allow, then the role list. It applies to every route the app owns (the same `route_prefixes`, including a member's own business apps and the life apps), and Today and pulse leave out that app's cards. Careers is each candidate's own workspace: the candidate role always keeps it (a setting that takes it from candidates is `400`), while staff can be kept out of it. The account and organization pages (`/api/auth/*`, `/api/org/*`, Settings, Security) and the Business hub are not apps and are never closed, so an owner can always change the settings back. Changing what owners may open needs `members.manage_owners`. Operators under a support grant and API keys are bound by the subscription only.
+
 ### Read-only organizations
 
 A route marked **writes** is refused with `402 subscription_inactive` while the subscription is `read_only` or `cancelled`. Reads, exports and billing keep working. A `deleted` or suspended organization refuses everything.
@@ -94,7 +102,7 @@ Routes marked *no gate* work while a person has not yet verified their email or 
 | Method | Path | Auth | Flags | Body and query | What it does, and who may call it |
 | --- | --- | --- | --- | --- | --- |
 | GET | `/api/org` | member session |  |  | Organization, policy, branding, entitlements, pause state; billing summary for those who may see it. |
-| PATCH | `/api/org/policy` | member session | writes |  | Change policy. Validated against the plan: `402 plan_required` when a setting exceeds it. Audited with before and after. **Who:** `org.settings`: owner, admin. |
+| PATCH | `/api/org/policy` | member session | writes |  | Change policy. Validated against the plan: `402 plan_required` when a setting exceeds it. `app_roles` and `member_apps` (who may open which app, see `403 app_not_allowed`) are validated against the app catalog, the roles and the active members. Audited with before and after. **Who:** `org.settings`: owner, admin. |
 | PUT | `/api/org/branding` | member session | writes | body: `logo_url`, `name` | Logo (https only) and display name. Team and Enterprise. **Who:** `org.settings`. |
 | GET | `/api/org/dashboard` | member session |  |  | The dashboard for the caller's role: organization (plan and usage, pipeline, automation today, needs attention, coach workload, outcomes, audit), coach, candidate, or usage only (billing contact). **Who:** any role that has a dashboard. |
 | GET | `/api/org/banners` | member session | no verified-email gate |  | Paused, trial, billing state, over-limits, closure, active support access and platform announcements. |
@@ -105,6 +113,8 @@ Routes marked *no gate* work while a person has not yet verified their email or 
 | PATCH | `/api/org/members/{id}` | member session | writes | body: `role` | Change a member's role (`role`). Ends their sessions. A candidate cannot change role; the last owner cannot be demoted. **Who:** `members.manage`; owner changes need an owner. |
 | DELETE | `/api/org/members/{id}` | member session | writes |  | Remove a member. For a candidate, applies the candidate-data policy (export and delete, or archive). The last owner cannot be removed. **Who:** `members.manage`. |
 | POST | `/api/org/members/{id}/mfa-reset` | member session | writes |  | Clear a member's MFA after a lost device; ends their sessions. **Who:** `members.manage`. |
+| GET | `/api/org/members/{id}/apps` | member session |  |  | Every app with whether this member may open it (`allowed`), what their role gives (`by_role`), their own setting (`allow`, `deny` or `role`), whether the organization has it (`subscribed`) and `locked` (Careers for a candidate). **Who:** `members.manage`. |
+| PUT | `/api/org/members/{id}/apps` | member session | writes | body: `allow`, `deny` | One member's exceptions: apps given beyond their role (`allow`) and taken away (`deny`); empty lists return them to their role. A candidate cannot be denied Careers; an owner's apps need an owner. Audited as `member.app_access`. **Who:** `members.manage`. |
 | GET | `/api/org/invites` | member session |  | query: `all` | Pending invitations (`all=1` for history). **Who:** `members.manage`. |
 | POST | `/api/org/invites` | member session | writes | body: `coach_id`, `coach_scope`, `email`, `emails`, `role` | Invite one or several people (`email` or `emails`, `role`, optional `coach_id` and `coach_scope` for a candidate). Pending invitations count against seats. With several addresses the answer lists `invites` and `failed`. **Who:** `members.manage`. |
 | POST | `/api/org/invites/{id}/resend` | member session | writes |  | New single-use link and a new 7-day expiry. **Who:** `members.manage`. |
@@ -171,12 +181,13 @@ Routes marked *no gate* work while a person has not yet verified their email or 
 
 | Method | Path | Auth | Flags | Body and query | What it does, and who may call it |
 | --- | --- | --- | --- | --- | --- |
-| GET | `/api/apps` | member session |  |  | The app switcher: every app in the catalog with `enabled` and a `reason` when it is off, the account's address and the local installation (`AIRA_CLOUD_LOCAL_APP_URL`). **Who:** any member. |
-| GET | `/api/org/apps` | member session |  |  | The Apps page: each app with how the plan treats it (`included`, `addon`, `unavailable`), its status (`included`, `granted`, `active`, `cancelling`, `off`, `unavailable`), the price per candidate seat and what it costs this organization; `monthly_cents` and `addons_monthly_cents`. **Who:** owner and billing contact (`can_manage`); admin and auditor read. |
+| GET | `/api/apps` | member session |  |  | The app switcher: every app in the catalog with `enabled` and a `reason` when it is off, `allowed` (the organization has given it to this member; `allowed_reason` when not), the account's address and the local installation (`AIRA_CLOUD_LOCAL_APP_URL`). **Who:** any member. |
+| GET | `/api/org/apps` | member session |  |  | The Apps page: each app with how the plan treats it (`included`, `addon`, `unavailable`), its status (`included`, `granted`, `active`, `cancelling`, `off`, `unavailable`), the price per candidate seat and what it costs this organization; `monthly_cents` and `addons_monthly_cents`; `access` (each app's `roles`, null for everyone, and `locked_roles`), `roles`, `can_manage_access` and `can_manage_owners`. **Who:** owner and billing contact (`can_manage`); admin and auditor read. |
 | POST | `/api/org/apps/{value}/quote` | member session |  |  | What turning an app on costs: the monthly line and the prorated charge for the rest of this period. `402 plan_required` when the plan does not sell the app. **Who:** `billing.manage`. |
 | POST | `/api/org/apps/{value}/subscribe` | member session | writes |  | Turn an app on: billed per candidate seat with the plan, prorated now; `409 included|already_subscribed|granted|not_subscribed`. Audited as `billing.app_subscribed`. **Who:** `billing.manage`. |
 | POST | `/api/org/apps/{value}/unsubscribe` | member session | writes |  | Turn an app off at the period end; it keeps working until then. **Who:** `billing.manage`. |
 | POST | `/api/org/apps/{value}/keep` | member session | writes |  | Undo a cancellation that has not taken effect yet. **Who:** `billing.manage`. |
+| PUT | `/api/org/apps/{value}/access` | member session | writes | body: `roles` | Who may use an app: a list of roles, or null (or every role) for everyone. Careers must keep `candidate`; taking an app from owners, or giving it back, needs an owner. Audited as `org.app_access`. **Who:** `org.settings`. |
 | GET | `/api/platform/tenants/{id}/apps` | operator session |  |  | A tenant's apps as its Apps page shows them. **Who:** operator (`platform.tenants.read`). |
 | PUT | `/api/platform/tenants/{id}/apps/{value}` | operator session |  | body: `note`, `status` | Grant an app to a tenant at no charge (`status: granted`, with a `note`), also where the plan does not sell it, or take the grant back (`revoked`). Both audit logs record it. **Who:** `platform.billing.manage`. |
 

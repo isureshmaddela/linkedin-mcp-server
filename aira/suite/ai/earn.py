@@ -113,12 +113,14 @@ def next_steps(connection: sqlite3.Connection) -> list[dict[str, Any]]:
 def _month_by_app(
     connection: sqlite3.Connection, currency: str, start: str
 ) -> list[dict[str, Any]]:
-    rows = kit.fetch_all(
-        connection,
-        """SELECT app, SUM(amount_cents) AS total FROM suite_revenue WHERE voided_at IS NULL AND currency = ?
-        AND at >= ? GROUP BY app ORDER BY total DESC""",
-        (currency, start),
-    )
+    with kit.earnings_source(connection) as source:
+        kit.ensure_core(source)
+        rows = kit.fetch_all(
+            source,
+            """SELECT app, SUM(amount_cents) AS total FROM suite_revenue WHERE voided_at IS NULL AND currency = ?
+            AND at >= ? GROUP BY app ORDER BY total DESC""",
+            (currency, start),
+        )
     return [
         {"app": row["app"], "name": _name(row["app"]), "cents": int(row["total"] or 0)}
         for row in rows
@@ -161,12 +163,14 @@ def _goals(
 def recent_week_cents(connection: sqlite3.Connection, currency: str) -> int:
     """What the apps earned a week, on average, over the last four weeks (in one currency)."""
     since = kit.iso(kit.utcnow() - timedelta(days=PACE_DAYS))
-    total = kit.count(
-        connection,
-        """SELECT COALESCE(SUM(amount_cents), 0) FROM suite_revenue WHERE voided_at IS NULL AND currency = ?
-        AND at >= ?""",
-        (currency, since),
-    )
+    with kit.earnings_source(connection) as source:
+        kit.ensure_core(source)
+        total = kit.count(
+            source,
+            """SELECT COALESCE(SUM(amount_cents), 0) FROM suite_revenue WHERE voided_at IS NULL AND currency = ?
+            AND at >= ?""",
+            (currency, since),
+        )
     return round(total * 7 / PACE_DAYS)
 
 
@@ -272,7 +276,8 @@ def overview(connection: sqlite3.Connection, me: dict[str, Any]) -> dict[str, An
     }
     if not may:
         return data
-    revenue = kit.revenue(connection, months=6)
+    with kit.earnings_source(connection) as source:
+        revenue = kit.revenue(source, months=6)
     currency = revenue["currency"]
     start = kit.utcnow().date().replace(day=1).isoformat()
     counts = kit.outbox_counts(connection)

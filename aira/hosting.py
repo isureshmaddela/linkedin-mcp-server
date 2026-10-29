@@ -75,6 +75,12 @@ class Hooks:
     secret_key: Callable[[], bytes | None] | None = None
     # (model, prompt) -> parsed JSON object; replaces the local Ollama call
     model_json: Callable[[str, str], dict[str, Any]] | None = None
+    # () -> a connection to where the signed-in person's earnings are kept, when that is not the bound database
+    # (hosted: their own space while the request runs in the organization's life apps), or None
+    earnings_connection: Callable[[], Any] | None = None
+    # () -> the address of the Ollama server the platform runs its own model on, when the operator lets
+    # organizations build with it (Sites' "Ollama on the Monosage server"); None or "" when it does not
+    server_ollama_url: Callable[[], str] | None = None
     # (services, user) -> services with limits and policy applied
     wrap_services: Callable[[Any, Mapping[str, Any]], Any] | None = None
     # called with (workspace connection, submission row) after a new submission is recorded
@@ -102,6 +108,10 @@ class Hooks:
     # () -> the organization's mail for the bound member's recruiter email; replaces Business hub > Email of
     # the member's own workspace (a hosted member has none: the organization's is shared)
     outreach_mail: Callable[[], OutreachMail] | None = None
+    # () -> the mail server a business without its own sends customer email through, or None: hosted, a member's
+    # own space lends the organization's (the member's name, Reply-To their address); Business hub > Email of the
+    # bound database wins whenever it is set up (aira.suite.kit.outgoing_mail)
+    business_mail: Callable[[], OutreachMail | None] | None = None
 
     def reset(self) -> None:
         """Clear every hook (tests, and a shell shutting down)."""
@@ -110,6 +120,8 @@ class Hooks:
         self.settings_overlay = None
         self.serpapi_key = None
         self.secret_key = None
+        self.earnings_connection = None
+        self.server_ollama_url = None
         self.model_json = None
         self.wrap_services = None
         self.start_background = None
@@ -121,6 +133,7 @@ class Hooks:
         self.search_credits = None
         self.browser_time_cap = None
         self.outreach_mail = None
+        self.business_mail = None
         self.submission_listeners.clear()
 
 

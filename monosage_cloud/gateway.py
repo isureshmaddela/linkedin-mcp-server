@@ -32,7 +32,7 @@ from aira.security import (
     same_origin,
 )
 from aira.apps import app_of_path
-from monosage_cloud import context, redaction
+from monosage_cloud import context, redaction, spaces
 from monosage_cloud.db import clear_scope, set_scope
 from monosage_cloud.errors import (
     CloudError,
@@ -447,6 +447,7 @@ class Gateway:
                         route.name,
                         org_id,
                         "candidate" if principal.role == CANDIDATE else "staff",
+                        principal,
                     )
         elif route.auth == "public" and route.method in MUTATING:
             allowed, retry = self.auth_limiter.check(f"auth:{request.client_ip}")
@@ -519,9 +520,10 @@ class Gateway:
             else {}
         )
         entitlements = self.app.entitlements.require_state(org_id, write=rule.write)
-        self._require_app_for(request.path, name, org_id, audience)
+        self._require_app_for(request.path, name, org_id, audience, principal)
 
         candidate_id = ""
+        space = ""
         if rule.scope == "candidate":
             candidate_id = self._target_candidate(request, principal)
             self.app.authz.require(
@@ -530,7 +532,15 @@ class Gateway:
             if rule.write:
                 self._require_active_workspace(org_id, candidate_id)
         else:
-            self.app.authz.require(principal, rule.permission)
+            policy = self.app.tenancy.policy(org_id)
+            space = spaces.choose(request.headers, principal, policy, request.path)
+            # In a member's own space they are its owner; in the organization's apps a member it named works as its
+            # staff do. Everyone else needs the organization's suite permissions.
+            if not (
+                space == spaces.MEMBER
+                or (space == spaces.COMPANY and spaces.named_member(principal, policy))
+            ):
+                self.app.authz.require(principal, rule.permission)
         if rule.feature:
             self.app.entitlements.require_feature(
                 org_id,
@@ -599,9 +609,19 @@ class Gateway:
                         )
                     )
             else:
-                with self.app.workspaces.bind_org_api(
-                    org_id, principal=principal, correlation_id=correlation
-                ) as user:
+                binding = (
+                    self.app.workspaces.bind_member_apps(
+                        org_id,
+                        principal.member_id,
+                        principal=principal,
+                        correlation_id=correlation,
+                    )
+                    if space == spaces.MEMBER
+                    else self.app.workspaces.bind_org_api(
+                        org_id, principal=principal, correlation_id=correlation
+                    )
+                )
+                with binding as user:
                     ctx.state["user"] = user
                     if hook and hook.inside:
                         hook.inside(ctx)
@@ -726,13 +746,23 @@ class Gateway:
     # ------------------------------------------------------------------ helpers the hooks use
 
     def _require_app_for(
-        self, path: str, route_name: str, org_id: str, audience: str
+        self,
+        path: str,
+        route_name: str,
+        org_id: str,
+        audience: str,
+        principal: Principal | None = None,
     ) -> None:
-        """A route an app owns is refused with ``402 app_required`` until the organization has that app."""
+        """A route an app owns is refused with ``402 app_required`` until the organization has that app, and with
+        ``403 app_not_allowed`` when the organization has not given it to this member (app_access.py)."""
         owner = app_of_path(path)
-        if owner is None or not owner.feature or route_name in APP_FREE_ROUTES:
+        if owner is None or route_name in APP_FREE_ROUTES:
             return
-        self.app.entitlements.require_app(org_id, owner.id, audience=audience)
+        if owner.feature:
+            self.app.entitlements.require_app(org_id, owner.id, audience=audience)
+        from monosage_cloud import app_access
+
+        app_access.require(self.app.tenancy.policy(org_id), principal, owner.id)
 
     def _own_workspace(self, request: HttpRequest, principal: Principal) -> Principal:
         """An owner or admin who names their own workspace acts as its candidate for this request.

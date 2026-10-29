@@ -136,6 +136,13 @@ def me_payload(app: Any, principal: Principal) -> dict[str, Any]:
         )
     elif not principal.is_operator:
         payload["personal_workspace"] = app.tenancy.personal_workspace(principal)
+    if not principal.is_operator:
+        from monosage_cloud import spaces
+
+        # Whose business apps the browser opens: the member's own, and whether they may open the organization's.
+        payload["spaces"] = spaces.describe(
+            principal, app.tenancy.policy(principal.org_id)
+        )
     return payload
 
 

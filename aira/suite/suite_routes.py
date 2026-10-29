@@ -119,7 +119,8 @@ def home(request: Request) -> tuple[int, dict[str, Any]]:
             "apps": _apps_summary(connection),
             "activity": kit.activity(connection, limit=20),
             "outbox": kit.outbox_counts(connection),
-            "email_ready": bool(kit.email_settings(connection)["smtp_host"]),
+            "email_ready": bool(kit.email_settings(connection)["smtp_host"])
+            or kit.lent_mail() is not None,
         }
         data["goal"] = _goal(connection, data["revenue"]["this_month_cents"])
     return 200, data
@@ -242,7 +243,17 @@ def _email_view(request: Request, connection: Any) -> dict[str, Any]:
             request.secret_store.get(connection, kit.SMTP_PASSWORD_SECRET)
         ),
         "ready": bool(settings["smtp_host"] and settings["from_email"]),
+        # hosted, a member's own space without its own mail server: how its email goes out instead (no secrets)
+        "lent": _lent_view(),
     }
+
+
+def _lent_view() -> dict[str, Any] | None:
+    lent = kit.lent_mail()
+    if lent is None:
+        return None
+    keys = ("from_name", "from_email", "reply_to")
+    return {key: lent.settings.get(key, "") for key in keys}
 
 
 @aira_route("GET", f"{BASE}/email")
@@ -323,8 +334,8 @@ def outbox_edit(request: Request) -> tuple[int, dict[str, Any]]:
 def outbox_send(request: Request) -> tuple[int, dict[str, Any]]:
     _grown_up(request)
     with request.connect() as connection:
-        password = request.secret_store.get(connection, kit.SMTP_PASSWORD_SECRET) or ""
-        result = kit.send_outbox(connection, password)
+        settings, password, _lent = kit.outgoing_mail(connection, request.secret_store)
+        result = kit.send_outbox(connection, password, mail_settings=settings)
         result["counts"] = kit.outbox_counts(connection)
     request.audit(
         "suite.outbox_send",

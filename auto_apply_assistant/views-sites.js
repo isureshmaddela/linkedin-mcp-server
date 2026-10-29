@@ -146,7 +146,7 @@
   async function editProvider(p, providers, after) {
     const fields = [];
     if (p.kind !== "builtin" && p.kind !== "platform") {
-      fields.push({ name: "base_url", label: "Address", placeholder: p.base_url || "https://…/v1", hint: p.local ? "Where the server runs on this computer." : p.id === "custom" ? "The server's OpenAI-compatible address, ending in /v1." : "Leave as it is unless you use a proxy." });
+      if (!p.fixed_address) fields.push({ name: "base_url", label: "Address", placeholder: p.base_url || "https://…/v1", hint: p.local ? "Where the server runs on this computer." : p.id === "custom" ? "The server's OpenAI-compatible address, ending in /v1." : "Leave as it is unless you use a proxy." });
       fields.push({ name: "model", label: "Model", placeholder: p.default_model || "model name", hint: (p.models || []).length ? `For example ${p.models.slice(0, 3).join(", ")}.` : "The model's name on that server." });
     }
     if (p.needs_key || p.key_optional) fields.push({ name: "api_key", label: p.configured ? `API key (saved, ends in ${p.last4})` : "API key", type: "password", placeholder: p.configured ? "Leave empty to keep the saved key" : "Paste the key", hint: p.key_url ? `Get one at ${p.key_url.replace(/^https:\/\//, "")}` : "" });

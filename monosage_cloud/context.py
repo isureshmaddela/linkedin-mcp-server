@@ -24,10 +24,12 @@ _local = threading.local()
 class TenantContext:
     org_id: str
     candidate_id: str = ""
-    kind: str = "request"  # request | worker | org_api | system
+    kind: str = "request"  # request | worker | org_api | member_apps | system
     principal: Principal | None = None
     correlation_id: str = ""
     audience: str = "staff"
+    # member_apps: whose own business apps the request runs in (their space, their earnings)
+    member_id: str = ""
     # state a run builds up while it works (reservations, timings)
     scratch: dict[str, Any] = field(default_factory=dict)
 

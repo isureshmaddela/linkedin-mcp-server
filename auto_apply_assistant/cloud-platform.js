@@ -157,6 +157,7 @@
   async function signOut() {
     try { await api("/api/platform/auth/logout", { method: "POST", body: {} }); } catch { /* the session may already be gone */ }
     sessionStorage.removeItem(SUPPORT_KEY);
+    Aira.remember("operatorConsole", false);
     location.hash = "#/platform";
     location.reload();
   }
@@ -194,6 +195,7 @@
   function showConsole() {
     P.active = true;
     Aira.state.platformMode = true;
+    Aira.remember("operatorConsole", true); // the main address opens the console on this browser (cloud-spaces.js)
     P.items = NAV_DEFS.filter((item) => !item.admin || isAdmin());
     Aira.state.user = { email: P.me.email, kind: "operator", role: P.me.role };
     $("authScreen").hidden = true;

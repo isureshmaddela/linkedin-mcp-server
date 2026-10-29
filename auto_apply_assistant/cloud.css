@@ -4,6 +4,18 @@
 /* ---- banners above the page (acting for, paused, trial, billing, announcements) ------------------------------- */
 .cloud-slot { display: grid; gap: 8px; padding: 10px clamp(12px, 3vw, 28px) 0; }
 .cloud-slot[hidden] { display: none; }
+/* Wide screens lay the frame out as one grid (the top bar across, the menu left, the page right; .main is
+   display: contents): the banner slots get rows of their own above the page, right of the menu, instead of falling
+   into the menu's column below the fold. An empty (hidden) slot's row has no height. */
+@media (min-width: 901px) {
+  .app { grid-template-rows: var(--topbar) auto auto auto minmax(0, 1fr); }
+  .app .sidebar { grid-row: 2 / -1; }
+  .app > .main > .cloud-slot { grid-column: 2; padding: 12px 24px 0 12px; }
+  .app > .main > #cloudBanners { grid-row: 2; }
+  .app > .main > #cloudActing { grid-row: 3; }
+  .app > .main > #cloudSpace { grid-row: 4; }
+  .app > .main > .content { grid-row: 5; }
+}
 .cloud-banner { display: flex; align-items: center; flex-wrap: wrap; gap: 8px 14px; padding: 9px 14px; border: 1px solid var(--line-strong); border-left-width: 4px; border-radius: var(--radius-sm); background: var(--surface); font-size: 13.5px; }
 .cloud-banner > strong { flex: none; }
 .cloud-banner > span { flex: 1 1 240px; min-width: 0; color: var(--ink-2); overflow-wrap: anywhere; }
@@ -102,3 +114,29 @@
 
 /* organization-branded sign-in */
 .ca-org-logo { width: 40px; height: 40px; border-radius: 10px; object-fit: contain; background: var(--surface, #fff); }
+
+/* Spaces (cloud-spaces.js): whose business a business app is open in. A pill in the top bar on wide screens; under
+   the bar a strip that warns while the organization's apps are open (and, on narrow screens, carries the switch). */
+.space-switch { display: inline-flex; align-items: center; gap: 2px; flex: none; padding: 3px; border: 1px solid var(--line); border-radius: 999px; background: var(--surface-2); }
+.space-switch[hidden] { display: none; }
+.space-opt { min-height: 30px; max-width: 160px; padding: 0 12px; border: 0; border-radius: 999px; background: transparent; color: var(--ink-2); font: inherit; font-size: 13px; font-weight: 700; cursor: pointer; }
+.space-opt span { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.space-opt:hover { background: var(--surface-3); color: var(--ink); }
+.space-opt:focus-visible { outline: 2px solid var(--app); outline-offset: 1px; }
+.space-opt[aria-pressed="true"] { background: var(--brand-soft); color: var(--brand-ink); }
+.space-opt[data-space="company"][aria-pressed="true"] { background: var(--warning-soft); color: var(--warning); }
+.space-badge { display: inline-flex; align-items: center; min-height: 28px; padding: 0 10px; color: var(--brand-ink); font-size: 12.5px; font-weight: 700; white-space: nowrap; }
+body[data-space="company"] .topbar { box-shadow: inset 0 -3px 0 var(--warning); }
+.cloud-banner.space-strip[data-space="company"] { border-left-color: var(--warning); background: var(--warning-soft); }
+.cloud-banner.space-strip[data-space="member"] { border-left-color: var(--brand); background: var(--brand-soft); }
+@media (min-width: 1101px) { .cloud-banner.space-strip[data-space="member"] { display: none; } }
+@media (max-width: 1100px) { .space-switch { display: none !important; } }
+
+/* The account menu: the person's role and organization, each on its own line. */
+.account-who #accountMeta { display: grid; gap: 4px; }
+.account-who .account-role { justify-self: start; padding: 1px 8px; border-radius: 999px; background: var(--brand-soft); color: var(--brand-ink); font-size: 11.5px; font-weight: 700; }
+.account-who .account-org { overflow-wrap: anywhere; color: var(--ink-2); }
+
+/* Home's hosted cards: what the member earned this month, and their part of the organization. */
+.space-today { margin-bottom: 16px; }
+.space-earn-value { margin: 4px 0 2px; font: 700 30px/1.15 var(--font-display, inherit); color: var(--ink); }
