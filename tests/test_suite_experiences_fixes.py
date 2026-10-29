@@ -110,15 +110,15 @@ def test_set_default_index_keeps_an_index_installed_over_the_old_default():
 def test_a_hosted_server_started_like_cmd_serve_keeps_the_organization_index(
     tmp_path,
 ):
-    """The exact import order of ``python -m aira_cloud serve``: CloudApp, then Gateway (which imports the
+    """The exact import order of ``python -m monosage_cloud serve``: CloudApp, then Gateway (which imports the
     single-user module for the first time). Run in a fresh interpreter, where that import really happens."""
     script = (
         "from pathlib import Path\n"
-        "from aira_cloud.app import CloudApp\n"
-        "from aira_cloud.config import CloudConfig\n"
+        "from monosage_cloud.app import CloudApp\n"
+        "from monosage_cloud.config import CloudConfig\n"
         "from aira.suite import public\n"
         f"app = CloudApp(CloudConfig(data_root=Path(r'{tmp_path / 'cloud'}'), base_url='http://127.0.0.1:8781', master_key=''))\n"
-        "from aira_cloud.gateway import Gateway\n"
+        "from monosage_cloud.gateway import Gateway\n"
         "Gateway(app)\n"
         "print(type(public._index).__name__)\n"
     )

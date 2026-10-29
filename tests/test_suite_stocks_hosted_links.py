@@ -1,6 +1,6 @@
 """Stocks, hosted: an analyst's public page works on a real hosted server, whatever order the modules load in.
 
-``aira_cloud serve`` imports the gateway, builds the ``CloudApp`` (which installs the organization's public-link
+``monosage_cloud serve`` imports the gateway, builds the ``CloudApp`` (which installs the organization's public-link
 index) and only then builds the ``Gateway``, whose first import of the local build used to put the single-user
 index back. Links made after that answered 404 to every visitor. The other hosted tests import the local build
 first, which hides it, so this one runs the server's own order in a fresh interpreter.
@@ -20,7 +20,7 @@ SCRIPT = r"""
 import json, sys
 from pathlib import Path
 
-from aira_cloud.gateway import Gateway  # what cmd_serve imports first
+from monosage_cloud.gateway import Gateway  # what cmd_serve imports first
 assert "auto_apply_assistant" not in sys.modules, "the local build must not be imported yet"
 from cloud_support import Browser, build_org, make_app, sign_in
 from aira.suite import kit, public
@@ -91,7 +91,7 @@ def test_the_workaround_keeps_a_hosted_index_and_still_changes_the_default(
 ):
     from aira.suite import public
     from aira.suite.stocks import links
-    from aira_cloud.public_links import HostedPublicIndex
+    from monosage_cloud.public_links import HostedPublicIndex
 
     def buggy(
         index,

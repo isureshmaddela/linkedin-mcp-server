@@ -24,7 +24,7 @@ from cloud_support import (
 from test_career_copilot import PROFILE, RESUME
 
 import auto_apply_assistant as local
-from aira_cloud.worker import Skip, Worker
+from monosage_cloud.worker import Skip, Worker
 from linkedin_mcp_server.job_sources import JobPosting, JobSearchResult
 
 DESCRIPTION = (

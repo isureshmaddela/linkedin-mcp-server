@@ -31,8 +31,8 @@ from test_cloud_leads import (  # noqa: F401
 )
 
 from aira.leads import mail
-from aira_cloud import plans
-from aira_cloud.policy import POLICY
+from monosage_cloud import plans
+from monosage_cloud.policy import POLICY
 
 PASSWORD = "s3cret-Sm7p-passw0rd"
 SENDER = {

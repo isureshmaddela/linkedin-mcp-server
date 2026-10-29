@@ -16,7 +16,7 @@ import pytest
 from cloud_support import Browser, audit_actions, build_org, make_app, sign_in
 
 from aira.hosting import HOOKS
-from aira_cloud.agent import sign
+from monosage_cloud.agent import sign
 
 SECRET = "launch-secret-" + "x" * 30
 LOCAL = "http://127.0.0.1:8765"

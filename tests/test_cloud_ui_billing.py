@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from cloud_support import PASSWORD, Browser, build_org, sign_in  # noqa: F401
 
-from aira_cloud import crypto
+from monosage_cloud import crypto
 
 
 def operator_browser(

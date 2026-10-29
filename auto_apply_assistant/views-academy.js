@@ -68,7 +68,7 @@
     if (me && me.age_group === "child") return false;
     return !(Aira.apps && typeof Aira.apps.blocked === "function" && Aira.apps.blocked("academy"));
   };
-  // Who may create here: in the hosted build an auditor or a billing contact only reads it (aira_cloud/rbac.py:
+  // Who may create here: in the hosted build an auditor or a billing contact only reads it (monosage_cloud/rbac.py:
   // suite.manage).
   xp.canManage = () => {
     if (!xp.canOpen()) return false;

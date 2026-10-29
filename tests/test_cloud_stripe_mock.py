@@ -17,8 +17,8 @@ import uuid
 
 import pytest
 
-from aira_cloud.billing_providers import StripeProvider
-from aira_cloud.config import CloudConfig, FakeClock
+from monosage_cloud.billing_providers import StripeProvider
+from monosage_cloud.config import CloudConfig, FakeClock
 
 IMAGE = "stripe/stripe-mock:latest"
 

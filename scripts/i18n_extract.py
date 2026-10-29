@@ -3,7 +3,7 @@
 Sources:
 * the browser screens (``auto_apply_assistant/*.js``): string and template literals that read as text;
   ``${...}`` in a template becomes ``{0}``, ``{1}``...
-* the server (``aira/``, ``aira_cloud/``, ``auto_apply_assistant.py``): error messages people read, and the
+* the server (``aira/``, ``monosage_cloud/``, ``auto_apply_assistant.py``): error messages people read, and the
   values of keys and arguments that are shown on screen (``title``, ``text``, ``label``, ``empty`` ...);
   an f-string's ``{expression}`` becomes ``{0}``...
 * the app catalog (names, taglines, descriptions, highlights) and common status words.
@@ -512,7 +512,7 @@ def collect() -> list[str]:
     python_files = [
         ROOT / "auto_apply_assistant.py",
         *sorted((ROOT / "aira").rglob("*.py")),
-        *sorted((ROOT / "aira_cloud").rglob("*.py")),
+        *sorted((ROOT / "monosage_cloud").rglob("*.py")),
     ]
     for path in python_files:
         if (

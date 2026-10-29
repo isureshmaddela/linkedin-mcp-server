@@ -5,8 +5,11 @@
   const BASE = "/api/autopilot/workday-accounts";
 
   // Settings asks every registered file for its cards: Aira.settingsCards("integrations") -> [elements].
+  // In the hosted build the accounts are the candidate's own (credentials.manage): staff working in a candidate's
+  // workspace never see them, while an owner or admin in their own workspace does.
   const previous = Aira.settingsCards;
-  Aira.settingsCards = (tab) => [...(previous ? previous(tab) : []), ...(tab === "integrations" && !Aira.cloud ? [workdayCard()] : [])];
+  const allowed = () => !Aira.cloud || (typeof Aira.cloud.can === "function" && Aira.cloud.can("credentials.manage"));
+  Aira.settingsCards = (tab) => [...(previous ? previous(tab) : []), ...(tab === "integrations" && allowed() ? [workdayCard()] : [])];
 
   function workdayCard() {
     const body = h("div", {}, ui.skeleton(2));

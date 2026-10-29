@@ -4,7 +4,7 @@
  * registered: client id, secret shown once, redirect addresses, scopes), tokens (personal access tokens for scripts
  * and no-code tools), webhooks (signed event posts, deliveries), connected (apps you allowed) and reference (every
  * route a token can call, with its scope; the OpenAPI file). Runs on /api/developers/* and /oauth/* (the hosted
- * build: aira_cloud/routes/developers.py). The single-user build has no developer platform and says so.
+ * build: monosage_cloud/routes/developers.py). The single-user build has no developer platform and says so.
  */
 "use strict";
 (() => {

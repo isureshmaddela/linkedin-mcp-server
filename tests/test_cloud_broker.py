@@ -18,8 +18,8 @@ from patchright.sync_api import sync_playwright
 from websockets.sync.client import connect
 
 from aira.hosting import HOOKS
-from aira_cloud.gateway import Gateway, make_server
-from aira_cloud.streaming import Broker, clamp_size, host_allowed, navigation_hosts
+from monosage_cloud.gateway import Gateway, make_server
+from monosage_cloud.streaming import Broker, clamp_size, host_allowed, navigation_hosts
 
 SECRET = "b" * 40
 BROKER_SECRET = "k" * 40
@@ -413,7 +413,7 @@ def test_navigation_away_from_the_allowed_hosts_is_blocked_and_leaving_ends_the_
 
 
 def test_only_http_to_allowed_hosts_may_be_navigated_to(tmp_path):
-    from aira_cloud.config import CloudConfig
+    from monosage_cloud.config import CloudConfig
 
     config = CloudConfig(
         data_root=tmp_path, broker_allowed_hosts=("accounts.example.test",)
@@ -532,13 +532,13 @@ def test_one_session_per_candidate_and_the_host_cap_is_enforced(make_stack):
     assert message["type"] == "error" and message["code"] == "busy"
     refused.close()
     # refused before the link was used: it still works when there is room
-    from aira_cloud.db import one as one_row
+    from monosage_cloud.db import one as one_row
 
     with stack.app.db.read() as connection:
         row = one_row(
             connection,
             "SELECT state FROM remote_login_sessions WHERE token_hash = ?",
-            (__import__("aira_cloud.crypto", fromlist=["x"]).hash_token(second),),
+            (__import__("monosage_cloud.crypto", fromlist=["x"]).hash_token(second),),
         )
     assert row["state"] == "pending"
     one.close()

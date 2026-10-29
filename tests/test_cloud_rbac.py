@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from cloud_support import audit_actions, build_org  # noqa: F401
 
-from aira_cloud.errors import Forbidden, NotFound, PlanRequired
+from monosage_cloud.errors import Forbidden, NotFound, PlanRequired
 
 ORG_LEVEL = {
     # permission: roles that hold it

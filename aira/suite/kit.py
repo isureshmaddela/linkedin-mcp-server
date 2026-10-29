@@ -1048,14 +1048,18 @@ def send_outbox(
     limit: int = 25,
     sender: Callable[..., None] | None = None,
     ids: Sequence[str] | None = None,
+    mail_settings: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Send approved messages whose time has come, through the business's own mail server.
 
-    ``ids`` limits the pass to those messages (an app sending what the person just approved)."""
+    ``ids`` limits the pass to those messages (an app sending what the person just approved). ``mail_settings``
+    replaces this database's Business hub > Email (a hosted member sending through the organization's)."""
     from aira.leads import mail as transport
 
     ensure_core(connection)
-    settings = email_settings(connection)
+    settings = (
+        dict(mail_settings) if mail_settings is not None else email_settings(connection)
+    )
     missing = [
         label
         for label, key in (

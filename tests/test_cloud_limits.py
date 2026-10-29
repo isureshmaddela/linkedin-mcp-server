@@ -8,7 +8,7 @@ import pytest
 from cloud_support import build_org, local_module, seed_workspace, sign_in
 from test_cloud_platform import operator_browser, principal_of
 
-from aira_cloud.errors import ValidationFailed
+from monosage_cloud.errors import ValidationFailed
 
 
 def enterprise(cloud, name="Contract Org", slug="contract.test", **overrides):

@@ -128,7 +128,7 @@ plus each section's own.
 
 ## Known shared issue (worked around here)
 
-Hosted servers started with `python -m aira_cloud serve` build the `CloudApp` (which installs the organization's
+Hosted servers started with `python -m monosage_cloud serve` build the `CloudApp` (which installs the organization's
 public-link index) before the gateway first imports the single-user module, whose `public.set_default_index(...)`
 used to make the single-user index current again, so every public link made afterwards answered 404.
 `aira/suite/academy/__init__.py` wraps `set_default_index` so it keeps an index installed over the old default (the

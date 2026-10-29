@@ -10,8 +10,8 @@ grant it; the app itself only has to be its own domain. This guide is the contra
 | Concern | Where | What you do |
 | --- | --- | --- |
 | Catalog, switcher, keyboard (`g` + digit) | `aira/apps.py` (`INDUSTRY_APPS`), `app.js` (`APPS`, `NAV`) | nothing: your app is listed with id, name, icon, section `#/<id>` |
-| Subscriptions and gating | `aira_cloud/plans.py` `APP_PRICING`, gateway `402 app_required` on `/api/<id>/*` | nothing |
-| Hosted permissions | `aira_cloud/policy.py` `suite_rules()` | GET routes need `suite.read`, others `suite.manage`; mark a non-GET read with `HOSTED_RULES = {"handler": "read"}` |
+| Subscriptions and gating | `monosage_cloud/plans.py` `APP_PRICING`, gateway `402 app_required` on `/api/<id>/*` | nothing |
+| Hosted permissions | `monosage_cloud/policy.py` `suite_rules()` | GET routes need `suite.read`, others `suite.manage`; mark a non-GET read with `HOSTED_RULES = {"handler": "read"}` |
 | Where data lives | `request.connect()` | the person's database (single-user build) or the organization's shared database (hosted) |
 | Shared tables | `aira/suite/kit.py` | business profile, activity feed, revenue ledger, settings, email outbox |
 | Public pages for customers | `aira/suite/public.py`, `public.html`, `public.js` | register a page kind and its actions; write a renderer |
@@ -36,7 +36,7 @@ The route module **must** be named `<id>_routes.py` (route handler names are `ai
 `aira/suite/__init__.py` already imports `aira.suite.<id>.<id>_routes` when it exists; `index.html` and
 `public.html` already load `views-<id>.js` and `public-<id>.js`. Do not edit shared files (`app.js`,
 `index.html`, `public.html`, `app.css`, `suite-kit.js`, `public.js`, `public.css`, `kit.py`, `public.py`,
-`suite_routes.py`, `aira/apps.py`, `aira_cloud/*`). Put app-only styles in your view file as inline style objects,
+`suite_routes.py`, `aira/apps.py`, `monosage_cloud/*`). Put app-only styles in your view file as inline style objects,
 or use the kit's classes. If you need a platform change, say so in your report instead of making it.
 
 ## Backend

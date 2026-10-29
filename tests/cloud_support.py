@@ -12,11 +12,11 @@ import pytest
 
 import pg_support
 from aira.hosting import HOOKS
-from aira_cloud import crypto
-from aira_cloud.app import CloudApp
-from aira_cloud.config import CloudConfig, FakeClock
-from aira_cloud.mail import link_from
-from aira_cloud.rbac import Principal
+from monosage_cloud import crypto
+from monosage_cloud.app import CloudApp
+from monosage_cloud.config import CloudConfig, FakeClock
+from monosage_cloud.mail import link_from
+from monosage_cloud.rbac import Principal
 
 PASSWORD = "correct horse battery staple"
 START = 1_790_000_000  # 2026-09-21, a fixed point so month and day keys are stable
@@ -175,7 +175,7 @@ def build_org(
 def subscribe_apps(app: CloudApp, owner: Principal, apps: str | list[str]) -> list[str]:
     """Turn on app add-ons for the owner's organization (``"all"`` = every add-on the plan sells); returns the ids."""
     from aira.apps import APP_IDS
-    from aira_cloud.plans import app_state
+    from monosage_cloud.plans import app_state
 
     plan_id = app.billing.subscription(owner.org_id)["plan_id"]
     wanted = (
@@ -265,7 +265,7 @@ class Browser:
     """A cookie jar that calls the gateway directly: a person (or an API client) using the hosted product."""
 
     def __init__(self, app: CloudApp, *, operator: bool = False) -> None:
-        from aira_cloud.gateway import Gateway
+        from monosage_cloud.gateway import Gateway
 
         self.app = app
         self.gateway = getattr(app, "gateway", None) or Gateway(app)
@@ -282,7 +282,7 @@ class Browser:
         raw: bool = False,
         as_candidate: str = "",
     ) -> tuple[int, Any]:
-        from aira_cloud.webio import HttpRequest
+        from monosage_cloud.webio import HttpRequest
 
         sent = {
             "Host": "127.0.0.1:8780",

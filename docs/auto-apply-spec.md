@@ -129,6 +129,12 @@ candidate accounts, and an application is a sequence of pages.
 * API (session, owner-only, same-origin): `GET/POST /api/autopilot/workday-accounts`,
   `PATCH/DELETE /api/autopilot/workday-accounts/<host>`, `POST /api/autopilot/workday-settings`. UI: Settings >
   Integrations > Workday accounts (`views-workday.js`, via `Aira.settingsCards(tab)`).
+* Hosted build (`monosage_cloud`): the same routes run in the candidate's own workspace under the candidate-only
+  permission `credentials.manage` (the candidate, or an owner or admin in their personal workspace; never a coach,
+  an administrator, an auditor or a support grant, and the card is hidden from them). The password is encrypted
+  under the organization's data key (`HOOKS.secret_key`, wrapped by the KMS master key), re-encrypted when the
+  organization's keys rotate, and left out of every export. The worker binds the candidate's workspace and runs
+  the same apply code, so hosted auto-apply signs in with the saved account.
 * Limits: English step names and notices; hierarchical dropdowns and multi-select prompt inputs are not chosen
   automatically (they hold as questions); tests run against `tests/workday_stub.py`, never a real tenant.
 

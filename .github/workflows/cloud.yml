@@ -10,7 +10,7 @@ on:
   push:
     branches: [main]
     paths:
-      - "aira_cloud/**"
+      - "monosage_cloud/**"
       - "aira/**"
       - "auto_apply_assistant.py"
       - "auto_apply_assistant/**"
@@ -42,14 +42,14 @@ jobs:
       - run: uv sync --group dev --extra cloud
 
       - name: Ruff
-        run: uv run ruff check aira_cloud tests/test_cloud_*.py tests/cloud_support.py
+        run: uv run ruff check monosage_cloud tests/test_cloud_*.py tests/cloud_support.py
 
       - name: Ruff format
-        run: uv run ruff format --check aira_cloud tests/test_cloud_*.py tests/cloud_support.py
+        run: uv run ruff format --check monosage_cloud tests/test_cloud_*.py tests/cloud_support.py
         continue-on-error: true   # formatting is advisory until the package is formatted once
 
       - name: Type check
-        run: uv run ty check aira_cloud
+        run: uv run ty check monosage_cloud
 
       - run: uv cache prune --ci
 

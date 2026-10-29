@@ -2,6 +2,29 @@
 
 Aira is organised the way a Google account is: one sign-in, several apps, an app switcher to move between them, and an account page where the apps are managed.
 
+## Monosage and Monosage Cloud (8765 and 8780)
+
+The same apps run in two builds of one code base:
+
+| | Monosage (single-user) | Monosage Cloud (hosted) |
+| --- | --- | --- |
+| Address | `http://127.0.0.1:8765` | `http://127.0.0.1:8780` |
+| Started with | `scripts/start_monosage.ps1` or `python auto_apply_assistant.py` | `scripts/start_monosage_cloud.ps1` or `python -m monosage_cloud serve --worker` |
+| For | one person or household on their own computer | many organizations: owners, admins, coaches, candidates, billing, auditors |
+| Data | `~/.linkedin-mcp/auto_apply` (one database per local account) | `.aira-cloud/`: a control plane, one workspace per member, one database per organization |
+| Apps | every app | every app; the organization's plan and its admin decide which are on |
+
+Monosage Cloud has everything the single-user build has. Where a feature needs something per organization it is
+set there: the AI model (Settings > Integrations: the hosted model, Claude with the organization's key, or its own
+endpoint), the mail server recruiter emails go out through (Business hub > Email), and plan limits. Workday sign-ins
+stay with the candidate, encrypted with the organization's key. So one address is enough: run Monosage Cloud and
+bring the single-user data in once with `python -m monosage_cloud import-local --email you@example.com` (or
+`start_monosage_cloud.ps1 -ImportLocal you@example.com`). It copies the local account with the same email into that
+member's workspace (careers records, documents and the apps' data, with the local profile joined to theirs) and says
+what it leaves behind: keys encrypted with the local key, the API console's history, shared public links, and the
+Social and Videos accounts. The single-user build keeps working for anyone who wants Monosage only on their own
+computer, offline from any organization.
+
 ## The pieces
 
 | Piece | What it is | Where |
@@ -14,7 +37,7 @@ Aira is organised the way a Google account is: one sign-in, several apps, an app
 | **Account menu** | Your email and organization, "Manage your account", switch organization, sign out. | top bar, every screen |
 | **Apps page** | Where an admin turns apps on and off for the organization. Each app has a price per seat and a short description; subscribing changes the organization's bill with the same proration as a seat change. | `#/org/apps` |
 | **Superadmin** | The platform console over every account: tenants, plans, flags, support access, and which apps each tenant has (including overrides). | `#/platform` (operators) |
-| **A sub-app installation** | The single-user build (`http://127.0.0.1:8765/`) is one installation of the apps on your own machine. It can stand alone, or sign in with your Aira account so the account at `8780` opens it without a second password. | `8765` |
+| **A sub-app installation** | The single-user build (`http://127.0.0.1:8765/`) is one installation of the apps on your own machine. It can stand alone, or sign in with your Monosage account so the account at `8780` opens it without a second password. | `8765` |
 
 The catalog of apps is `aira/apps.py`, read by both builds. Each app names its sections (the left menu), the API paths it owns (the hosted gateway refuses them when the organization has not subscribed) and the plan features it carries (Marketing carries `leads`).
 
@@ -145,12 +168,12 @@ platform console under **Apps** (`#/platform/apps`; `GET/PUT/DELETE /api/platfor
 - Careers is part of every plan and cannot be priced or switched off. Every change is in the platform audit log
   (`app.settings_update`, `app.settings_reset`) with the old and new prices and the reason.
 
-## Sign in with your Aira account (8780 → 8765)
+## Sign in with your Monosage Cloud account (8780 → 8765)
 
 The single-user build keeps its own accounts and database. To make it part of the account:
 
 1. The local build is told where the account lives (`AIRA_ACCOUNT_URL`, for example `http://127.0.0.1:8780`) and shares a secret with it: `AIRA_ACCOUNT_SECRET` on the local side must equal `AIRA_CLOUD_LAUNCH_SECRET` on the account (32 or more random characters). The account is told where the local installation is: `AIRA_CLOUD_LOCAL_APP_URL`, for example `http://127.0.0.1:8765`. Without both settings on each side the feature is off: the button does not appear and the routes answer `409 not_configured`.
-2. The local sign-in page shows "Sign in with your Aira account". That sends the browser to `GET /api/launch/local?return=<local address>` on the account. A signed-in candidate (only a candidate: staff cannot open someone else's installation, and a suspended or read-only organization is refused) gets a one-time launch token (60 seconds, single use, stored hashed, bound to the organization, the member and the exact return address, five per minute) and a `302` back to `<local address>#/launch?token=...`.
+2. The local sign-in page shows "Sign in with your Monosage account". That sends the browser to `GET /api/launch/local?return=<local address>` on the account. A signed-in candidate (only a candidate: staff cannot open someone else's installation, and a suspended or read-only organization is refused) gets a one-time launch token (60 seconds, single use, stored hashed, bound to the organization, the member and the exact return address, five per minute) and a `302` back to `<local address>#/launch?token=...`.
 3. The local build posts the token to its own `POST /api/auth/launch`, which asks the account `POST /api/internal/launch/validate` (signed with the shared secret and the purpose label `launch`, the same scheme as the agent and broker calls, replay-proof). The account answers once with the person's email, name, organization and role, and audits `auth.launch_local`. The local build then finds or creates the local account for that email (such an account has no password here: a password sign-in answers `403` and says to use the account), starts a normal local session, and reloads into the app. The token never stays in the address bar.
 4. `GET /api/auth/me` and `GET /api/apps` on the local build then say `account: {linked, url, org_name}`; the account's app switcher shows "Local workspace" when `AIRA_CLOUD_LOCAL_APP_URL` is set, so the move works in both directions.
 

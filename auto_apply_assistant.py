@@ -4254,24 +4254,35 @@ def _summarize_recruiter(recruiter_id: str) -> dict[str, Any]:
 
 
 def _recruiter_outreach_view() -> dict[str, Any]:
-    """The outreach templates, the daily limit and whether email is set up (Business hub > Email)."""
+    """The outreach templates, the daily limit and whether email is set up (Business hub > Email: the person's
+    own, or in the hosted build the organization's)."""
+    hosted = recruiter_outreach.hosted_mail()
     with _connect() as connection:
         settings = recruiter_outreach.get_settings(connection)
-        email = suite_kit.email_settings(connection)
-        has_password = bool(
-            _airaapi_secret_store().get(connection, suite_kit.SMTP_PASSWORD_SECRET)
-        )
+        if hosted is None:
+            email = suite_kit.email_settings(connection)
+            has_password = bool(
+                _airaapi_secret_store().get(connection, suite_kit.SMTP_PASSWORD_SECRET)
+            )
+        else:
+            email, has_password = dict(hosted.settings), bool(hosted.password)
         sent = recruiter_outreach.sent_today(connection)
         connection.commit()
+    settings["daily_limit"] = recruiter_outreach.daily_limit(settings, hosted)
     return {
         "settings": settings,
         "placeholders": list(recruiter_outreach.PLACEHOLDERS),
         "opt_out_line": recruiter_outreach.OPT_OUT_LINE,
         "sent_today": sent,
+        "max_daily_limit": (hosted.daily_cap if hosted is not None else 0)
+        or recruiter_outreach.MAX_DAILY_LIMIT,
         "email": {
             "ready": bool(email.get("smtp_host") and email.get("from_email")),
             "from_email": email.get("from_email") or "",
             "has_password": has_password,
+            "organization": hosted is not None,
+            "reply_to": (email.get("reply_to") or "") if hosted is not None else "",
+            "unavailable": hosted.unavailable if hosted is not None else "",
         },
     }
 
@@ -11494,7 +11505,7 @@ _install_airaapi_routes()
 # One account can be a household: a child or another adult has their own profile for the everyday apps
 # (aira/suite/life.py). Careers holds one person's job search (applications, offers and pay, recruiter
 # messages, the resume), so only the account owner's profile opens it, and with the owner's PIN when they set
-# one. The hosted build has no household profiles: there the organization's roles decide (aira_cloud/policy.py).
+# one. The hosted build has no household profiles: there the organization's roles decide (monosage_cloud/policy.py).
 CAREERS_ROUTE_RE = re.compile(
     r"/api/(?:jobs|applications|interviews|recruiters|interactions|documents|analytics|dashboard|autopilot"
     r"|email|inbox|conversations|messages|preparations|tasks|profile|resume|search|schedules|careers"

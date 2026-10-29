@@ -127,8 +127,10 @@
 
   // -------------------------------------------------------------------------
   async function renderIntegrations(content) {
-    const [sources, linkedin, status, settings, serp, resetMail, provider] = await Promise.all([api("/api/sources"), api("/api/linkedin/status"), api("/api/status"), api("/api/settings"), api("/api/airaapi/overview").catch(() => null), Aira.cloud ? null : api("/api/settings/reset-mail", { silent: true }).catch(() => null), Aira.cloud ? null : api("/api/settings/model-provider", { silent: true }).catch(() => null)]);
+    const [sources, linkedin, status, settings, serp, resetMail, provider] = await Promise.all([api("/api/sources"), api("/api/linkedin/status"), api("/api/status"), api("/api/settings"), api("/api/airaapi/overview").catch(() => null), Aira.cloud ? null : api("/api/settings/reset-mail", { silent: true }).catch(() => null), api("/api/settings/model-provider", { silent: true }).catch(() => null)]);
     const onClaude = status.model_provider === "claude";
+    // The hosted build answers with the organization's model choice (scope "organization"): its card replaces the local model ones.
+    const orgModel = provider && provider.scope === "organization";
     Aira.state.sources = sources.sources;
     const connectBtn = h("button", { type: "button", class: "btn", text: linkedin.state === "connected" ? "LinkedIn connected" : linkedin.state === "login" ? "Waiting for sign-in…" : "Connect LinkedIn", disabled: ["connected", "login", "starting"].includes(linkedin.state) });
     connectBtn.addEventListener("click", () => withBusy(connectBtn, async () => { const result = await api("/api/linkedin/connect", { method: "POST", body: {} }); toast(result.state === "login" ? "A LinkedIn sign-in window opened. Complete it in that browser." : "Resuming your saved LinkedIn session.", "success"); setTimeout(() => router.render(), 3000); }));
@@ -164,7 +166,7 @@
     const browserRow = h("label", { class: "check", style: { marginTop: "10px" }, title: "Restarts the LinkedIn session so you can watch it work" }, showBrowser, "Show the LinkedIn browser while Monosage works (off by default; Monosage runs it in the background)");
     const cards = h("div", { class: "grid cols-2" },
       h("div", { class: "card" }, h("h3", { text: "LinkedIn" }), h("p", { class: "muted", text: linkedin.message }), h("div", { class: "btn-row" }, connectBtn, linkedin.state === "connected" ? restartBtn : null, freshBtn), browserRow, h("p", { class: "muted", style: { fontSize: "12px", marginTop: "8px" }, text: "Monosage opens LinkedIn in an isolated browser profile for this account. Sign in there; Monosage never sees your LinkedIn password and never bypasses verification steps. Restart the session after updating Monosage so new features such as sending replies are available." })),
-      h("div", { class: "card" }, h("h3", { text: "Ollama (local AI)" }), h("p", { class: "muted", text: onClaude ? "Not in use: Claude writes fit reviews, drafts, and reply suggestions. Choose Local model in the Claude card to switch back." : status.ollama ? "Reachable. Fit reviews, drafts, and reply suggestions run locally." : "Not reachable. Start Ollama and pull a chat model (for example qwen3.5:4b), or use Claude with an Anthropic API key." }), h("div", { class: "btn-row" }, h("div", { class: "field", style: { minWidth: "220px" } }, h("label", { for: "defaultModel", text: "Default model" }), Object.assign(model, { id: "defaultModel" })), saveModel)),
+      orgModel ? orgModelCard(provider) : h("div", { class: "card" }, h("h3", { text: "Ollama (local AI)" }), h("p", { class: "muted", text: onClaude ? "Not in use: Claude writes fit reviews, drafts, and reply suggestions. Choose Local model in the Claude card to switch back." : status.ollama ? "Reachable. Fit reviews, drafts, and reply suggestions run locally." : "Not reachable. Start Ollama and pull a chat model (for example qwen3.5:4b), or use Claude with an Anthropic API key." }), h("div", { class: "btn-row" }, h("div", { class: "field", style: { minWidth: "220px" } }, h("label", { for: "defaultModel", text: "Default model" }), Object.assign(model, { id: "defaultModel" })), saveModel)),
       provider && !provider.hosted ? claudeCard(provider) : null,
       googleCard(serp, status),
       h("div", { class: "card" }, h("h3", { text: "Email & calendar" }), h("p", { class: "muted", text: "Mailbox sync (Gmail/Outlook OAuth) is not connected in this build. Import emails by paste or .eml, and add interviews to any calendar with .ics downloads or one-click links. The connector interface is in place for a future provider." })),
@@ -267,6 +269,68 @@
       h("p", { class: "muted", text: detail }),
       form);
   }
+
+  // The hosted build: the organization's model, which an owner or admin chooses for everyone in it (Monosage's hosted
+  // model, Claude with the organization's Anthropic API key, or its own OpenAI-compatible endpoint on the plan that
+  // includes it). Keys are the organization's, stored encrypted; the page only learns whether one is saved and its last
+  // four characters. The organization's Integrations page shows the same body (Aira.orgModelBody).
+  function orgModelCard(mp) {
+    return h("div", { class: "card" },
+      h("div", { class: "btn-row", style: { justifyContent: "space-between" } }, h("h3", { text: "AI model" }), h("span", { class: "badge", text: "Organization setting" })),
+      ...orgModelBody(mp, () => { Aira.refreshStatus(); router.render(); }));
+  }
+
+  function orgModelBody(mp, reload) {
+    const claude = mp.claude;
+    const own = mp.openai || {};
+    const inUse = mp.provider === "claude" ? `${claude.model_label} with the organization's Anthropic API key${claude.last4 ? ` (ending ${claude.last4})` : ""}` : mp.provider === "openai" ? `the organization's own endpoint${own.model ? ` (model ${own.model})` : ""}` : "Monosage's hosted model";
+    const nodes = [h("p", { class: "muted", text: `Your organization chooses the model that writes fit reviews, tailored resumes and cover letters, and reply drafts for everyone in it. In use now: ${inUse}.` })];
+    if (mp.chosen && mp.chosen !== mp.provider) nodes.push(h("p", { class: "muted", text: "The model chosen for the organization cannot be used right now, so Monosage's hosted model answers." }));
+    if (mp.provider === "claude") nodes.push(h("p", { class: "muted", text: "The resume and job text of each request is sent to Anthropic; usage is billed to the organization's Anthropic account." }));
+    if (!mp.can_manage) { nodes.push(h("p", { class: "muted", style: { fontSize: "12px" }, text: "Only an owner or admin of the organization can change it." })); return nodes; }
+    const plan = own.required_plan ? own.required_plan.charAt(0).toUpperCase() + own.required_plan.slice(1) : "Enterprise";
+    const choices = [["platform", "Monosage hosted model"], ["claude", "Claude (the organization's Anthropic API key)"], ...(own.available ? [["openai", "Your own OpenAI-compatible endpoint"]] : [])];
+    const chosen = mp.chosen || mp.provider;
+    const provider = ui.select(choices, own.available || chosen !== "openai" ? chosen : "platform", { id: "orgModelProvider" });
+    const model = ui.select(claude.models.map((m) => [m.id, m.label]), claude.model, { id: "orgClaudeModel" });
+    const key = h("input", { id: "orgClaudeKey", type: "password", autocomplete: "off", spellcheck: "false", maxlength: 400, placeholder: claude.configured ? `Saved (ending ${claude.last4 || "····"}). Paste a new key to replace it.` : "sk-ant-…" });
+    const url = h("input", { id: "orgModelUrl", type: "url", maxlength: 500, value: own.url || "", placeholder: "https://models.example.com/v1" });
+    const ownModel = h("input", { id: "orgModelName", type: "text", maxlength: 100, value: own.model || "", placeholder: "model name" });
+    const ownKey = h("input", { id: "orgModelKey", type: "password", autocomplete: "off", maxlength: 400, placeholder: own.configured ? "Leave empty to keep the stored key" : "API key" });
+    const claudeBox = h("div", { class: "form-grid" }, ui.field("Claude model", model), ui.field("Anthropic API key", key, "Create one at console.anthropic.com > API keys. It is stored encrypted for your organization and never shown again."));
+    const ownBox = own.available ? h("div", { class: "form-grid" }, ui.field("OpenAI-compatible endpoint (https)", url), ui.field("Model", ownModel), ui.field("API key", ownKey)) : null;
+    const sync = () => { claudeBox.hidden = provider.value !== "claude"; if (ownBox) ownBox.hidden = provider.value !== "openai"; };
+    provider.addEventListener("change", sync);
+    sync();
+    const saveBtn = h("button", { type: "submit", class: "btn secondary sm", text: "Save" });
+    const testBtn = h("button", { type: "button", class: "btn ghost sm", text: "Test connection", disabled: mp.provider === "platform" });
+    const removeKey = claude.configured ? h("button", { type: "button", class: "btn ghost sm", text: "Remove key" }) : null;
+    const removeEndpoint = own.configured ? h("button", { type: "button", class: "btn ghost sm", text: "Remove endpoint" }) : null;
+    const form = h("form", { novalidate: true },
+      h("div", { class: "form-grid" }, ui.field("Model for the organization", provider)), claudeBox, ownBox,
+      own.available ? null : h("p", { class: "muted", style: { fontSize: "12px" }, text: `Your own OpenAI-compatible endpoint is included from the ${plan} plan.` }),
+      h("div", { class: "btn-row", style: { marginTop: "10px" } }, saveBtn, testBtn, removeKey, removeEndpoint));
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const body = { provider: provider.value };
+      const typed = key.value.trim();
+      if (provider.value === "claude") { body.model = model.value; if (typed) body.api_key = typed; }
+      if (provider.value === "claude" && !typed && !claude.configured) { toast("Paste an Anthropic API key to use Claude.", "error"); key.focus(); return; }
+      if (provider.value === "openai") body.endpoint = { url: url.value.trim(), model: ownModel.value.trim(), api_key: ownKey.value };
+      withBusy(saveBtn, async () => {
+        await api("/api/settings/model-provider", { method: "POST", body });
+        key.value = ""; ownKey.value = "";
+        toast(provider.value === "claude" ? "Saved. Claude now writes the organization's reviews and drafts. Test the connection to check the key." : provider.value === "openai" ? "Saved. Your own endpoint now writes the organization's reviews and drafts." : "Saved. Monosage's hosted model writes the organization's reviews and drafts.", "success");
+        reload();
+      });
+    });
+    testBtn.addEventListener("click", () => withBusy(testBtn, async () => { const data = await api("/api/settings/model-provider/test", { method: "POST", body: {} }); toast(`Connected: ${data.model_label} answered.`, "success"); }));
+    if (removeKey) removeKey.addEventListener("click", async () => { if (!(await Aira.confirm({ title: "Remove the organization's Anthropic API key?", message: "Monosage forgets the key, and the organization's reviews and drafts go back to Monosage's hosted model.", confirmLabel: "Remove key", danger: true }))) return; await withBusy(removeKey, async () => { await api("/api/settings/model-provider/key", { method: "DELETE" }); toast("Key removed. Monosage's hosted model writes the organization's reviews and drafts.", "success"); reload(); }); });
+    if (removeEndpoint) removeEndpoint.addEventListener("click", async () => { if (!(await Aira.confirm({ title: "Remove the organization's model endpoint?", message: "Monosage forgets the endpoint and its key.", confirmLabel: "Remove endpoint", danger: true }))) return; await withBusy(removeEndpoint, async () => { await api("/api/org/integrations/model", { method: "DELETE" }); toast("Back to the hosted model.", "success"); reload(); }); });
+    nodes.push(form);
+    return nodes;
+  }
+  Aira.orgModelBody = orgModelBody;
 
   // The SerpApi key behind Google Jobs. Its state comes from the API overview (the key may live in the app or in
   // SERPAPI_API_KEY); the key itself is never shown. Managing it happens in API > Account.

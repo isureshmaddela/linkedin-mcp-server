@@ -1,8 +1,8 @@
 # Connecting other apps to Aira (the developer platform)
 
 Hosted Aira offers three ways for other software to work with an organization's data. All of them are in
-**Developers** (the API app) and run on `aira_cloud/oauth.py`, `aira_cloud/webhooks.py` and
-`aira_cloud/routes/developers.py`.
+**Developers** (the API app) and run on `monosage_cloud/oauth.py`, `monosage_cloud/webhooks.py` and
+`monosage_cloud/routes/developers.py`.
 
 | Way | For | How it proves who it is |
 | --- | --- | --- |

@@ -145,8 +145,8 @@
       h("div", { class: "panel-head" }, h("h3", { text: list.name }), h("small", { class: "muted", text: fmt.plural(people.length, "contact") })),
       h("p", { class: "muted small", text: `${filterText(list.filters)}. ${people.length - withEmail ? `${people.length - withEmail} of them have no email address and are LinkedIn only.` : ""}`.trim() }),
       h("div", { class: "btn-row rcx-toolbar" },
-        // Recruiter email uses the single-user build's mail server; the hosted build has no recruiter email.
-        Aira.cloud ? null : h("button", { type: "button", class: "btn sm", text: "Email this list", disabled: !people.length, onclick: () => emailFlow(list) }),
+        // The person's own mail server (Business hub > Email); in the hosted build the organization's.
+        h("button", { type: "button", class: "btn sm", text: "Email this list", disabled: !people.length, onclick: () => emailFlow(list) }),
         h("button", { type: "button", class: "btn secondary sm", text: "LinkedIn drafts", disabled: !people.length, onclick: () => linkedinFlow(list) }),
         h("button", { type: "button", class: "btn secondary sm", text: "Export CSV", onclick: () => Aira.download(`/api/recruiters/lists/${list.list_id}/export.csv`, `recruiters-${list.name.toLowerCase().replace(/[^a-z0-9]+/g, "-")}.csv`) }),
         h("button", { type: "button", class: "btn ghost sm", text: "Edit list", onclick: () => listForm(list, list, () => router.render()) }),
@@ -195,15 +195,21 @@
     const s = view.settings;
     const subject = h("input", { type: "text", value: s.email_subject, maxlength: 200 });
     const text = h("textarea", { rows: 8, maxlength: 5000 }, s.email_body);
-    const limit = h("input", { type: "number", min: 1, max: 100, value: s.daily_limit });
+    const limit = h("input", { type: "number", min: 1, max: view.max_daily_limit || 100, value: s.daily_limit });
     const saveLimit = h("button", { type: "button", class: "btn ghost sm", text: "Save limit" });
-    saveLimit.addEventListener("click", () => withBusy(saveLimit, async () => { await api("/api/recruiters/outreach", { method: "POST", body: { daily_limit: Number(limit.value) } }); toast("Daily limit saved.", "success"); }));
+    // The hosted build keeps the limit within the organization's plan; show what was saved.
+    saveLimit.addEventListener("click", () => withBusy(saveLimit, async () => { const saved = await api("/api/recruiters/outreach", { method: "POST", body: { daily_limit: Number(limit.value) } }); limit.value = saved.settings.daily_limit; toast("Daily limit saved.", "success"); }));
     const results = h("div", { class: "rcx-preview" });
     const previewButton = h("button", { type: "button", class: "btn secondary sm", text: "Preview emails" });
     const sendButton = h("button", { type: "button", class: "btn sm", text: "Send", disabled: true, id: "rcxSendEmails" });
     let boxes = [];
-    const refreshSend = () => { const n = boxes.filter((box) => box.checked).length; sendButton.textContent = `Send ${fmt.plural(n, "email")}`; sendButton.disabled = n === 0 || !view.email.ready; };
-    const setup = view.email.ready ? h("p", { class: "muted small", text: `Emails go out from ${view.email.from_email} through your own mail server (Business hub > Email).` }) : h("div", { class: "note warn" }, h("span", { text: "Set up your email first: your own mail server or Gmail with an app password." }), " ", h("a", { href: "#/hub?tab=email", text: "Set up email", onclick: () => closeDialog() }));
+    const refreshSend = () => { const n = boxes.filter((box) => box.checked).length; sendButton.textContent = `Send ${fmt.plural(n, "email")}`; sendButton.disabled = n === 0 || !view.email.ready || Boolean(view.email.unavailable); };
+    // Hosted, the organization's mail server sends (its owners and admins set it up); replies come to the person.
+    const orgMail = view.email.organization;
+    const setup = view.email.unavailable ? h("div", { class: "note warn", text: view.email.unavailable })
+      : view.email.ready ? h("p", { class: "muted small", text: orgMail ? `Emails go out from ${view.email.from_email} through your organization's mail server, with your name on them. Replies come to ${view.email.reply_to}.` : `Emails go out from ${view.email.from_email} through your own mail server (Business hub > Email).` })
+      : orgMail ? h("div", { class: "note warn", text: "Your organization has not set up email yet. An owner or admin sets it up in Business hub > Email." })
+      : h("div", { class: "note warn" }, h("span", { text: "Set up your email first: your own mail server or Gmail with an app password." }), " ", h("a", { href: "#/hub?tab=email", text: "Set up email", onclick: () => closeDialog() }));
     previewButton.addEventListener("click", () => withBusy(previewButton, async () => {
       const plan = await api(`/api/recruiters/lists/${list.list_id}/email/preview`, { method: "POST", body: { subject: subject.value, body: text.value } });
       boxes = [];
@@ -234,13 +240,14 @@
         const result = await api(`/api/recruiters/lists/${list.list_id}/email/send`, { method: "POST", body: { subject: subject.value, body: text.value, recruiter_ids: ids, confirm: true } });
         toast(`Sent ${result.sent}${result.failed ? `, ${result.failed} failed` : ""}${result.skipped ? `, ${result.skipped} skipped` : ""}.`, result.failed ? "error" : "success");
         for (const detail of result.details.filter((d) => d.status === "failed")) toast(detail.error, "error");
+        if (result.note) toast(result.note, "info");
         previewButton.click();
       });
     });
     const body = h("div", { class: "rcx-flow" },
       h("p", { class: "muted", text: `Each email is written from your template and the contact's details. Every email ends with: “${view.opt_out_line}” Contacts who replied, opted out, are on your do-not-contact list or have no email address are skipped.` }),
       setup,
-      h("div", { class: "form-grid" }, ui.field("Subject", subject), ui.field("Emails per day", limit, "Up to 100."), h("div", { class: "field" }, h("label", { text: " " }), saveLimit)),
+      h("div", { class: "form-grid" }, ui.field("Subject", subject), ui.field("Emails per day", limit, `Up to ${view.max_daily_limit || 100}.`), h("div", { class: "field" }, h("label", { text: " " }), saveLimit)),
       h("div", { class: "field wide" }, h("label", { for: "rcxEmailText", text: "Email text" }), Object.assign(text, { id: "rcxEmailText" }), h("span", { class: "hint", text: placeholderHint(view.placeholders) })),
       h("div", { class: "btn-row", style: { marginTop: "10px" } }, previewButton, sendButton),
       results);

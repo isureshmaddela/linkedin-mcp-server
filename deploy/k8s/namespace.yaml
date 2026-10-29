@@ -4,5 +4,5 @@ kind: Namespace
 metadata:
   name: aira
   labels:
-    app.kubernetes.io/part-of: aira-cloud
+    app.kubernetes.io/part-of: monosage-cloud
     pod-security.kubernetes.io/enforce: restricted

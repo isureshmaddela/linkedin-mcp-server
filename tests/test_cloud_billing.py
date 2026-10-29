@@ -15,9 +15,9 @@ from cloud_support import (
     webhook,
 )  # noqa: F401
 
-from aira_cloud.billing_providers import check_signature, sign
-from aira_cloud.config import DAY
-from aira_cloud.errors import (
+from monosage_cloud.billing_providers import check_signature, sign
+from monosage_cloud.config import DAY
+from monosage_cloud.errors import (
     Conflict,
     Forbidden,
     NotFound,
@@ -108,8 +108,8 @@ def test_stripe_signature_scheme():
 
 
 def test_stripe_events_are_normalized():
-    from aira_cloud.billing_providers import StripeProvider
-    from aira_cloud.config import CloudConfig, Clock
+    from monosage_cloud.billing_providers import StripeProvider
+    from monosage_cloud.config import CloudConfig, Clock
 
     provider = StripeProvider(CloudConfig(), Clock())
     paid = provider.normalize(

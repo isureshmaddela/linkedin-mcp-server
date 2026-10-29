@@ -46,8 +46,8 @@ OPERATOR_PASSWORD = "Operator-smoke-password-1!"
 
 S3_PRELUDE = """
 import sys, urllib.request
-from aira_cloud.config import CloudConfig
-from aira_cloud.storage import sigv4_headers
+from monosage_cloud.config import CloudConfig
+from monosage_cloud.storage import sigv4_headers
 c = CloudConfig()
 def s3(method, path):
     url = c.s3_endpoint.rstrip('/') + '/' + c.s3_bucket + path
@@ -448,7 +448,7 @@ def run(args: argparse.Namespace) -> None:
         deadline = time.time() + 120
         done = False
         while time.time() < deadline:
-            out = stack.exec("web", "python", "-m", "aira_cloud", "check").stdout
+            out = stack.exec("web", "python", "-m", "monosage_cloud", "check").stdout
             try:
                 queue = json.loads(out[out.index("{") :]).get("queue", {})
             except ValueError:
@@ -468,7 +468,7 @@ def run(args: argparse.Namespace) -> None:
             "web",
             "python",
             "-c",
-            "import sqlite3; from aira_cloud.config import CloudConfig; "
+            "import sqlite3; from monosage_cloud.config import CloudConfig; "
             "db = sqlite3.connect(str(CloudConfig().data_root / 'control.sqlite3')); "
             "print(db.execute(\"SELECT worker_id, status FROM queue_jobs WHERE kind = 'keys.rotate' ORDER BY created_at DESC LIMIT 1\").fetchone())",
         ).stdout.strip()
@@ -490,7 +490,7 @@ def run(args: argparse.Namespace) -> None:
             "web",
             "python",
             "-m",
-            "aira_cloud",
+            "monosage_cloud",
             "backup-org",
             "--org",
             org_id,
@@ -506,7 +506,7 @@ def run(args: argparse.Namespace) -> None:
             "web",
             "python",
             "-m",
-            "aira_cloud",
+            "monosage_cloud",
             "restore-org",
             "--file",
             "/data/smoke-backup.zip",
@@ -521,7 +521,7 @@ def run(args: argparse.Namespace) -> None:
             "web",
             "python",
             "-m",
-            "aira_cloud",
+            "monosage_cloud",
             "restore-org",
             "--file",
             "/data/smoke-backup.zip",

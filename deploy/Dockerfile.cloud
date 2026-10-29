@@ -1,10 +1,10 @@
 # Aira hosted build: one image definition, two targets.
 #
-#   docker build -f deploy/Dockerfile.cloud --target web    -t aira-cloud-web    .
-#   docker build -f deploy/Dockerfile.cloud --target worker -t aira-cloud-worker .
+#   docker build -f deploy/Dockerfile.cloud --target web    -t monosage-cloud-web    .
+#   docker build -f deploy/Dockerfile.cloud --target worker -t monosage-cloud-worker .
 #
-# web    python -m aira_cloud serve     the gateway and web interface (no browser)
-# worker python -m aira_cloud worker    job threads, the scheduler tick, Chromium for applications
+# web    python -m monosage_cloud serve     the gateway and web interface (no browser)
+# worker python -m monosage_cloud worker    job threads, the scheduler tick, Chromium for applications
 #
 # Both run as a non-root user and keep all state under /data (AIRA_CLOUD_DATA), which web and worker must share.
 # Built and exercised end to end by deploy/smoke.py (sign-up, MFA, S3 documents, worker job, backup/restore, restart).
@@ -33,7 +33,7 @@ RUN groupadd --gid 10001 aira && useradd --uid 10001 --gid aira --create-home --
 WORKDIR /app
 COPY --from=builder /app/.venv /app/.venv
 COPY aira ./aira
-COPY aira_cloud ./aira_cloud
+COPY monosage_cloud ./monosage_cloud
 COPY linkedin_mcp_server ./linkedin_mcp_server
 COPY auto_apply_assistant.py ./
 COPY auto_apply_assistant ./auto_apply_assistant
@@ -58,7 +58,7 @@ FROM base AS web
 USER aira
 HEALTHCHECK --interval=30s --timeout=5s --start-period=20s --retries=3 \
     CMD ["python", "-c", "import urllib.request,sys; sys.exit(0 if urllib.request.urlopen('http://127.0.0.1:8780/api/ready', timeout=4).status == 200 else 1)"]
-ENTRYPOINT ["python", "-m", "aira_cloud"]
+ENTRYPOINT ["python", "-m", "monosage_cloud"]
 CMD ["serve"]
 
 
@@ -72,6 +72,6 @@ RUN patchright install-deps chromium \
 USER aira
 # The worker serves no HTTP; a pass of "check" proves it can open the control plane.
 HEALTHCHECK --interval=60s --timeout=20s --start-period=30s --retries=3 \
-    CMD ["python", "-m", "aira_cloud", "check"]
-ENTRYPOINT ["python", "-m", "aira_cloud"]
+    CMD ["python", "-m", "monosage_cloud", "check"]
+ENTRYPOINT ["python", "-m", "monosage_cloud"]
 CMD ["worker"]

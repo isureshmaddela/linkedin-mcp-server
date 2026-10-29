@@ -3,7 +3,7 @@ checklist and numbers, and on this computer the owner's admin page (settings, re
 
 An advertiser is the account (the organization hosted, the local account here): its data sits in the platform-wide
 Videos database under the account's ``home``. The admin routes are the computer owner's; the hosted build refuses
-them (``HOSTED_RULES``) because the platform console does that work (``aira_cloud/routes/creators.py``).
+them (``HOSTED_RULES``) because the platform console does that work (``monosage_cloud/routes/creators.py``).
 """
 
 from __future__ import annotations
@@ -25,7 +25,7 @@ BASE = "/api/ads"
 LOW_BALANCE_DAYS = 3  # the hub warns when the balance lasts fewer days than this at the last week's spending
 ID = "([0-9a-f]{32})"
 
-# The hosted build answers these from the platform console instead (aira_cloud/policy.py reads this).
+# The hosted build answers these from the platform console instead (monosage_cloud/policy.py reads this).
 HOSTED_RULES = {
     "admin_get": "deny",
     "admin_settings": "deny",

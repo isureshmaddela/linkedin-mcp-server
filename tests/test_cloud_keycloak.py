@@ -23,7 +23,7 @@ from pathlib import Path
 import pytest
 from cloud_support import build_org, make_app, sign_in
 
-from aira_cloud.gateway import Gateway, make_server
+from monosage_cloud.gateway import Gateway, make_server
 
 IMAGE = "quay.io/keycloak/keycloak:26.0"
 PASSWORD = "kc-user-password-1"
@@ -383,7 +383,7 @@ def test_oidc_sign_in_through_keycloak_provisions_members_and_maps_groups(
 
 
 def test_oidc_with_a_wrong_client_secret_is_refused_by_keycloak(stack, browser):
-    from aira_cloud.errors import ValidationFailed
+    from monosage_cloud.errors import ValidationFailed
 
     owner = stack.org.owner
     stack.app.sso.configure_oidc(

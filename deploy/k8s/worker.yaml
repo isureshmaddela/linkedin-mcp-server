@@ -3,14 +3,14 @@ kind: Deployment
 metadata:
   name: aira-worker
   namespace: aira
-  labels: { app.kubernetes.io/name: aira-worker, app.kubernetes.io/part-of: aira-cloud }
+  labels: { app.kubernetes.io/name: aira-worker, app.kubernetes.io/part-of: monosage-cloud }
 spec:
   replicas: 2
   selector:
     matchLabels: { app.kubernetes.io/name: aira-worker }
   template:
     metadata:
-      labels: { app.kubernetes.io/name: aira-worker, app.kubernetes.io/part-of: aira-cloud }
+      labels: { app.kubernetes.io/name: aira-worker, app.kubernetes.io/part-of: monosage-cloud }
     spec:
       # A stopped worker's running jobs return to the queue when their lease (15 minutes) expires, up to three attempts;
       # a longer grace period lets in-flight applications finish on a scale-down or a rollout.
@@ -23,14 +23,14 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: worker
-          image: registry.example.com/aira-cloud-worker:1.0.0   # build: docker build -f deploy/Dockerfile.cloud --target worker
+          image: registry.example.com/monosage-cloud-worker:1.0.0   # build: docker build -f deploy/Dockerfile.cloud --target worker
           args: ["worker", "--threads", "4"]
           envFrom:
             - configMapRef: { name: aira-config }
             - secretRef: { name: aira-secrets }
           # The worker serves no HTTP; `check` opens the control plane, which proves the pod can do its job.
           livenessProbe:
-            exec: { command: ["python", "-m", "aira_cloud", "check"] }
+            exec: { command: ["python", "-m", "monosage_cloud", "check"] }
             initialDelaySeconds: 60
             periodSeconds: 60
             timeoutSeconds: 30

@@ -1,4 +1,4 @@
-# Running the hosted build: operations runbook
+# Running Monosage Cloud (the hosted build): operations runbook
 
 **Template status.** This is an operating guide written from the code. Nothing in it has been rehearsed in a production environment; where a step is a procedure rather than something the code does for you, it says so. The local single-user build is operated with [runbook.md](runbook.md).
 
@@ -8,7 +8,7 @@ See [multitenant.md](multitenant.md) for what the system does and its known gaps
 
 | Topology | Use for | Notes |
 | --- | --- | --- |
-| **One process** `python -m aira_cloud serve --worker` | development, demos, a pilot | web tier, worker pool and scheduler together. This is the only layout in which LinkedIn automation works end to end (see below) |
+| **One process** `python -m monosage_cloud serve --worker` | development, demos, a pilot | web tier, worker pool and scheduler together. This is the only layout in which LinkedIn automation works end to end (see below) |
 | **Web and worker separate** `serve` plus `worker` on the same host or on hosts sharing the data volume | a small production | the worker needs Chromium; the web tier does not. Both must see the same `<data root>` and the same `control.sqlite3` |
 | **Several web replicas** behind a proxy | availability | stateless apart from in-memory rate-limit counters and the 60-second entitlement cache. All replicas need the same data volume and a file system whose locking SQLite can rely on. A managed database is the intended answer for more than this; it is not built |
 
@@ -21,7 +21,7 @@ Constraints to plan around:
 
 ## 2. Configuration reference
 
-Read once at start (`aira_cloud/config.py`; a few more are read by `__main__.py` and `app.py`). Durations and limits that are not listed here (session lifetime 7 days, operator session 12 hours, invite 7 days, lockout after 8 failures for 15 minutes, trial 14 days, read-only after 14 days past due, deletion scheduled at 60 days, export window 30 days, deletion grace 30 days, entitlement cache 60 seconds) are code defaults in `CloudConfig`, not environment variables.
+Read once at start (`monosage_cloud/config.py`; a few more are read by `__main__.py` and `app.py`). Durations and limits that are not listed here (session lifetime 7 days, operator session 12 hours, invite 7 days, lockout after 8 failures for 15 minutes, trial 14 days, read-only after 14 days past due, deletion scheduled at 60 days, export window 30 days, deletion grace 30 days, entitlement cache 60 seconds) are code defaults in `CloudConfig`, not environment variables.
 
 ### Service
 
@@ -81,7 +81,7 @@ Read once at start (`aira_cloud/config.py`; a few more are read by `__main__.py`
 | `AIRA_CLOUD_MODEL_KEY` | API key for `anthropic` or `openai` |
 | `AIRA_CLOUD_MODEL_NAME` | model name; for `anthropic` the default is `claude-sonnet-5-5` |
 
-An Enterprise organization can replace all of this with its own endpoint (`PUT /api/org/integrations/model`), stored as an encrypted organization secret.
+This is the platform model, every organization's default. An owner or admin can replace it for their organization in Settings > Integrations (`POST /api/settings/model-provider`): with Claude through the organization's own Anthropic API key (any plan; the call goes to `https://api.anthropic.com` with that key, not `AIRA_CLOUD_MODEL_KEY`), or on Enterprise with its own OpenAI-compatible endpoint (also `PUT /api/org/integrations/model`). Keys are stored as encrypted organization secrets; calls are counted as `model_calls` whichever key answers them.
 
 ### Document storage
 
@@ -103,21 +103,21 @@ uv sync --no-dev
 export AIRA_CLOUD_DATA=/var/lib/aira
 export AIRA_CLOUD_BASE_URL=https://aira.example.com
 export AIRA_CLOUD_ALLOWED_HOSTS=aira.example.com
-python -m aira_cloud migrate                       # creates control.sqlite3 at the current schema
-python -m aira_cloud operator --email you@vendor.example --role platform_admin
-python -m aira_cloud check                         # schema version, region, queue
-python -m aira_cloud serve --worker                # web + worker + scheduler
+python -m monosage_cloud migrate                       # creates control.sqlite3 at the current schema
+python -m monosage_cloud operator --email you@vendor.example --role platform_admin
+python -m monosage_cloud check                         # schema version, region, queue
+python -m monosage_cloud serve --worker                # web + worker + scheduler
 ```
 
 `operator` prompts for a password (12 or more characters) unless `--password` or `AIRA_CLOUD_OPERATOR_PASSWORD` is given. Sign in at `/#/platform`, then set up MFA: an operator session is refused every platform action until the second factor is given. Create a `support` operator for anyone who should not change plans, flags or billing.
 
-`python -m aira_cloud seed-demo` creates three demo organizations with a known password. It refuses to run when the base URL is https and not loopback. Never run it on a real deployment.
+`python -m monosage_cloud seed-demo` creates three demo organizations with a known password. It refuses to run when the base URL is https and not loopback. Never run it on a real deployment.
 
 `/api/health` is liveness; `/api/ready` checks the schema version, that the data directory is writable and reports queue depth and workers (503 when not ready).
 
 ## 4. Scheduling
 
-Everything that depends on time runs in `lifecycle.tick()` (billing transitions, trial notices, plan-version migrations, support-access expiry, retention, session and export cleanup, and enqueueing due work). The worker's heartbeat thread calls it about every 10 seconds, and `python -m aira_cloud tick` runs one pass. A lease in `cloud_kv` makes it safe to have several workers or a CronJob calling it: only one pass runs at a time. Run at least one worker, or a cron job calling `tick` every minute, in every deployment; without it trials never end, dunning never advances and no scheduled plan runs.
+Everything that depends on time runs in `lifecycle.tick()` (billing transitions, trial notices, plan-version migrations, support-access expiry, retention, session and export cleanup, and enqueueing due work). The worker's heartbeat thread calls it about every 10 seconds, and `python -m monosage_cloud tick` runs one pass. A lease in `cloud_kv` makes it safe to have several workers or a CronJob calling it: only one pass runs at a time. Run at least one worker, or a cron job calling `tick` every minute, in every deployment; without it trials never end, dunning never advances and no scheduled plan runs.
 
 ## 5. Worker sizing
 
@@ -158,11 +158,11 @@ To prove the drill, keep a record of: backup time, time to restore, the audit ve
 ## 7. Key rotation
 
 - **Passwords and sessions**: users change passwords themselves; `POST /api/auth/password/change` and a reset end every other session. An administrator ends someone's sessions by changing their role or removing them.
-- **Organization data key**: `SecretManager.rotate(org_id)` adds a new key and re-encrypts that organization's control-plane secrets (SSO client secret, model endpoint, MFA secrets). New documents use the new key; old documents stay readable because retired keys are kept. Documents and the secrets stored in the organization's API workspace are re-encrypted by a worker job (`python -m aira_cloud rotate-keys --org <id>` or the platform route); retired keys are kept until that finishes.
-- **Master key** (moving between the local file, AWS KMS and Vault, or to a new KMS key): `python -m aira_cloud rewrap-keys`. Data keys do not change, so documents and secrets are not touched. Procedure:
+- **Organization data key**: `SecretManager.rotate(org_id)` adds a new key and re-encrypts that organization's control-plane secrets (SSO client secret, model endpoint, the organization's Anthropic API key, MFA secrets). New documents use the new key; old documents stay readable because retired keys are kept. Documents and the secrets stored in the organization's API workspace are re-encrypted by a worker job (`python -m monosage_cloud rotate-keys --org <id>` or the platform route); retired keys are kept until that finishes.
+- **Master key** (moving between the local file, AWS KMS and Vault, or to a new KMS key): `python -m monosage_cloud rewrap-keys`. Data keys do not change, so documents and secrets are not touched. Procedure:
   1. Set the *new* provider in the normal variables (`AIRA_CLOUD_KMS`, `AIRA_CLOUD_KMS_KEY_ID`, ...) and the *old* one with the same names and an `_OLD` suffix: `AIRA_CLOUD_KMS_OLD` (default `local`), `AIRA_CLOUD_MASTER_KEY_OLD` (or leave it unset to read `<data root>/secrets/master.key`), `AIRA_CLOUD_KMS_KEY_ID_OLD`, `AIRA_CLOUD_KMS_ENDPOINT_OLD`, `AIRA_CLOUD_KMS_REGION_OLD`, `AIRA_CLOUD_KMS_ACCESS_KEY_OLD`, `AIRA_CLOUD_KMS_SECRET_KEY_OLD`, `AIRA_CLOUD_KMS_SESSION_TOKEN_OLD`, `AIRA_CLOUD_KMS_VAULT_ADDR_OLD`, `AIRA_CLOUD_KMS_VAULT_TOKEN_OLD`, `AIRA_CLOUD_KMS_VAULT_MOUNT_OLD`, `AIRA_CLOUD_KMS_VAULT_NAMESPACE_OLD`.
-  2. `python -m aira_cloud rewrap-keys --verify-only` proves the old key opens every organization key and the new one wraps and unwraps it again, changing nothing.
-  3. Stop the web tier and workers (or accept that they briefly read through the old provider), back up the control database, then run `python -m aira_cloud rewrap-keys`. Every provider call happens first; the database is then updated in one transaction, and only rows still holding the blob that was read. A failure at any point changes nothing.
+  2. `python -m monosage_cloud rewrap-keys --verify-only` proves the old key opens every organization key and the new one wraps and unwraps it again, changing nothing.
+  3. Stop the web tier and workers (or accept that they briefly read through the old provider), back up the control database, then run `python -m monosage_cloud rewrap-keys`. Every provider call happens first; the database is then updated in one transaction, and only rows still holding the blob that was read. A failure at any point changes nothing.
   4. Start everything with only the new provider configured. Keep the old master key until a restore drill has passed against a backup taken after the change: older backups still hold keys wrapped by the old one.
   The command writes a `platform.keys_rewrapped` entry to the platform audit log. It is a command and not a platform route on purpose: it needs credentials for the old provider, which the serving process should not hold.
 - **Webhook secret** (`STRIPE_WEBHOOK_SECRET`): Stripe can sign with two secrets during rotation, and the verifier accepts any matching `v1` signature in the header. Roll the secret in Stripe, update the environment, restart.
@@ -189,7 +189,7 @@ Without `AIRA_CLOUD_SMTP_URL` nothing is sent: every message is stored in `mail_
 - **Retention**: the tick purges expired documents (policy and plan retention) and prunes audit rows past the plan's window daily. Nothing else to schedule.
 - **Plan changes**: publish a new plan version (`PUT /api/platform/plans/{id}`); new subscriptions use it, existing ones keep theirs until you schedule a migration (`POST .../migrate`).
 - **Feature flags**: `PUT /api/platform/flags` per plan, per organization or by percentage. A global flag switched off is a kill switch.
-- **Upgrades and rollback**: stop workers (running jobs finish or their leases expire and they retry), back up, deploy the new code, start. Control-plane migrations are numbered and additive (`cloud_migrations`) and run at start; `python -m aira_cloud migrate` applies them without serving. Workspace databases migrate themselves on first connect. Because migrations are additive, rolling back the code leaves a newer schema in place; older code ignores new tables and columns, but test a rollback in staging first. To roll back for real, restore the pre-upgrade backup.
+- **Upgrades and rollback**: stop workers (running jobs finish or their leases expire and they retry), back up, deploy the new code, start. Control-plane migrations are numbered and additive (`cloud_migrations`) and run at start; `python -m monosage_cloud migrate` applies them without serving. Workspace databases migrate themselves on first connect. Because migrations are additive, rolling back the code leaves a newer schema in place; older code ignores new tables and columns, but test a rollback in staging first. To roll back for real, restore the pre-upgrade backup.
 
 ## 11. Incident playbooks
 
@@ -203,7 +203,7 @@ Without `AIRA_CLOUD_SMTP_URL` nothing is sent: every message is stored in `mail_
 
 **LinkedIn risk.** If LinkedIn restricts accounts or counsel advises: set the global flag `sources.linkedin` off (every organization loses the feature immediately and the UI explains why), or `linkedin.easy_apply` off to stop only applications, or block the `linkedin` source. Tell owners; candidates can disconnect at any time. Do not attempt to work around a LinkedIn control.
 
-**Cold-outreach complaints or a mail-reputation problem.** Block the source `leads_outreach` (`POST /api/platform/sources/block`, name `leads_outreach`, with a reason). Every organization's outreach send, test send and approval is refused with that reason within seconds; drafting, lead search and the call log keep working. Unblock when resolved. The same refusal applies on its own when an organization is suspended, past due, read-only or paused, or the candidate is paused. Outreach goes out through each candidate's own SMTP account (host must be public; the password is encrypted under the organization's key), so deliverability and complaints stay with that candidate. Size the reverse proxy for the send route (`POST /api/leads/outbox/send`): a batch is at most 5 messages with a 2–10 second pause between them, so allow a read timeout of at least 150 seconds.
+**Cold-outreach complaints or a mail-reputation problem.** Block the source `leads_outreach` (`POST /api/platform/sources/block`, name `leads_outreach`, with a reason). Every organization's outreach send, test send and approval, and every candidate's recruiter email from a list, is refused with that reason within seconds; drafting, lead search and the call log keep working. Unblock when resolved. The same refusal applies on its own when an organization is suspended, past due, read-only or paused, or the candidate is paused. Outreach goes out through each candidate's own SMTP account (host must be public; the password is encrypted under the organization's key), so deliverability and complaints stay with that candidate. Size the reverse proxy for the send route (`POST /api/leads/outbox/send`): a batch is at most 5 messages with a 2–10 second pause between them, so allow a read timeout of at least 150 seconds. Recruiter email (`POST /api/recruiters/lists/{id}/email/send`) goes through the organization's Business hub > Email server, at most ten messages per request with no pause (about 200 seconds at worst against a failing server, so give it the same timeout or more).
 
 **Support access.** An operator never reads tenant data without a grant. To end one early the owner revokes it in the organization's Support page, or an operator with `platform.tenants.manage` suspends the tenant. Every enter and leave is in both audit logs.
 
@@ -237,7 +237,7 @@ Without `AIRA_CLOUD_SMTP_URL` nothing is sent: every message is stored in `mail_
 
 ## The sign-in broker
 
-`python -m aira_cloud broker` is a small standalone service (WebSocket plus one page) that lets a candidate sign in to LinkedIn in the private browser Aira runs for them, from their own computer or phone.
+`python -m monosage_cloud broker` is a small standalone service (WebSocket plus one page) that lets a candidate sign in to LinkedIn in the private browser Aira runs for them, from their own computer or phone.
 
 Run it **on the worker host that holds the candidate's LinkedIn profile** (same machine and volume; it opens the profile directory itself, so the worker's own browser for that candidate must not be running at the same moment). Put TLS in front of it (`wss://` needs `https://`), and set `AIRA_CLOUD_REMOTE_LOGIN_URL` on the web tier to `https://<broker host>/s/{token}`. It needs `AIRA_CLOUD_BROKER_SECRET` (the same value on the web tier; the broker refuses to start without it) and `AIRA_CLOUD_BROKER_APP_URL`, the address of the web tier it can reach (default `AIRA_CLOUD_BASE_URL`). With several worker hosts, give each its own broker and route links to the host that holds the profile (the link's host is the one in the issued URL, so use one broker per host behind a router keyed on the candidate, or run a single worker host for LinkedIn).
 
@@ -269,7 +269,7 @@ The control plane (organizations, members, plans, usage, audit, queue) runs on S
 | `AIRA_CLOUD_DB` | `sqlite` (default) or `postgres` |
 | `AIRA_CLOUD_DATABASE_URL` | connection URL for the **application role** `aira_app`: not the table owner, no `BYPASSRLS`. Tenant requests and jobs use it |
 | `AIRA_CLOUD_DATABASE_PLATFORM_URL` | connection URL for the **platform role** `aira_platform` (`BYPASSRLS`): sign-in, sign-up, webhooks, the scheduler tick, queue leasing, operator actions, backups. If empty the application role is used for everything and row-level security cannot protect tenant requests (a warning is logged) |
-| `AIRA_CLOUD_DATABASE_ADMIN_URL` | connection URL for the **owner role** `aira_owner`: applies migrations, guards, grants and policies at start-up and with `python -m aira_cloud migrate`. If empty the process only checks that the schema is current and refuses to start otherwise |
+| `AIRA_CLOUD_DATABASE_ADMIN_URL` | connection URL for the **owner role** `aira_owner`: applies migrations, guards, grants and policies at start-up and with `python -m monosage_cloud migrate`. If empty the process only checks that the schema is current and refuses to start otherwise |
 | `AIRA_CLOUD_DATABASE_POOL_SIZE` | connections per pool (tenant and platform each have one), default 24 |
 
 ### One-time setup (as a PostgreSQL superuser)
@@ -281,7 +281,7 @@ CREATE ROLE aira_platform LOGIN BYPASSRLS   PASSWORD '...';
 CREATE DATABASE aira OWNER aira_owner;
 ```
 
-The role names are fixed. Then run `python -m aira_cloud migrate` with the three URLs set. It creates the tables, the audit-log guards (PL/pgSQL triggers that refuse `UPDATE` and, outside maintenance, `DELETE`), grants, and for **every table with an organization column** `ENABLE` and `FORCE ROW LEVEL SECURITY` with one policy: `org_id = current_setting('app.org_id', true)`. Setup is idempotent and runs again whenever a migration adds tables.
+The role names are fixed. Then run `python -m monosage_cloud migrate` with the three URLs set. It creates the tables, the audit-log guards (PL/pgSQL triggers that refuse `UPDATE` and, outside maintenance, `DELETE`), grants, and for **every table with an organization column** `ENABLE` and `FORCE ROW LEVEL SECURITY` with one policy: `org_id = current_setting('app.org_id', true)`. Setup is idempotent and runs again whenever a migration adds tables.
 
 ### What runs under row-level security
 
@@ -296,8 +296,8 @@ The role names are fixed. Then run `python -m aira_cloud migrate` with the three
 Stop the web tier and workers, then, with the three URLs set and an empty target database:
 
 ```
-python -m aira_cloud migrate-to-postgres --verify-only    # compare row counts only
-python -m aira_cloud migrate-to-postgres                   # copy control.sqlite3 into PostgreSQL
+python -m monosage_cloud migrate-to-postgres --verify-only    # compare row counts only
+python -m monosage_cloud migrate-to-postgres                   # copy control.sqlite3 into PostgreSQL
 ```
 
 The copy keeps identity sequences ahead of the copied rows and compares counts per table; the SQLite file is left untouched (keep it until you are satisfied). Workspaces and documents do not move.
@@ -323,7 +323,7 @@ Nothing here is a paper claim: each item below was executed (Windows 11, Docker 
 | Stripe adapter | `uv run python -m pytest tests/test_cloud_stripe_mock.py` | Every request the adapter makes (customers, checkout sessions, subscription changes with and without proration, cancel at once and at period end, billing portal, invoice items) is validated by `stripe/stripe-mock` against Stripe's OpenAPI specification, and the webhook normalizer reads the object shapes stripe-mock returns. Point the adapter at any Stripe-compatible API with `STRIPE_API_BASE`. Not run against a Stripe account (no keys). |
 | OIDC and SAML | `uv run python -m pytest tests/test_cloud_keycloak.py` | Real Keycloak 26 in Docker, real Chromium filling Keycloak's login form: OIDC (discovery, PKCE, client secret, group claim to role, linking on second sign-in, wrong secret refused) and SAML (signature check against Keycloak's key, mapped `mail`, `displayName` and `memberOf` attributes, just-in-time provisioning). Not run against Okta, Entra ID or Google. |
 
-Bugs these runs found and fixed: subscription changes sent `product_data`, which Stripe rejects on an existing subscription (a product is now created first); the Stripe event normalizer assumed the older API shapes for an invoice's subscription and for a subscription's billing period; the health and readiness endpoints answered 403 to Kubernetes probes when an allowed-host list was set, because probes address pods by IP (those two endpoints no longer check the host); the compose file referenced MinIO images that are no longer published (it now uses SeaweedFS, and `python -m aira_cloud init-storage` creates the bucket); Terraform lacked a KMS key policy and access logging (added); the Kubernetes NetworkPolicy blocked pods from reaching one another (added `same-namespace`) and the worker had no liveness probe (added).
+Bugs these runs found and fixed: subscription changes sent `product_data`, which Stripe rejects on an existing subscription (a product is now created first); the Stripe event normalizer assumed the older API shapes for an invoice's subscription and for a subscription's billing period; the health and readiness endpoints answered 403 to Kubernetes probes when an allowed-host list was set, because probes address pods by IP (those two endpoints no longer check the host); the compose file referenced MinIO images that are no longer published (it now uses SeaweedFS, and `python -m monosage_cloud init-storage` creates the bucket); Terraform lacked a KMS key policy and access logging (added); the Kubernetes NetworkPolicy blocked pods from reaching one another (added `same-namespace`) and the worker had no liveness probe (added).
 
 Not done: a Kubernetes cluster other than kind (managed ReadWriteMany storage, an ingress controller, autoscaling on real metrics), `terraform apply`, Stripe with live or test-mode keys, a real enterprise IdP.
 

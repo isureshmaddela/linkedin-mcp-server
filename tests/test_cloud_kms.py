@@ -19,10 +19,10 @@ from kms_stub import (
 )
 
 from aira.hosting import HOOKS
-from aira_cloud import crypto
-from aira_cloud.config import CloudConfig
-from aira_cloud.errors import ValidationFailed
-from aira_cloud.kms import (
+from monosage_cloud import crypto
+from monosage_cloud.config import CloudConfig
+from monosage_cloud.errors import ValidationFailed
+from monosage_cloud.kms import (
     AwsKmsKey,
     KeyProviderError,
     KmsSettings,
@@ -436,7 +436,7 @@ def test_the_old_key_must_actually_open_the_keys(tmp_path, aws):
 
 
 def test_the_rewrap_command_checks_then_applies_and_audits(tmp_path, aws, monkeypatch):
-    from aira_cloud.__main__ import main
+    from monosage_cloud.__main__ import main
 
     local = make(tmp_path)
     org = build_org(local)
@@ -478,7 +478,7 @@ def test_the_rewrap_command_checks_then_applies_and_audits(tmp_path, aws, monkey
 def test_the_rewrap_command_refuses_to_invent_an_old_key(
     tmp_path, aws, monkeypatch, capsys
 ):
-    from aira_cloud.__main__ import main
+    from monosage_cloud.__main__ import main
 
     for name, value in {
         "AIRA_CLOUD_KMS": "aws",

@@ -9,7 +9,10 @@ The key is a secret. It is stored encrypted with the SerpApi key's Fernet store
 audit record or an error message: responses only say whether a key is saved and its last four
 characters. The routes here back the Claude card in Settings > Integrations.
 
-The hosted build installs its own model (``HOOKS.model_json``), so there the card only says so.
+The hosted build installs its own model (``HOOKS.model_json``), so these handlers refuse changes there. The
+multi-tenant control plane answers the same paths for the whole organization (``monosage_cloud/routes/org.py``):
+the platform model, Claude with the organization's own key and one of :data:`CLAUDE_MODELS`, or its own
+endpoint, through the model gateway (``monosage_cloud/models.py``), which calls :func:`claude_json`.
 """
 
 from __future__ import annotations

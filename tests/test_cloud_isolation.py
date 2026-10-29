@@ -26,10 +26,10 @@ from aira import autopilot
 from aira.interviews import create_interview
 from aira.crm import create_recruiter
 from aira.audit import create_task
-from aira_cloud.policy import POLICY
-from aira_cloud.webio import CLOUD_ROUTES
+from monosage_cloud.policy import POLICY
+from monosage_cloud.webio import CLOUD_ROUTES
 
-import aira_cloud.routes  # noqa: F401  (registers the control-plane routes)
+import monosage_cloud.routes  # noqa: F401  (registers the control-plane routes)
 
 MARKERS = ("beta.test", "Beta Secret", "BETA-SECRET")
 SAFE = {
@@ -479,7 +479,7 @@ def test_every_route_with_another_tenants_ids_is_refused_and_leaks_nothing(world
 
 
 def sign_in_mfa(app: Any, browser: Browser, who: Any) -> None:
-    from aira_cloud import crypto
+    from monosage_cloud import crypto
 
     secret = app.__dict__.get("_test_totp", {}).get(who.email)
     if secret:

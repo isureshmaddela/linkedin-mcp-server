@@ -1,10 +1,47 @@
-"""Aira Career Copilot, hosted multi-tenant shell.
+"""The old name of :mod:`monosage_cloud`, kept so existing commands, deployments and imports keep working.
 
-The domain code in ``aira/`` is shared with the local single-user build. This
-package adds what a hosted service needs around it: organizations as tenants,
-members and roles, plans and entitlements, billing, an organization dashboard,
-a platform console, a tenant-fair job queue with workers, and the HTTP gateway
-that binds every request to one organization before any domain code runs.
+``import aira_cloud.policy`` is ``monosage_cloud.policy`` (the same module object, so hooks and state are shared),
+and ``python -m aira_cloud ...`` runs ``python -m monosage_cloud ...``.
 """
 
-__version__ = "1.0.0"
+from __future__ import annotations
+
+import importlib
+import importlib.abc
+import importlib.util
+import sys
+from types import ModuleType
+
+import monosage_cloud as _new
+
+_OLD, _NEW = __name__, "monosage_cloud"
+
+
+class _Alias(importlib.abc.MetaPathFinder, importlib.abc.Loader):
+    """Answers ``aira_cloud.<name>`` with ``monosage_cloud.<name>`` (importing it if needed)."""
+
+    def __init__(self) -> None:
+        self._specs: dict[str, object] = {}
+
+    def find_spec(self, fullname: str, path: object = None, target: object = None):  # noqa: ANN201
+        if not fullname.startswith(f"{_OLD}.") or fullname == f"{_OLD}.__main__":
+            return None
+        return importlib.util.spec_from_loader(fullname, self)
+
+    def create_module(self, spec) -> ModuleType:  # noqa: ANN001
+        module = importlib.import_module(_NEW + spec.name[len(_OLD) :])
+        self._specs[spec.name] = module.__spec__
+        return module
+
+    def exec_module(self, module: ModuleType) -> None:
+        # importlib gave the module the alias's spec; it keeps its own.
+        module.__spec__ = self._specs.pop(module.__spec__.name, module.__spec__)
+
+
+if not any(isinstance(finder, _Alias) for finder in sys.meta_path):
+    sys.meta_path.insert(0, _Alias())
+
+__all__ = getattr(_new, "__all__", [])
+for _name in dir(_new):
+    if not _name.startswith("__"):
+        globals()[_name] = getattr(_new, _name)

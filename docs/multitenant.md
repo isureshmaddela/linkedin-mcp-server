@@ -1,6 +1,6 @@
-# Aira hosted (multi-tenant) build: as-built specification
+# Monosage Cloud (the hosted, multi-tenant build): as-built specification
 
-This describes what `aira_cloud/` does today. It is written from the code, not from the plan. The plan is the scope document ("Aira Career Copilot — Multi-Tenant SaaS Scope"); where the code differs, [Differences from the scope document and known gaps](#differences-from-the-scope-document-and-known-gaps) says so.
+This describes what `monosage_cloud/` does today. It is written from the code, not from the plan. The plan is the scope document ("Aira Career Copilot — Multi-Tenant SaaS Scope"); where the code differs, [Differences from the scope document and known gaps](#differences-from-the-scope-document-and-known-gaps) says so.
 
 The local single-user build (`auto_apply_assistant.py`, `127.0.0.1:8765`) is unchanged and keeps its own documentation ([architecture.md](architecture.md), [api.md](api.md), [security.md](security.md), [runbook.md](runbook.md)). The hosted build reuses its domain code and replaces the shell around it.
 
@@ -19,11 +19,11 @@ The product logic is the existing domain layer in `aira/` (job search, scoring, 
         |                                                         |
         +------------------------+--------------------------------+
                                  v
-                 aira_cloud.gateway.Gateway   (pure HttpRequest -> HttpResponse)
+                 monosage_cloud.gateway.Gateway   (pure HttpRequest -> HttpResponse)
                  host check, rate limits, session, gates, policy, entitlements, tenant bind
                    |                     |                       |
         control-plane routes      local routes via shim     /v1 via organization key
-        aira_cloud/routes/*       aira_cloud/policy.py      aira_cloud/v1.py
+        monosage_cloud/routes/*       monosage_cloud/policy.py      monosage_cloud/v1.py
                    |                     |
                    v                     v
         control plane DB          candidate workspace (SQLite, one per candidate)
@@ -32,32 +32,32 @@ The product logic is the existing domain layer in `aira/` (job search, scoring, 
                    |                     |  aira/hosting.py hooks (documents, key, model, limits, ...)
         queue_jobs, leases                |
                    v                     |
-        worker pool (aira_cloud.worker) --+--> shared domain code in aira/ and auto_apply_assistant.py
+        worker pool (monosage_cloud.worker) --+--> shared domain code in aira/ and auto_apply_assistant.py
         scheduler.py, lifecycle.tick()
 ```
 
 | Piece | File | Role |
 | --- | --- | --- |
-| Configuration and clock | `aira_cloud/config.py` | Environment-driven settings; an injectable `Clock` so lifecycle tests can move time |
-| Control-plane database | `aira_cloud/db.py`, `schema.py` | SQLite (WAL), numbered migrations, `org_id` on every tenant table |
-| Secrets | `aira_cloud/crypto.py` | Per-organization data keys wrapped by a master key; passwords (scrypt), TOTP, recovery codes |
-| Identity | `aira_cloud/identity.py` | Organization sign-up, email verification, sign-in, sessions, MFA, invitations, password reset, operators |
-| Authorization | `aira_cloud/rbac.py` | Roles, the permission matrix, coach scopes, the 404-for-foreign-ids rule |
-| Tenancy | `aira_cloud/tenancy.py` | Policy, members, seats, coach assignments, pause switches, consent, onboarding, offboarding |
-| Plans and limits | `aira_cloud/plans.py`, `entitlements.py` | Plan catalog, `Entitlements`, feature flags, atomic usage counters, `402 plan_required` |
-| Billing | `aira_cloud/billing.py`, `billing_providers.py` | Subscription state machine, checkout, proration, dunning, webhooks; stand-in and Stripe providers |
-| Lifecycle | `aira_cloud/lifecycle.py` | Over-limit tracking, exports, closure, deletion, data-subject requests, the scheduler tick |
-| Dashboard | `aira_cloud/dashboard.py` | Organization, coach and candidate dashboards, the held-question queue |
-| Platform console | `aira_cloud/platform_admin.py` | Tenants, plans, flags, support access, announcements, health, abuse controls |
-| Workspaces | `aira_cloud/workspace.py` | Paths, binding a thread to a candidate, snapshots, export, deletion |
-| Queue and workers | `aira_cloud/jobqueue.py`, `worker.py`, `scheduler.py`, `gate.py` | Tenant-fair leasing, job handlers, due-work discovery, the run-start gate |
-| Seams in shared code | `aira/hosting.py`, `aira_cloud/hooks.py` | Hooks the domain code consults; all `None` in the local build |
-| Gateway | `aira_cloud/gateway.py`, `webio.py`, `policy.py`, `route_hooks.py`, `redaction.py`, `v1.py` | The request pipeline |
-| Model gateway | `aira_cloud/models.py` | Hosted model, Ollama, or an organization's own endpoint |
-| Storage | `aira_cloud/storage.py` | Local disk or S3-compatible object storage for encrypted documents |
-| Mail | `aira_cloud/mail.py` | Outbox in the database; SMTP when configured |
-| Audit | `aira_cloud/audit.py` | Hash-chained append-only logs, per organization and for the platform |
-| Entry point | `aira_cloud/__main__.py`, `demo.py` | `serve`, `worker`, `tick`, `migrate`, `operator`, `seed-demo`, `check` |
+| Configuration and clock | `monosage_cloud/config.py` | Environment-driven settings; an injectable `Clock` so lifecycle tests can move time |
+| Control-plane database | `monosage_cloud/db.py`, `schema.py` | SQLite (WAL), numbered migrations, `org_id` on every tenant table |
+| Secrets | `monosage_cloud/crypto.py` | Per-organization data keys wrapped by a master key; passwords (scrypt), TOTP, recovery codes |
+| Identity | `monosage_cloud/identity.py` | Organization sign-up, email verification, sign-in, sessions, MFA, invitations, password reset, operators |
+| Authorization | `monosage_cloud/rbac.py` | Roles, the permission matrix, coach scopes, the 404-for-foreign-ids rule |
+| Tenancy | `monosage_cloud/tenancy.py` | Policy, members, seats, coach assignments, pause switches, consent, onboarding, offboarding |
+| Plans and limits | `monosage_cloud/plans.py`, `entitlements.py` | Plan catalog, `Entitlements`, feature flags, atomic usage counters, `402 plan_required` |
+| Billing | `monosage_cloud/billing.py`, `billing_providers.py` | Subscription state machine, checkout, proration, dunning, webhooks; stand-in and Stripe providers |
+| Lifecycle | `monosage_cloud/lifecycle.py` | Over-limit tracking, exports, closure, deletion, data-subject requests, the scheduler tick |
+| Dashboard | `monosage_cloud/dashboard.py` | Organization, coach and candidate dashboards, the held-question queue |
+| Platform console | `monosage_cloud/platform_admin.py` | Tenants, plans, flags, support access, announcements, health, abuse controls |
+| Workspaces | `monosage_cloud/workspace.py` | Paths, binding a thread to a candidate, snapshots, export, deletion |
+| Queue and workers | `monosage_cloud/jobqueue.py`, `worker.py`, `scheduler.py`, `gate.py` | Tenant-fair leasing, job handlers, due-work discovery, the run-start gate |
+| Seams in shared code | `aira/hosting.py`, `monosage_cloud/hooks.py` | Hooks the domain code consults; all `None` in the local build |
+| Gateway | `monosage_cloud/gateway.py`, `webio.py`, `policy.py`, `route_hooks.py`, `redaction.py`, `v1.py` | The request pipeline |
+| Model gateway | `monosage_cloud/models.py` | The organization's choice: the hosted model or Ollama (default), Claude with the organization's own Anthropic key, or its own endpoint (Enterprise) |
+| Storage | `monosage_cloud/storage.py` | Local disk or S3-compatible object storage for encrypted documents |
+| Mail | `monosage_cloud/mail.py` | Outbox in the database; SMTP when configured |
+| Audit | `monosage_cloud/audit.py` | Hash-chained append-only logs, per organization and for the platform |
+| Entry point | `monosage_cloud/__main__.py`, `demo.py` | `serve`, `worker`, `tick`, `migrate`, `operator`, `seed-demo`, `check` |
 
 One process can be the web tier, a worker, or both (`serve --worker`). The web tier is stateless apart from in-memory rate-limit counters and the 60-second entitlement cache, so several replicas can share one control-plane database and one tenants directory, subject to the limits of SQLite (see the gaps section).
 
@@ -120,9 +120,10 @@ Seven roles exist. Six belong to an organization (`owner`, `admin`, `coach`, `ca
 | `automation.pause.candidate` | yes | yes | assigned, from `act` | own | | |
 | `applications.submit` | | | assigned, `approve` | own | | |
 | `linkedin.manage`, `export.own`, `sensitive.*`, `consent.manage` | | | | own only | | |
+| `credentials.manage` (Workday accounts: employer sign-ins and their encrypted passwords) | | | | own only | | |
 | `messages.read` / `messages.send` | | | only if policy `coach_messages` is `view` / `act` | own | | |
 
-A coach's effective scope is the assignment scope capped by the plan's `coach_max_scope`; a downgrade narrows existing assignments at once. A support grant gives an operator the granted role (`auditor` or `admin`) in that tenant but never `billing.manage`, `support.approve`, `org.close`, `linkedin.manage`, anything sensitive, or messages.
+A coach's effective scope is the assignment scope capped by the plan's `coach_max_scope`; a downgrade narrows existing assignments at once. A support grant gives an operator the granted role (`auditor` or `admin`) in that tenant but never `billing.manage`, `support.approve`, `org.close`, `linkedin.manage`, `credentials.manage`, anything sensitive, or messages.
 
 Sensitive profile fields (work authorization, visa, demographics, salary) are entered and confirmed by the candidate only. A coach, administrator or auditor learns that a field is set, never its value, unless organization policy `coach_sees_sensitive` is on **and** the candidate granted the `sensitive_access` consent **and** the viewer is an assigned coach (`rbac.can_see_sensitive`, `redaction.py`). Even then a coach cannot write them (`route_hooks.profile_write_inside`, `answers_write_pre`, `run_answer_inside`).
 
@@ -163,7 +164,7 @@ Billing periods are 30 days. Usage counters use calendar months (UTC).
 
 `Gateway.handle` (`gateway.py`) runs, in order: host check (`AIRA_CLOUD_ALLOWED_HOSTS`, loopback always allowed) → client rate limit → route match (control-plane routes first, then the local build's routes) → same-origin check for mutating requests → session (`aira_session` for members, `aira_operator` for operators; an operator reaches a tenant only through an approved support grant) → verified-email and MFA gates → organization and member rate limits (an operator can lower an organization's limit) → subscription state (`writes` routes are refused while read-only) → permission for the named candidate → plan feature → organization policy (source allowed; LinkedIn allowed and the candidate's own opt-in) → per-kind hook (limits, metering, sensitive-field rules) → bind the tenant → run the handler → redact → meter → audit. Errors are mapped to one JSON envelope; unexpected failures return a request id, not internals.
 
-Local build routes (171) run through a shim subclass of the local `RequestHandler` against one bound workspace. `aira_cloud/policy.py` lists every one with a scope, permission, plan feature and kind; a route with no entry is denied, and `tests/test_cloud_*.py` check that none is missing. API console routes bind the organization's own API workspace (`_org`), shared by all its candidates.
+Local build routes (171) run through a shim subclass of the local `RequestHandler` against one bound workspace. `monosage_cloud/policy.py` lists every one with a scope, permission, plan feature and kind; a route with no entry is denied, and `tests/test_cloud_*.py` check that none is missing. API console routes bind the organization's own API workspace (`_org`), shared by all its candidates.
 
 The tenant binding is a thread-local (`context.py`) plus the local module's own request context. Hooks read it, so with no tenant bound a hook raises instead of falling back to a default.
 
@@ -171,7 +172,7 @@ The tenant binding is a thread-local (`context.py`) plus the local module's own 
 
 `aira/hosting.py` holds one optional callable per decision a host needs to change. Each is `None` in the local build.
 
-| Hook | Hosted behaviour (`aira_cloud/hooks.py`) |
+| Hook | Hosted behaviour (`monosage_cloud/hooks.py`) |
 | --- | --- |
 | `worker_registry` | LinkedIn worker pid, port and profile directory stored in `workspaces`, profile under the candidate's directory |
 | `documents` | the organization's blob backend (local or S3) and its data key (current key first, retired keys still readable) |
@@ -199,7 +200,7 @@ Other small changes to shared code: `aira/documents.py` accepts a blob backend a
 
 `GET /api/org/dashboard` returns the panels the caller's role may see: plan and usage (seats, applications against the limit, searches, API searches, cover letters, storage, days to renewal, cost per application), pipeline by stage with the 30-day change, automation today by source with live queue state, needs attention (held questions older than 24 hours, failed runs, a missing resume, no coach, LinkedIn expected but unconnected), coach workload (candidates, open items, median time to answer a held question), outcomes (interviews and offers per 100 applications by source and by resume version), and the last 50 audit events. Candidate stages are `onboarding`, `searching`, `applying`, `interviewing`, `offers`, `placed`, computed from a snapshot of the workspace (refreshed at most every 60 seconds) and logged on change. Coaches and candidates get their own dashboards and a held-question queue.
 
-Controls: policy (review or automatic submission, daily cap per candidate, allowed sources, LinkedIn and Easy Apply, cover letters, retention, candidate-data policy on departure, whether a coach may see sensitive values or messages, MFA for staff, region review list, pooled SerpApi), pause for the organization or one candidate with a reason shown on the dashboard, members and invitations, coach assignments and bulk reassignment, integrations (SerpApi key through the API console, API keys with per-key limits, the organization's model endpoint on Enterprise, SSO), billing, and data (export the organization or one candidate, delete a candidate workspace, request closure). Every policy change is validated against the plan (`402 plan_required` when it exceeds it) and audited with before and after values.
+Controls: policy (review or automatic submission, daily cap per candidate, allowed sources, LinkedIn and Easy Apply, cover letters, retention, candidate-data policy on departure, whether a coach may see sensitive values or messages, MFA for staff, region review list, pooled SerpApi), pause for the organization or one candidate with a reason shown on the dashboard, members and invitations, coach assignments and bulk reassignment, integrations (SerpApi key through the API console, API keys with per-key limits, the organization's AI model: the platform model, Claude with the organization's own Anthropic API key on every plan, or its own OpenAI-compatible endpoint on Enterprise, SSO), billing, and data (export the organization or one candidate, delete a candidate workspace, request closure). Every policy change is validated against the plan (`402 plan_required` when it exceeds it) and audited with before and after values.
 
 ## 11. Platform console
 
@@ -216,7 +217,7 @@ Health: queue depth, worker count and utilisation, apply success rate by ATS, se
 - **Lockout**: eight failed sign-ins lock the account for 15 minutes; unknown emails take the same time as known ones.
 - **MFA**: TOTP (RFC 6238) with replay protection and ten recovery codes. It is available on every plan. It is required for owners and admins on plans with `auth.sso` (Team, Enterprise) and for all staff when the organization policy sets `require_mfa_staff`; such a person is held at a setup gate until enrolled, and cannot turn it off. Operators always need it. An administrator can reset a member's MFA.
 - **Invitations**: single use, 7 days, pending invitations count against seats, resend issues a new link. An administrator cannot invite or change an owner.
-- **SSO and SCIM**: OIDC, SAML and SCIM 2.0 live in `aira_cloud/sso.py` and `sso_routes.py` (Team and Enterprise for SSO, Enterprise for SCIM). The routes the file registers are listed in [hosted-api.md](hosted-api.md#single-sign-on-and-scim). An organization with SSO enforced refuses password sign-in for everyone except owners (a break-glass path).
+- **SSO and SCIM**: OIDC, SAML and SCIM 2.0 live in `monosage_cloud/sso.py` and `sso_routes.py` (Team and Enterprise for SSO, Enterprise for SCIM). The routes the file registers are listed in [hosted-api.md](hosted-api.md#single-sign-on-and-scim). An organization with SSO enforced refuses password sign-in for everyone except owners (a break-glass path).
 
 ## 13. Data lifecycle
 
@@ -258,8 +259,8 @@ The apps ([apps.md](apps.md); catalog `aira/apps.py`: Careers, Leads, API) are s
 - **Data**: `org_apps (org_id, app_id, status active|cancelled|granted, seats_at_start, activated_at, cancelled_at, cancel_at_period_end, granted_by, note)`, migration v4, tenant-scoped like every table with an `org_id` (RLS on PostgreSQL).
 - **Entitlements**: `EntitlementService.resolve` adds `apps` (the apps the plan includes by `APP_PRICING`, plus active and granted rows). An app that is on carries its feature (`leads`, `api.console`) into `features`, so the existing feature checks keep working; an app that is off takes its feature away even from an old plan version that listed it.
 - **Gateway**: `Gateway._require_app_for` runs after the subscription-state check and before policy features on both cloud and local routes; the SerpApi key routes under `/api/airaapi` are exempt (`policy.APP_FREE_ROUTES`) because Careers' Google Jobs needs the organization's key. `/v1` checks the API app in `run_v1`. The isolation sweep covers the new routes (app ids are a fixed vocabulary).
-- **Billing** (`aira_cloud/billing.py`): `apps_overview`, `app_quote`, `subscribe_app`, `unsubscribe_app`, `keep_app`, `set_app_grant`; `quote(..., apps=)` carries add-ons and lists `dropped_apps`; `change_plan` and the deferred downgrade cancel add-ons the target plan does not sell; `cancel` flags them, `reactivate` clears, the period rollover applies cancellations, re-prices the provider's subscription (`update_subscription(..., addons=)`) and stores invoice `lines`. Audit: `billing.app_subscribed`, `billing.app_cancelled`, `billing.app_kept`, `billing.app_granted`, `billing.app_revoked`.
-- **Routes** (`aira_cloud/routes/apps.py`): `GET /api/apps` (any member; the switcher, with `account_url` and `local_url` from `AIRA_CLOUD_LOCAL_APP_URL`), `GET /api/org/apps`, `POST /api/org/apps/<app>/quote|subscribe|unsubscribe|keep`, `GET /api/platform/tenants/<id>/apps`, `PUT /api/platform/tenants/<id>/apps/<app>`.
+- **Billing** (`monosage_cloud/billing.py`): `apps_overview`, `app_quote`, `subscribe_app`, `unsubscribe_app`, `keep_app`, `set_app_grant`; `quote(..., apps=)` carries add-ons and lists `dropped_apps`; `change_plan` and the deferred downgrade cancel add-ons the target plan does not sell; `cancel` flags them, `reactivate` clears, the period rollover applies cancellations, re-prices the provider's subscription (`update_subscription(..., addons=)`) and stores invoice `lines`. Audit: `billing.app_subscribed`, `billing.app_cancelled`, `billing.app_kept`, `billing.app_granted`, `billing.app_revoked`.
+- **Routes** (`monosage_cloud/routes/apps.py`): `GET /api/apps` (any member; the switcher, with `account_url` and `local_url` from `AIRA_CLOUD_LOCAL_APP_URL`), `GET /api/org/apps`, `POST /api/org/apps/<app>/quote|subscribe|unsubscribe|keep`, `GET /api/platform/tenants/<id>/apps`, `PUT /api/platform/tenants/<id>/apps/<app>`.
 - **UI**: `auto_apply_assistant/cloud-apps.js` renders `#/org/apps` (cards with the price on this plan, Subscribe with a quote, Cancel at period end, Keep, the monthly total and a link to Plan & billing); owners and billing contacts change, admins and auditors read.
 
 ## Aira Leads in the hosted build
@@ -268,7 +269,7 @@ Aira Leads (`/api/leads/*`, [aira/leads/](../aira/leads/)) runs inside each cand
 
 - the Leads app (an add-on on Starter and Team, included in Enterprise and the trial; its `leads` feature is carried by the app, see Apps above) and two limits, `leads_stored` and `lead_enrichments_per_month` ([pricing.md](pricing.md)); plan versions published before they existed pick up the limits from the shipped plan;
 - permissions `leads.read` and `leads.write` at `act` level: the candidate and a coach with `act` or `approve` scope; nobody else (see [multitenant-security.md](multitenant-security.md));
-- route hooks (`aira_cloud/route_hooks.py`): source gates (Google lead searches need `sources.google_jobs` and a policy that allows it; Sales Navigator needs every LinkedIn gate), metering (`searches`, pooled allowance by credits, `lead_enrichments`), stored-lead capacity checks, and forwarding of Sales Navigator reads to the worker host that holds the candidate's LinkedIn session (also for a saved Sales Navigator search, decided once the workspace is bound);
+- route hooks (`monosage_cloud/route_hooks.py`): source gates (Google lead searches need `sources.google_jobs` and a policy that allows it; Sales Navigator needs every LinkedIn gate), metering (`searches`, pooled allowance by credits, `lead_enrichments`), stored-lead capacity checks, and forwarding of Sales Navigator reads to the worker host that holds the candidate's LinkedIn session (also for a saved Sales Navigator search, decided once the workspace is bound);
 - counts in the organization dashboard (`plan_usage.leads`, including outreach emails sent) and in each workspace snapshot;
 - **outreach** (`leads_outreach` feature, Team and up; limits `lead_emails_per_month` and `lead_email_daily_cap`): permission `leads.outreach` held only by the candidate (approve, send, sender settings, test message, removing a do-not-contact entry); the send hook (`leads_outreach_send`) checks the kill switch and the automation gates (suspended, past due, read-only, paused, over limits), reserves the batch against the month's allowance and returns what was not sent; the platform kill switch is the source name `leads_outreach` (`POST /api/platform/sources/block`) and stops every send and test message while drafting and reading carry on;
 - lead tables, including the outbox, the do-not-contact list, the call log and the sender settings, in the candidate's own export (staff exports leave them out: `redaction.PRIVATE_TABLES`), and removal with the workspace.
@@ -280,23 +281,23 @@ Stated plainly so nobody plans around something that does not exist.
 **Not built**
 
 - **PostgreSQL: what is and is not proven.** The control plane runs on PostgreSQL 16 with row-level security, an application role that is neither owner nor `BYPASSRLS`, a platform role for cross-organization code, PL/pgSQL audit guards, and a SQLite-to-PostgreSQL copy command. The whole hosted-shell suite (`tests/test_cloud_*.py`) was run against a real PostgreSQL 16 in Docker, and `tests/test_cloud_postgres.py` proves: no tenant means no rows; a missing `WHERE` returns only the caller's organization; cross-organization writes are refused or touch nothing; the application role cannot disable policies, switch roles, create objects or read platform tables; the table owner is bound by the policies too; every table is classified; audit rows cannot be updated or deleted; usage counters stay exact under 16 threads; the job lease never double-leases or exceeds a cap under 8 workers and skips a locked row instead of waiting. **Not tested:** PgBouncer or other transaction poolers, read replicas, failover, PostgreSQL versions other than 16, and load (writers are serialized by one advisory lock outside the hot paths named in the operations guide). Global tables (plans, flags, `cloud_kv`) carry no policy, and a thread that never enters a tenant scope runs as the platform role. Row-level security protects rows, not columns. Workspaces remain one SQLite file per candidate on a shared volume.
-- **KMS in production.** Master-key custody is a setting (`AIRA_CLOUD_KMS=local|aws|vault`, `aira_cloud/kms.py`): AWS KMS (`Encrypt`, `Decrypt`, `GenerateDataKey`, Signature Version 4) and Vault transit are built and tested against stand-ins that check request signatures and prove the KMS only ever sees data keys (`tests/test_cloud_kms.py`). Not exercised against a real AWS account or Vault server, and AWS instance-role credentials are not fetched (inject them into the environment). `python -m aira_cloud rewrap-keys` moves every organization key between providers in one transaction.
+- **KMS in production.** Master-key custody is a setting (`AIRA_CLOUD_KMS=local|aws|vault`, `monosage_cloud/kms.py`): AWS KMS (`Encrypt`, `Decrypt`, `GenerateDataKey`, Signature Version 4) and Vault transit are built and tested against stand-ins that check request signatures and prove the KMS only ever sees data keys (`tests/test_cloud_kms.py`). Not exercised against a real AWS account or Vault server, and AWS instance-role credentials are not fetched (inject them into the environment). `python -m monosage_cloud rewrap-keys` moves every organization key between providers in one transaction.
 - **Master-key rotation** is the `rewrap-keys` command above (with `--verify-only`); per-organization data-key rotation is `rotate-keys` (documents and secrets re-encrypted by a worker job).
-- **Remote sign-in is a broker, not a full remote desktop.** Worker agents (`python -m aira_cloud worker --agent-port ...`) hold the LinkedIn sessions and the gateway forwards LinkedIn-bound routes to them. `python -m aira_cloud broker` (`aira_cloud/streaming.py`) answers the one-time sign-in link: it validates the token with the web tier, starts Chromium on the candidate's profile on that host, streams the page as JPEG frames over a WebSocket and replays mouse, wheel, key and pasted-text events, ending when the session cookie appears. It shows one browser page, not a desktop (no address bar, no other windows, no downloads), only LinkedIn's hosts and an operator allowlist can be navigated to, and sign-in with Google or Apple needs their hosts added to `AIRA_CLOUD_BROKER_ALLOWED_HOSTS` and a pop-up the broker does not show. It has run against a stub login site with real browsers; it has not run against LinkedIn's live sign-in, which may add checkpoints (captcha, device checks) that behave differently in a headless browser. Keystrokes pass through the broker process on their way to the browser; it does not log or keep them, but it is inside the trust boundary you operate.
+- **Remote sign-in is a broker, not a full remote desktop.** Worker agents (`python -m monosage_cloud worker --agent-port ...`) hold the LinkedIn sessions and the gateway forwards LinkedIn-bound routes to them. `python -m monosage_cloud broker` (`monosage_cloud/streaming.py`) answers the one-time sign-in link: it validates the token with the web tier, starts Chromium on the candidate's profile on that host, streams the page as JPEG frames over a WebSocket and replays mouse, wheel, key and pasted-text events, ending when the session cookie appears. It shows one browser page, not a desktop (no address bar, no other windows, no downloads), only LinkedIn's hosts and an operator allowlist can be navigated to, and sign-in with Google or Apple needs their hosts added to `AIRA_CLOUD_BROKER_ALLOWED_HOSTS` and a pop-up the broker does not show. It has run against a stub login site with real browsers; it has not run against LinkedIn's live sign-in, which may add checkpoints (captcha, device checks) that behave differently in a headless browser. Keystrokes pass through the broker process on their way to the browser; it does not log or keep them, but it is inside the trust boundary you operate.
 - **Pooled SerpApi metering is built.** Searches made with the platform's key (`use_pooled_serpapi`) are counted as `pooled_searches`, limited by `pooled_searches_per_month` (Team 2,000, Enterprise 50,000, none on Starter and Trial), refused with `402 plan_required` at the limit, and billed per search past it when overage is on. Only credits actually spent count: a cache hit is free. Autopilot runs check the allowance before each search rather than reserving, so concurrent runs can overshoot by a few searches.
 - **Overage** covers applications, AI cover letters, API searches (console, `/v1` and organization monitors) and pooled SerpApi searches. Team and Enterprise owners turn it on (`POST /api/org/billing/overage`); it is invoiced once for the previous month. Jobs-tab searches with an organization's own key are counted (`searches`) but have no limit and no rate.
-- **Scheduled backups.** `python -m aira_cloud backup-org` / `restore-org` and the platform download produce and restore one organization's archive (the restore drill is a test: one tenant restored, the others byte-identical); running them on a schedule and keeping the archives off the host is yours to arrange.
+- **Scheduled backups.** `python -m monosage_cloud backup-org` / `restore-org` and the platform download produce and restore one organization's archive (the restore drill is a test: one tenant restored, the others byte-identical); running them on a schedule and keeping the archives off the host is yours to arrange.
 - **Deployment artifacts beyond what was run.** The Docker stack, the Kubernetes manifests (on kind), Terraform validation and checkov are run and have scripts (see "What was run, and how to rerun it" in [multitenant-operations.md](multitenant-operations.md)). Not run: `terraform apply`, a managed Kubernetes service with ReadWriteMany storage and an ingress controller, autoscaling on real metrics. The GitHub workflow that repeats the runs has not executed on GitHub yet.
 - **Production billing.** The Stripe adapter's requests are validated against Stripe's OpenAPI specification by stripe-mock and its webhook normalizer reads the shapes stripe-mock returns; it has not talked to a Stripe account, test mode or live. Stripe subscription schedules are not used: a downgrade is applied at period end by the tick, which is close but not identical.
 - **Certification and external review.** No penetration test, SOC 2 audit, DPA review or counsel review has happened. The legal documents in `docs/legal/` are templates.
 - **Operational signals.** No distributed tracing, no alert rules, no log shipping beyond the SIEM poll stream (`GET /api/org/audit/stream`, JSON lines or CEF, Enterprise); log retention (90 days in the scope) is a deployment setting. HSTS is sent on https requests.
-- **Replacing Ollama.** A hosted model (Anthropic or an OpenAI-compatible endpoint) and per-organization endpoints are supported by `models.py` but were not run against a live provider here.
+- **Replacing Ollama.** A hosted model (Anthropic or an OpenAI-compatible endpoint), Claude with an organization's own Anthropic key and per-organization endpoints are supported by `models.py` but were not run against a live provider here (the tests use loopback stand-ins).
 
 **Differences in how things are done**
 
 - The candidate-data policy is per organization, not per plan (section 16).
 - `GET /api/org/audit/export` is available to anyone with `audit.read` on every plan; the SIEM poll stream (`/api/org/audit/stream`) is Enterprise.
-- The single-user local build and the hosted build share one repository and one test suite; there is no separate package for the hosted shell beyond `aira_cloud/`.
+- The single-user local build and the hosted build share one repository and one test suite; there is no separate package for the hosted shell beyond `monosage_cloud/`.
 
 **Open decisions from the scope document, as decided in code**
 
@@ -306,7 +307,7 @@ Stated plainly so nobody plans around something that does not exist.
 | SerpApi key model | bring-your-own key (Starter and up, entered in the API console); pooled key for Team and Enterprise behind a policy switch; Aira Jobs is free for all |
 | LinkedIn automation | off by default; needs the plan feature, organization policy and the candidate's own acknowledged opt-in; a platform kill switch can turn it off for everyone |
 | Database layout | control-plane SQLite plus one SQLite per candidate (see gaps) |
-| AI model | model gateway: hosted or Ollama by default, an organization's own endpoint on Enterprise |
+| AI model | model gateway, chosen per organization by an owner or admin in Settings > Integrations (`/api/settings/model-provider`, the same card as the local build): hosted or Ollama by default; Claude with the organization's own Anthropic API key and model on every plan (like the local build's Claude card, and like the organization's own SerpApi key it costs the platform nothing); the organization's own OpenAI-compatible endpoint stays Enterprise (`byo_model`) because the server calls an address the organization supplies. Keys are encrypted organization secrets, never returned or logged; every call is metered (`model_calls`) whichever key answers it |
 | Billing provider | Stripe for self-serve, operator-activated invoicing for Enterprise; a stand-in provider for development |
 | Candidate identity | per organization (email per organization) |
 

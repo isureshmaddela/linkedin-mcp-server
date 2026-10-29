@@ -321,6 +321,11 @@
 
   function modelCard(data, manage, planWith, reload) {
     const m = data.model;
+    // One card for the organization's model: the same body as Settings > Integrations (views-settings.js).
+    if (m.choice && Aira.orgModelBody) {
+      const sub = m.choice.provider === "claude" ? "Claude" : m.choice.provider === "openai" ? "Own endpoint" : "Hosted";
+      return A.panel("AI model", h("div", { class: "panel-body adm-form" }, ...Aira.orgModelBody({ ...m.choice, can_manage: manage }, reload)), { sub });
+    }
     const url = h("input", { type: "url", placeholder: "https://models.example.com/v1", id: "modelUrl", value: m.url || "", ...(m.byo_available && manage ? {} : { disabled: true }) });
     const key = h("input", { type: "password", autocomplete: "off", placeholder: m.configured ? "Leave empty to keep the stored key" : "API key", id: "modelKey", ...(m.byo_available && manage ? {} : { disabled: true }) });
     const model = h("input", { type: "text", placeholder: "model name", id: "modelName", value: m.model || "", ...(m.byo_available && manage ? {} : { disabled: true }) });

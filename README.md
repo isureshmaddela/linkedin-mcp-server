@@ -10,13 +10,13 @@
 Through this LinkedIn MCP server, AI assistants like Claude can connect to your LinkedIn. Access profiles and companies, search for jobs, or get job details.
 
 
-## Aira Career Copilot (local dashboard)
+## Monosage (local, single-user)
 
-This repository also ships **Aira**, a local-first career copilot built on top of the MCP server: multi-source job discovery (LinkedIn, Google Jobs via SerpApi, Greenhouse, Lever, Ashby, SmartRecruiters), deduplication, explainable job scoring, tailored documents, application preparation and tracking, email-driven interview detection, calendar export, recruiter CRM, an encrypted document center, and analytics.
+This repository also ships **Monosage** (code name `aira`), a local-first career copilot built on top of the MCP server: multi-source job discovery (LinkedIn, Google Jobs via SerpApi, Greenhouse, Lever, Ashby, SmartRecruiters), deduplication, explainable job scoring, tailored documents, application preparation and tracking, email-driven interview detection, calendar export, recruiter CRM, an encrypted document center, and analytics.
 
 ```powershell
 uv sync --group dev
-.\scripts\start_aira.ps1 -OpenBrowser   # or: uv run python auto_apply_assistant.py
+.\scripts\start_monosage.ps1 -OpenBrowser   # or: uv run python auto_apply_assistant.py
 ```
 
 Two sections turn one SerpApi key into a research desk:
@@ -362,15 +362,18 @@ This project is licensed under the Apache 2.0 license.
 
 <br>
 
-## Hosted (multi-tenant) build
+## Monosage Cloud: the Hosted (multi-tenant) build
 
-Besides the local single-user Aira app (`auto_apply_assistant.py`, loopback only, one database per account), this repository contains a hosted shell, `aira_cloud/`, that runs the same domain code for many organizations at once: organizations as tenants, seven roles, plans and entitlements, billing, an organization dashboard, a platform console, a tenant-fair worker queue, SSO and SCIM. The local build is unchanged and keeps its own tests.
+Besides the local single-user Monosage app (`auto_apply_assistant.py`, port 8765, loopback only, one database per account), this repository contains **Monosage Cloud**, `monosage_cloud/` (formerly `aira_cloud`, which still works as an alias), that runs the same domain code and every app for many organizations at once on port 8780: organizations as tenants, seven roles, plans and entitlements, billing, an organization dashboard, a platform console, a tenant-fair worker queue, SSO and SCIM. The local build is unchanged and keeps its own tests.
 
 ```bash
 uv sync --group dev --extra cloud
-uv run python -m aira_cloud seed-demo                                  # demo organizations (development only)
-uv run python -m aira_cloud operator --email you@example.com           # first platform admin
-uv run python -m aira_cloud serve --worker                             # web tier + workers + scheduler on 127.0.0.1:8780
+uv run python -m monosage_cloud seed-demo                                  # demo organizations (development only)
+uv run python -m monosage_cloud operator --email you@example.com           # first platform admin
+uv run python -m monosage_cloud serve --worker                             # web tier + workers + scheduler on 127.0.0.1:8780
+uv run python -m monosage_cloud import-local --email you@example.com       # bring your 8765 data into your 8780 workspace
 ```
 
-On Windows, `.\scripts\start_aira_cloud.ps1 -SeedDemo -OpenBrowser` does the same. Documentation: [what it does and what it does not (as built)](docs/multitenant.md), [operations runbook](docs/multitenant-operations.md), [security controls and threat model](docs/multitenant-security.md), [plans and pricing rules](docs/pricing.md), [API reference](docs/hosted-api.md), and the legal templates in [docs/legal](docs/legal/terms.md) (templates, not reviewed by counsel). Container, Kubernetes and Terraform starting points are in [deploy/](deploy/docker-compose.cloud.yml); they have not been built or applied.
+Everything the single-user build does, Monosage Cloud does too (including Workday sign-ins, recruiter email through the organization's mail server, and the choice of AI model, now per organization), so one address is enough. `import-local` copies a local account into the member's workspace with the same email: careers records, documents (encrypted again with the organization's key) and the apps' data. A workspace in use keeps its own records and gets the local ones added; `--replace` makes it a copy instead. Saved keys and passwords encrypted with the local key, the API console's history, shared public links and the Social and Videos accounts stay behind; the command says so. Owners and admins start their own workspace first (account menu > My workspace).
+
+On Windows, `.\scripts\start_monosage_cloud.ps1 -SeedDemo -OpenBrowser` does the same, and `-ImportLocal you@example.com` runs the import before starting. Documentation: [what it does and what it does not (as built)](docs/multitenant.md), [operations runbook](docs/multitenant-operations.md), [security controls and threat model](docs/multitenant-security.md), [plans and pricing rules](docs/pricing.md), [API reference](docs/hosted-api.md), and the legal templates in [docs/legal](docs/legal/terms.md) (templates, not reviewed by counsel). Container, Kubernetes and Terraform starting points are in [deploy/](deploy/docker-compose.cloud.yml); they have not been built or applied.

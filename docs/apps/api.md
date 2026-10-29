@@ -11,7 +11,7 @@ The developer app (catalog id `api`, a core app). It has two sections in the lef
 
 Code: `aira/airaapi/` (except the Careers and Leads modules), `auto_apply_assistant/views-airaapi.js`,
 `views-playground.js`, `views-serp-kit.js`, `views-developers.js`, `app-api.css`, and on the hosted side
-`aira_cloud/oauth.py`, `aira_cloud/webhooks.py`, `aira_cloud/routes/developers.py`.
+`monosage_cloud/oauth.py`, `monosage_cloud/webhooks.py`, `monosage_cloud/routes/developers.py`.
 
 ## In the Aira frame
 
@@ -140,8 +140,8 @@ The local build: one sign-in opens Developers with every other app; the console 
 build: the console runs on the organization's workspace, routes under
 `/api/airaapi` and `/v1` answer `402 app_required` until `subscribe_app(org.owner, "api")`, and organizations never
 see each other's keys, searches, projects or earnings. The gateway refuses any local route without a rule in
-`aira_cloud.policy.POLICY`; the rules for the rank tracker, Earnings and `PATCH /keys/{id}` are registered by
-`aira_cloud/routes/developers.py` (`developers_rules`) until policy.py lists them. A by-hand rank check
+`monosage_cloud.policy.POLICY`; the rules for the rank tracker, Earnings and `PATCH /keys/{id}` are registered by
+`monosage_cloud/routes/developers.py` (`developers_rules`) until policy.py lists them. A by-hand rank check
 (`POST /rank/{id}/run`) is metered like one API search there; scheduled checks are metered per search by the worker.
 
 ## Tests

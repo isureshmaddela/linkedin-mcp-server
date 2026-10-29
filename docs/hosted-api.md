@@ -1,6 +1,6 @@
 # Hosted API reference
 
-The control-plane API of the hosted build (`aira_cloud/routes/`), and how the local build's candidate-workspace routes are exposed through the gateway. Generated from the route table; regenerate when routes change.
+The control-plane API of the hosted build (`monosage_cloud/routes/`), and how the local build's candidate-workspace routes are exposed through the gateway. Generated from the route table; regenerate when routes change.
 
 Applies to the hosted build only. The local single-user build keeps its own API, described in [api.md](api.md).
 
@@ -126,9 +126,13 @@ Routes marked *no gate* work while a person has not yet verified their email or 
 | GET | `/api/org/audit/export` | member session |  |  | All events as JSON lines. **Who:** `audit.read`. |
 | GET | `/api/org/audit/stream` | member session |  | query: `after`, `format`, `limit` | Poll the audit log for a SIEM: events after a cursor as JSON lines or CEF (Enterprise). |
 | GET | `/api/me/activity` | member session | no verified-email gate | query: `limit` | What was done in the candidate's name: actor, role, action, time. **Who:** candidate. |
-| GET | `/api/org/integrations` | member session |  |  | SerpApi key status (never the key), model endpoint, SSO and SCIM state, Aira API key counts. **Who:** `integrations.read`: owner, admin, auditor. |
-| PUT | `/api/org/integrations/model` | member session | writes | body: `api_key`, `model`, `url` | Set the organization's own OpenAI-compatible model endpoint (`url`, `api_key`, `model`; Enterprise). **Who:** `integrations.manage`. |
-| DELETE | `/api/org/integrations/model` | member session | writes |  | Remove it. **Who:** `integrations.manage`. |
+| GET | `/api/org/integrations` | member session |  |  | SerpApi key status (never the key), model endpoint and the organization's model choice (`model.choice`, the same view as `GET /api/settings/model-provider`), SSO and SCIM state, Aira API key counts. **Who:** `integrations.read`: owner, admin, auditor. |
+| PUT | `/api/org/integrations/model` | member session | writes | body: `api_key`, `model`, `url` | Set the organization's own OpenAI-compatible model endpoint (`url`, `api_key`, `model`; an empty `api_key` keeps the stored one) and choose it (Enterprise, `byo_model`). **Who:** `integrations.manage`. |
+| DELETE | `/api/org/integrations/model` | member session | writes |  | Remove it; if it was the choice, the platform model answers again. **Who:** `integrations.manage`. |
+| GET | `/api/settings/model-provider` | member session |  |  | The organization's model (Settings > Integrations), in the local build's shape plus `scope: "organization"`: `provider` in effect (`platform`, `claude` or `openai`), `chosen`, `claude` (`configured`, `model`, `models`; `last4` only with `integrations.read`), `openai` (`available`, `required_plan`, `configured`, `model`; `url` only with `integrations.read`), `can_manage`. Never a key. **Who:** every member. |
+| POST | `/api/settings/model-provider` | member session | writes | body: `api_key`, `endpoint`, `model`, `provider` | Choose the organization's model: `provider` `platform` (default), `claude` (needs a saved or sent Anthropic `api_key`; `model` one of Claude Sonnet 5.5, Opus 5.5, Haiku 5.5; every plan) or `openai` (Enterprise; `endpoint`: `url`, `model`, `api_key`). Keys are stored as encrypted organization secrets and never returned or logged; audited as `integrations.model_provider` without the key. **Who:** `integrations.manage`: owner, admin. |
+| POST | `/api/settings/model-provider/test` | member session | writes |  | One small, metered request through the organization's own Claude key or endpoint; `400` while the platform model is in use. **Who:** `integrations.manage`. |
+| DELETE | `/api/settings/model-provider/key` | member session | writes |  | Forget the organization's Anthropic key; if Claude was the choice, the platform model answers again (`removed`). **Who:** `integrations.manage`. |
 | GET | `/api/org/support` | member session |  |  | Platform support-access requests for this organization. **Who:** `support.approve`: owner. |
 | POST | `/api/org/support/{id}/approve` | member session | writes | body: `hours` | Approve a request for up to 24 hours (`hours`). **Who:** owner. |
 | POST | `/api/org/support/{id}/deny` | member session | writes |  | Deny a request. **Who:** owner. |
@@ -281,9 +285,9 @@ Videos is one catalog for the whole platform and an ad bought by one organizatio
 
 ## Single sign-on and SCIM
 
-Registered in `aira_cloud/sso_routes.py`. See the SSO section of [multitenant.md](multitenant.md). Routes registered when this document was generated:
+Registered in `monosage_cloud/sso_routes.py`. See the SSO section of [multitenant.md](multitenant.md). Routes registered when this document was generated:
 
-Configuration (`/api/org/sso...`) is for owners and admins (`sso.manage`); SSO needs a plan with `auth.sso` (Team, Enterprise) and SCIM tokens need `auth.scim` (Enterprise). The `/api/sso/...` routes are the sign-in handshake with the identity provider (the SAML assertion consumer takes the provider's POST, so it skips the same-origin check and relies on the signed response and one-time relay state). The `/scim/v2/` routes authenticate with an organization's SCIM bearer token and answer in SCIM envelopes, errors included. Details and the exact checks are in `aira_cloud/sso.py` and `sso_routes.py`.
+Configuration (`/api/org/sso...`) is for owners and admins (`sso.manage`); SSO needs a plan with `auth.sso` (Team, Enterprise) and SCIM tokens need `auth.scim` (Enterprise). The `/api/sso/...` routes are the sign-in handshake with the identity provider (the SAML assertion consumer takes the provider's POST, so it skips the same-origin check and relies on the signed response and one-time relay state). The `/scim/v2/` routes authenticate with an organization's SCIM bearer token and answer in SCIM envelopes, errors included. Details and the exact checks are in `monosage_cloud/sso.py` and `sso_routes.py`.
 
 | Method | Path | Auth | Body and query |
 | --- | --- | --- | --- |
@@ -314,7 +318,7 @@ Configuration (`/api/org/sso...`) is for owners and admins (`sso.manage`); SSO n
 
 ## Candidate workspace routes (the local build's API through the gateway)
 
-These are the local build's routes ([api.md](api.md) documents their bodies and answers). The gateway runs them unchanged against one candidate's workspace after it has checked, in order: the session; verified email and second factor; the subscription state (`writes` while read-only); the **permission for that candidate**; the plan feature; organization policy (source allowed, LinkedIn allowed, the candidate's own opt-in). Then it binds the workspace, runs the handler, masks sensitive values for callers who may not see them, meters usage and writes an audit entry naming the actor and the candidate. `POLICY` in `aira_cloud/policy.py` is the source of truth. It defaults to deny: a route with no entry is refused, and a test fails if one is missing.
+These are the local build's routes ([api.md](api.md) documents their bodies and answers). The gateway runs them unchanged against one candidate's workspace after it has checked, in order: the session; verified email and second factor; the subscription state (`writes` while read-only); the **permission for that candidate**; the plan feature; organization policy (source allowed, LinkedIn allowed, the candidate's own opt-in). Then it binds the workspace, runs the handler, masks sensitive values for callers who may not see them, meters usage and writes an audit entry naming the actor and the candidate. `POLICY` in `monosage_cloud/policy.py` is the source of truth. It defaults to deny: a route with no entry is refused, and a test fails if one is missing.
 
 Which workspace: a candidate's own, or `X-Aira-Candidate: <member id>` for staff. Naming a candidate of another organization is a `404`; naming one in your organization that you may not act for is a `403`.
 
@@ -478,11 +482,34 @@ Which workspace: a candidate's own, or `X-Aira-Candidate: <member id>` for staff
 | PATCH | `/api/schedules/(\d+)` | `api_schedule_update` | feature `sources.linkedin`; LinkedIn: plan, policy and the candidate's opt-in |
 | DELETE | `/api/schedules/(\d+)` | `api_schedule_delete` | feature `sources.linkedin`; LinkedIn: plan, policy and the candidate's opt-in |
 
+### Recruiter email from a list (the candidate's own; a coach only when policy allows acting on messages and the candidate has consented)
+
+Recruiter email goes out through the **organization's** Business hub > Email (set up by an owner, admin or coach in the organization's workspace; the password is decrypted under the organization's key and never returned). Each email carries the candidate's name ("Cam Candidate via Acme Careers"), the organization's From address and Reply-To the candidate's own sign-in address. The messages, the templates, the daily limit and the send log stay in the candidate's workspace. A contact on the candidate's do-not-contact list, on the organization's (Leads > Do not contact) or who asked to stop in a reply is skipped, with the reason shown in the preview.
+
+| Method | Path | Handler | Extra rule |
+| --- | --- | --- | --- |
+| GET | `/api/recruiters/outreach` | `api_recruiter_outreach` | `messages.read`; `email.organization`, `email.reply_to`, `email.unavailable` (the plan, the operator's switch or the organization's state), `max_daily_limit` (the plan's `lead_email_daily_cap`) |
+| POST | `/api/recruiters/outreach` | `api_recruiter_outreach_save` | `messages.send`; the daily limit is clamped to the plan's `lead_email_daily_cap` |
+| POST | `/api/recruiters/lists/([0-9a-f]{32})/email/preview` | `api_recruiter_list_email_preview` | `messages.send`; sends nothing, records opt-outs found in replies |
+| POST | `/api/recruiters/lists/([0-9a-f]{32})/email/send` | `api_recruiter_list_email_send` | `messages.send`; feature `leads_outreach`; kill switch `leads_outreach` and automation gates; someone acting for the candidate needs the candidate's consents (`403 consent_required`); at most ten emails per request (`held_back`, `note` name the rest), cut to the month's allowance (`lead_emails_per_month`, shared with Leads, no overage); counts emails actually sent; audited as counts |
+
 ### Candidate export (`export.own`)
 
 | Method | Path | Handler | Extra rule |
 | --- | --- | --- | --- |
 | GET | `/api/account/export` | `api_account_export` | audited |
+
+### Workday accounts (`credentials.manage`: the candidate only, or an owner or admin in their personal workspace)
+
+The candidate's sign-ins on employers' Workday sites. A coach, an administrator, an auditor, the billing contact and a support grant are refused (`403`); another organization's candidate is a `404`. Passwords are encrypted under the organization's data key, re-encrypted when its keys rotate, and never returned, audited or exported; emails come back masked. The worker's auto-apply uses them in the candidate's workspace.
+
+| Method | Path | Handler | Extra rule |
+| --- | --- | --- | --- |
+| GET | `/api/autopilot/workday-accounts` | `airaapi__workday_accounts__accounts_list` |  |
+| POST | `/api/autopilot/workday-accounts` | `airaapi__workday_accounts__accounts_add` | audited |
+| PATCH | `/api/autopilot/workday-accounts/([a-z0-9.-]{4,253})` | `airaapi__workday_accounts__accounts_update` | audited |
+| DELETE | `/api/autopilot/workday-accounts/([a-z0-9.-]{4,253})` | `airaapi__workday_accounts__accounts_delete` | audited |
+| POST | `/api/autopilot/workday-settings` | `airaapi__workday_accounts__accounts_settings` |  |
 
 ### Aira Leads (`leads.read`, `leads.write`; the candidate and a coach with `act` or `approve` scope; plan feature `leads`)
 

@@ -9,9 +9,9 @@ from pathlib import Path
 import pytest
 from cloud_support import Browser  # noqa: F401
 
-import aira_cloud.routes  # noqa: F401  (registers the control-plane routes)
-from aira_cloud.routes import legal
-from aira_cloud.webio import CLOUD_ROUTES
+import monosage_cloud.routes  # noqa: F401  (registers the control-plane routes)
+from monosage_cloud.routes import legal
+from monosage_cloud.webio import CLOUD_ROUTES
 
 ROOT = Path(__file__).resolve().parents[1]
 DOCS = ROOT / "docs"
@@ -299,12 +299,12 @@ ENV_TOKEN = re.compile(
 
 def _code_corpus() -> str:
     return "\n".join(
-        path.read_text(encoding="utf-8") for path in (ROOT / "aira_cloud").rglob("*.py")
+        path.read_text(encoding="utf-8") for path in (ROOT / "monosage_cloud").rglob("*.py")
     )
 
 
 def _config_variables() -> set[str]:
-    text = (ROOT / "aira_cloud" / "config.py").read_text(encoding="utf-8")
+    text = (ROOT / "monosage_cloud" / "config.py").read_text(encoding="utf-8")
     return set(re.findall(r"_(?:env|bool|int)\(\"([A-Z0-9_]+)\"", text))
 
 
@@ -392,7 +392,7 @@ def test_the_dockerfile_copies_only_paths_that_exist_and_runs_as_non_root():
 
 
 def test_the_start_script_and_readme_section_exist():
-    script = (ROOT / "scripts" / "start_aira_cloud.ps1").read_text(encoding="utf-8")
-    assert "aira_cloud serve --worker" in script and "seed-demo" in script
+    script = (ROOT / "scripts" / "start_monosage_cloud.ps1").read_text(encoding="utf-8")
+    assert "monosage_cloud serve --worker" in script and "seed-demo" in script
     readme = (ROOT / "README.md").read_text(encoding="utf-8")
     assert "Hosted (multi-tenant) build" in readme and "docs/multitenant.md" in readme

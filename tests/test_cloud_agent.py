@@ -15,9 +15,9 @@ from cloud_support import (
     sign_in,
 )  # noqa: F401
 
-from aira_cloud.agent import AgentServer, agent_secret, sign
-from aira_cloud.gateway import Gateway
-from aira_cloud.worker import Worker
+from monosage_cloud.agent import AgentServer, agent_secret, sign
+from monosage_cloud.gateway import Gateway
+from monosage_cloud.worker import Worker
 
 BROKER_SECRET = "broker-secret-" + "x" * 30
 
@@ -244,7 +244,7 @@ def test_redaction_still_applies_to_responses_that_came_back_from_an_agent(
     agent = start_agent(cloud, "w-1")
     local = local_module()
     # make a profile read go through the agent, to prove the web tier redacts what an agent returns
-    from aira_cloud import policy
+    from monosage_cloud import policy
 
     monkeypatch.setitem(policy.REMOTE_ROUTES, "api_profile", False)
     candidate = sign_in(cloud, team.candidate)
@@ -425,7 +425,7 @@ def test_remote_sign_in_link_is_short_lived_single_use_and_the_candidates_own(
 def test_a_signed_request_cannot_be_replayed_inside_the_window_by_another_verifier(
     team, cloud
 ):
-    from aira_cloud.agent import Verifier
+    from monosage_cloud.agent import Verifier
 
     secret = agent_secret(cloud)
     body = b'{"x": 1}'

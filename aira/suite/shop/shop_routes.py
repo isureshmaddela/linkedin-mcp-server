@@ -1,7 +1,7 @@
 """Shop routes (``/api/shop/*``), its public pages (``storefront``, ``order``) and its hub entries.
 
 Loaded by :func:`aira.suite.load_apps`. Every handler opens the account's database (the person's own locally, the
-organization's hosted); the hosted rules come from :func:`aira_cloud.policy.suite_rules` (GET = ``suite.read``,
+organization's hosted); the hosted rules come from :func:`monosage_cloud.policy.suite_rules` (GET = ``suite.read``,
 others = ``suite.manage``; ``HOSTED_RULES`` marks the price check as a read).
 """
 

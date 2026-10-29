@@ -112,7 +112,7 @@ def test_hosted_health_links_open_when_the_single_user_index_was_installed_last(
     # The production order without any other app's workaround: the single-user index made current again over the
     # organization index (set directly, so a wrapped ``set_default_index`` cannot hide the bug).
     public._index = local._public_link_index
-    assert type(public._index).__module__ != "aira_cloud.public_links"
+    assert type(public._index).__module__ != "monosage_cloud.public_links"
     org = build_org(cloud)
     cloud.billing.subscribe_app(org.owner, "care")
     visitor = Browser(cloud)

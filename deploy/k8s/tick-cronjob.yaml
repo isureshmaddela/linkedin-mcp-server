@@ -27,7 +27,7 @@ spec:
             seccompProfile: { type: RuntimeDefault }
           containers:
             - name: tick
-              image: registry.example.com/aira-cloud-web:1.0.0
+              image: registry.example.com/monosage-cloud-web:1.0.0
               args: ["tick"]
               env:
                 - { name: HOME, value: /tmp }

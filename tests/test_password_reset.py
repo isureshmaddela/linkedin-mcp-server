@@ -221,7 +221,7 @@ def test_deleting_an_account_removes_its_reset_code(env, caplog):
     ],
 )
 def test_the_hosted_build_keeps_its_own_password_routes(route):
-    from aira_cloud import policy
+    from monosage_cloud import policy
 
     assert policy.POLICY[route] is policy.DENY
 

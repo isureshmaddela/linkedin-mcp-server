@@ -30,8 +30,8 @@ from serpapi_stub import DEFAULT_KEY, SerpApiStub
 from stripe_stub import SECRET, StripeStub
 
 from aira.hosting import HOOKS
-from aira_cloud.billing_providers import sign
-from aira_cloud.errors import Unavailable
+from monosage_cloud.billing_providers import sign
+from monosage_cloud.errors import Unavailable
 
 # ----------------------------------------------------------------------------- object storage (S3-compatible)
 
@@ -160,7 +160,7 @@ def test_the_signer_matches_the_published_sigv4_example():
     """AWS's documented GET Object example (examplebucket, 2013-05-24): the same canonical request and signature."""
     import datetime as dt
 
-    from aira_cloud.storage import sigv4_headers
+    from monosage_cloud.storage import sigv4_headers
 
     headers = sigv4_headers(
         method="GET",
@@ -258,7 +258,7 @@ def test_stripe_checkout_sends_the_plan_seats_and_organization_and_activates_on_
         and sub["billing_subscription_id"] == "sub_abc123"
     )
     bad = sign("whsec_other", payload, app.clock.now())
-    from aira_cloud.errors import Unauthorized
+    from monosage_cloud.errors import Unauthorized
 
     with pytest.raises(Unauthorized):
         app.billing.handle_webhook("stripe", payload.replace(b"evt_1", b"evt_2"), bad)
@@ -814,7 +814,7 @@ def test_enterprise_can_bring_its_own_model_endpoint(tmp_path, model, monkeypatc
 
 
 def test_the_organizations_own_aira_api_monitors_run_on_schedule(cloud, serpapi):
-    from aira_cloud.worker import Worker
+    from monosage_cloud.worker import Worker
 
     org = build_org(cloud, plan="team", seats=10, apps=["api"])
     owner = sign_in(cloud, org.owner, mfa=True)

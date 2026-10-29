@@ -60,7 +60,7 @@ def _template_database() -> str:
             return _template
         import psycopg
 
-        from aira_cloud.pgdb import PostgresDB
+        from monosage_cloud.pgdb import PostgresDB
 
         name = f"aira_tpl_{os.getpid()}"
         with psycopg.connect(admin_url(), autocommit=True) as admin:

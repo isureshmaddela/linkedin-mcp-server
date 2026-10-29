@@ -1,4 +1,4 @@
-# Non-secret settings. Every name is read by aira_cloud/config.py (see docs/multitenant-operations.md).
+# Non-secret settings. Every name is read by monosage_cloud/config.py (see docs/multitenant-operations.md).
 apiVersion: v1
 kind: ConfigMap
 metadata:

@@ -34,7 +34,7 @@ CLAIMS = {
 
 
 class AccountStub:
-    """Stands in for the hosted account: validates launch tokens the way ``aira_cloud.launch`` does."""
+    """Stands in for the hosted account: validates launch tokens the way ``monosage_cloud.launch`` does."""
 
     def __init__(self) -> None:
         self.tokens: dict[str, dict[str, Any]] = {}
@@ -347,7 +347,7 @@ def test_a_candidate_signed_in_to_the_account_opens_the_local_installation(
     }
     hosted_env.pop("AIRA_TEST_DATABASE_URL", None)
     seeded = subprocess.run(
-        [sys.executable, "-m", "aira_cloud", "seed-demo"],
+        [sys.executable, "-m", "monosage_cloud", "seed-demo"],
         cwd="D:/linkedin",
         env=hosted_env,
         capture_output=True,
@@ -357,7 +357,7 @@ def test_a_candidate_signed_in_to_the_account_opens_the_local_installation(
     assert seeded.returncode == 0, seeded.stderr[-800:]
     log = open(tmp_path / "hosted.log", "w", encoding="utf-8")
     server = subprocess.Popen(
-        [sys.executable, "-m", "aira_cloud", "serve"],
+        [sys.executable, "-m", "monosage_cloud", "serve"],
         cwd="D:/linkedin",
         env=hosted_env,
         stdout=log,

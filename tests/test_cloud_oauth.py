@@ -14,7 +14,7 @@ import pytest
 from cloud_support import Browser, build_org, sign_in
 
 from aira.suite import kit
-from aira_cloud.worker import HANDLERS
+from monosage_cloud.worker import HANDLERS
 
 REDIRECT = "https://partner.example/callback"
 VERIFIER = "v" * 20 + "-verifier-" + "x" * 20  # 50 characters, the allowed alphabet

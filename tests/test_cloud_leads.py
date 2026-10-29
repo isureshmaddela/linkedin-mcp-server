@@ -20,8 +20,8 @@ from cloud_support import (
 from serpapi_stub import DEFAULT_KEY, SerpApiStub
 
 from aira.leads import service as leads_service
-from aira_cloud import plans
-from aira_cloud.policy import POLICY
+from monosage_cloud import plans
+from monosage_cloud.policy import POLICY
 
 SALES_NAV_URL = (
     "https://www.linkedin.com/sales/search/people?query=(recentSearchParam:(id:7))"

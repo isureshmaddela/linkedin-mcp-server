@@ -97,7 +97,7 @@ def _require_adult(request: Request, connection: sqlite3.Connection) -> None:
     In the single-user build a household shares one sign-in, so a child or teen profile picked in the
     browser (``X-Aira-Profile``) is refused here. A request that names no profile on an account with
     several is asked to choose one (``profile_required``), like the everyday apps. In the hosted build
-    the organization's roles decide (aira_cloud.policy), so nothing is checked here.
+    the organization's roles decide (monosage_cloud.policy), so nothing is checked here.
     """
     from aira import suite
     from aira.suite import life

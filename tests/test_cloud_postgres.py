@@ -20,9 +20,9 @@ pytestmark = pytest.mark.skipif(
 
 psycopg = pytest.importorskip("psycopg")
 
-from aira_cloud import dialect  # noqa: E402
-from aira_cloud.db import platform_scope, tenant_scope  # noqa: E402
-from aira_cloud.entitlements import LimitReached  # noqa: E402
+from monosage_cloud import dialect  # noqa: E402
+from monosage_cloud.db import platform_scope, tenant_scope  # noqa: E402
+from monosage_cloud.entitlements import LimitReached  # noqa: E402
 
 
 def connect(app, role: str = "app", **kwargs):
@@ -229,7 +229,7 @@ def test_every_table_is_classified_for_row_level_security(cloud):
 
 
 def test_the_audit_triggers_refuse_update_and_delete(cloud):
-    from aira_cloud.db import INTEGRITY_ERRORS
+    from monosage_cloud.db import INTEGRITY_ERRORS
 
     org = build_org(cloud, "Audit Org", plan="starter", seats=5)
     for statement in (
@@ -374,7 +374,7 @@ def test_a_job_another_worker_is_claiming_is_skipped_not_waited_for(cloud):
 
 
 def test_the_sqlite_control_plane_moves_to_postgres_intact(tmp_path):
-    from aira_cloud import migrate_pg
+    from monosage_cloud import migrate_pg
     from cloud_support import PASSWORD, sign_in
 
     source = make_app(tmp_path / "sqlite-install", db_backend="sqlite")
@@ -419,7 +419,7 @@ def test_the_sqlite_control_plane_moves_to_postgres_intact(tmp_path):
 
 
 def test_without_the_owner_url_the_application_only_checks_the_schema(cloud):
-    from aira_cloud.pgdb import PostgresDB
+    from monosage_cloud.pgdb import PostgresDB
 
     config = cloud.config
     checking = PostgresDB(
@@ -452,7 +452,7 @@ def test_without_the_owner_url_the_application_only_checks_the_schema(cloud):
 def test_the_migrate_to_postgres_command_copies_and_verifies(
     tmp_path, monkeypatch, capsys
 ):
-    from aira_cloud.__main__ import main
+    from monosage_cloud.__main__ import main
 
     source = make_app(tmp_path / "install", db_backend="sqlite")
     org = build_org(

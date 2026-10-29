@@ -76,7 +76,7 @@
   // Service holds customers' details and money: a child or teen household profile cannot open it (the server
   // refuses too), so "+ New" and the search offer them nothing.
   const grownUp = () => { const me = Aira.life && Aira.life.me; return !me || !me.age_group || ["adult", "senior"].includes(me.age_group); };
-  // In the hosted build an auditor (or a billing contact) only reads Service: nothing to create (aira_cloud/rbac.py).
+  // In the hosted build an auditor (or a billing contact) only reads Service: nothing to create (monosage_cloud/rbac.py).
   const canCreate = () => grownUp() && !(Aira.cloud && typeof Aira.cloud.role === "function" && ["auditor", "billing", "candidate"].includes(Aira.cloud.role()));
   // What "+ New" or a search result asked for ({ make, open }): the address drops ?new= and ?open= at once, so Back
   // and refresh do not open it again, and the tab opens it once it is drawn.

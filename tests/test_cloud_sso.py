@@ -16,7 +16,7 @@ from cloud_support import (
 )
 from idp_stub import OidcProvider, SamlIdp
 
-from aira_cloud.errors import Forbidden, PlanRequired, ValidationFailed
+from monosage_cloud.errors import Forbidden, PlanRequired, ValidationFailed
 
 
 @pytest.fixture(autouse=True)

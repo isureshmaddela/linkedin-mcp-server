@@ -401,8 +401,8 @@ NEW_ROUTES = (
 
 
 def test_every_developers_route_has_a_hosted_rule():
-    import aira_cloud.routes  # noqa: F401  (registers the Developers rules)
-    from aira_cloud.policy import POLICY
+    import monosage_cloud.routes  # noqa: F401  (registers the Developers rules)
+    from monosage_cloud.policy import POLICY
 
     airaapi_http.load_route_modules()
     names = {

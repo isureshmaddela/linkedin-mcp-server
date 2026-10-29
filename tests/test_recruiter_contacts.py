@@ -1152,8 +1152,8 @@ def test_linkedin_drafts_are_sent_one_at_a_time_through_the_existing_reply_flow(
     assert [item["message"] for item in worker.sent] == [draft]
 
 
-def test_hosted_policy_scopes_the_new_routes_and_refuses_recruiter_email():
-    from aira_cloud.policy import POLICY
+def test_hosted_policy_scopes_the_new_routes_and_recruiter_email():
+    from monosage_cloud.policy import POLICY
 
     names_ = {
         name
@@ -1162,18 +1162,24 @@ def test_hosted_policy_scopes_the_new_routes_and_refuses_recruiter_email():
     }
     assert names_ <= set(POLICY)
     for name in (
+        "api_recruiters_find",
+        "api_recruiter_story",
+        "api_recruiter_list_members",
+        "api_recruiter_list_linkedin_drafts",
         "api_recruiter_outreach",
         "api_recruiter_outreach_save",
         "api_recruiter_list_email_preview",
         "api_recruiter_list_email_send",
     ):
-        assert POLICY[name].scope == "deny", name
-    for name in (
-        "api_recruiters_find",
-        "api_recruiter_story",
-        "api_recruiter_list_members",
-        "api_recruiter_list_linkedin_drafts",
-    ):
         assert POLICY[name].scope == "candidate", name
+    # Recruiter email goes out through the organization's mail (tests/test_cloud_recruiter_email.py).
+    assert POLICY["api_recruiter_outreach"].permission == "messages.read"
+    for name in (
+        "api_recruiter_outreach_save",
+        "api_recruiter_list_email_preview",
+        "api_recruiter_list_email_send",
+    ):
+        assert POLICY[name].permission == "messages.send", name
+    assert POLICY["api_recruiter_list_email_send"].audit is True
     assert POLICY["api_recruiter_story"].permission == "messages.read"
     assert POLICY["api_recruiter_list_linkedin_drafts"].permission == "messages.send"

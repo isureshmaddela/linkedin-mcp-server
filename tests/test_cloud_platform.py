@@ -16,9 +16,9 @@ from cloud_support import (
     webhook,
 )
 
-from aira_cloud import crypto
-from aira_cloud.config import DAY
-from aira_cloud.errors import Conflict, Forbidden, NotFound, ValidationFailed
+from monosage_cloud import crypto
+from monosage_cloud.config import DAY
+from monosage_cloud.errors import Conflict, Forbidden, NotFound, ValidationFailed
 
 
 def operator_browser(
@@ -60,7 +60,7 @@ def operator_browser(
 
 
 def principal_of(app, browser: Browser):
-    from aira_cloud.webio import OPERATOR_COOKIE
+    from monosage_cloud.webio import OPERATOR_COOKIE
 
     return app.identity.principal_for_token(
         browser.cookies[OPERATOR_COOKIE], kind="operator"

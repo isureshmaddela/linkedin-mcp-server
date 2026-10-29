@@ -6,10 +6,10 @@ kind: Kustomization
 resources:
   - ../../k8s
 images:
-  - name: registry.example.com/aira-cloud-web
+  - name: registry.example.com/monosage-cloud-web
     newName: aira-deploy-web
     newTag: latest
-  - name: registry.example.com/aira-cloud-worker
+  - name: registry.example.com/monosage-cloud-worker
     newName: aira-deploy-worker
     newTag: latest
 patches:

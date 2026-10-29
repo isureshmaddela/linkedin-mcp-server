@@ -5,7 +5,7 @@ from __future__ import annotations
 
 from cloud_support import build_org, sign_in  # noqa: F401
 
-from aira_cloud.policy import LINKEDIN_NOTICE
+from monosage_cloud.policy import LINKEDIN_NOTICE
 
 
 def test_linkedin_notice_is_the_text_the_api_enforces(cloud):

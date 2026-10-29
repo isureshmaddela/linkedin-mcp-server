@@ -23,10 +23,10 @@ from test_cloud_ui_billing import operator_browser
 from aira import apps as app_catalog
 from aira.apps import app_of_path
 from aira.hosting import HOOKS
-from aira_cloud import plans
-from aira_cloud.config import DAY
-from aira_cloud.errors import AppRequired, Conflict, PlanRequired, SubscriptionInactive
-from aira_cloud.policy import APP_FREE_ROUTES, POLICY
+from monosage_cloud import plans
+from monosage_cloud.config import DAY
+from monosage_cloud.errors import AppRequired, Conflict, PlanRequired, SubscriptionInactive
+from monosage_cloud.policy import APP_FREE_ROUTES, POLICY
 
 LEADS_SEAT = 400  # Marketing (with Leads) per seat on Team
 MARKETING_STARTER_SEAT = 500
@@ -664,7 +664,7 @@ def _free_port() -> int:
 
 @pytest.fixture
 def served(tmp_path):
-    from aira_cloud.gateway import Gateway, make_server
+    from monosage_cloud.gateway import Gateway, make_server
 
     HOOKS.reset()
     port = _free_port()

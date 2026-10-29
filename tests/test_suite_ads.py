@@ -974,7 +974,7 @@ def test_hosted_ads_top_up_through_billing_and_operators_run_the_money(
     # the creator's payout is theirs, not the organization's revenue
     assert cara.call("GET", "/api/suite/revenue")[0] in (200, 403)
     # deleting the advertiser's organization removes its ads but keeps what creators earned
-    from aira_cloud.hooks import erase_videos
+    from monosage_cloud.hooks import erase_videos
 
     erase_videos(shop.org_id)
     with closing(db.connect()) as sc:

@@ -106,7 +106,7 @@ def test_tasks_run_and_due_mail_goes_out(db, monkeypatch):
 def test_the_hosted_scheduler_queues_one_tick_per_organization_and_the_worker_runs_it(
     cloud, monkeypatch
 ):
-    from aira_cloud.worker import HANDLERS
+    from monosage_cloud.worker import HANDLERS
 
     org = build_org(cloud)
     counts = cloud.scheduler.enqueue_due()

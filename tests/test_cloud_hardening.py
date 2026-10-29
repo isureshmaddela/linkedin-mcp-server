@@ -18,8 +18,8 @@ from cloud_support import (
 from serpapi_stub import DEFAULT_KEY, SerpApiStub
 
 from aira.hosting import HOOKS
-from aira_cloud.errors import Conflict, PlanRequired
-from aira_cloud.worker import Worker
+from monosage_cloud.errors import Conflict, PlanRequired
+from monosage_cloud.worker import Worker
 
 
 def operator(app):
@@ -119,7 +119,7 @@ def test_an_operator_queues_rotation_and_a_worker_does_it(cloud):
         {"email": "ops@aira.test", "password": PASSWORD},
     )
     assert status == 200
-    from aira_cloud import crypto
+    from monosage_cloud import crypto
 
     assert browser.call("POST", "/api/platform/auth/mfa/begin", {})[0] == 200
     pending = cloud.secrets.get("_platform", f"mfa-pending:{ops.operator_id}")
@@ -375,7 +375,7 @@ def test_sign_in_page_branding_is_public_but_only_for_plans_that_include_it(clou
 
 
 def test_a_forged_forwarded_for_prefix_does_not_change_the_client_address(cloud):
-    from aira_cloud.gateway import client_address
+    from monosage_cloud.gateway import client_address
 
     config = cloud.config
     config.trust_proxy = False
@@ -394,8 +394,8 @@ def test_a_forged_forwarded_for_prefix_does_not_change_the_client_address(cloud)
 
 
 def test_organization_supplied_urls_must_be_public_https(monkeypatch):
-    from aira_cloud.errors import ValidationFailed
-    from aira_cloud.sso import _check_public_url
+    from monosage_cloud.errors import ValidationFailed
+    from monosage_cloud.sso import _check_public_url
 
     monkeypatch.delenv("AIRA_CLOUD_ALLOW_LOCAL_IDP", raising=False)
     monkeypatch.delenv("AIRA_CLOUD_ALLOW_LOCAL_URLS", raising=False)
@@ -415,7 +415,7 @@ def test_organization_supplied_urls_must_be_public_https(monkeypatch):
 
 
 def test_scim_cannot_reroute_an_owner_or_admin_sign_in_address(cloud):
-    from aira_cloud.errors import Forbidden
+    from monosage_cloud.errors import Forbidden
 
     org = build_org(cloud)
     body = {
@@ -444,7 +444,7 @@ def test_scim_cannot_reroute_an_owner_or_admin_sign_in_address(cloud):
 
 
 def test_cef_lines_cannot_be_split_by_a_newline_in_a_field():
-    from aira_cloud.routes.org import _cef
+    from monosage_cloud.routes.org import _cef
 
     line = _cef(
         {
@@ -468,7 +468,7 @@ def test_staff_cannot_list_or_download_a_candidates_complete_export(cloud):
 
     from cloud_support import build_org, local_module, seed_workspace
 
-    from aira_cloud.errors import NotFound
+    from monosage_cloud.errors import NotFound
 
     org = build_org(cloud)
     candidate = org.candidate.member_id
@@ -520,8 +520,8 @@ def test_one_organizations_rate_limit_never_changes_another_threads_limit():
 
 
 def test_careers_reports_and_alert_runs_meter_the_credits_they_used():
-    from aira_cloud.route_hooks import _search_cost
-    from aira_cloud.webio import HttpResponse
+    from monosage_cloud.route_hooks import _search_cost
+    from monosage_cloud.webio import HttpResponse
 
     class Ctx:
         def __init__(self, name: str) -> None:

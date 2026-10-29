@@ -13,8 +13,8 @@ from cloud_support import (
     token_from_mail,
 )  # noqa: F401
 
-from aira_cloud import crypto
-from aira_cloud.errors import (
+from monosage_cloud import crypto
+from monosage_cloud.errors import (
     Conflict,
     Forbidden,
     Gone,

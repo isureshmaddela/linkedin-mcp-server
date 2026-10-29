@@ -27,7 +27,7 @@ _indexed: set[str] = set()
 def _hosted_index() -> Any:
     """The organization index of the hosted build, when this request runs inside an organization; else None."""
     try:
-        from aira_cloud import context
+        from monosage_cloud import context
     except ImportError:  # the single-user build without the hosted shell
         return None
     bound = context.current()

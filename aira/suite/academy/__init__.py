@@ -22,7 +22,7 @@ from aira.suite import public as _public
 def _keep_installed_public_index() -> None:
     """Work around a shared bug until aira/suite/public.py is fixed (see docs/apps/experiences.md).
 
-    The hosted build installs its organization index with ``public.set_index`` (aira_cloud.hooks.install), and the
+    The hosted build installs its organization index with ``public.set_index`` (monosage_cloud.hooks.install), and the
     single-user module (auto_apply_assistant) later calls ``public.set_default_index`` when the gateway imports it.
     That call also made its index current, so on a hosted server started the normal way every new public link was
     indexed in the local accounts database and answered 404. Here ``set_default_index`` still changes the default

@@ -11,6 +11,10 @@ get anything at all. Nothing here has its own mail sender or touches LinkedIn:
   up or guessed), are on the do-not-contact list (their own row here, or their address on the Leads suppression
   list), asked not to be contacted in a reply, replied after an email from this page (from then on the person
   writes to them themselves), or were emailed in the last :data:`FOLLOW_UP_DAYS` days.
+* **Hosted**, a member has no mail server of their own: the email goes out through the organization's Business hub >
+  Email (``aira.hosting.HOOKS.outreach_mail``), with their name on it and Reply-To their own address, within the
+  organization's plan cap, and an address on the organization's do-not-contact list is skipped too. The messages,
+  the daily limit and the send log stay in the member's workspace.
 * **LinkedIn** gets drafts only: one personalised draft per contact, saved in the conversation's reply box
   (``message_drafts``), where the person reads it and presses Send in the Messages tab, one conversation at a time,
   through the existing reply flow and its guardrails. Nothing is ever sent to LinkedIn from here.
@@ -20,7 +24,7 @@ from __future__ import annotations
 
 import re
 import sqlite3
-from collections.abc import Mapping, Sequence
+from collections.abc import Callable, Mapping, Sequence
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -35,6 +39,7 @@ SETTINGS_KEY = "recruiter_outreach"
 DEFAULT_DAILY_LIMIT = 20
 MAX_DAILY_LIMIT = 100
 FOLLOW_UP_DAYS = 14
+ORGANIZATION_MAIL_MISSING = "Your organization has not set up email yet. An owner or admin sets it up in Business hub > Email."
 OPT_OUT_LINE = 'If you would rather not hear from me, reply "unsubscribe" and I will not email you again.'
 PLACEHOLDERS = (
     "first_name",
@@ -89,6 +94,21 @@ def _suite():
     from aira.suite import kit
 
     return kit
+
+
+def hosted_mail() -> Any:
+    """The hosted organization's mail for the bound member (``aira.hosting.OutreachMail``); None in the single-user
+    build, where Business hub > Email of the person's own workspace is used."""
+    from aira.hosting import HOOKS
+
+    return HOOKS.outreach_mail() if HOOKS.outreach_mail is not None else None
+
+
+def daily_limit(settings: Mapping[str, Any], mail: Any = None) -> int:
+    """The daily limit in effect: the person's own, within the organization's plan cap when hosted."""
+    limit = int(settings["daily_limit"])
+    cap = int(getattr(mail, "daily_cap", 0) or 0)
+    return min(limit, cap) if cap else limit
 
 
 def get_settings(connection: sqlite3.Connection) -> dict[str, Any]:
@@ -199,8 +219,12 @@ def details(
 
 
 def do_not_contact_reason(
-    connection: sqlite3.Connection, person: Mapping[str, Any]
+    connection: sqlite3.Connection,
+    person: Mapping[str, Any],
+    suppressed: Callable[[str], str] | None = None,
 ) -> str:
+    """Why this contact must not be written to ('' when they may). ``suppressed`` also asks a hosted
+    organization's do-not-contact list, for email that goes out through its mail server."""
     row = connection.execute(
         "SELECT reason FROM recruiter_do_not_contact WHERE recruiter_id = ?",
         (person["recruiter_id"],),
@@ -215,6 +239,8 @@ def do_not_contact_reason(
         reason = mail.suppressed_reason(connection, {"email": person["email"]})
         if reason:
             return reason
+        if suppressed is not None:
+            return suppressed(str(person["email"]))
     return ""
 
 
@@ -378,12 +404,15 @@ def _latest_from_them(connection: sqlite3.Connection, person: Mapping[str, Any])
 
 
 def _email_block(
-    connection: sqlite3.Connection, person: Mapping[str, Any], now: datetime
+    connection: sqlite3.Connection,
+    person: Mapping[str, Any],
+    now: datetime,
+    suppressed: Callable[[str], str] | None = None,
 ) -> str:
     """Why this contact gets no email now ('' when they may)."""
     if not person.get("email"):
         return "LinkedIn only: there is no email address for this contact. Use LinkedIn drafts instead."
-    reason = do_not_contact_reason(connection, person)
+    reason = do_not_contact_reason(connection, person, suppressed)
     if reason:
         return reason
     log = [
@@ -437,9 +466,14 @@ def email_plan(
     body: str,
     my_name: str,
     now: datetime | None = None,
+    mail: Any = None,
 ) -> dict[str, Any]:
-    """What each person on the list would get (or why not). Nothing is written except opt-outs found in replies."""
+    """What each person on the list would get (or why not). Nothing is written except opt-outs found in replies.
+
+    ``mail`` is the hosted organization's (:func:`hosted_mail` when not given)."""
     now = now or datetime.now(timezone.utc)
+    mail = mail if mail is not None else hosted_mail()
+    suppressed = mail.suppressed if mail is not None else None
     subject = validate_template(subject, "email subject", limit=200)
     body = validate_template(body, "email text", limit=5000)
     if not collapse(my_name) and "{my_" in subject + body:
@@ -449,7 +483,8 @@ def email_plan(
     people = contacts.members(connection, list_id, now=now)
     record_opt_outs(connection, people)
     settings = get_settings(connection)
-    remaining = max(0, int(settings["daily_limit"]) - sent_today(connection, now))
+    limit = daily_limit(settings, mail)
+    remaining = max(0, limit - sent_today(connection, now))
     items: list[dict[str, Any]] = []
     ready = 0
     for person in people:
@@ -460,7 +495,7 @@ def email_plan(
             "email": person["email"],
             "linkedin_only": not person["email"],
         }
-        reason = _email_block(connection, person, now)
+        reason = _email_block(connection, person, now, suppressed)
         if not reason:
             values = details(connection, person, my_name)
             try:
@@ -473,7 +508,7 @@ def email_plan(
         elif ready >= remaining:
             item.update(
                 status="later",
-                reason=f"Over today's limit of {settings['daily_limit']} emails. Send the rest tomorrow.",
+                reason=f"Over today's limit of {limit} emails. Send the rest tomorrow.",
             )
         else:
             item["status"] = "ready"
@@ -486,7 +521,7 @@ def email_plan(
         "skipped": sum(1 for item in items if item["status"] == "skipped"),
         "later": sum(1 for item in items if item["status"] == "later"),
         "linkedin_only": sum(1 for item in items if item["linkedin_only"]),
-        "daily_limit": int(settings["daily_limit"]),
+        "daily_limit": limit,
         "sent_today": sent_today(connection, now),
         "remaining_today": remaining,
     }
@@ -503,20 +538,45 @@ def send_emails(
     password: str,
     sender: Any = None,
     now: datetime | None = None,
+    mail: Any = None,
 ) -> dict[str, Any]:
     """Send the previewed emails the person confirmed. The plan is worked out again first, so a contact who
-    replied, opted out or reached the daily limit since the preview is not written to."""
+    replied, opted out or reached the daily limit since the preview is not written to.
+
+    Hosted (``mail``, :func:`hosted_mail` when not given), the organization's mail server and password are used
+    and the email carries the person's name ("Jordan Lee via Acme Careers") with Reply-To their own address."""
     kit = _suite()
     chosen = {str(item) for item in recruiter_ids if item}
     if not chosen:
         raise ValueError("Choose at least one contact to email.")
-    settings = kit.email_settings(connection)
-    if not (settings.get("smtp_host") and settings.get("from_email")):
-        raise ValueError(
-            "Set up your email first in Business hub > Email (your own mail server or Gmail)."
-        )
+    mail = mail if mail is not None else hosted_mail()
+    if mail is None:
+        settings = kit.email_settings(connection)
+        if not (settings.get("smtp_host") and settings.get("from_email")):
+            raise ValueError(
+                "Set up your email first in Business hub > Email (your own mail server or Gmail)."
+            )
+    else:
+        if mail.unavailable:
+            raise ValueError(mail.unavailable)
+        settings = dict(mail.settings)
+        if not (settings.get("smtp_host") and settings.get("from_email")):
+            raise ValueError(ORGANIZATION_MAIL_MISSING)
+        password = mail.password
+        writer = collapse(my_name)
+        organization = collapse(str(settings.get("from_name") or ""))
+        if writer:
+            settings["from_name"] = (
+                f"{writer} via {organization}" if organization else writer
+            )[:100]
     plan = email_plan(
-        connection, list_id, subject=subject, body=body, my_name=my_name, now=now
+        connection,
+        list_id,
+        subject=subject,
+        body=body,
+        my_name=my_name,
+        now=now,
+        mail=mail,
     )
     queued: list[str] = []
     for item in plan["items"]:
@@ -548,7 +608,12 @@ def send_emails(
             "skipped": len(chosen),
         }
     result = kit.send_outbox(
-        connection, password, limit=len(queued), sender=sender, ids=queued
+        connection,
+        password,
+        limit=len(queued),
+        sender=sender,
+        ids=queued,
+        mail_settings=settings if mail is not None else None,
     )
     return {
         "queued": len(queued),

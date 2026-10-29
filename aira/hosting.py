@@ -1,6 +1,6 @@
 """Seams between the shared domain code and a hosting shell.
 
-The local build (``auto_apply_assistant.py``) and the hosted build (``aira_cloud``)
+The local build (``auto_apply_assistant.py``) and the hosted build (``monosage_cloud``)
 run the same domain modules. A hosted deployment needs to change a handful of
 decisions without forking that code: where documents live and which key
 encrypts them, which SerpApi key and model a tenant uses, which limits apply to
@@ -43,6 +43,25 @@ class WorkerRegistry(Protocol):
 SubmissionListener = Callable[[sqlite3.Connection, Mapping[str, Any]], None]
 
 
+@dataclass(frozen=True)
+class OutreachMail:
+    """The mail a hosted organization sends a member's own outreach with (recruiter email from a list).
+
+    The messages and their send log stay in the member's workspace; only the way out is the organization's.
+    """
+
+    # Business hub > Email of the organization (``aira.suite.kit.EMAIL_SETTINGS_DEFAULTS`` keys), with
+    # ``reply_to`` set to the member's own address so replies reach them
+    settings: Mapping[str, Any]
+    password: str
+    # an email address -> why the organization must not write to it ('' when it may): its do-not-contact list
+    suppressed: Callable[[str], str]
+    # the most emails a member may send a day under the organization's plan (0: no cap beyond the member's own)
+    daily_cap: int = 0
+    # why sending is off right now ('' when it is on): the plan, an operator's switch, a paused organization
+    unavailable: str = ""
+
+
 @dataclass
 class Hooks:
     worker_registry: WorkerRegistry | None = None
@@ -80,6 +99,9 @@ class Hooks:
     # (credits) -> None: called after each Jobs-tab Google Jobs search with the SerpApi credits it actually
     # spent (0 for an answer from the cache), so a hosted shell can meter searches made with a pooled key
     search_credits: Callable[[int], None] | None = None
+    # () -> the organization's mail for the bound member's recruiter email; replaces Business hub > Email of
+    # the member's own workspace (a hosted member has none: the organization's is shared)
+    outreach_mail: Callable[[], OutreachMail] | None = None
 
     def reset(self) -> None:
         """Clear every hook (tests, and a shell shutting down)."""
@@ -98,6 +120,7 @@ class Hooks:
         self.search_connect = None
         self.search_credits = None
         self.browser_time_cap = None
+        self.outreach_mail = None
         self.submission_listeners.clear()
 
 

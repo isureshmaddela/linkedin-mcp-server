@@ -20,7 +20,7 @@ _MARK = "_keeps_hosted_index"
 
 
 def _is_hosted(index: Any) -> bool:
-    return type(index).__module__.startswith("aira_cloud")
+    return type(index).__module__.startswith("monosage_cloud")
 
 
 def install() -> None:

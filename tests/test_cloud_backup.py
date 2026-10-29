@@ -9,7 +9,7 @@ import zipfile
 import pytest
 from cloud_support import PASSWORD, build_org, local_module, seed_workspace, sign_in  # noqa: F401
 
-from aira_cloud.errors import Conflict, ValidationFailed
+from monosage_cloud.errors import Conflict, ValidationFailed
 
 
 def fingerprint(app, org_id: str) -> dict:
@@ -169,7 +169,7 @@ def test_a_tampered_or_foreign_archive_is_refused_before_anything_changes(cloud)
 
 
 def test_the_command_line_writes_and_restores_a_backup(cloud, tmp_path, monkeypatch):
-    from aira_cloud.__main__ import main
+    from monosage_cloud.__main__ import main
 
     a = build_org(cloud, "Alpha Org", plan="team", slug_email="alpha.test")
     seed_workspace(cloud, a.org_id, a.candidate.member_id, job_title="Cloud Architect")

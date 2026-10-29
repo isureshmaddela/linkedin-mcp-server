@@ -258,6 +258,7 @@
     "data.export_org": "exported the organization", "data.export_candidate": "exported a candidate", "data.export_audit": "exported the audit log", "data.delete_candidate": "deleted a candidate workspace", "support.request": "Monosage support asked for access", "support.approve": "approved support access",
     "support.deny": "denied support access", "support.enter": "support entered the organization", "support.end": "support access ended", "support.expired": "support access expired", "linkedin.opt_in": "turned LinkedIn on", "linkedin.easy_apply_opt_in": "turned LinkedIn Easy Apply on",
     "integrations.model_endpoint": "set a model endpoint", "integrations.model_endpoint_removed": "removed the model endpoint",
+    "integrations.model_provider": "changed the organization's AI model", "integrations.model_provider_key_removed": "removed the organization's Anthropic API key",
   };
   A.describe = (event) => {
     const d = event.detail || {};

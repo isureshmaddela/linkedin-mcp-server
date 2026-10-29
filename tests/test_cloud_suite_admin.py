@@ -7,8 +7,8 @@ from cloud_support import build_org, sign_in, signup
 from test_cloud_ui_billing import operator_browser
 
 from aira import apps as app_catalog
-from aira_cloud import plans
-from aira_cloud.errors import AppRequired
+from monosage_cloud import plans
+from monosage_cloud.errors import AppRequired
 
 
 def test_every_industry_app_is_sold_per_seat_and_included_in_enterprise():
@@ -110,7 +110,7 @@ def test_the_superadmin_sets_a_subscription_bought_outside_the_product(cloud):
 
 
 def test_every_life_app_is_for_every_member_and_never_for_support_staff():
-    from aira_cloud.rbac import NEVER_VIA_SUPPORT, ORG_PERMISSIONS
+    from monosage_cloud.rbac import NEVER_VIA_SUPPORT, ORG_PERMISSIONS
 
     for app in app_catalog.LIFE_APPS:
         assert app.category == "life" and app.scope == "org"

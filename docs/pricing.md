@@ -1,6 +1,6 @@
 # Plans, entitlements and billing rules
 
-The numbers are the defaults in `aira_cloud/plans.py` (`DEFAULT_PLANS`). They are the scope document's proposal, not a pricing decision: validate them with pricing work. An operator can publish a new plan version without a deploy ([multitenant-operations.md](multitenant-operations.md)); new subscriptions use the new version and existing ones keep theirs until a migration date is scheduled. Prices below are the defaults in US dollars.
+The numbers are the defaults in `monosage_cloud/plans.py` (`DEFAULT_PLANS`). They are the scope document's proposal, not a pricing decision: validate them with pricing work. An operator can publish a new plan version without a deploy ([multitenant-operations.md](multitenant-operations.md)); new subscriptions use the new version and existing ones keep theirs until a migration date is scheduled. Prices below are the defaults in US dollars.
 
 Applies to the hosted build only. See [multitenant.md](multitenant.md) for how limits are enforced.
 
@@ -17,6 +17,7 @@ Applies to the hosted build only. See [multitenant.md](multitenant.md) for how l
 | Automatic submission | review mode only | yes | yes | yes |
 | Search plans per candidate | 2 | 5 | 10 | 25 |
 | AI cover letters per month | 20 | 500 | 5,000 | 100,000; an organization's own model endpoint |
+| AI model (Settings > Integrations, chosen by an owner or admin for the organization) | Monosage's hosted model, or Claude with the organization's own Anthropic API key | same | same | + the organization's own OpenAI-compatible endpoint (`byo_model`) |
 | API app (console and `/v1`) | every app is on: read-only history | not available (the API app is sold from Team) | add-on, $3 per candidate seat per month: 10,000 searches; `/v1` with 5 keys, 120 requests per minute | included: 250,000 searches; 50 keys, 600 requests per minute |
 | Monitors and alerts per candidate | 2 | 10 | 25 | 100 |
 | Marketing app, with Leads (lead search incl. people asking for services, lists, enrichment, drafts, call assist) | every app is on | add-on, $5 per candidate seat per month: Google sources (Maps, web, hiring signals, news) with the organization's key; drafts only | add-on, $4 per candidate seat per month; + sending lead email (`leads_outreach`) | included |
@@ -62,7 +63,7 @@ Notes on rows: MFA is available on every plan; the plan only decides whether it 
 
 ## Apps
 
-A plan sets seats, limits and the base price; the apps ([apps.md](apps.md), catalog `aira/apps.py`) are turned on per organization. The defaults are `APP_PRICING` in `aira_cloud/plans.py`; `AppSettings.state(plan, app)` (the defaults with the superadmin's changes) is `included`, `addon` or `unavailable`.
+A plan sets seats, limits and the base price; the apps ([apps.md](apps.md), catalog `aira/apps.py`) are turned on per organization. The defaults are `APP_PRICING` in `monosage_cloud/plans.py`; `AppSettings.state(plan, app)` (the defaults with the superadmin's changes) is `included`, `addon` or `unavailable`.
 
 | App | Trial | Starter | Team | Enterprise |
 | --- | --- | --- | --- | --- |

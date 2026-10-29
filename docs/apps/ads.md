@@ -182,8 +182,8 @@ clicks to before its page changed, and until when, so an old click goes to the p
 every first connection and cannot add columns; `service.py`
 the rules; `ads_routes.py` the advertiser's routes and the local admin routes with `HOSTED_RULES` "deny"); serving,
 counting and clicks are under `/api/videos/ads/*` (`aira/suite/videos/videos_routes.py`) so every Videos member can
-see ads without their organization having Ads; hosted money and moderation routes in `aira_cloud/routes/creators.py`;
-the top-up in `aira_cloud/billing.py` (`charge_ads_topup`). UI: `views-ads.js`, the console pages in
+see ads without their organization having Ads; hosted money and moderation routes in `monosage_cloud/routes/creators.py`;
+the top-up in `monosage_cloud/billing.py` (`charge_ads_topup`). UI: `views-ads.js`, the console pages in
 `cloud-platform.js`. Advertiser routes besides campaigns and ads: `POST /api/ads/estimate` (a read in the hosted
 build, so auditors may run it), `POST /api/ads/campaigns/<id>/duplicate`, `GET|POST /api/ads/campaigns/<id>/sales`,
 `DELETE /api/ads/sales/<id>`, `GET /api/ads/creatives` (the search box's list), `GET /api/ads/campaigns?format=csv`, `GET /api/ads/reports?campaign=<id>&format=csv`.

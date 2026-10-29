@@ -47,7 +47,7 @@ AUDIENCES = ("public", "friends")
 STATUSES = ("available", "reserved", "sold")
 SORTS = ("newest", "cheapest", "dearest")
 LIMIT_PER_HOUR = 20
-# Hosted roles that work in the organization's business apps (``suite.manage`` in aira_cloud.rbac).
+# Hosted roles that work in the organization's business apps (``suite.manage`` in monosage_cloud.rbac).
 BUSINESS_ROLES = ("owner", "admin", "coach")
 
 

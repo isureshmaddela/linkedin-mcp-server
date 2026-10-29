@@ -11,7 +11,7 @@
 
 ```powershell
 uv sync --group dev
-.\scripts\start_aira.ps1 -OpenBrowser        # starts http://127.0.0.1:8765
+.\scripts\start_monosage.ps1 -OpenBrowser    # starts http://127.0.0.1:8765
 # or
 uv run python auto_apply_assistant.py
 ```
@@ -115,8 +115,10 @@ In-app settings (Settings → Automation / Data): daily application limit (0 = u
   installed (`uv run patchright install chromium`).
 - **LinkedIn Easy Apply** is off by default in every plan. LinkedIn's User Agreement does not allow automated
   applications, and accounts that use them can be restricted; turn it on only if you accept that.
-- **Unsupported**: Workday and LinkedIn jobs that apply on an unknown external site end as "Apply manually", with the
-  link.
+- **Workday** applies with the account saved for that employer's site in Settings > Integrations > Workday accounts
+  (or one Monosage creates for you); without one the job holds under *Needs you*. The hosted build has the same card
+  for the candidate's own workspace, and its worker uses the saved accounts.
+- **Unsupported**: LinkedIn jobs that apply on an unknown external site end as "Apply manually", with the link.
 
 ## Health, readiness, metrics
 

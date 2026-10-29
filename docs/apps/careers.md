@@ -155,7 +155,7 @@ company research, pay checks and interview preparation reports.
 ## For developers
 
 * Routes are the single-user build's (`auto_apply_assistant.py`); the hosted build runs the same handlers in the
-  candidate's workspace under the permissions in `aira_cloud/policy.py`.
+  candidate's workspace under the permissions in `monosage_cloud/policy.py`.
 * New in this release, all on existing routes:
   * `POST /api/jobs/import` with `{"manual": {title, company, location?, url?, description?, workplace_type?,
     employment_type?, salary_min?, salary_max?, currency?}}` adds a job by hand (source `manual`).

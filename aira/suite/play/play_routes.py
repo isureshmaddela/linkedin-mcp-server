@@ -1,7 +1,7 @@
 """Play routes (``/api/play/*``), the live trivia public page (``trivia_room``), and Play's Today card and pulse.
 
 Loaded by :func:`aira.suite.load_apps`. Every route is for the person using Aira (``life.current``); hosted rules
-come from :func:`aira_cloud.policy.suite_rules` (``life.read`` / ``life.manage``, which every member has).
+come from :func:`monosage_cloud.policy.suite_rules` (``life.read`` / ``life.manage``, which every member has).
 """
 
 from __future__ import annotations

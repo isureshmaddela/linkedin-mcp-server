@@ -5,7 +5,7 @@ from __future__ import annotations
 import pytest
 from cloud_support import add_member, audit_actions, build_org, sign_in
 
-from aira_cloud.errors import Conflict, Forbidden, PlanRequired
+from monosage_cloud.errors import Conflict, Forbidden, PlanRequired
 
 
 def own(browser, member_id: str, method: str, path: str, body=None):

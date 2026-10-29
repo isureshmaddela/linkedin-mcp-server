@@ -19,8 +19,8 @@ from cloud_support import (
     signup,
 )  # noqa: F401
 
-from aira_cloud.db import INTEGRITY_ERRORS, table_columns, table_names
-from aira_cloud.errors import (
+from monosage_cloud.db import INTEGRITY_ERRORS, table_columns, table_names
+from monosage_cloud.errors import (
     Conflict,
     Forbidden,
     NotFound,

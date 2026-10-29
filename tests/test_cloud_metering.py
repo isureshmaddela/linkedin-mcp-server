@@ -8,8 +8,8 @@ import pytest
 from cloud_support import build_org, local_module, sign_in
 from serpapi_stub import DEFAULT_KEY, SerpApiStub
 
-from aira_cloud.config import DAY
-from aira_cloud.worker import Worker
+from monosage_cloud.config import DAY
+from monosage_cloud.worker import Worker
 
 
 @pytest.fixture

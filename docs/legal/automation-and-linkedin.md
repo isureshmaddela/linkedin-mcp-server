@@ -4,7 +4,7 @@
 
 ## Rules the automation follows
 
-These are enforced in code (the form engine in `aira/apply_engine.py`, the run pipeline in `aira/autopilot.py`, and the hosted gate in `aira_cloud/gate.py`). They apply to every organization and cannot be switched off by a plan or a policy.
+These are enforced in code (the form engine in `aira/apply_engine.py`, the run pipeline in `aira/autopilot.py`, and the hosted gate in `monosage_cloud/gate.py`). They apply to every organization and cannot be switched off by a plan or a policy.
 
 1. **No guessed answers.** The service answers an application question only from information the candidate entered and confirmed, or from an answer the candidate gave to a held question (and chose to remember). A question it cannot answer is held for the candidate; it is never filled with a guess.
 2. **Sensitive information is the candidate's own.** Work authorization, visa or sponsorship, demographic information and salary are entered and confirmed by the candidate only. They are never sent to the AI model, never filled without a confirmed answer, and are masked from coaches, administrators and auditors unless the organization's policy and the candidate's consent allow a coach to see them (a coach still cannot enter them).

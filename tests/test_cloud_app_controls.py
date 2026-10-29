@@ -8,7 +8,7 @@ from cloud_support import build_org, sign_in, signup
 from test_cloud_apps import _open, served  # noqa: F401
 from test_cloud_ui_billing import operator_browser
 
-from aira_cloud import plans
+from monosage_cloud import plans
 
 TEAM_MARKETING = 400
 

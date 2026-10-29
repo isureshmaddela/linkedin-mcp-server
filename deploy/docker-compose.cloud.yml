@@ -13,7 +13,7 @@
 # restart). Image tags are not pinned here; pin them in your own pipeline. SeaweedFS and the mail catcher stand in for a real object store and SMTP service.
 # web and worker must share the "aira-data" volume (the control-plane database and the tenants directory).
 
-name: aira-cloud
+name: monosage-cloud
 
 x-aira: &aira
   env_file: ["${AIRA_ENV_FILE:-.env.cloud}"]
@@ -27,7 +27,7 @@ services:
   web:
     <<: *aira
     build: { context: .., dockerfile: deploy/Dockerfile.cloud, target: web }
-    image: ${AIRA_WEB_IMAGE:-aira-cloud-web}
+    image: ${AIRA_WEB_IMAGE:-monosage-cloud-web}
     command: ["serve"]
     ports: ["127.0.0.1:${AIRA_WEB_PORT:-8780}:8780"]
     depends_on:
@@ -37,7 +37,7 @@ services:
   worker:
     <<: *aira
     build: { context: .., dockerfile: deploy/Dockerfile.cloud, target: worker }
-    image: ${AIRA_WORKER_IMAGE:-aira-cloud-worker}
+    image: ${AIRA_WORKER_IMAGE:-monosage-cloud-worker}
     command: ["worker", "--threads", "4"]
     shm_size: 1gb          # Chromium needs a larger /dev/shm than the Docker default
     init: true
@@ -65,7 +65,7 @@ services:
 
   storage-init:
     <<: *aira
-    image: ${AIRA_WEB_IMAGE:-aira-cloud-web}
+    image: ${AIRA_WEB_IMAGE:-monosage-cloud-web}
     command: ["init-storage"]
     restart: "no"
     depends_on:

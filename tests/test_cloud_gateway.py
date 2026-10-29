@@ -23,8 +23,8 @@ from cloud_support import (
     webhook,
 )  # noqa: F401
 
-from aira_cloud import crypto
-from aira_cloud.config import DAY
+from monosage_cloud import crypto
+from monosage_cloud.config import DAY
 
 
 # ----------------------------------------------------------------------------- gates before anything else
@@ -183,6 +183,20 @@ def test_rate_limits_per_member_and_per_organization(tmp_path):
     assert 429 in codes and codes[0] == 200
     status, body = candidate.call("GET", "/api/jobs")
     assert status == 429 and body["code"] == "rate_limited"
+    app.close()
+
+
+def test_page_scripts_do_not_spend_the_per_address_allowance(tmp_path):
+    """A page load fetches about 80 scripts; opening many apps in a minute must still leave room for the API."""
+    app = make_app(tmp_path, ip_requests_per_minute=20)
+    browser = Browser(app)
+    codes = [browser.call("GET", "/static/app.js", raw=True)[0] for _ in range(60)]
+    assert set(codes) == {200}  # their own allowance is ten times larger
+    assert browser.call("GET", "/api/health")[0] == 200
+    assert 429 in [browser.call("GET", "/api/health")[0] for _ in range(25)]
+    assert 429 in [
+        browser.call("GET", "/static/app.js", raw=True)[0] for _ in range(150)
+    ]
     app.close()
 
 
@@ -876,12 +890,12 @@ def test_held_questions_reach_the_coach_and_sensitive_ones_stay_with_the_candida
 def test_log_lines_carry_the_organization_id(cloud, caplog):
     org = build_org(cloud)
     candidate = sign_in(cloud, org.candidate)
-    with caplog.at_level(logging.INFO, logger="aira_cloud.gateway"):
+    with caplog.at_level(logging.INFO, logger="monosage_cloud.gateway"):
         candidate.call("GET", "/api/jobs")
     records = [
         r
         for r in caplog.records
-        if r.name == "aira_cloud.gateway" and getattr(r, "org_id", "") == org.org_id
+        if r.name == "monosage_cloud.gateway" and getattr(r, "org_id", "") == org.org_id
     ]
     assert records and getattr(records[0], "correlation_id", "")
 
