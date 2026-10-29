@@ -151,10 +151,23 @@ def build_org(
     seats: int = 25,
     slug_email: str = "acme.test",
     apps: str | list[str] | None = None,
+    apps_space: str = "shared",
 ) -> Org:
-    """``apps`` turns app add-ons on after checkout: a list of app ids, or ``"all"`` for every add-on the plan offers."""
+    """``apps`` turns app add-ons on after checkout: a list of app ids, or ``"all"`` for every add-on the plan offers.
+
+    ``apps_space``: a new organization gives each member their own business apps ("personal"); most tests here were
+    written for the organization's apps that its staff share, so they ask for "shared" (the default of this helper).
+    """
     result = signup(app, name, f"owner@{slug_email}")
     org_id = result["org"]["org_id"]
+    if apps_space != "personal":
+        with app.db.write() as connection:
+            policy = {**app.tenancy.policy(org_id), "apps_space": apps_space}
+            connection.execute(
+                "UPDATE organizations SET policy = ? WHERE org_id = ?",
+                (dumps(policy), org_id),
+            )
+        app.tenancy.invalidate_policy(org_id)
     if plan != "trial":
         pay(app, org_id, plan, seats)
     owner = result["owner"]

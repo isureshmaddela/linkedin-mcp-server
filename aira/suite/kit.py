@@ -728,6 +728,22 @@ def void_revenue(
     )
 
 
+@contextmanager
+def earnings_source(connection: sqlite3.Connection) -> Iterator[sqlite3.Connection]:
+    """The database that holds what the person earns. Here it is the bound one; in the hosted build, when each
+    member has their own business apps, it is their own space (the life apps that show earnings run elsewhere)."""
+    from aira.hosting import HOOKS
+
+    other = HOOKS.earnings_connection() if HOOKS.earnings_connection else None
+    if other is None:
+        yield connection
+        return
+    try:
+        yield other
+    finally:
+        other.close()
+
+
 def revenue(
     connection: sqlite3.Connection,
     *,
@@ -863,6 +879,41 @@ def email_settings(connection: sqlite3.Connection) -> dict[str, Any]:
         **EMAIL_SETTINGS_DEFAULTS,
         **{k: v for k, v in stored.items() if k in EMAIL_SETTINGS_DEFAULTS},
     }
+
+
+def _mail_ready(settings: Mapping[str, Any]) -> bool:
+    return bool(settings.get("smtp_host") and settings.get("from_email"))
+
+
+def lent_mail() -> Any:
+    """The mail server lent to this database when it has none of its own (hosted: a member's own space sends
+    through the organization's), or None. Here, in the single-user build, there is none."""
+    from aira.hosting import HOOKS
+
+    if HOOKS.business_mail is None:
+        return None
+    lent = HOOKS.business_mail()
+    if lent is None or lent.unavailable or not _mail_ready(lent.settings):
+        return None
+    return lent
+
+
+def outgoing_mail(
+    connection: sqlite3.Connection, secret_store: Any
+) -> tuple[dict[str, Any], str, bool]:
+    """``(settings, password, lent)``: how customer email leaves. Business hub > Email of this database when it is
+    set up (a sender address and a mail server); otherwise the lent server (``lent`` True); otherwise these
+    incomplete settings, which :func:`send_outbox` turns into "Set up email first"."""
+    settings = email_settings(connection)
+    if _mail_ready(settings):
+        password = (
+            secret_store.get(connection, SMTP_PASSWORD_SECRET) if secret_store else ""
+        )
+        return settings, password or "", False
+    lent = lent_mail()
+    if lent is not None:
+        return dict(lent.settings), lent.password, True
+    return settings, "", False
 
 
 def save_email_settings(

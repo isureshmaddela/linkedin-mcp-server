@@ -256,7 +256,17 @@ def handle_suite_tick(app: CloudApp, job: dict[str, Any]) -> dict[str, Any]:
 
     local = _local()
     org_id = job["org_id"]
-    with app.workspaces.bind_org_api(org_id, correlation_id=job["job_id"]):
+    member_id = str((job.get("payload") or {}).get("member_id") or "")
+    if member_id:
+        # a member's own space (monosage_cloud/spaces.py)
+        if not app.workspaces.member_apps_live(org_id, member_id):
+            raise Skip("The member's own apps are not in use.")
+        binding = app.workspaces.bind_member_apps(
+            org_id, member_id, correlation_id=job["job_id"]
+        )
+    else:
+        binding = app.workspaces.bind_org_api(org_id, correlation_id=job["job_id"])
+    with binding:
         with local._connect() as connection:
             return background.run(connection, local._airaapi_secret_store())
 

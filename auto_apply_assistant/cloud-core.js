@@ -73,12 +73,15 @@
 
   // The organization's apps, opened without a workspace: the API console for staff who may read the integrations,
   // the industry apps and the Business hub for members who may use them (owners, admins, coaches as team members).
+  // With spaces (cloud-spaces.js) every member, whatever their role, runs the business apps in a space of their own.
   function orgNav() {
-    if (cloud.role() === "candidate") return [];
-    const industry = LOCAL_NAV.filter((item) => ORG_APPS.has(item.app) && item.app !== "api" && !LIFE_IDS.has(item.app) && !appOff(item.app));
+    const staff = cloud.role() !== "candidate";
+    const own = cloud.ownSpaceApps ? cloud.ownSpaceApps() : [];
+    const industry = LOCAL_NAV.filter((item) => ORG_APPS.has(item.app) && item.app !== "api" && !LIFE_IDS.has(item.app) && !appOff(item.app))
+      .filter((item) => (staff && cloud.can("suite.read")) || own.includes(item.app));
     const items = [];
-    if (cloud.can("integrations.read") && !appOff("api")) items.push(...LOCAL_NAV.filter((item) => item.app === "api"));
-    if (cloud.can("suite.read") && industry.length) items.push(...industry, ...LOCAL_NAV.filter((item) => item.id === "hub"));
+    if (staff && cloud.can("integrations.read") && !appOff("api")) items.push(...LOCAL_NAV.filter((item) => item.app === "api"));
+    if (industry.length) items.push(...industry, ...LOCAL_NAV.filter((item) => item.id === "hub"));
     return items;
   }
 
@@ -94,7 +97,7 @@
     if (role === "candidate" || acting) nav = workspaceNav().map((item) => (item.id === "dashboard" && role !== "candidate" && !self ? { ...item, label: "Candidate home" } : item));
     const own = itemsFor(role).map((item) => ({ id: item.id, label: item.label, icon: item.icon || "dashboard", group: item.group || "Organization", app: item.app || APP_OF_GROUP[item.group || "Organization"] || "account", key: item.key, quick: !!item.quick }));
     // Staff sections come first for people who administer; a candidate's own sections stay first for them.
-    nav = role === "candidate" ? [...nav, ...lifeNav(), ...own] : [...own, ...nav.map((item) => ({ ...item, group: acting && !self && item.group !== "Account" ? "Candidate workspace" : item.group })), ...orgNav(), ...lifeNav()];
+    nav = role === "candidate" ? [...nav, ...orgNav(), ...lifeNav(), ...own] : [...own, ...nav.map((item) => ({ ...item, group: acting && !self && item.group !== "Account" ? "Candidate workspace" : item.group })), ...orgNav(), ...lifeNav()];
     Aira.NAV.splice(0, Aira.NAV.length, ...nav);
     Aira.state.currentApp = null;
     Aira.apps.pseudo.account.tagline = cloud.me && cloud.me.org ? cloud.me.org.name : "Organization and sign-in";
@@ -113,9 +116,15 @@
   // own, or a candidate's, first.
   Aira.sectionGate = (section) => {
     if (!cloud.me || Aira.state.platformMode) return null;
-    if (section === "hub" && !cloud.can("suite.read")) return Aira.ui.empty("Not available", "This page is not part of your role.");
+    if (section === "hub" && !cloud.can("suite.read") && !(cloud.ownSpaceApps && cloud.ownSpaceApps().length)) return Aira.ui.empty("Not available", "This page is not part of your role.");
     if (!WORKSPACE_IDS.includes(section) || cloud.hasWorkspace()) return null;
     const own = cloud.own();
+    // An owner or admin who already has a workspace of their own goes straight into it (the banner keeps the way to a
+    // candidate's); a candidate they had open is reopened by restoreActing, so this page does not ask again.
+    if (own.available && own.exists) {
+      cloud.enterOwnWorkspace({ go: null }).then((ok) => { if (ok) Aira.router.render(); });
+      return Aira.ui.skeleton(4);
+    }
     const actions = [];
     if (own.available) actions.push(h("button", { type: "button", class: "btn", text: own.exists ? "Open my workspace" : "Start my workspace", onclick: () => cloud.enterOwnWorkspace({ go: [section] }) }));
     if (cloud.can("candidates.list")) actions.push(h("a", { class: `btn ${actions.length ? "secondary" : ""}`, href: cloud.role() === "coach" ? "#/coach" : "#/org", text: "Choose a candidate" }));
@@ -128,6 +137,7 @@
   };
   Aira.apps.remedy = (id, kind) => {
     if (kind === "disabled") return { text: "Monosage has paused it for every organization; it comes back with your data when it is switched on again." };
+    if (kind === "denied") return cloud.can("org.settings") ? { text: "Choose who can use it on the Apps page, or give it to one person under Members.", action: { label: "Open Apps", href: "#/org/apps" } } : null;
     if (kind === "role") {
       return cloud.role() === "candidate" && !LIFE_IDS.has(id)
         ? { text: "It holds your organization's business data, which its owners, administrators and coaches use." }
@@ -163,7 +173,7 @@
     if (user.org && user.org.slug) Aira.remember("lastOrg", user.org.slug); // the next sign-in page shows this organization's branding
     cloud.restoreActing();
     $("accountEmail").textContent = user.email;
-    $("accountMeta").textContent = `${user.role || ""}${user.org ? " · " + user.org.name : ""}`;
+    if (cloud.renderWho) cloud.renderWho(user); else $("accountMeta").textContent = `${user.role || ""}${user.org ? " · " + user.org.name : ""}`;
     cloud.buildNav();
     cloud.refreshBanners();
     if (!cloud.bannerTimer) cloud.bannerTimer = setInterval(cloud.refreshBanners, 60000);
@@ -173,8 +183,14 @@
   // Does this person have a candidate workspace to load right now?
   cloud.hasWorkspace = () => cloud.role() === "candidate" || !!Aira.state.actingFor;
 
+  // Where a signed-in person starts: an operator in the platform console; a candidate's workspace someone opened on
+  // its Dashboard; everyone else on their own start page (Home, Today, with their apps), else their role's page.
   cloud.landing = (workspace) => {
     const role = cloud.role();
+    if (role === "operator") return ["platform"];
+    if (Aira.state.actingFor && !cloud.inOwnWorkspace()) return ["dashboard"];
+    const start = Aira.startPage ? Aira.startPage(true) : null;
+    if (start && Aira.views[start] && (start !== "today" || Aira.NAV.some((item) => item.id === "today"))) return [start];
     if (role === "candidate") return null;
     if (Aira.state.actingFor) return ["dashboard"];
     return [{ owner: "org", admin: "org", auditor: "org", coach: "coach", billing: "billing" }[role] || "org"];
@@ -252,13 +268,16 @@
     },
   });
 
-  cloud.leaveWorkspace = () => {
+  cloud.leaveWorkspace = ({ go } = {}) => {
     Aira.state.actingFor = null;
     Aira.state.workspaceLoaded = false;
     Aira.remember("actingFor", null);
     cloud.buildNav();
     cloud.renderActingBanner();
-    Aira.router.go(cloud.landing(false));
+    // "Back to organization" goes to the organization's pages (a coach's candidates) rather than Home.
+    const back = { owner: ["org"], admin: ["org"], auditor: ["org"], coach: ["coach"] }[cloud.role()];
+    const target = go === undefined ? back || cloud.landing(false) : go;
+    if (target) Aira.router.go(target);
   };
 
   cloud.renderActingBanner = () => {
@@ -267,7 +286,8 @@
     if (!acting) { slot.replaceChildren(); slot.hidden = true; return; }
     if (acting.self) {
       slot.hidden = false;
-      slot.replaceChildren(h("div", { class: "cloud-banner info", role: "status" }, h("strong", { text: "Your own workspace" }), h("span", { class: "muted", text: "Only you can open it." }), h("button", { type: "button", class: "btn secondary sm", text: "Back to organization", onclick: cloud.leaveWorkspace })));
+      const pick = cloud.can("candidates.list") ? h("a", { class: "btn ghost sm", href: cloud.role() === "coach" ? "#/coach" : "#/org/candidates", text: "Choose a candidate", onclick: () => cloud.leaveWorkspace({ go: null }) }) : null;
+      slot.replaceChildren(h("div", { class: "cloud-banner info", role: "status" }, h("strong", { text: "Your own workspace" }), h("span", { class: "muted", text: "Only you can open it." }), pick, h("button", { type: "button", class: "btn secondary sm", text: "Back to organization", onclick: () => cloud.leaveWorkspace() })));
       return;
     }
     const scope = acting.scope ? ` (${acting.scope} access)` : "";

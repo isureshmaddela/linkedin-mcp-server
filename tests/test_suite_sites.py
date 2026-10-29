@@ -848,10 +848,12 @@ def test_hosted_sites_need_the_app_respect_roles_and_stay_in_their_organization(
     status, overview = owner.call("GET", "/api/sites/overview")
     assert status == 200, overview
     ids = [p["id"] for p in overview["providers"]["providers"]]
+    # The platform model runs on the server's Ollama here, so its models stream as the default.
     assert (
         "platform" in ids
+        and "server" in ids
         and "ollama" not in ids
-        and overview["default_provider"] == "platform"
+        and overview["default_provider"] == "server"
     )
 
     status, made = owner.call("POST", "/api/sites/projects", {"template": "portfolio"})

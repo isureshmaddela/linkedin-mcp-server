@@ -860,7 +860,10 @@ def default_provider(connection: sqlite3.Connection) -> str:
     chosen = str(kit.get_setting(connection, APP, DEFAULT_PROVIDER_SETTING, "") or "")
     if chosen and chosen in {p.id for p in providers.offered()}:
         return chosen
-    return "platform" if providers.hosted() else providers.TEMPLATE_ONLY
+    if providers.hosted():
+        # The server's own Ollama streams the site as it is written; the platform's model answers in one piece.
+        return "server" if providers.server_ollama_url() else "platform"
+    return providers.TEMPLATE_ONLY
 
 
 def start_run(

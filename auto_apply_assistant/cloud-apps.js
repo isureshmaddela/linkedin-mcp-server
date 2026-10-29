@@ -4,6 +4,7 @@
  * plan), and whether it is on. Owners and billing contacts turn an app on (a quote first, prorated like a seat
  * change) or off at the period end; administrators and auditors read the same page. The server decides everything
  * (/api/org/apps and /api/org/apps/<id>/{quote,subscribe,unsubscribe,keep}); the page only hides what it would refuse.
+ * Owners and admins also choose who can use each app ("Who can use it": roles, or Everyone; /api/org/apps/<id>/access).
  * The sidebar entry ("org-apps", a redirect to #/org/apps) is registered in cloud-org.js with the other admin pages.
  */
 "use strict";
@@ -128,6 +129,59 @@
     return row;
   }
 
+  // ---------------------------------------------------------------------------
+  // Who can use it: the roles that may open each app (PUT /api/org/apps/<id>/access); people get exceptions under Members
+  // ---------------------------------------------------------------------------
+  const accessOf = (app, data) => (data.access || []).find((row) => row.id === app.id) || { roles: null, locked_roles: [] };
+  const roleName = (role) => (A.roleLabel && A.roleLabel[role]) || titleCase(role);
+  const whoText = (roles) => (roles === null || roles === undefined ? "Everyone" : roles.length ? roles.map(roleName).join(", ") : "Only the people given it under Members");
+
+  function changeAccess(app, data) {
+    const access = accessOf(app, data);
+    const locked = new Set(access.locked_roles || []);
+    const roles = data.roles || [];
+    const current = new Set(access.roles === null || access.roles === undefined ? roles : access.roles);
+    const everyone = h("input", { type: "checkbox", id: `ca-everyone-${app.id}` });
+    everyone.checked = access.roles === null || access.roles === undefined;
+    const boxes = roles.map((role) => {
+      const input = h("input", { type: "checkbox", id: `ca-role-${app.id}-${role}`, value: role });
+      input.checked = current.has(role) || locked.has(role);
+      const fixed = locked.has(role) || (role === "owner" && !data.can_manage_owners);
+      const hint = locked.has(role) ? `${app.name} is each candidate's own workspace: candidates always keep it.` : role === "owner" && !data.can_manage_owners ? "Only an owner can change what owners may use." : "";
+      return { role, input, fixed, node: h("label", { class: "adm-check", for: input.id }, input, h("span", { class: "what" }, h("b", { text: roleName(role) }), hint ? h("span", { text: hint }) : null)) };
+    });
+    const sync = () => { for (const box of boxes) { box.input.disabled = everyone.checked || box.fixed; if (everyone.checked) box.input.checked = true; } };
+    everyone.addEventListener("change", sync); sync();
+    const error = h("div", { class: "adm-inline-error", role: "alert" });
+    Aira.modal({
+      title: `Who can use ${app.name}`,
+      body: h("div", { class: "adm-form ca-access-form", "data-app": app.id },
+        h("p", { class: "adm-sub", text: "Members without it do not see it in their apps or on Today. You can still give it to one person, or take it from one person, under Members." }),
+        h("label", { class: "adm-check", for: everyone.id }, everyone, h("span", { class: "what" }, h("b", { text: "Everyone" }), h("span", { text: "Every role in your organization" }))),
+        h("div", { class: "ca-access-roles", role: "group", "aria-label": "Roles" }, ...boxes.map((box) => box.node)),
+        error),
+      actions: [{ label: "Cancel", kind: "ghost" }, { label: "Save", kind: "", onClick: async (close) => {
+        error.textContent = "";
+        const chosen = everyone.checked ? null : boxes.filter((box) => box.input.checked).map((box) => box.role);
+        try {
+          await Aira.api(`/api/org/apps/${encodeURIComponent(app.id)}/access`, { method: "PUT", body: { roles: chosen } });
+        } catch (e) { error.textContent = A.message ? A.message(e) : e.message; return false; }
+        Aira.toast(`Saved who can use ${app.name}.`, "success");
+        close();
+        await refresh();
+        return false;
+      } }],
+    });
+  }
+
+  function accessRow(app, data) {
+    const access = accessOf(app, data);
+    return h("div", { class: "ca-access", "data-app": app.id },
+      h("span", { class: "muted small", text: "Who can use it" }),
+      h("strong", { class: "ca-access-who", text: whoText(access.roles) }),
+      data.can_manage_access ? h("button", { type: "button", class: "btn ghost sm", "data-access": "change", "data-app": app.id, text: "Change", onclick: () => changeAccess(app, data) }) : null);
+  }
+
   function card(app, data) {
     return h("section", { class: "card cb-card ca-app", "data-app": app.id, "data-status": app.status },
       h("div", { class: "ca-app-head" }, h("h2", { text: app.name }), statusBadge(app)),
@@ -137,6 +191,7 @@
       (app.highlights || []).length ? h("ul", { class: "ca-highlights" }, ...app.highlights.map((item) => h("li", { text: item }))) : null,
       h("div", { class: "ca-price" }, h("strong", { text: priceLine(app) })),
       statusText(app, data) ? h("p", { class: "muted ca-status-text", text: statusText(app, data) }) : null,
+      data.access ? accessRow(app, data) : null,
       actionsFor(app, data));
   }
 
@@ -183,5 +238,5 @@
     stage.replaceChildren(page);
   };
 
-  cloud.appsPage = { priceLine, statusText };
+  cloud.appsPage = { priceLine, statusText, whoText };
 })();

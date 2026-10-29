@@ -247,7 +247,7 @@
   }
 
   const ACTION_WORDS = {
-    "org.create": "created the organization", "org.policy": "changed the application policy", "org.branding": "changed branding", "org.suspended": "suspended the organization", "org.reinstated": "reinstated the organization",
+    "org.create": "created the organization", "org.policy": "changed the application policy", "org.app_access": "changed who can use an app", "member.app_access": "changed the apps a member may open", "org.branding": "changed branding", "org.suspended": "suspended the organization", "org.reinstated": "reinstated the organization",
     "org.closure_requested": "requested closure", "org.closure_cancelled": "cancelled closure", "member.invite": "invited someone", "member.invite_resend": "resent an invitation", "member.invite_revoke": "withdrew an invitation",
     "member.join": "joined", "member.role_change": "changed a role", "member.remove": "removed a member", "member.verify_email": "verified their email", "member.erased": "erased a member's data",
     "coach.assign": "assigned a coach", "coach.scope_change": "changed a coach's scope", "coach.unassign": "unassigned a coach", "automation.pause_org": "paused automation for the organization", "automation.resume_org": "resumed automation",

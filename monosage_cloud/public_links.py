@@ -4,6 +4,10 @@ A business's customers use these pages without signing in. The token resolves to
 the control-plane index (``public_links``), the organization must be active and still have the app the link
 belongs to, and the request then runs against the organization's shared database. A visitor is rate
 limited per address; an unknown, revoked or unsubscribed link is the same 404.
+
+A link made inside a member's own space (monosage_cloud/spaces.py: their shop, booking page, course or site) also
+records the member, and its visitors run in that member's database. Such a link answers only while the member is
+an active member and the organization gives members their own apps; a removed member's links are the same 404.
 """
 
 from __future__ import annotations
@@ -35,11 +39,13 @@ class HostedPublicIndex:
         org_id = bound.org_id if bound else ""
         if not org_id:
             raise RuntimeError("A public link can only be made inside an organization.")
+        # made in a member's own space: their visitors run in that member's database
+        member_id = bound.member_id if bound and bound.kind == "member_apps" else ""
         with self.app.db.write() as connection:
             connection.execute(
-                """INSERT INTO public_links (token_hash, org_id, app, created_at) VALUES (?, ?, ?, ?)
+                """INSERT INTO public_links (token_hash, org_id, app, created_at, member_id) VALUES (?, ?, ?, ?, ?)
                 ON CONFLICT (token_hash) DO NOTHING""",
-                (token_hash, org_id, app, self.app.clock.now()),
+                (token_hash, org_id, app, self.app.clock.now(), member_id),
             )
 
     def remove(self, token_hash: str) -> None:
@@ -54,9 +60,19 @@ class HostedPublicIndex:
         with platform_scope(), self.app.db.read() as connection:
             return one(
                 connection,
-                "SELECT org_id, app FROM public_links WHERE token_hash = ?",
+                "SELECT org_id, app, member_id FROM public_links WHERE token_hash = ?",
                 (public.hash_token(token),),
             )
+
+    def remove_member(self, org_id: str, member_id: str) -> int:
+        """Forget every link made in a member's own space (their space is gone)."""
+        if not member_id:
+            return 0
+        with self.app.db.write() as connection:
+            return connection.execute(
+                "DELETE FROM public_links WHERE org_id = ? AND member_id = ?",
+                (org_id, member_id),
+            ).rowcount
 
 
 def _headers(request: HttpRequest) -> Message:
@@ -97,6 +113,7 @@ def run_public_link(
     if not found:
         return Reply(404, NOT_FOUND).to_response(), ""
     org_id = str(found["org_id"])
+    member_id = str(found.get("member_id") or "")
     set_scope(org_id)
     try:
         app.entitlements.require_state(
@@ -105,13 +122,22 @@ def run_public_link(
         app.entitlements.require_app(org_id, str(found["app"]), audience="candidate")
     except CloudError:
         return Reply(404, NOT_FOUND).to_response(), org_id
+    if member_id and not app.workspaces.member_apps_live(org_id, member_id):
+        return Reply(404, NOT_FOUND).to_response(), org_id
     payload = (
         request.json()
         if request.method in {"POST", "PATCH", "PUT"} and request.body
         else {}
     )
     try:
-        with app.workspaces.bind_org_api(org_id, correlation_id=correlation) as user:
+        binding = (
+            app.workspaces.bind_member_apps(
+                org_id, member_id, correlation_id=correlation
+            )
+            if member_id
+            else app.workspaces.bind_org_api(org_id, correlation_id=correlation)
+        )
+        with binding as user:
             local._request_context.actor = "public:visitor"
             request_object = airaapi_http.Request(
                 match=match,
@@ -123,7 +149,7 @@ def run_public_link(
                 connect=local._connect,
                 setting=local._setting,
                 secret_store=local._airaapi_secret_store(),
-                key_index=app.hosting_key_index(user["user_id"]),
+                key_index=app.hosting_key_index(org_id),
                 audit=local._audit,
             )
             outcome = entry.handler(request_object)

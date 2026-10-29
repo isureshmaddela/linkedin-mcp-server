@@ -122,11 +122,17 @@ def install(app: CloudApp) -> None:
         }
 
     def _has_app(app_id: str) -> bool:
+        from monosage_cloud import app_access
+
         bound = context.current()
         return bool(
             bound
             and bound.org_id
             and app.entitlements.resolve(bound.org_id).has_app(app_id)
+            # and the member this request is for may open it (their role, their exceptions)
+            and app_access.may_open(
+                app.tenancy.policy(bound.org_id), bound.principal, app_id
+            )
         )
 
     aira_suite.set_actor_resolver(
@@ -144,6 +150,33 @@ def install(app: CloudApp) -> None:
     )
     HOOKS.secret_key = lambda: app.secrets.key(ctx_org())
     HOOKS.model_json = app.models.complete_json
+
+    def earnings_connection() -> Any:
+        """What a member earns lives in their own space (when the organization gives each member one): the life
+        apps that show it (AI's Earn tab, Life's earning goals) run in the organization's database."""
+        from monosage_cloud import spaces
+
+        ctx = context.current()
+        principal = ctx.principal if ctx else None
+        if (
+            ctx is None
+            or ctx.kind != "org_api"
+            or principal is None
+            or principal.is_operator
+        ):
+            return None
+        if spaces.mode(app.tenancy.policy(ctx.org_id)) != "personal":
+            return None
+        return app.workspaces.member_apps_connection(ctx.org_id, principal.member_id)
+
+    HOOKS.earnings_connection = earnings_connection
+    # The platform model runs on this server's Ollama: Sites may build with its models too (streamed, at the
+    # operator's address only).
+    HOOKS.server_ollama_url = lambda: (
+        (app.config.model_url or "http://127.0.0.1:11434")
+        if app.config.model_provider == "ollama"
+        else ""
+    )
     HOOKS.wrap_services = app.gate.wrap_services
 
     def settings_overlay(merged: dict[str, str]) -> dict[str, str]:
@@ -339,6 +372,18 @@ def install(app: CloudApp) -> None:
         return organization_mail(app, ctx.org_id, ctx.candidate_id)
 
     HOOKS.outreach_mail = outreach_mail
+
+    def business_mail() -> Any:
+        """A member's own business apps without mail of their own send customer email through the organization's
+        (the member's name, Reply-To their address). The organization's own apps have their own settings only."""
+        from monosage_cloud.outreach_mail import business_mail as lend
+
+        ctx = context.current()
+        if ctx is None or ctx.kind != "member_apps" or not ctx.member_id:
+            return None
+        return lend(app, ctx.org_id, ctx.member_id)
+
+    HOOKS.business_mail = business_mail
 
 
 def _org_serpapi_key(app: CloudApp, org_id: str) -> str | None:

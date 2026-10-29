@@ -130,3 +130,10 @@ a.adm-item:hover { background: var(--surface-2); }
 .adm-chain.bad { color: var(--danger); }
 .adm-btnrow { display: flex; gap: 8px; flex-wrap: wrap; align-items: center; }
 .adm-skip { position: absolute; left: -9999px; }
+
+/* Who can use an app (Apps page) and one member's apps (Members page) */
+.ca-access { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 10px; margin: 10px 0 4px; padding-top: 10px; border-top: 1px solid var(--line); }
+.ca-access-who { flex: 1 1 auto; min-width: 0; overflow-wrap: anywhere; }
+.ca-access-roles { display: grid; grid-template-columns: repeat(auto-fill, minmax(180px, 1fr)); gap: 0 14px; padding-left: 4px; }
+.ca-member-apps { max-height: 60vh; overflow: auto; border: 1px solid var(--line); border-radius: 8px; }
+.ca-member-apps select { max-width: 220px; }

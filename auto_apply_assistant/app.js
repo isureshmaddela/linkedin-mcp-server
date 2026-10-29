@@ -140,7 +140,8 @@ async function api(path, { method = "GET", body, raw = false, silent = false } =
       method,
       // A coach, administrator or auditor opens one candidate's workspace by naming them here (the hosted build).
       // The life apps name the person using a shared device (life.js keeps it; the hosted build ignores it).
-      headers: { "Content-Type": "application/json", "X-Requested-With": "aira", Accept: raw ? "*/*" : "application/json", ...(Aira.state.actingFor ? { "X-Aira-Candidate": Aira.state.actingFor.id } : {}), ...(Aira.state.lifeProfile ? { "X-Aira-Profile": Aira.state.lifeProfile } : {}) },
+      // A build may add its own (the hosted build's X-Aira-Space while a member works in their organization's apps).
+      headers: { "Content-Type": "application/json", "X-Requested-With": "aira", Accept: raw ? "*/*" : "application/json", ...(Aira.state.actingFor ? { "X-Aira-Candidate": Aira.state.actingFor.id } : {}), ...(Aira.state.lifeProfile ? { "X-Aira-Profile": Aira.state.lifeProfile } : {}), ...(Aira.extraHeaders ? Aira.extraHeaders(path) : {}) },
       body: body === undefined ? undefined : JSON.stringify(body),
       credentials: "same-origin",
     });
@@ -351,7 +352,7 @@ Aira.withBusy = withBusy;
 
 // A server answer that an app is not on here (the organization has not turned it on, or it is switched off for
 // everyone): views show the app's closed page instead of an error.
-const APP_CLOSED_CODES = new Set(["app_required", "app_disabled"]);
+const APP_CLOSED_CODES = new Set(["app_required", "app_disabled", "app_not_allowed"]);
 const ui = {
   stage: (stage) => h("span", { class: `badge stage ${stage || "discovered"}`, text: fmt.stage(stage) }),
   source: (source) => h("span", { class: "badge source", text: fmt.source(source) }),
@@ -475,7 +476,7 @@ const apps = (Aira.apps = {
   catalog: APPS,
   // Apps a build adds for sections that are not products: the hosted Account (organization) pages, Coaching, the Admin console.
   pseudo: {},
-  state: { enabled: {}, reasons: {}, switchedOff: {}, accountUrl: "", accountLinked: false, localUrl: "", installation: "local", loaded: false, extra: [] },
+  state: { enabled: {}, reasons: {}, switchedOff: {}, denied: {}, accountUrl: "", accountLinked: false, localUrl: "", installation: "local", loaded: false, extra: [] },
   decorate: null, // a build may adjust the list the switcher shows: (entries) => entries
   async load() {
     try {
@@ -484,6 +485,9 @@ const apps = (Aira.apps = {
         apps.state.enabled[item.id] = item.enabled !== false;
         apps.state.reasons[item.id] = item.reason || "";
         apps.state.switchedOff[item.id] = !!item.switched_off;
+        // The organization has it but has not given it to this person (their role, or an exception for them).
+        apps.state.denied[item.id] = item.enabled !== false && item.allowed === false;
+        if (apps.state.denied[item.id]) { apps.state.enabled[item.id] = false; apps.state.reasons[item.id] = item.allowed_reason || ""; }
       }
       apps.state.accountUrl = String(data.account_url || "");
       // Only a person who signed in through a Monosage account belongs to an organization online.
@@ -545,15 +549,15 @@ const apps = (Aira.apps = {
   blocked(section) {
     const id = apps.sectionApp(section);
     if (!id) return null;
-    if (apps.state.loaded && apps.state.enabled[id] === false) return { app: id, kind: apps.state.switchedOff[id] ? "disabled" : "off", reason: apps.state.reasons[id] || "" };
+    if (apps.state.loaded && apps.state.enabled[id] === false) return { app: id, kind: apps.state.denied[id] ? "denied" : apps.state.switchedOff[id] ? "disabled" : "off", reason: apps.state.reasons[id] || "" };
     return apps.roleBlock ? apps.roleBlock(section, id) : null;
   },
   // What this person can do about a closed app: a build returns { text, action: { label, href } } or null.
   remedy: null,
   locked({ app: id, kind, reason }) {
     const app = apps.describe(id);
-    const title = kind === "role" ? `${app.name} is not part of your role` : kind === "disabled" ? `${app.name} is switched off for now` : `${app.name} is not turned on`;
-    const fallback = kind === "role" ? "Your role does not include this app." : kind === "disabled" ? "Nobody can open it until it is switched back on. Your data is kept." : "Your organization has not turned this app on yet.";
+    const title = kind === "denied" ? `You do not have ${app.name}` : kind === "role" ? `${app.name} is not part of your role` : kind === "disabled" ? `${app.name} is switched off for now` : `${app.name} is not turned on`;
+    const fallback = kind === "denied" ? `Your organization has not given you ${app.name}. Ask an owner or admin.` : kind === "role" ? "Your role does not include this app." : kind === "disabled" ? "Nobody can open it until it is switched back on. Your data is kept." : "Your organization has not turned this app on yet.";
     const remedy = apps.remedy ? apps.remedy(id, kind) : null;
     const home = (Aira.startPage && Aira.startPage(false)) || "";
     return h("section", { class: "card app-locked", "data-app": id, "data-kind": kind, role: "status" },
@@ -570,7 +574,7 @@ const apps = (Aira.apps = {
     const data = error.data || {};
     const section = Router.current && Router.current.path[0];
     const id = data.app || apps.sectionApp(section) || "";
-    return apps.locked({ app: id, kind: error.code === "app_disabled" ? "disabled" : "off", reason: error.message });
+    return apps.locked({ app: id, kind: error.code === "app_disabled" ? "disabled" : error.code === "app_not_allowed" ? "denied" : "off", reason: error.message });
   },
 });
 // Phones open the sidebar as a sheet (More in the bottom bar); this keeps the trigger and the sheet in step.
@@ -828,7 +832,10 @@ function renderAccount() {
   // Everything about the account is here, like a Google account menu: the left menu keeps only the open app.
   const pages = visibleNav().filter((item) => item.group === "Account");
   const settings = pages.find((item) => item.id === "settings");
-  if (me && me.kind === "member" && cloud.isStaff && cloud.isStaff()) links.push({ label: "Organization settings", href: "#/org", icon: "recruiters" });
+  // The way into this person's part of the organization (its administration, their candidates, its billing).
+  const org = me && me.kind === "member" && cloud.orgLink ? cloud.orgLink() : null;
+  if (org) links.push(org);
+  else if (me && me.kind === "member" && cloud.isStaff && cloud.isStaff()) links.push({ label: "Organization settings", href: "#/org", icon: "recruiters" });
   for (const item of pages) if (item !== settings) links.push({ label: item.label, href: `#/${item.id}`, icon: item.icon, section: item.id });
   if (me && me.kind === "member" && Array.isArray(me.orgs) && me.orgs.length > 1) links.push({ label: "Switch organization", href: "#/switch-org", icon: "recruiters" });
   // A build's own entries (Display and reading from life.js) once each; the online account stays in the launcher.

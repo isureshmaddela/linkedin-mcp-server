@@ -8,6 +8,7 @@ be exported or deleted as a unit. The domain modules run against it unchanged.
 
 from __future__ import annotations
 
+import base64
 import io
 import json
 import logging
@@ -33,6 +34,9 @@ logger = logging.getLogger("monosage_cloud.workspace")
 
 STAGES = ("onboarding", "searching", "applying", "interviewing", "offers", "placed")
 ORG_API_DIR = "_org"
+MEMBER_APPS_FILE = "apps.sqlite3"
+# not in a member's export of their space: secrets encrypted under the organization's key
+MEMBER_APPS_EXPORT_SKIP = frozenset({"airaapi_secrets"})
 
 
 def _local() -> Any:
@@ -62,6 +66,22 @@ class WorkspaceManager:
 
     def org_api_path(self, org_id: str) -> Path:
         return self.org_dir(org_id) / ORG_API_DIR / "api.sqlite3"
+
+    def member_apps_path(self, org_id: str, member_id: str) -> Path:
+        """A member's own business apps (their space: Studio, Shop, Sites... and what they earn), beside their
+        careers workspace when they have one."""
+        return self.candidate_dir(org_id, member_id) / MEMBER_APPS_FILE
+
+    def member_apps_paths(self, org_id: str) -> list[tuple[str, Path]]:
+        """Every member space of the organization that has been opened, as (member_id, path)."""
+        root = self.org_dir(org_id)
+        if not root.is_dir():
+            return []
+        return sorted(
+            (path.parent.name, path)
+            for path in root.glob(f"*/{MEMBER_APPS_FILE}")
+            if path.parent.name != ORG_API_DIR
+        )
 
     # -- lifecycle ----------------------------------------------------------------------
 
@@ -207,8 +227,13 @@ class WorkspaceManager:
                 )
         return purged
 
-    def delete(self, org_id: str, candidate_id: str) -> None:
-        """Remove a workspace's database, documents and browser profile, and stop its LinkedIn session."""
+    def delete(
+        self, org_id: str, candidate_id: str, *, keep_member_apps: bool = False
+    ) -> None:
+        """Remove a workspace's database, documents and browser profile, and stop its LinkedIn session.
+
+        The member's own business apps (``apps.sqlite3``, in the same directory) go too, unless
+        ``keep_member_apps``: a member who ends only their careers workspace keeps their business."""
         local = _local()
         try:
             workspace = self.row(org_id, candidate_id)
@@ -220,7 +245,18 @@ class WorkspaceManager:
             )
         except Exception:  # noqa: BLE001 - deletion continues even if a worker is already gone
             logger.debug("No LinkedIn worker to stop for %s", candidate_id)
-        shutil.rmtree(self.candidate_dir(org_id, candidate_id), ignore_errors=True)
+        directory = self.candidate_dir(org_id, candidate_id)
+        if keep_member_apps and self.member_apps_path(org_id, candidate_id).exists():
+            for child in directory.iterdir():
+                if child.name.startswith(MEMBER_APPS_FILE):
+                    continue  # apps.sqlite3 and its -wal / -shm
+                if child.is_dir():
+                    shutil.rmtree(child, ignore_errors=True)
+                else:
+                    child.unlink(missing_ok=True)
+        else:
+            shutil.rmtree(directory, ignore_errors=True)
+            self.app.public_index.remove_member(org_id, candidate_id)
         self.app.storage.delete_prefix(org_id, candidate_id)
         with self.app.db.write() as connection:
             connection.execute(
@@ -338,10 +374,129 @@ class WorkspaceManager:
                 if correlation_id and hasattr(local._request_context, "correlation_id"):
                     del local._request_context.correlation_id
 
+    @contextmanager
+    def bind_member_apps(
+        self,
+        org_id: str,
+        member_id: str,
+        *,
+        principal: Principal | None = None,
+        correlation_id: str = "",
+    ) -> Iterator[dict[str, Any]]:
+        """Bind to a member's own space: the business apps run against their database, as the single-user build's
+        apps run against its account's."""
+        local = _local()
+        path = self.member_apps_path(org_id, member_id)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        user = {
+            "user_id": f"member-{member_id}",
+            "email": principal.email if principal else "",
+            "data_path": str(path),
+            "linkedin_port": None,
+            "created_at": 0,
+            "password_hash": "",
+            "org_id": org_id,
+        }
+        ctx = context.TenantContext(
+            org_id=org_id,
+            candidate_id="",
+            kind="member_apps",
+            principal=principal,
+            correlation_id=correlation_id,
+            member_id=member_id,
+        )
+        with context.bound(ctx):
+            local._bind_user(user)
+            local._request_context.actor = (
+                principal.label if principal else "system:member_apps"
+            )[:120]
+            if correlation_id:
+                local._request_context.correlation_id = correlation_id
+            try:
+                yield user
+            finally:
+                local._unbind_user()
+                if correlation_id and hasattr(local._request_context, "correlation_id"):
+                    del local._request_context.correlation_id
+
+    def member_apps_live(self, org_id: str, member_id: str) -> bool:
+        """Does this member's space still serve its customers and run its background work? Only while they are an
+        active member and the organization gives members their own apps (in "shared" mode nobody can open a
+        member's space, so its links and reminders rest until the organization switches back)."""
+        from monosage_cloud import spaces
+
+        if not member_id or spaces.mode(self.app.tenancy.policy(org_id)) != "personal":
+            return False
+        with self.app.db.read() as connection:
+            row = one(
+                connection,
+                "SELECT status FROM members WHERE org_id = ? AND member_id = ? AND removed_at IS NULL",
+                (org_id, member_id),
+            )
+        return row is not None and row["status"] == "active"
+
+    def delete_member_apps(self, org_id: str, member_id: str) -> bool:
+        """Delete a member's own space (their business apps database) and forget its public links."""
+        path = self.member_apps_path(org_id, member_id)
+        existed = path.exists()
+        for suffix in ("", "-wal", "-shm", "-journal"):
+            Path(f"{path}{suffix}").unlink(missing_ok=True)
+        self.app.public_index.remove_member(org_id, member_id)
+        try:
+            path.parent.rmdir()  # only when nothing else (a careers workspace) lives there
+        except OSError:
+            pass
+        return existed
+
+    def member_apps_export(self, org_id: str, member_id: str) -> dict[str, Any] | None:
+        """A member's own space as JSON tables (their business, customers, orders, pages, earnings), or None when
+        they never opened one. Stored secrets (mail password, payment keys) are left out: they are encrypted under
+        the organization's key and useless outside it."""
+        path = self.member_apps_path(org_id, member_id)
+        if not path.exists():
+            return None
+        uri = f"file:{path.as_posix()}?mode=ro"
+        source = sqlite3.connect(uri, uri=True, timeout=15)
+        source.row_factory = sqlite3.Row
+        try:
+            names = [
+                r[0]
+                for r in source.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+                )
+                if r[0] not in MEMBER_APPS_EXPORT_SKIP
+            ]
+            tables: dict[str, list[dict[str, Any]]] = {}
+            for name in names:
+                tables[name] = [
+                    {
+                        key: (
+                            {"base64": base64.b64encode(bytes(value)).decode("ascii")}
+                            if isinstance(value, (bytes, memoryview))
+                            else value
+                        )
+                        for key, value in dict(row).items()
+                    }
+                    for row in source.execute(f'SELECT * FROM "{name}"')  # noqa: S608 - names from sqlite_master
+                ]
+        finally:
+            source.close()
+        return {
+            "member_id": member_id,
+            "exported_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+            "tables": tables,
+        }
+
+    def member_apps_connection(self, org_id: str, member_id: str) -> sqlite3.Connection:
+        """A connection to a member's own space (what they earn, read by the life apps that show it)."""
+        return self._open_shared(self.member_apps_path(org_id, member_id))
+
     def org_api_connection(self, org_id: str) -> sqlite3.Connection:
         """A connection to the organization's shared API workspace (search history and cache for all its candidates)."""
+        return self._open_shared(self.org_api_path(org_id))
+
+    def _open_shared(self, path: Path) -> sqlite3.Connection:
         local = _local()
-        path = self.org_api_path(org_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         connection = sqlite3.connect(path, timeout=15, factory=local._ManagedConnection)
         connection.row_factory = sqlite3.Row
@@ -566,17 +721,24 @@ class WorkspaceManager:
         return total + self.org_leads(org_id)
 
     def org_leads(self, org_id: str) -> int:
-        """Leads in the organization's shared pipeline."""
-        if not self.org_api_path(org_id).exists():
-            return 0
-        connection = self.org_api_connection(org_id)
-        try:
-            row = connection.execute("SELECT COUNT(*) FROM leads").fetchone()
-            return int(row[0] or 0) if row else 0
-        except sqlite3.Error:  # no table yet: no leads
-            return 0
-        finally:
-            connection.close()
+        """Leads in the organization's shared pipeline and in every member's own space (Marketing > Leads of their
+        own business): the plan's lead limit is the organization's, whoever saved them."""
+        paths = [self.org_api_path(org_id)] + [
+            path for _member, path in self.member_apps_paths(org_id)
+        ]
+        total = 0
+        for path in paths:
+            if not path.exists():
+                continue
+            connection = self._open_shared(path)
+            try:
+                row = connection.execute("SELECT COUNT(*) FROM leads").fetchone()
+                total += int(row[0] or 0) if row else 0
+            except sqlite3.Error:  # no table yet: no leads
+                pass
+            finally:
+                connection.close()
+        return total
 
     @staticmethod
     def stage_of(snapshot: dict[str, Any], override: str = "") -> str:
@@ -659,14 +821,45 @@ class WorkspaceManager:
         principal: Principal | None = None,
         *,
         full: bool = False,
+        own_space: bool | None = None,
     ) -> bytes:
         """The candidate's tables as JSON and every live document, decrypted, in one archive.
 
         Sensitive profile values are masked unless the export is the candidate's own (``full``, or no
         requesting principal) or the requester may see them.
+
+        The member's own business apps (their space, ``business_apps.json``) are added only when the export is
+        theirs: ``full`` (a departure hand-over), no requesting principal (a data-subject request), or the member
+        exporting themselves. ``own_space`` overrides that (an organization export passes False). A member with a
+        space but no careers workspace (staff) gets an archive of the space alone.
         """
         local = _local()
         buffer = io.BytesIO()
+        if own_space is None:
+            own_space = (
+                full
+                or principal is None
+                or (principal.member_id == candidate_id and not principal.is_operator)
+            )
+        space = self.member_apps_export(org_id, candidate_id) if own_space else None
+        with self.app.db.read() as connection:
+            has_workspace = (
+                one(
+                    connection,
+                    "SELECT 1 AS x FROM workspaces WHERE candidate_id = ? AND org_id = ?",
+                    (candidate_id, org_id),
+                )
+                is not None
+            )
+        if not has_workspace:
+            if space is None:
+                raise NotFound("Candidate not found.")
+            with zipfile.ZipFile(buffer, "w", zipfile.ZIP_DEFLATED) as archive:
+                archive.writestr(
+                    "business_apps.json",
+                    json.dumps(space, ensure_ascii=False, indent=2, default=str),
+                )
+            return buffer.getvalue()
         with self.bind(
             org_id, candidate_id, principal=principal, kind="system", source="export"
         ):
@@ -683,6 +876,11 @@ class WorkspaceManager:
                     "workspace.json",
                     json.dumps(data, ensure_ascii=False, indent=2, default=str),
                 )
+                if space is not None:
+                    archive.writestr(
+                        "business_apps.json",
+                        json.dumps(space, ensure_ascii=False, indent=2, default=str),
+                    )
                 with local._connect() as connection:
                     documents = [
                         dict(r)
