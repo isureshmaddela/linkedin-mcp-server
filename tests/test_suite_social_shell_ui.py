@@ -169,14 +169,19 @@ def test_new_search_and_folders_in_the_frame(browser, env):
     assert page.locator("#appBrand").inner_text().strip() == "Monosage"
     assert page.locator("#appBrand").get_attribute("aria-label") == "Monosage Social: home"
     # The page is named after its tab, not the app again.
-    assert page.locator("#main .page-head h1").inner_text().strip() == "Feed"
+    assert page.locator("#main .page-head h1").inner_text().strip() == "Home"
 
     # "+ New": the app's main creates, each opening its form; the address forgets the ask.
     page.click(".shell-new")
     assert menu_items(page) == [
         "Post",
+        "Photo",
         "Story",
+        "Reel",
+        "Poll",
         "Chat",
+        "Group",
+        "Page",
         "Marketplace listing",
         "Family event",
     ]
@@ -271,11 +276,12 @@ def test_new_search_and_folders_in_the_frame(browser, env):
 
     # The left menu: Social's tabs as folders with real icons; a folder opens its tab.
     page.goto(f"{env.base}/social#/social?tab=feed")
-    page.wait_for_selector("#main h1:has-text('Feed')")
+    page.wait_for_selector("#main h1:has-text('Home')")
     folders = page.locator(".shell-subnav[data-section='social'] .shell-sublink")
-    names = [name.strip() for name in folders.all_inner_texts()]
-    assert names[:6] == ["Feed", "Chats", "Friends", "Groups", "Pages", "Marketplace"]
-    assert any(name.startswith("Notifications") for name in names), names
+    names = [name.splitlines()[0].strip() for name in folders.all_inner_texts()]
+    assert names[:5] == ["Home", "Explore", "Reels", "Chats", "Friends"], names
+    for section in ("Groups", "Pages", "Marketplace", "Notifications", "Saved", "Profile"):
+        assert section in names, (section, names)
     assert page.locator(".shell-subnav .shell-sublink .shell-subdot").count() == 0
     folders.filter(has_text="Pages").click()
     page.wait_for_selector("#main h1:has-text('Pages')")

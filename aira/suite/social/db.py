@@ -64,7 +64,9 @@ def connect() -> sqlite3.Connection:
         with _lock:
             if key not in _ready:
                 connection.execute("PRAGMA journal_mode = WAL")
-                for statement in store.SCHEMA:
+                from aira.suite.social import dating
+
+                for statement in (*store.SCHEMA, *dating.SCHEMA):
                     connection.execute(statement)
                 store.migrate(connection)
                 connection.commit()

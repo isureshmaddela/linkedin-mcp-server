@@ -23,11 +23,39 @@ from datetime import timedelta
 from typing import Any
 
 from aira.suite import kit, life
-from aira.suite.social import store
+from aira.suite.social import photos, store
 from aira.suite.social.store import new_id, row, rows, stamp
 
 REACTIONS = ("❤️", "👍", "😂", "😮", "😢", "🎉")
-AUDIENCES = ("public", "friends", "only_me")
+STORY_REACTIONS = ("❤️", "😂", "😮", "😢", "👏", "🔥")
+# close_friends: only the people on the author's close friends list (who are also their friends)
+AUDIENCES = ("public", "friends", "close_friends", "only_me")
+# A feeling or activity beside a post: the browser shows the emoji and the words.
+FEELINGS = {
+    "happy": "😊",
+    "grateful": "🙏",
+    "excited": "🤩",
+    "loved": "🥰",
+    "proud": "😌",
+    "relaxed": "😎",
+    "tired": "😴",
+    "sad": "😢",
+    "celebrating": "🎉",
+    "eating": "🍽️",
+    "travelling": "✈️",
+    "watching": "🎬",
+    "reading": "📖",
+    "listening": "🎧",
+    "playing": "🎮",
+    "working": "💼",
+    "exercising": "🏃",
+    "cooking": "🍳",
+}
+# Photo filters: the browser applies a CSS filter by this name when it shows the photos (the files stay as sent).
+FILTERS = ("", "warm", "cool", "mono", "vivid", "fade", "vintage", "dramatic")
+POLL_DAYS = (1, 3, 7)
+MAX_PINNED = 3
+MAX_LINKS = 5
 VISIBILITIES = ("public", "private")
 REPORT_TARGETS = ("post", "comment", "message", "account", "story", "listing")
 LIMITS = {
@@ -39,6 +67,8 @@ LIMITS = {
     "story": 20,
     "group": 10,
     "page": 10,
+    "photo": 120,
+    "story_reply": 120,
 }
 DEFAULT_BLOCKLIST = ("fuck", "shit", "bitch", "bastard", "cunt", "motherfucker")
 HANDLE = re.compile(r"^[a-z][a-z0-9_.]{2,29}$")
@@ -104,9 +134,19 @@ def _account(found: dict[str, Any] | None) -> dict[str, Any] | None:
         return None
     found["skills"] = store.loads(found.get("skills"), [])
     found["experience"] = store.loads(found.get("experience"), [])
+    found["links"] = store.loads(found.get("links"), [])
+    found["cover"] = found.get("cover") or ""
     found["open_messages"] = bool(found.get("open_messages"))
     found["open_to_work"] = bool(found.get("open_to_work"))
     return found
+
+
+def account_out(acct: dict[str, Any]) -> dict[str, Any]:
+    """The person's own account as the browser sees it: uploaded pictures as addresses it can load."""
+    out = {key: value for key, value in acct.items() if key != "person_key"}
+    out["avatar"] = photos.display(acct.get("avatar"))
+    out["cover"] = photos.display(acct.get("cover"))
+    return out
 
 
 def me(sc: sqlite3.Connection, ident: dict[str, Any]) -> dict[str, Any]:
@@ -149,15 +189,51 @@ def _clean_handle(value: Any) -> str:
     return handle
 
 
-def _avatar(value: Any, fallback: str) -> str:
+def _avatar(
+    value: Any, fallback: str, *, sc: sqlite3.Connection | None = None, owner: str = ""
+) -> str:
     text = str(value or "").strip()
     if not text:
         return fallback
+    if photos.is_ref(text) and sc is not None and owner:
+        return photos.owned(sc, text, owner)
     if text.lower().startswith("https://"):
         return kit.url(text, "the picture link")
     if len(text) > 8:
-        raise ValueError("Use an emoji or an https:// picture link.")
+        raise ValueError("Use an emoji, a photo from your device or an https:// picture link.")
     return text
+
+
+def _picture(value: Any, sc: sqlite3.Connection, owner: str, label: str) -> str:
+    """A cover, group or page picture: empty, an uploaded photo of this person, or an https link."""
+    text = str(value or "").strip()
+    if not text:
+        return ""
+    if photos.is_ref(text):
+        return photos.owned(sc, text, owner)
+    link = kit.url(text, label)
+    if not link.lower().startswith("https://"):
+        raise ValueError(f"{label[:1].upper()}{label[1:]} must start with https://.")
+    return link
+
+
+def _links(value: Any) -> str:
+    """Links in the bio: at most five, https only, each with an optional short label."""
+    items = value if isinstance(value, list) else []
+    if len(items) > MAX_LINKS:
+        raise ValueError(f"At most {MAX_LINKS} links.")
+    clean = []
+    for item in items:
+        if isinstance(item, str):
+            item = {"url": item}
+        if not isinstance(item, dict):
+            raise ValueError("Each link is an address and a short label.")
+        link = kit.url(item.get("url"), "the link", required=True)
+        if not link.lower().startswith("https://"):
+            raise ValueError("Links must start with https://.")
+        label = kit.text(item.get("label"), "the link's label", max_len=40)
+        clean.append({"url": link, "label": label})
+    return store.dumps(clean)
 
 
 def create_account(
@@ -228,7 +304,11 @@ def update_account(
             raw["display_name"], "your name", max_len=60, required=True
         )
     if "avatar" in raw:
-        values["avatar"] = _avatar(raw["avatar"], acct["avatar"])
+        values["avatar"] = _avatar(raw["avatar"], acct["avatar"], sc=sc, owner=acct["id"])
+    if "cover" in raw:
+        values["cover"] = _picture(raw["cover"], sc, acct["id"], "the cover photo link")
+    if "links" in raw:
+        values["links"] = _links(raw["links"])
     if "bio" in raw:
         values["bio"] = kit.text(raw["bio"], "a bio", max_len=300, multiline=True)
     if "visibility" in raw:
@@ -383,7 +463,7 @@ def mini(acct: dict[str, Any]) -> dict[str, Any]:
         "id": acct["id"],
         "handle": acct["handle"],
         "name": acct["display_name"],
-        "avatar": acct["avatar"],
+        "avatar": photos.display(acct["avatar"]),
     }
 
 
@@ -429,8 +509,17 @@ def profile_view(
             "SELECT COUNT(*) FROM so_follows WHERE target_type = 'account' AND target_id = ?",
             (target["id"],),
         ),
+        "following_count": kit.count(
+            sc,
+            "SELECT COUNT(*) FROM so_follows WHERE follower_id = ? AND target_type = 'account'",
+            (target["id"],),
+        ),
         "can_message": rel == "self" or can_message(sc, viewer, target),
         "young": target["age_group"] in ("child", "teen"),
+        "cover": photos.display(target.get("cover")),
+        "full": full,
+        # the viewer put this friend on their close friends list (only the viewer knows)
+        "close_friend": rel == "friends" and is_close_friend(sc, viewer["id"], target["id"]),
     }
     if full:
         view.update(
@@ -440,6 +529,14 @@ def profile_view(
                 "open_to_work": target["open_to_work"],
                 "skills": target["skills"],
                 "experience": target["experience"],
+                "links": target.get("links") or [],
+                "posts_count": kit.count(
+                    sc,
+                    """SELECT COUNT(*) FROM so_posts WHERE author_id = ? AND group_id IS NULL AND page_id IS NULL
+                    AND deleted_at IS NULL AND hidden_at IS NULL"""
+                    + ("" if rel == "self" else " AND audience = 'public'" if rel != "friends" else " AND audience IN ('public', 'friends')"),
+                    (target["id"],),
+                ),
             }
         )
     return view
@@ -478,14 +575,16 @@ def search(sc: sqlite3.Connection, me_: dict[str, Any], q: str) -> dict[str, Any
         )
     groups = rows(
         sc,
-        "SELECT id, name, about, visibility FROM so_groups WHERE archived_at IS NULL AND visibility = 'public' AND lower(name) LIKE ? ORDER BY name LIMIT 20",
+        "SELECT id, name, about, visibility, photo FROM so_groups WHERE archived_at IS NULL AND visibility = 'public' AND lower(name) LIKE ? ORDER BY name LIMIT 20",
         (like,),
     )
     pages = rows(
         sc,
-        "SELECT id, name, about, category FROM so_pages WHERE archived_at IS NULL AND lower(name) LIKE ? ORDER BY name LIMIT 20",
+        "SELECT id, name, about, category, photo FROM so_pages WHERE archived_at IS NULL AND lower(name) LIKE ? ORDER BY name LIMIT 20",
         (like,),
     )
+    for item in [*groups, *pages]:
+        item["photo"] = photos.display(item.get("photo"), sc=sc)
     return {"people": people[:20], "groups": groups, "pages": pages, "posts": []}
 
 
@@ -873,6 +972,10 @@ def block(sc: sqlite3.Connection, me_: dict[str, Any], other_id: str) -> dict[st
         "DELETE FROM so_follows WHERE target_type = 'account' AND ((follower_id = ? AND target_id = ?) OR (follower_id = ? AND target_id = ?))",
         (me_["id"], other["id"], other["id"], me_["id"]),
     )
+    sc.execute(
+        "DELETE FROM so_close_friends WHERE (owner_id = ? AND friend_id = ?) OR (owner_id = ? AND friend_id = ?)",
+        (me_["id"], other["id"], other["id"], me_["id"]),
+    )
     sc.commit()
     return {"blocked": True}
 
@@ -901,6 +1004,105 @@ def blocks(sc: sqlite3.Connection, me_: dict[str, Any]) -> list[dict[str, Any]]:
         except LookupError:
             continue
     return out
+
+
+# ---------------------------------------------------------------------------
+# close friends, and who follows whom
+# ---------------------------------------------------------------------------
+
+
+def is_close_friend(sc: sqlite3.Connection, owner_id: str, friend_id: str) -> bool:
+    return bool(
+        row(
+            sc,
+            "SELECT 1 AS x FROM so_close_friends WHERE owner_id = ? AND friend_id = ?",
+            (owner_id, friend_id),
+        )
+    )
+
+
+def in_close_circle(sc: sqlite3.Connection, viewer_id: str, author_id: str) -> bool:
+    """The author put the viewer on their close friends list, and they are still friends."""
+    return is_close_friend(sc, author_id, viewer_id) and are_friends(sc, viewer_id, author_id)
+
+
+def close_friends(sc: sqlite3.Connection, me_: dict[str, Any]) -> list[dict[str, Any]]:
+    out = []
+    for item in rows(
+        sc,
+        "SELECT friend_id FROM so_close_friends WHERE owner_id = ? ORDER BY created_at",
+        (me_["id"],),
+    ):
+        try:
+            other = account(sc, item["friend_id"])
+        except LookupError:
+            continue
+        if other.get("suspended_at") or not are_friends(sc, me_["id"], other["id"]):
+            continue
+        out.append(mini(other))
+    return out
+
+
+def set_close_friend(
+    sc: sqlite3.Connection, me_: dict[str, Any], other_id: str, on: bool
+) -> dict[str, Any]:
+    other = visible_account(sc, me_, other_id)
+    if on:
+        if not are_friends(sc, me_["id"], other["id"]):
+            raise PermissionError("Only your friends can be on your close friends list.")
+        if kit.count(sc, "SELECT COUNT(*) FROM so_close_friends WHERE owner_id = ?", (me_["id"],)) >= 300:
+            raise ValueError("Your close friends list is full (300 people).")
+        sc.execute(
+            "INSERT OR IGNORE INTO so_close_friends (owner_id, friend_id, created_at) VALUES (?, ?, ?)",
+            (me_["id"], other["id"], stamp()),
+        )
+    else:
+        sc.execute(
+            "DELETE FROM so_close_friends WHERE owner_id = ? AND friend_id = ?",
+            (me_["id"], other["id"]),
+        )
+    sc.commit()
+    return {"close_friend": on}
+
+
+def follow_lists(
+    sc: sqlite3.Connection, me_: dict[str, Any], target: dict[str, Any]
+) -> dict[str, Any]:
+    """Who follows this person and whom they follow, for someone who may see their whole profile. People the
+    viewer may not see (blocked, suspended, a child who is a stranger) are left out."""
+    rel = relation(sc, me_, target)
+    if not (rel in ("self", "friends") or target["visibility"] == "public"):
+        raise PermissionError("This profile is private: become friends to see who they follow.")
+
+    def people(sql: str) -> list[dict[str, Any]]:
+        out = []
+        for item in rows(sc, sql, (target["id"],)):
+            try:
+                other = account(sc, item["other"])
+            except LookupError:
+                continue
+            if not can_see_account(sc, me_, other):
+                continue
+            out.append({**mini(other), "relation": relation(sc, me_, other)})
+        return out
+
+    return {
+        "followers": people(
+            "SELECT follower_id AS other FROM so_follows WHERE target_type = 'account' AND target_id = ? ORDER BY created_at DESC LIMIT 300"
+        ),
+        "following": people(
+            "SELECT target_id AS other FROM so_follows WHERE target_type = 'account' AND follower_id = ? ORDER BY created_at DESC LIMIT 300"
+        ),
+        "pages": [
+            {"id": p["id"], "name": p["name"], "photo": photos.display(p["photo"])}
+            for p in rows(
+                sc,
+                """SELECT p.id, p.name, p.photo FROM so_follows f JOIN so_pages p ON p.id = f.target_id
+                WHERE f.follower_id = ? AND f.target_type = 'page' AND p.archived_at IS NULL ORDER BY p.name LIMIT 100""",
+                (target["id"],),
+            )
+        ],
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -950,7 +1152,14 @@ def filtered(sc: sqlite3.Connection, text: str) -> str:
     return out
 
 
-def _photos(value: Any, limit: int = 6) -> list[str]:
+def _photos(
+    value: Any,
+    limit: int = 6,
+    *,
+    sc: sqlite3.Connection | None = None,
+    owner: str = "",
+) -> list[str]:
+    """https photo links, and (with ``sc`` and ``owner``) photos this person uploaded (``media:<id>``)."""
     items = (
         value if isinstance(value, list) else [p for p in str(value or "").split() if p]
     )
@@ -958,6 +1167,11 @@ def _photos(value: Any, limit: int = 6) -> list[str]:
         raise ValueError(f"At most {limit} photos.")
     out = []
     for item in items:
+        if photos.is_ref(item):
+            if sc is None or not owner:
+                raise ValueError("Photo links must start with https://.")
+            out.append(photos.owned(sc, item, owner))
+            continue
         link = kit.url(item, "a photo link")
         if not link.lower().startswith("https://"):
             raise ValueError("Photo links must start with https://.")
@@ -991,6 +1205,7 @@ def notify(
 def notifications(
     sc: sqlite3.Connection, me_: dict[str, Any], limit: int = 50
 ) -> dict[str, Any]:
+    finish_polls(sc)
     found = rows(
         sc,
         "SELECT * FROM so_notifications WHERE account_id = ? ORDER BY created_at DESC LIMIT ?",
@@ -1025,6 +1240,25 @@ def read_notifications(sc: sqlite3.Connection, me_: dict[str, Any]) -> int:
     ).rowcount
     sc.commit()
     return changed
+
+
+def read_notification(
+    sc: sqlite3.Connection, me_: dict[str, Any], notification_id: str
+) -> int:
+    """Mark one notification read (the person opened it)."""
+    found = row(
+        sc,
+        "SELECT id FROM so_notifications WHERE id = ? AND account_id = ?",
+        (store.check_id(notification_id, "notification"), me_["id"]),
+    )
+    if not found:
+        raise LookupError("That notification was not found.")
+    sc.execute(
+        "UPDATE so_notifications SET read_at = COALESCE(read_at, ?) WHERE id = ?",
+        (stamp(), found["id"]),
+    )
+    sc.commit()
+    return unread_notifications(sc, me_)
 
 
 # ---------------------------------------------------------------------------
@@ -1101,6 +1335,8 @@ def can_see_post(
         return False
     if post["audience"] == "friends":
         return are_friends(sc, viewer["id"], author["id"])
+    if post["audience"] == "close_friends":
+        return in_close_circle(sc, viewer["id"], author["id"])
     return True  # public
 
 
@@ -1122,20 +1358,59 @@ def visible_post(
     return post
 
 
+def _alts(value: Any, count: int) -> list[str]:
+    """A short description of each photo for people who cannot see it (one per photo, may be empty)."""
+    items = value if isinstance(value, list) else []
+    if len(items) > count:
+        items = items[:count]
+    out = [kit.text(item, "a photo description", max_len=200) for item in items]
+    return out + [""] * (count - len(out))
+
+
+def _poll(raw: Any) -> dict[str, Any] | None:
+    """``{"options": [...], "days": 1|3|7}``: two to four different answers, each up to 80 characters."""
+    if not raw:
+        return None
+    if not isinstance(raw, dict):
+        raise ValueError("A poll is a list of answers.")
+    options = [
+        kit.text(item, "an answer", max_len=80)
+        for item in (raw.get("options") or [])
+        if str(item or "").strip()
+    ]
+    if len(options) < 2 or len(options) > 4:
+        raise ValueError("A poll has two to four answers.")
+    if len({item.lower() for item in options}) != len(options):
+        raise ValueError("Each answer in a poll must be different.")
+    try:
+        days = int(raw.get("days") or 1)
+    except (TypeError, ValueError):
+        raise ValueError("A poll runs for 1, 3 or 7 days.") from None
+    if days not in POLL_DAYS:
+        raise ValueError("A poll runs for 1, 3 or 7 days.")
+    return {"options": options, "days": days}
+
+
 def create_post(
     sc: sqlite3.Connection, me_: dict[str, Any], raw: dict[str, Any]
 ) -> dict[str, Any]:
     _active(me_)
     text = kit.text(raw.get("text"), "something to share", max_len=2000, multiline=True)
-    photos = _photos(raw.get("photos"))
+    pictures = _photos(raw.get("photos"), sc=sc, owner=me_["id"])
     shared = str(raw.get("shared_post_id") or "")
-    if not text and not photos and not shared:
+    poll = _poll(raw.get("poll"))
+    if not text and not pictures and not shared and not poll:
         raise ValueError("Write something or add a photo.")
+    if poll and not text:
+        raise ValueError("Write the question for your poll.")
     group_id = str(raw.get("group_id") or "")
     page_id = str(raw.get("page_id") or "")
     audience = kit.choice(
         raw.get("audience"), "who can see it", AUDIENCES, default="friends"
     )
+    feeling = kit.choice(raw.get("feeling"), "the feeling", tuple(FEELINGS), default="")
+    place = kit.text(raw.get("place"), "the place", max_len=80)
+    photo_filter = kit.choice(raw.get("filter"), "the photo filter", FILTERS, default="")
     if group_id:
         group = group_row(sc, group_id)
         if not _group_member(sc, group["id"], me_["id"]):
@@ -1161,8 +1436,8 @@ def create_post(
     clean = filtered(sc, text)
     tags = sorted({t.lower() for t in TAG.findall(clean)})
     sc.execute(
-        """INSERT INTO so_posts (id, author_id, audience, group_id, page_id, text, photos, shared_post_id, tags, created_at, updated_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        """INSERT INTO so_posts (id, author_id, audience, group_id, page_id, text, photos, shared_post_id, tags, created_at,
+        updated_at, feeling, place, filter, alts) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
         (
             post_id,
             me_["id"],
@@ -1170,13 +1445,26 @@ def create_post(
             group_id or None,
             page_id or None,
             clean,
-            store.dumps(photos),
+            store.dumps(pictures),
             shared or None,
             " ".join(tags),
             moment,
             moment,
+            feeling,
+            filtered(sc, place),
+            photo_filter if pictures else "",
+            store.dumps(_alts(raw.get("alts"), len(pictures))),
         ),
     )
+    if poll:
+        sc.execute(
+            "INSERT INTO so_polls (post_id, options, closes_at) VALUES (?, ?, ?)",
+            (
+                post_id,
+                store.dumps([filtered(sc, item) for item in poll["options"]]),
+                store.later(24 * poll["days"]),
+            ),
+        )
     for tag in tags:
         sc.execute(
             "INSERT OR IGNORE INTO so_post_tags (tag, post_id, created_at) VALUES (?, ?, ?)",
@@ -1257,6 +1545,14 @@ def edit_post(
         if wanted == "public" and me_["age_group"] in ("child", "teen"):
             wanted = "friends"
         values["audience"] = wanted
+    if "feeling" in raw:
+        values["feeling"] = kit.choice(raw["feeling"], "the feeling", tuple(FEELINGS), default="")
+    if "place" in raw:
+        values["place"] = filtered(sc, kit.text(raw["place"], "the place", max_len=80))
+    if "filter" in raw:
+        values["filter"] = kit.choice(raw["filter"], "the photo filter", FILTERS, default="")
+    if "alts" in raw:
+        values["alts"] = store.dumps(_alts(raw["alts"], len(store.loads(post["photos"], []))))
     _update(sc, "so_posts", post["id"], values)
     sc.commit()
     return post_view(sc, me_, _post_row(sc, post["id"]))
@@ -1272,10 +1568,36 @@ def delete_post(sc: sqlite3.Connection, me_: dict[str, Any], post_id: str) -> No
         raise LookupError("That post was not found.")
     moment = stamp()
     sc.execute(
-        "UPDATE so_posts SET deleted_at = ?, updated_at = ? WHERE id = ?",
+        "UPDATE so_posts SET deleted_at = ?, updated_at = ?, pinned_at = NULL WHERE id = ?",
         (moment, moment, post["id"]),
     )
     sc.commit()
+
+
+def pin_post(
+    sc: sqlite3.Connection, me_: dict[str, Any], post_id: str, on: bool
+) -> dict[str, Any]:
+    """Keep up to three of your own posts at the top of your profile."""
+    post = _post_row(sc, post_id)
+    if post["author_id"] != me_["id"] or post["deleted_at"] or post["hidden_at"]:
+        raise LookupError("That post was not found.")
+    if post["group_id"] or post["page_id"]:
+        raise ValueError("Only posts on your own profile can be pinned.")
+    moment = stamp()
+    if on and not post["pinned_at"]:
+        pinned = kit.count(
+            sc,
+            "SELECT COUNT(*) FROM so_posts WHERE author_id = ? AND pinned_at IS NOT NULL AND deleted_at IS NULL",
+            (me_["id"],),
+        )
+        if pinned >= MAX_PINNED:
+            raise ValueError(f"You can pin up to {MAX_PINNED} posts. Unpin one first.")
+    sc.execute(
+        "UPDATE so_posts SET pinned_at = ?, updated_at = ? WHERE id = ?",
+        (moment if on else None, moment, post["id"]),
+    )
+    sc.commit()
+    return post_view(sc, me_, _post_row(sc, post["id"]))
 
 
 def react(
@@ -1315,6 +1637,142 @@ def react(
     return post_view(sc, me_, _post_row(sc, post["id"]))
 
 
+# ---------------------------------------------------------------------------
+# polls
+# ---------------------------------------------------------------------------
+
+
+def _poll_row(sc: sqlite3.Connection, post_id: str) -> dict[str, Any] | None:
+    return row(sc, "SELECT * FROM so_polls WHERE post_id = ?", (post_id,))
+
+
+def poll_view(
+    sc: sqlite3.Connection, viewer: dict[str, Any], post: dict[str, Any]
+) -> dict[str, Any] | None:
+    found = _poll_row(sc, post["id"])
+    if not found:
+        return None
+    options = store.loads(found["options"], [])
+    counts = [0] * len(options)
+    mine = None
+    for vote in rows(
+        sc, "SELECT account_id, choice FROM so_poll_votes WHERE post_id = ?", (post["id"],)
+    ):
+        if 0 <= vote["choice"] < len(counts):
+            counts[vote["choice"]] += 1
+        if vote["account_id"] == viewer["id"]:
+            mine = vote["choice"]
+    closed = found["closes_at"] <= stamp()
+    # the results show once you voted, when the poll is over, and always to its author
+    shown = closed or mine is not None or post["author_id"] == viewer["id"]
+    total = sum(counts)
+    return {
+        "options": [
+            {
+                "text": text,
+                "votes": counts[index] if shown else None,
+                "percent": round(100 * counts[index] / total) if shown and total else (0 if shown else None),
+            }
+            for index, text in enumerate(options)
+        ],
+        "total": total,
+        "my_vote": mine,
+        "closed": closed,
+        "closes_at": found["closes_at"],
+        "results": shown,
+    }
+
+
+def vote(
+    sc: sqlite3.Connection, me_: dict[str, Any], post_id: str, choice: Any
+) -> dict[str, Any]:
+    """One vote per person, kept once given."""
+    _active(me_)
+    post = visible_post(sc, me_, post_id)
+    found = _poll_row(sc, post["id"])
+    if not found:
+        raise LookupError("That poll was not found.")
+    if found["closes_at"] <= stamp():
+        raise PermissionError("This poll is over.")
+    options = store.loads(found["options"], [])
+    try:
+        index = int(choice)
+    except (TypeError, ValueError):
+        raise ValueError("Choose one of the answers.") from None
+    if not 0 <= index < len(options):
+        raise ValueError("Choose one of the answers.")
+    if row(
+        sc,
+        "SELECT 1 AS x FROM so_poll_votes WHERE post_id = ? AND account_id = ?",
+        (post["id"], me_["id"]),
+    ):
+        raise ValueError("You already voted in this poll.")
+    moment = stamp()
+    sc.execute(
+        "INSERT INTO so_poll_votes (post_id, account_id, choice, created_at) VALUES (?, ?, ?, ?)",
+        (post["id"], me_["id"], index, moment),
+    )
+    sc.execute("UPDATE so_posts SET updated_at = ? WHERE id = ?", (moment, post["id"]))
+    notify(
+        sc,
+        post["author_id"],
+        "poll_vote",
+        me_["id"],
+        "post",
+        post["id"],
+        f"{me_['display_name']} voted in your poll.",
+    )
+    sc.commit()
+    return post_view(sc, me_, _post_row(sc, post["id"]))
+
+
+def finish_polls(sc: sqlite3.Connection) -> int:
+    """Polls that are over tell their author and everyone who voted which answer won (once)."""
+    done = 0
+    for found in rows(
+        sc,
+        "SELECT * FROM so_polls WHERE closes_at <= ? AND notified_at IS NULL LIMIT 50",
+        (stamp(),),
+    ):
+        post = row(sc, "SELECT * FROM so_posts WHERE id = ?", (found["post_id"],))
+        sc.execute(
+            "UPDATE so_polls SET notified_at = ? WHERE post_id = ?",
+            (stamp(), found["post_id"]),
+        )
+        done += 1
+        if not post or post["deleted_at"] or post["hidden_at"]:
+            continue
+        options = store.loads(found["options"], [])
+        counts = [0] * len(options)
+        voters = []
+        for item in rows(
+            sc, "SELECT account_id, choice FROM so_poll_votes WHERE post_id = ?", (post["id"],)
+        ):
+            if 0 <= item["choice"] < len(counts):
+                counts[item["choice"]] += 1
+            voters.append(item["account_id"])
+        total = sum(counts)
+        if total:
+            best = max(range(len(counts)), key=lambda i: counts[i])
+            text = f"The poll is over: “{options[best]}” got the most votes ({counts[best]} of {total})."
+        else:
+            text = "The poll is over. Nobody voted this time."
+        for person in dict.fromkeys([post["author_id"], *voters]):
+            sc.execute(
+                """INSERT INTO so_notifications (id, account_id, kind, actor_id, ref_type, ref_id, text, created_at)
+                VALUES (?, ?, 'poll_result', '', 'post', ?, ?, ?)""",
+                (new_id(), person, post["id"], text[:300], stamp()),
+            )
+    if done:
+        sc.commit()
+    return done
+
+
+# ---------------------------------------------------------------------------
+# comments: one level of replies, and likes
+# ---------------------------------------------------------------------------
+
+
 def comment(
     sc: sqlite3.Connection, me_: dict[str, Any], post_id: str, raw: dict[str, Any]
 ) -> dict[str, Any]:
@@ -1326,23 +1784,46 @@ def comment(
             raw.get("text"), "a comment", max_len=1000, required=True, multiline=True
         ),
     )
+    parent_id = str(raw.get("parent_id") or "")
+    parent = None
+    if parent_id:
+        parent = row(
+            sc,
+            "SELECT * FROM so_comments WHERE id = ? AND post_id = ?",
+            (store.check_id(parent_id, "comment"), post["id"]),
+        )
+        if not parent or parent["deleted_at"] or parent["hidden_at"] or blocked(sc, me_["id"], parent["author_id"]):
+            raise LookupError("That comment was not found.")
+        if parent["parent_id"]:
+            parent_id = parent["parent_id"]  # a reply to a reply joins the same thread (one level)
     rate(sc, me_, "comment")
     comment_id = new_id()
     moment = stamp()
     sc.execute(
-        "INSERT INTO so_comments (id, post_id, author_id, text, created_at) VALUES (?, ?, ?, ?, ?)",
-        (comment_id, post["id"], me_["id"], text, moment),
+        "INSERT INTO so_comments (id, post_id, author_id, text, created_at, parent_id) VALUES (?, ?, ?, ?, ?, ?)",
+        (comment_id, post["id"], me_["id"], text, moment, parent_id),
     )
     sc.execute("UPDATE so_posts SET updated_at = ? WHERE id = ?", (moment, post["id"]))
-    notify(
-        sc,
-        post["author_id"],
-        "comment",
-        me_["id"],
-        "post",
-        post["id"],
-        f"{me_['display_name']} commented on your post.",
-    )
+    if parent:
+        notify(
+            sc,
+            parent["author_id"],
+            "reply",
+            me_["id"],
+            "post",
+            post["id"],
+            f"{me_['display_name']} replied to your comment.",
+        )
+    if not parent or parent["author_id"] != post["author_id"]:
+        notify(
+            sc,
+            post["author_id"],
+            "comment",
+            me_["id"],
+            "post",
+            post["id"],
+            f"{me_['display_name']} commented on your post.",
+        )
     _mention(sc, me_, post, text, "comment")
     sc.commit()
     return {
@@ -1352,6 +1833,9 @@ def comment(
             "text": text,
             "created_at": moment,
             "mine": True,
+            "parent_id": parent_id,
+            "likes": 0,
+            "liked": False,
         }
     }
 
@@ -1359,9 +1843,20 @@ def comment(
 def comments(
     sc: sqlite3.Connection, me_: dict[str, Any], post_id: str
 ) -> list[dict[str, Any]]:
+    """Oldest first; a reply carries its ``parent_id`` (replies to a removed comment go with it)."""
     post = visible_post(sc, me_, post_id)
     hidden = blocked_ids(sc, me_["id"])
     out = []
+    shown: set[str] = set()
+    liked = {
+        r["comment_id"]
+        for r in rows(
+            sc,
+            """SELECT l.comment_id FROM so_comment_likes l JOIN so_comments c ON c.id = l.comment_id
+            WHERE c.post_id = ? AND l.account_id = ?""",
+            (post["id"], me_["id"]),
+        )
+    }
     for item in rows(
         sc,
         "SELECT * FROM so_comments WHERE post_id = ? AND deleted_at IS NULL AND hidden_at IS NULL ORDER BY created_at",
@@ -1369,12 +1864,15 @@ def comments(
     ):
         if item["author_id"] in hidden:
             continue
+        if item["parent_id"] and item["parent_id"] not in shown:
+            continue
         try:
             author = account(sc, item["author_id"])
         except LookupError:
             continue
         if author.get("suspended_at"):
             continue
+        shown.add(item["id"])
         out.append(
             {
                 "id": item["id"],
@@ -1384,9 +1882,61 @@ def comments(
                 "mine": item["author_id"] == me_["id"],
                 "can_delete": item["author_id"] == me_["id"]
                 or post["author_id"] == me_["id"],
+                "parent_id": item["parent_id"] or "",
+                "likes": kit.count(
+                    sc, "SELECT COUNT(*) FROM so_comment_likes WHERE comment_id = ?", (item["id"],)
+                ),
+                "liked": item["id"] in liked,
             }
         )
     return out
+
+
+def like_comment(
+    sc: sqlite3.Connection, me_: dict[str, Any], comment_id: str, on: bool
+) -> dict[str, Any]:
+    found = row(
+        sc,
+        "SELECT * FROM so_comments WHERE id = ?",
+        (store.check_id(comment_id, "comment"),),
+    )
+    if not found or found["deleted_at"] or found["hidden_at"] or blocked(sc, me_["id"], found["author_id"]):
+        raise LookupError("That comment was not found.")
+    post = visible_post(sc, me_, found["post_id"])
+    had = bool(
+        row(
+            sc,
+            "SELECT 1 AS x FROM so_comment_likes WHERE comment_id = ? AND account_id = ?",
+            (found["id"], me_["id"]),
+        )
+    )
+    if on and not had:
+        sc.execute(
+            "INSERT INTO so_comment_likes (comment_id, account_id, created_at) VALUES (?, ?, ?)",
+            (found["id"], me_["id"], stamp()),
+        )
+        notify(
+            sc,
+            found["author_id"],
+            "comment_like",
+            me_["id"],
+            "post",
+            post["id"],
+            f"{me_['display_name']} liked your comment.",
+        )
+    elif not on:
+        sc.execute(
+            "DELETE FROM so_comment_likes WHERE comment_id = ? AND account_id = ?",
+            (found["id"], me_["id"]),
+        )
+    sc.execute("UPDATE so_posts SET updated_at = ? WHERE id = ?", (stamp(), post["id"]))
+    sc.commit()
+    return {
+        "liked": on,
+        "likes": kit.count(
+            sc, "SELECT COUNT(*) FROM so_comment_likes WHERE comment_id = ?", (found["id"],)
+        ),
+    }
 
 
 def delete_comment(
@@ -1410,6 +1960,11 @@ def delete_comment(
     sc.commit()
 
 
+# ---------------------------------------------------------------------------
+# a post as the browser sees it
+# ---------------------------------------------------------------------------
+
+
 def post_view(
     sc: sqlite3.Connection,
     viewer: dict[str, Any],
@@ -1428,16 +1983,27 @@ def post_view(
         reactions[item["emoji"]] = reactions.get(item["emoji"], 0) + 1
         if item["account_id"] == viewer["id"]:
             mine = item["emoji"]
+    saved = row(
+        sc,
+        "SELECT collection_id FROM so_saves WHERE account_id = ? AND post_id = ?",
+        (viewer["id"], post["id"]),
+    )
+    pictures = store.loads(post["photos"], [])
     view: dict[str, Any] = {
         "id": post["id"],
         "author": mini(author),
         "audience": post["audience"],
         "text": post["text"],
-        "photos": store.loads(post["photos"], []),
+        "photos": photos.display_list(pictures, sc=sc),
+        "alts": _alts(store.loads(post.get("alts"), []), len(pictures)),
+        "filter": post.get("filter") or "",
+        "feeling": post.get("feeling") or "",
+        "place": post.get("place") or "",
         "tags": [t for t in post["tags"].split() if t],
         "created_at": post["created_at"],
         "updated_at": post["updated_at"],
         "edited": bool(post.get("edited_at")),
+        "pinned": bool(post.get("pinned_at")),
         "reactions": reactions,
         "my_reaction": mine,
         "comments": kit.count(
@@ -1447,7 +2013,12 @@ def post_view(
         ),
         "mine": post["author_id"] == viewer["id"],
         "can_share": post["audience"] in ("public", "page"),
+        "saved": saved is not None,
+        "collection_id": saved["collection_id"] if saved else "",
     }
+    poll = poll_view(sc, viewer, post)
+    if poll:
+        view["poll"] = poll
     if post["group_id"]:
         found = row(
             sc, "SELECT id, name FROM so_groups WHERE id = ?", (post["group_id"],)
@@ -1550,10 +2121,12 @@ def tag_posts(
 def person_posts(
     sc: sqlite3.Connection, me_: dict[str, Any], target: dict[str, Any], limit: int = 30
 ) -> list[dict[str, Any]]:
+    """Their posts on their own profile, pinned ones first."""
     out = []
     for item in rows(
         sc,
-        "SELECT * FROM so_posts WHERE author_id = ? AND group_id IS NULL AND page_id IS NULL AND deleted_at IS NULL AND hidden_at IS NULL ORDER BY created_at DESC LIMIT ?",
+        """SELECT * FROM so_posts WHERE author_id = ? AND group_id IS NULL AND page_id IS NULL AND deleted_at IS NULL
+        AND hidden_at IS NULL ORDER BY (pinned_at IS NULL), pinned_at DESC, created_at DESC LIMIT ?""",
         (target["id"], limit * 2),
     ):
         if can_see_post(sc, me_, item):
@@ -1563,9 +2136,355 @@ def person_posts(
     return out
 
 
+def _tile(sc: sqlite3.Connection, me_: dict[str, Any], post: dict[str, Any]) -> dict[str, Any]:
+    """A square in a photo grid (Explore, a profile's Photos and Tagged): the first photo or the first words."""
+    pictures = store.loads(post["photos"], [])
+    return {
+        "id": post["id"],
+        "photo": photos.display(pictures[0], sc=sc) if pictures else "",
+        "alt": (_alts(store.loads(post.get("alts"), []), len(pictures)) or [""])[0] if pictures else "",
+        "photos": len(pictures),
+        "filter": post.get("filter") or "",
+        "text": post["text"][:140],
+        "author": mini(account(sc, post["author_id"])),
+        "reactions": kit.count(sc, "SELECT COUNT(*) FROM so_reactions WHERE post_id = ?", (post["id"],)),
+        "comments": kit.count(
+            sc,
+            "SELECT COUNT(*) FROM so_comments WHERE post_id = ? AND deleted_at IS NULL AND hidden_at IS NULL",
+            (post["id"],),
+        ),
+        "poll": bool(_poll_row(sc, post["id"])),
+        "created_at": post["created_at"],
+    }
+
+
+def person_grid(
+    sc: sqlite3.Connection, me_: dict[str, Any], target: dict[str, Any], kind: str
+) -> list[dict[str, Any]]:
+    """``photos``: their posts with photos; ``tagged``: posts by others that mention them, both as grid squares."""
+    kind = kit.choice(kind, "what to show", ("photos", "tagged"))
+    if kind == "photos":
+        found = rows(
+            sc,
+            """SELECT * FROM so_posts WHERE author_id = ? AND group_id IS NULL AND page_id IS NULL AND photos != '[]'
+            AND deleted_at IS NULL AND hidden_at IS NULL ORDER BY created_at DESC LIMIT 200""",
+            (target["id"],),
+        )
+    else:
+        found = rows(
+            sc,
+            """SELECT * FROM so_posts WHERE author_id != ? AND lower(text) LIKE ? AND deleted_at IS NULL
+            AND hidden_at IS NULL ORDER BY created_at DESC LIMIT 200""",
+            (target["id"], f"%@{target['handle']}%"),
+        )
+    out = []
+    for item in found:
+        if kind == "tagged" and target["handle"] not in MENTION.findall(item["text"].lower()):
+            continue
+        if can_see_post(sc, me_, item):
+            out.append(_tile(sc, me_, item))
+        if len(out) >= 60:
+            break
+    return out
+
+
+def memories(
+    sc: sqlite3.Connection, me_: dict[str, Any], day: str = ""
+) -> list[dict[str, Any]]:
+    """On this day: your own posts from earlier years on today's date (``day`` is MM-DD in your time zone)."""
+    today = store.utcnow()
+    wanted = str(day or "").strip() or today.strftime("%m-%d")
+    if not re.fullmatch(r"(0[1-9]|1[0-2])-(0[1-9]|[12]\d|3[01])", wanted):
+        raise ValueError("The day must be like 10-29 (month and day).")
+    out = []
+    for item in rows(
+        sc,
+        """SELECT * FROM so_posts WHERE author_id = ? AND substr(created_at, 6, 5) = ? AND substr(created_at, 1, 4) < ?
+        AND deleted_at IS NULL AND hidden_at IS NULL ORDER BY created_at DESC LIMIT 20""",
+        (me_["id"], wanted, today.strftime("%Y")),
+    ):
+        if can_see_post(sc, me_, item):
+            view = post_view(sc, me_, item)
+            view["years_ago"] = int(today.strftime("%Y")) - int(item["created_at"][:4])
+            out.append(view)
+    return out
+
+
 # ---------------------------------------------------------------------------
-# stories (24 hours)
+# saved posts and collections
 # ---------------------------------------------------------------------------
+
+
+def _collection(sc: sqlite3.Connection, me_: dict[str, Any], collection_id: str) -> dict[str, Any]:
+    found = row(
+        sc,
+        "SELECT * FROM so_collections WHERE id = ? AND owner_id = ?",
+        (store.check_id(collection_id, "collection"), me_["id"]),
+    )
+    if not found:
+        raise LookupError("That collection was not found.")
+    return found
+
+
+def collections(sc: sqlite3.Connection, me_: dict[str, Any]) -> list[dict[str, Any]]:
+    """Your collections (and "All saved"), each with how many posts and the first photo as its cover."""
+
+    def cover(where: str, params: tuple[Any, ...]) -> str:
+        for item in rows(
+            sc,
+            f"""SELECT p.* FROM so_saves s JOIN so_posts p ON p.id = s.post_id WHERE s.account_id = ? {where}
+            AND p.photos != '[]' ORDER BY s.created_at DESC LIMIT 10""",  # noqa: S608 - fixed clauses
+            (me_["id"], *params),
+        ):
+            if can_see_post(sc, me_, item):
+                return photos.display(store.loads(item["photos"], [""])[0], sc=sc)
+        return ""
+
+    out = [
+        {
+            "id": "",
+            "name": "All saved",
+            "count": kit.count(sc, "SELECT COUNT(*) FROM so_saves WHERE account_id = ?", (me_["id"],)),
+            "cover": cover("", ()),
+        }
+    ]
+    for item in rows(
+        sc, "SELECT * FROM so_collections WHERE owner_id = ? ORDER BY name", (me_["id"],)
+    ):
+        out.append(
+            {
+                "id": item["id"],
+                "name": item["name"],
+                "count": kit.count(
+                    sc,
+                    "SELECT COUNT(*) FROM so_saves WHERE account_id = ? AND collection_id = ?",
+                    (me_["id"], item["id"]),
+                ),
+                "cover": cover("AND s.collection_id = ?", (item["id"],)),
+            }
+        )
+    return out
+
+
+def create_collection(sc: sqlite3.Connection, me_: dict[str, Any], raw: dict[str, Any]) -> dict[str, Any]:
+    name = kit.text(raw.get("name"), "a name for the collection", max_len=60, required=True)
+    if name.lower() == "all saved" or row(
+        sc,
+        "SELECT 1 AS x FROM so_collections WHERE owner_id = ? AND lower(name) = ?",
+        (me_["id"], name.lower()),
+    ):
+        raise ValueError(f"You already have a collection called {name}.")
+    if kit.count(sc, "SELECT COUNT(*) FROM so_collections WHERE owner_id = ?", (me_["id"],)) >= 100:
+        raise ValueError("You have 100 collections: delete one first.")
+    collection_id = new_id()
+    sc.execute(
+        "INSERT INTO so_collections (id, owner_id, name, created_at) VALUES (?, ?, ?, ?)",
+        (collection_id, me_["id"], name, stamp()),
+    )
+    sc.commit()
+    return {"id": collection_id, "name": name, "count": 0, "cover": ""}
+
+
+def rename_collection(
+    sc: sqlite3.Connection, me_: dict[str, Any], collection_id: str, raw: dict[str, Any]
+) -> dict[str, Any]:
+    found = _collection(sc, me_, collection_id)
+    name = kit.text(raw.get("name"), "a name for the collection", max_len=60, required=True)
+    if row(
+        sc,
+        "SELECT 1 AS x FROM so_collections WHERE owner_id = ? AND lower(name) = ? AND id != ?",
+        (me_["id"], name.lower(), found["id"]),
+    ):
+        raise ValueError(f"You already have a collection called {name}.")
+    sc.execute("UPDATE so_collections SET name = ? WHERE id = ?", (name, found["id"]))
+    sc.commit()
+    return {"id": found["id"], "name": name}
+
+
+def delete_collection(sc: sqlite3.Connection, me_: dict[str, Any], collection_id: str) -> None:
+    """The collection goes; its posts stay saved under All saved."""
+    found = _collection(sc, me_, collection_id)
+    sc.execute(
+        "UPDATE so_saves SET collection_id = '' WHERE account_id = ? AND collection_id = ?",
+        (me_["id"], found["id"]),
+    )
+    sc.execute("DELETE FROM so_collections WHERE id = ?", (found["id"],))
+    sc.commit()
+
+
+def save_post(
+    sc: sqlite3.Connection, me_: dict[str, Any], post_id: str, raw: dict[str, Any]
+) -> dict[str, Any]:
+    """Save a post you can see (into a collection, or All saved); ``{"saved": false}`` takes it out."""
+    post = visible_post(sc, me_, post_id)
+    if raw.get("saved") is False or str(raw.get("saved")).lower() == "false":
+        sc.execute(
+            "DELETE FROM so_saves WHERE account_id = ? AND post_id = ?", (me_["id"], post["id"])
+        )
+        sc.commit()
+        return {"saved": False, "collection_id": ""}
+    collection_id = str(raw.get("collection_id") or "")
+    if collection_id:
+        collection_id = _collection(sc, me_, collection_id)["id"]
+    sc.execute(
+        """INSERT INTO so_saves (account_id, post_id, collection_id, created_at) VALUES (?, ?, ?, ?)
+        ON CONFLICT(account_id, post_id) DO UPDATE SET collection_id = excluded.collection_id""",
+        (me_["id"], post["id"], collection_id, stamp()),
+    )
+    sc.commit()
+    return {"saved": True, "collection_id": collection_id}
+
+
+def saved_posts(
+    sc: sqlite3.Connection, me_: dict[str, Any], collection_id: str = ""
+) -> list[dict[str, Any]]:
+    """Saved posts you can still see, newest saved first (a post that was removed or hidden drops out)."""
+    if collection_id:
+        _collection(sc, me_, collection_id)
+        found = rows(
+            sc,
+            """SELECT p.* FROM so_saves s JOIN so_posts p ON p.id = s.post_id WHERE s.account_id = ? AND s.collection_id = ?
+            ORDER BY s.created_at DESC LIMIT 200""",
+            (me_["id"], collection_id),
+        )
+    else:
+        found = rows(
+            sc,
+            "SELECT p.* FROM so_saves s JOIN so_posts p ON p.id = s.post_id WHERE s.account_id = ? ORDER BY s.created_at DESC LIMIT 200",
+            (me_["id"],),
+        )
+    return [post_view(sc, me_, item) for item in found if can_see_post(sc, me_, item)]
+
+
+# ---------------------------------------------------------------------------
+# Explore: what is popular now, people to follow, #tags, and search across it all
+# ---------------------------------------------------------------------------
+
+TRENDING_DAYS = 14
+
+
+def _explorable(sc: sqlite3.Connection, me_: dict[str, Any], post: dict[str, Any]) -> bool:
+    """Public posts you may see; a child sees only posts from friends and their own household."""
+    if not can_see_post(sc, me_, post):
+        return False
+    if minor(me_) and post["author_id"] != me_["id"]:
+        author = row(sc, "SELECT home FROM so_accounts WHERE id = ?", (post["author_id"],)) or {}
+        return are_friends(sc, me_["id"], post["author_id"]) or (
+            bool(me_.get("home")) and author.get("home") == me_["home"]
+        )
+    return True
+
+
+def _public_candidates(sc: sqlite3.Connection, limit: int = 400) -> list[dict[str, Any]]:
+    return rows(
+        sc,
+        """SELECT p.*, (SELECT COUNT(*) FROM so_reactions r WHERE r.post_id = p.id)
+              + 2 * (SELECT COUNT(*) FROM so_comments c WHERE c.post_id = p.id AND c.deleted_at IS NULL AND c.hidden_at IS NULL)
+              + 3 * (SELECT COUNT(*) FROM so_posts s WHERE s.shared_post_id = p.id AND s.deleted_at IS NULL)
+              + (SELECT COUNT(*) FROM so_poll_votes v WHERE v.post_id = p.id) AS score
+        FROM so_posts p LEFT JOIN so_groups g ON g.id = p.group_id
+        WHERE p.deleted_at IS NULL AND p.hidden_at IS NULL AND p.created_at > ?
+        AND (p.audience IN ('public', 'page') OR (p.audience = 'group' AND g.visibility = 'public'))
+        ORDER BY score DESC, p.created_at DESC LIMIT ?""",
+        (store.later(-24 * TRENDING_DAYS), limit),
+    )
+
+
+def explore(sc: sqlite3.Connection, me_: dict[str, Any]) -> dict[str, Any]:
+    trending = []
+    tags: dict[str, int] = {}
+    for item in _public_candidates(sc):
+        if not _explorable(sc, me_, item):
+            continue
+        for tag in item["tags"].split():
+            tags[tag] = tags.get(tag, 0) + 1
+        if len(trending) < 30:
+            trending.append(_tile(sc, me_, item))
+    people = suggestions(sc, me_, limit=12)
+    if me_["age_group"] not in ("child", "teen"):
+        known = {p["id"] for p in people} | friend_ids(sc, me_["id"]) | blocked_ids(sc, me_["id"]) | {me_["id"]}
+        followed = {
+            r["target_id"]
+            for r in rows(
+                sc,
+                "SELECT target_id FROM so_follows WHERE follower_id = ? AND target_type = 'account'",
+                (me_["id"],),
+            )
+        }
+        for item in rows(
+            sc,
+            """SELECT a.*, (SELECT COUNT(*) FROM so_follows f WHERE f.target_type = 'account' AND f.target_id = a.id) AS fans
+            FROM so_accounts a WHERE a.visibility = 'public' AND a.suspended_at IS NULL AND a.age_group IN ('adult', 'senior')
+            ORDER BY fans DESC, a.created_at DESC LIMIT 60""",
+        ):
+            if len(people) >= 12:
+                break
+            if item["id"] in known or item["id"] in followed:
+                continue
+            candidate = _account(item) or {}
+            people.append({**mini(candidate), "followers": item["fans"], "public": True})
+    for person in people:
+        person.setdefault("relation", "none")
+    popular = sorted(tags.items(), key=lambda pair: (-pair[1], pair[0]))[:16]
+    return {
+        "trending": trending,
+        "people": people,
+        "tags": [{"tag": tag, "posts": n} for tag, n in popular],
+    }
+
+
+def explore_search(sc: sqlite3.Connection, me_: dict[str, Any], q: str) -> dict[str, Any]:
+    """People, posts, groups, pages and #tags matching the words, each only what this person may see."""
+    query = kit.text(q, "a search", max_len=60)
+    empty = {"people": [], "groups": [], "pages": [], "posts": [], "tags": []}
+    if len(query.lstrip("#@")) < 2:
+        return empty
+    if query.startswith("#"):
+        word = query[1:].lower()
+        found = {
+            r["tag"]: r["n"]
+            for r in rows(
+                sc,
+                "SELECT tag, COUNT(*) AS n FROM so_post_tags WHERE tag LIKE ? GROUP BY tag ORDER BY n DESC LIMIT 20",
+                (f"{word}%",),
+            )
+        }
+        return {**empty, "tags": [{"tag": t, "posts": n} for t, n in found.items()], "posts": [_tile(sc, me_, p) for p in [
+            post for post in rows(
+                sc,
+                "SELECT p.* FROM so_post_tags t JOIN so_posts p ON p.id = t.post_id WHERE t.tag = ? ORDER BY p.created_at DESC LIMIT 100",
+                (word,),
+            ) if _explorable(sc, me_, post)
+        ][:30]]}
+    base = search(sc, me_, query)
+    words = query.lstrip("@").lower()
+    posts = []
+    for item in rows(
+        sc,
+        """SELECT * FROM so_posts WHERE deleted_at IS NULL AND hidden_at IS NULL AND (lower(text) LIKE ? OR lower(place) LIKE ?)
+        ORDER BY created_at DESC LIMIT 300""",
+        (f"%{words}%", f"%{words}%"),
+    ):
+        if _explorable(sc, me_, item):
+            posts.append(_tile(sc, me_, item))
+        if len(posts) >= 30:
+            break
+    tags = [
+        {"tag": r["tag"], "posts": r["n"]}
+        for r in rows(
+            sc,
+            "SELECT tag, COUNT(*) AS n FROM so_post_tags WHERE tag LIKE ? GROUP BY tag ORDER BY n DESC LIMIT 10",
+            (f"{words.replace(' ', '')}%",),
+        )
+    ]
+    return {**base, "posts": posts, "tags": tags}
+
+
+# ---------------------------------------------------------------------------
+# stories (24 hours), their replies and reactions, and highlights that keep them
+# ---------------------------------------------------------------------------
+
+STORY_AUDIENCES = ("friends", "close_friends")
 
 
 def create_story(
@@ -1575,25 +2494,76 @@ def create_story(
     text = filtered(
         sc, kit.text(raw.get("text"), "the story", max_len=200, multiline=True)
     )
-    photos = _photos([raw["photo"]] if raw.get("photo") else [], limit=1)
-    if not text and not photos:
+    pictures = _photos([raw["photo"]] if raw.get("photo") else [], limit=1, sc=sc, owner=me_["id"])
+    if not text and not pictures:
         raise ValueError("Write something or add a photo.")
+    audience = kit.choice(raw.get("audience"), "who can see it", STORY_AUDIENCES, default="friends")
     rate(sc, me_, "story")
     story_id = new_id()
     sc.execute(
-        "INSERT INTO so_stories (id, author_id, text, photo, color, created_at, expires_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO so_stories (id, author_id, text, photo, color, created_at, expires_at, audience) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         (
             story_id,
             me_["id"],
             text,
-            photos[0] if photos else "",
+            pictures[0] if pictures else "",
             kit.color(raw.get("color")),
             stamp(),
             store.later(STORY_HOURS),
+            audience,
         ),
     )
     sc.commit()
     return {"id": story_id}
+
+
+def can_see_story(sc: sqlite3.Connection, viewer: dict[str, Any], story: dict[str, Any]) -> bool:
+    """A story is for the author's friends (or only their close friends); never after it was removed."""
+    if story.get("deleted_at") or story.get("hidden_at"):
+        return False
+    if story["author_id"] == viewer["id"]:
+        return True
+    if blocked(sc, viewer["id"], story["author_id"]):
+        return False
+    try:
+        author = account(sc, story["author_id"])
+    except LookupError:
+        return False
+    if author.get("suspended_at"):
+        return False
+    if (story.get("audience") or "friends") == "close_friends":
+        return in_close_circle(sc, viewer["id"], story["author_id"])
+    return are_friends(sc, viewer["id"], story["author_id"])
+
+
+def _story_view(sc: sqlite3.Connection, me_: dict[str, Any], item: dict[str, Any], seen: bool) -> dict[str, Any]:
+    own = item["author_id"] == me_["id"]
+    reaction = row(
+        sc,
+        "SELECT emoji FROM so_story_reactions WHERE story_id = ? AND account_id = ?",
+        (item["id"], me_["id"]),
+    )
+    return {
+        "id": item["id"],
+        "text": item["text"],
+        "photo": photos.display(item["photo"], sc=sc),
+        "color": item["color"],
+        "audience": item.get("audience") or "friends",
+        "created_at": item["created_at"],
+        "expires_at": item["expires_at"],
+        "seen": seen,
+        "views": kit.count(
+            sc,
+            "SELECT COUNT(*) FROM so_story_views WHERE story_id = ?",
+            (item["id"],),
+        )
+        if own
+        else None,
+        "reactions": kit.count(sc, "SELECT COUNT(*) FROM so_story_reactions WHERE story_id = ?", (item["id"],))
+        if own
+        else None,
+        "my_reaction": reaction["emoji"] if reaction else None,
+    }
 
 
 def stories(sc: sqlite3.Connection, me_: dict[str, Any]) -> list[dict[str, Any]]:
@@ -1613,7 +2583,7 @@ def stories(sc: sqlite3.Connection, me_: dict[str, Any]) -> list[dict[str, Any]]
     grouped: dict[str, dict[str, Any]] = {}
     for item in found:
         author = account(sc, item["author_id"])
-        if author.get("suspended_at"):
+        if author.get("suspended_at") or not can_see_story(sc, me_, item):
             continue
         entry = grouped.setdefault(
             author["id"],
@@ -1622,53 +2592,138 @@ def stories(sc: sqlite3.Connection, me_: dict[str, Any]) -> list[dict[str, Any]]
                 "stories": [],
                 "unseen": 0,
                 "mine": author["id"] == me_["id"],
+                "close": False,
             },
         )
         is_seen = item["id"] in seen or author["id"] == me_["id"]
-        entry["stories"].append(
-            {
-                "id": item["id"],
-                "text": item["text"],
-                "photo": item["photo"],
-                "color": item["color"],
-                "created_at": item["created_at"],
-                "seen": is_seen,
-                "views": kit.count(
-                    sc,
-                    "SELECT COUNT(*) FROM so_story_views WHERE story_id = ?",
-                    (item["id"],),
-                )
-                if author["id"] == me_["id"]
-                else None,
-            }
-        )
+        entry["stories"].append(_story_view(sc, me_, item, is_seen))
+        if (item.get("audience") or "friends") == "close_friends":
+            entry["close"] = True
         if not is_seen:
             entry["unseen"] += 1
     return sorted(grouped.values(), key=lambda e: (not e["mine"], e["unseen"] == 0))
 
 
-def see_story(sc: sqlite3.Connection, me_: dict[str, Any], story_id: str) -> None:
-    found = row(
+def _story_row(sc: sqlite3.Connection, story_id: str) -> dict[str, Any] | None:
+    return row(
         sc,
         "SELECT * FROM so_stories WHERE id = ?",
         (store.check_id(story_id, "story"),),
     )
-    if (
-        not found
-        or found["deleted_at"]
-        or found["hidden_at"]
-        or found["expires_at"] <= stamp()
-        or not (
-            found["author_id"] == me_["id"]
-            or are_friends(sc, me_["id"], found["author_id"])
-        )
-    ):
+
+
+def visible_story(
+    sc: sqlite3.Connection, me_: dict[str, Any], story_id: str, *, live: bool = True
+) -> dict[str, Any]:
+    """A story this person may see; ``live`` also asks that its day is not over (a highlight keeps it)."""
+    found = _story_row(sc, story_id)
+    if not found or not can_see_story(sc, me_, found) or (live and found["expires_at"] <= stamp() and not _in_highlight(sc, found["id"])):
         raise LookupError("That story is no longer available.")
+    return found
+
+
+def _in_highlight(sc: sqlite3.Connection, story_id: str) -> bool:
+    return bool(row(sc, "SELECT 1 AS x FROM so_highlight_items WHERE story_id = ?", (story_id,)))
+
+
+def see_story(sc: sqlite3.Connection, me_: dict[str, Any], story_id: str) -> None:
+    found = visible_story(sc, me_, story_id)
     sc.execute(
         "INSERT OR IGNORE INTO so_story_views (story_id, viewer_id, at) VALUES (?, ?, ?)",
         (found["id"], me_["id"], stamp()),
     )
     sc.commit()
+
+
+def story_viewers(sc: sqlite3.Connection, me_: dict[str, Any], story_id: str) -> list[dict[str, Any]]:
+    """Who saw your story, and how they reacted (only for its author)."""
+    found = _story_row(sc, story_id)
+    if not found or found["author_id"] != me_["id"] or found["deleted_at"]:
+        raise LookupError("That story was not found.")
+    hidden = blocked_ids(sc, me_["id"])
+    out = []
+    for item in rows(
+        sc,
+        """SELECT v.viewer_id, v.at, r.emoji FROM so_story_views v LEFT JOIN so_story_reactions r
+        ON r.story_id = v.story_id AND r.account_id = v.viewer_id WHERE v.story_id = ? ORDER BY v.at DESC""",
+        (found["id"],),
+    ):
+        if item["viewer_id"] in hidden:
+            continue
+        try:
+            other = account(sc, item["viewer_id"])
+        except LookupError:
+            continue
+        out.append({**mini(other), "at": item["at"], "reaction": item["emoji"]})
+    return out
+
+
+def react_story(
+    sc: sqlite3.Connection, me_: dict[str, Any], story_id: str, emoji: Any
+) -> dict[str, Any]:
+    found = visible_story(sc, me_, story_id)
+    if found["author_id"] == me_["id"]:
+        raise ValueError("React to your friends' stories.")
+    if emoji in (None, ""):
+        sc.execute(
+            "DELETE FROM so_story_reactions WHERE story_id = ? AND account_id = ?",
+            (found["id"], me_["id"]),
+        )
+        sc.commit()
+        return {"my_reaction": None}
+    if emoji not in STORY_REACTIONS:
+        raise ValueError("Choose one of the reactions.")
+    had = row(
+        sc,
+        "SELECT emoji FROM so_story_reactions WHERE story_id = ? AND account_id = ?",
+        (found["id"], me_["id"]),
+    )
+    sc.execute(
+        """INSERT INTO so_story_reactions (story_id, account_id, emoji, created_at) VALUES (?, ?, ?, ?)
+        ON CONFLICT(story_id, account_id) DO UPDATE SET emoji = excluded.emoji""",
+        (found["id"], me_["id"], emoji, stamp()),
+    )
+    if not had:
+        notify(
+            sc,
+            found["author_id"],
+            "story_reaction",
+            me_["id"],
+            "story",
+            found["id"],
+            f"{me_['display_name']} reacted {emoji} to your story.",
+        )
+    sc.commit()
+    return {"my_reaction": emoji}
+
+
+def reply_story(
+    sc: sqlite3.Connection, me_: dict[str, Any], story_id: str, raw: dict[str, Any]
+) -> dict[str, Any]:
+    """A reply to a story is a private message to its author (the usual rules for who may message whom apply)."""
+    _active(me_)
+    found = visible_story(sc, me_, story_id)
+    if found["author_id"] == me_["id"]:
+        raise ValueError("Reply to your friends' stories.")
+    text = kit.text(raw.get("text"), "your reply", max_len=1000, required=True, multiline=True)
+    author = account(sc, found["author_id"])
+    if not can_message(sc, me_, author):
+        raise PermissionError("You can reply to your friends' stories.")
+    rate(sc, me_, "story_reply")
+    chat = open_direct(sc, me_, author["id"])
+    about = found["text"][:60] or "📷"
+    sent = send(sc, me_, chat["id"], {"text": f"↪ Story: “{about}”\n{text}"})
+    notify(
+        sc,
+        author["id"],
+        "story_reply",
+        me_["id"],
+        "chat",
+        chat["id"],
+        f"{me_['display_name']} replied to your story.",
+    )
+    sc.commit()
+    return {"chat": chat, "message": sent["message"]}
 
 
 def delete_story(sc: sqlite3.Connection, me_: dict[str, Any], story_id: str) -> None:
@@ -1682,7 +2737,116 @@ def delete_story(sc: sqlite3.Connection, me_: dict[str, Any], story_id: str) -> 
     sc.execute(
         "UPDATE so_stories SET deleted_at = ? WHERE id = ?", (stamp(), found["id"])
     )
+    sc.execute("DELETE FROM so_highlight_items WHERE story_id = ?", (found["id"],))
     sc.commit()
+
+
+def my_stories(sc: sqlite3.Connection, me_: dict[str, Any]) -> list[dict[str, Any]]:
+    """Your stories of the last year (also the ones whose day is over), to choose for a highlight."""
+    return [
+        _story_view(sc, me_, item, True)
+        for item in rows(
+            sc,
+            """SELECT * FROM so_stories WHERE author_id = ? AND deleted_at IS NULL AND hidden_at IS NULL AND created_at > ?
+            ORDER BY created_at DESC LIMIT 200""",
+            (me_["id"], store.later(-24 * 366)),
+        )
+    ]
+
+
+def _highlight(sc: sqlite3.Connection, me_: dict[str, Any], highlight_id: str) -> dict[str, Any]:
+    found = row(
+        sc,
+        "SELECT * FROM so_highlights WHERE id = ? AND owner_id = ?",
+        (store.check_id(highlight_id, "highlight"), me_["id"]),
+    )
+    if not found:
+        raise LookupError("That highlight was not found.")
+    return found
+
+
+def _highlight_stories(sc: sqlite3.Connection, me_: dict[str, Any], story_ids: Any) -> list[str]:
+    if not isinstance(story_ids, list) or not story_ids:
+        raise ValueError("Choose at least one of your stories.")
+    if len(story_ids) > 100:
+        raise ValueError("A highlight keeps up to 100 stories.")
+    out = []
+    for story_id in dict.fromkeys(str(s) for s in story_ids):
+        found = _story_row(sc, story_id)
+        if not found or found["author_id"] != me_["id"] or found["deleted_at"] or found["hidden_at"]:
+            raise LookupError("That story was not found.")
+        out.append(found["id"])
+    return out
+
+
+def save_highlight(
+    sc: sqlite3.Connection, me_: dict[str, Any], raw: dict[str, Any], highlight_id: str = ""
+) -> dict[str, Any]:
+    """Make a highlight (a title and some of your stories) or change one; its stories stay after their day."""
+    _active(me_)
+    title = kit.text(raw.get("title"), "a title for the highlight", max_len=30, required=True)
+    story_ids = _highlight_stories(sc, me_, raw.get("story_ids"))
+    moment = stamp()
+    if highlight_id:
+        found = _highlight(sc, me_, highlight_id)
+        sc.execute("UPDATE so_highlights SET title = ? WHERE id = ?", (title, found["id"]))
+        sc.execute("DELETE FROM so_highlight_items WHERE highlight_id = ?", (found["id"],))
+        highlight_id = found["id"]
+    else:
+        if kit.count(sc, "SELECT COUNT(*) FROM so_highlights WHERE owner_id = ?", (me_["id"],)) >= 50:
+            raise ValueError("You have 50 highlights: delete one first.")
+        highlight_id = new_id()
+        sc.execute(
+            "INSERT INTO so_highlights (id, owner_id, title, created_at) VALUES (?, ?, ?, ?)",
+            (highlight_id, me_["id"], title, moment),
+        )
+    for story_id in story_ids:
+        sc.execute(
+            "INSERT OR IGNORE INTO so_highlight_items (highlight_id, story_id, added_at) VALUES (?, ?, ?)",
+            (highlight_id, story_id, moment),
+        )
+    sc.commit()
+    return {"id": highlight_id, "title": title}
+
+
+def delete_highlight(sc: sqlite3.Connection, me_: dict[str, Any], highlight_id: str) -> None:
+    found = _highlight(sc, me_, highlight_id)
+    sc.execute("DELETE FROM so_highlight_items WHERE highlight_id = ?", (found["id"],))
+    sc.execute("DELETE FROM so_highlights WHERE id = ?", (found["id"],))
+    sc.commit()
+
+
+def highlights(
+    sc: sqlite3.Connection, viewer: dict[str, Any], owner: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """The owner's highlights with the stories in them this viewer may see (friends; close friends' ones only for
+    them). A highlight with nothing the viewer may see is left out."""
+    out = []
+    for item in rows(
+        sc, "SELECT * FROM so_highlights WHERE owner_id = ? ORDER BY created_at", (owner["id"],)
+    ):
+        shown = []
+        for story in rows(
+            sc,
+            """SELECT s.* FROM so_highlight_items i JOIN so_stories s ON s.id = i.story_id
+            WHERE i.highlight_id = ? ORDER BY s.created_at""",
+            (item["id"],),
+        ):
+            if can_see_story(sc, viewer, story):
+                shown.append(_story_view(sc, viewer, story, True))
+        if shown:
+            cover = next((s["photo"] for s in shown if s["photo"]), "")
+            out.append(
+                {
+                    "id": item["id"],
+                    "title": item["title"],
+                    "cover": cover,
+                    "color": shown[0]["color"],
+                    "stories": shown,
+                    "mine": owner["id"] == viewer["id"],
+                }
+            )
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -1714,7 +2878,12 @@ def may_send_direct(
     unfriended stranger cannot keep writing to a teen through an old chat), plus a chat an adult started
     about a Marketplace listing, which stays open between the two adults while that listing is still for sale
     to the buyer (and a little while after it sold, to arrange the pick-up). Once it is removed, hidden, no
-    longer visible to them or long sold, the ordinary rule applies again."""
+    longer visible to them or long sold, the ordinary rule applies again. A Dating match's chat has its own rule
+    (open while the match lasts, :func:`aira.suite.social.dating.chat_open`)."""
+    if chat.get("context") == "dating":
+        from aira.suite.social import dating
+
+        return dating.chat_open(sc, me_, other, chat)
     if can_message(sc, me_, other):
         return True
     if (
@@ -1943,7 +3112,7 @@ def chats(sc: sqlite3.Connection, me_: dict[str, Any]) -> dict[str, Any]:
     found = rows(
         sc,
         """SELECT c.* FROM so_chats c JOIN so_chat_members m ON m.chat_id = c.id
-        WHERE m.account_id = ? AND m.left_at IS NULL ORDER BY c.updated_at DESC LIMIT 200""",
+        WHERE m.account_id = ? AND m.left_at IS NULL AND c.context != 'dating' ORDER BY c.updated_at DESC LIMIT 200""",
         (me_["id"],),
     )
     out = [chat_summary(sc, me_, chat) for chat in found]
@@ -2010,7 +3179,7 @@ def messages(
                 "id": item["id"],
                 "author": names[item["author_id"]],
                 "text": "" if item["deleted_at"] else item["text"],
-                "photo": "" if item["deleted_at"] else item["photo"],
+                "photo": "" if item["deleted_at"] else photos.display(item["photo"], sc=sc),
                 "deleted": bool(item["deleted_at"]),
                 "created_at": item["created_at"],
                 "mine": mine,
@@ -2069,8 +3238,10 @@ def send(
     text = filtered(
         sc, kit.text(raw.get("text"), "a message", max_len=4000, multiline=True)
     )
-    photos = _photos([raw["photo"]] if raw.get("photo") else [], limit=1)
-    if not text and not photos:
+    pictures = _photos(
+        [raw["photo"]] if raw.get("photo") else [], limit=1, sc=sc, owner=me_["id"]
+    )
+    if not text and not pictures:
         raise ValueError("Write a message.")
     rate(sc, me_, "message")
     message_id = new_id()
@@ -2082,7 +3253,7 @@ def send(
             chat["id"],
             me_["id"],
             text,
-            photos[0] if photos else "",
+            pictures[0] if pictures else "",
             moment,
             moment,
         ),
@@ -2102,7 +3273,7 @@ def send(
         "message": {
             "id": message_id,
             "text": text,
-            "photo": photos[0] if photos else "",
+            "photo": photos.display(pictures[0], sc=sc) if pictures else "",
             "created_at": moment,
             "mine": True,
         }
@@ -2229,7 +3400,8 @@ def unread_messages(sc: sqlite3.Connection, me_: dict[str, Any]) -> int:
     total = 0
     for member in rows(
         sc,
-        "SELECT * FROM so_chat_members WHERE account_id = ? AND left_at IS NULL AND muted = 0",
+        # Dating's chats count in Dating's own badge, never on Social's
+        "SELECT * FROM so_chat_members WHERE account_id = ? AND left_at IS NULL AND muted = 0 AND chat_id NOT IN (SELECT id FROM so_chats WHERE context = 'dating')",
         (me_["id"],),
     ):
         total += _unread(sc, member["chat_id"], member)
@@ -2272,7 +3444,7 @@ def create_group(
     group_id = new_id()
     moment = stamp()
     sc.execute(
-        "INSERT INTO so_groups (id, name, about, visibility, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO so_groups (id, name, about, visibility, created_by, created_at, photo) VALUES (?, ?, ?, ?, ?, ?, ?)",
         (
             group_id,
             kit.text(raw.get("name"), "a group name", max_len=80, required=True),
@@ -2290,6 +3462,7 @@ def create_group(
             ),
             me_["id"],
             moment,
+            _picture(raw.get("photo"), sc, me_["id"], "the group's picture link"),
         ),
     )
     sc.execute(
@@ -2317,6 +3490,7 @@ def group_view(
         "name": group["name"],
         "about": group["about"],
         "visibility": group["visibility"],
+        "photo": photos.display(group.get("photo"), sc=sc),
         "members": kit.count(
             sc,
             "SELECT COUNT(*) FROM so_group_members WHERE group_id = ? AND status = 'member'",
@@ -2485,6 +3659,8 @@ def update_group(
         values["visibility"] = kit.choice(
             raw["visibility"], "who can see the group", VISIBILITIES
         )
+    if "photo" in raw:
+        values["photo"] = _picture(raw["photo"], sc, me_["id"], "the group's picture link")
     _update(sc, "so_groups", group["id"], values)
     sc.commit()
     return group_view(sc, me_, group_row(sc, group["id"]))
@@ -2526,6 +3702,8 @@ def update_page(
         if link and not link.lower().startswith("https://"):
             raise ValueError("The link must start with https://.")
         values["link"] = link
+    if "photo" in raw:
+        values["photo"] = _picture(raw["photo"], sc, me_["id"], "the page's picture link")
     _update(sc, "so_pages", found["id"], values)
     sc.commit()
     return page_view(sc, me_, page(sc, found["id"]))
@@ -2573,7 +3751,7 @@ def create_page(
     rate(sc, me_, "page")
     page_id = new_id()
     sc.execute(
-        "INSERT INTO so_pages (id, name, about, category, link, created_by, created_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO so_pages (id, name, about, category, link, created_by, created_at, photo) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         (
             page_id,
             kit.text(raw.get("name"), "a page name", max_len=80, required=True),
@@ -2584,6 +3762,7 @@ def create_page(
             link,
             me_["id"],
             stamp(),
+            _picture(raw.get("photo"), sc, me_["id"], "the page's picture link"),
         ),
     )
     sc.execute(
@@ -2607,6 +3786,7 @@ def page_view(
         "about": found["about"],
         "category": found["category"],
         "link": found["link"],
+        "photo": photos.display(found.get("photo"), sc=sc),
         "followers": kit.count(
             sc,
             "SELECT COUNT(*) FROM so_follows WHERE target_type = 'page' AND target_id = ?",
@@ -2686,11 +3866,8 @@ def report(
         if not found or not _member(sc, found["chat_id"], me_["id"], active=False):
             raise LookupError("That message was not found.")
     elif target_type == "story":
-        found = row(sc, "SELECT author_id FROM so_stories WHERE id = ?", (target_id,))
-        if not found or not (
-            found["author_id"] == me_["id"]
-            or are_friends(sc, me_["id"], found["author_id"])
-        ):
+        found = row(sc, "SELECT * FROM so_stories WHERE id = ?", (target_id,))
+        if not found or not can_see_story(sc, me_, found):
             raise LookupError("That story was not found.")
     elif target_type == "listing":
         from aira.suite.social import market
@@ -2919,7 +4096,9 @@ def export_account(sc: sqlite3.Connection, account_id: str) -> dict[str, Any]:
         ),
         "messages": rows(
             sc,
-            "SELECT id, chat_id, text, photo, created_at FROM so_messages WHERE author_id = ? AND deleted_at IS NULL ORDER BY created_at",
+            # Dating's chats are the person's own (dating.export), never in an organization's export of a member
+            """SELECT id, chat_id, text, photo, created_at FROM so_messages WHERE author_id = ? AND deleted_at IS NULL
+            AND chat_id NOT IN (SELECT id FROM so_chats WHERE context = 'dating') ORDER BY created_at""",
             (account_id,),
         ),
         "friends": [
@@ -2941,6 +4120,43 @@ def export_account(sc: sqlite3.Connection, account_id: str) -> dict[str, Any]:
             buyer, sold_cents, sold_at, created_at FROM so_listings WHERE seller_id = ? AND deleted_at IS NULL ORDER BY created_at""",
             (account_id,),
         ),
+        "polls": rows(
+            sc,
+            "SELECT p.post_id, p.options, p.closes_at FROM so_polls p JOIN so_posts s ON s.id = p.post_id WHERE s.author_id = ?",
+            (account_id,),
+        ),
+        "poll_votes": rows(
+            sc, "SELECT post_id, choice, created_at FROM so_poll_votes WHERE account_id = ?", (account_id,)
+        ),
+        "saved": rows(
+            sc, "SELECT post_id, collection_id, created_at FROM so_saves WHERE account_id = ?", (account_id,)
+        ),
+        "collections": rows(
+            sc, "SELECT id, name, created_at FROM so_collections WHERE owner_id = ?", (account_id,)
+        ),
+        "close_friends": [
+            r["friend_id"]
+            for r in rows(sc, "SELECT friend_id FROM so_close_friends WHERE owner_id = ?", (account_id,))
+        ],
+        "highlights": [
+            {
+                **item,
+                "story_ids": [
+                    r["story_id"]
+                    for r in rows(
+                        sc, "SELECT story_id FROM so_highlight_items WHERE highlight_id = ?", (item["id"],)
+                    )
+                ],
+            }
+            for item in rows(
+                sc, "SELECT id, title, created_at FROM so_highlights WHERE owner_id = ?", (account_id,)
+            )
+        ],
+        "photos": rows(
+            sc,
+            "SELECT id, mime, size, width, height, created_at FROM so_media WHERE owner_id = ? ORDER BY created_at",
+            (account_id,),
+        ),
     }
 
 
@@ -2948,6 +4164,9 @@ def erase_accounts(sc: sqlite3.Connection, account_ids: Iterable[str]) -> int:
     """Remove these people from Social: their profile, posts, comments, stories, messages, reactions,
     friendships, memberships and notifications. Groups, pages and chats they made stay for the others."""
     ids = [str(a) for a in account_ids if a]
+    from aira.suite.social import dating
+
+    dating.erase(sc, ids)  # their dating profile, likes, matches and the matches' chats
     for account_id in ids:
         posts = [
             r["id"]
@@ -2956,7 +4175,7 @@ def erase_accounts(sc: sqlite3.Connection, account_ids: Iterable[str]) -> int:
             )
         ]
         for post_id in posts:
-            for table in ("so_post_tags", "so_reactions", "so_comments"):
+            for table in ("so_post_tags", "so_reactions", "so_comments", "so_polls", "so_poll_votes", "so_saves"):
                 sc.execute(f"DELETE FROM {table} WHERE post_id = ?", (post_id,))  # noqa: S608 - fixed names
         stories = [
             r["id"]
@@ -2966,7 +4185,18 @@ def erase_accounts(sc: sqlite3.Connection, account_ids: Iterable[str]) -> int:
         ]
         for story_id in stories:
             sc.execute("DELETE FROM so_story_views WHERE story_id = ?", (story_id,))
+            sc.execute("DELETE FROM so_story_reactions WHERE story_id = ?", (story_id,))
+            sc.execute("DELETE FROM so_highlight_items WHERE story_id = ?", (story_id,))
+        photos.delete_owner(sc, account_id)  # the photo files they uploaded, from the disk too
         for statement in (
+            "DELETE FROM so_comment_likes WHERE account_id = ? OR comment_id IN (SELECT id FROM so_comments WHERE author_id = ?)",
+            "DELETE FROM so_poll_votes WHERE account_id = ?",
+            "DELETE FROM so_saves WHERE account_id = ?",
+            "DELETE FROM so_collections WHERE owner_id = ?",
+            "DELETE FROM so_close_friends WHERE owner_id = ? OR friend_id = ?",
+            "DELETE FROM so_highlight_items WHERE highlight_id IN (SELECT id FROM so_highlights WHERE owner_id = ?)",
+            "DELETE FROM so_highlights WHERE owner_id = ?",
+            "DELETE FROM so_story_reactions WHERE account_id = ?",
             "DELETE FROM so_posts WHERE author_id = ?",
             "DELETE FROM so_comments WHERE author_id = ?",
             "DELETE FROM so_reactions WHERE account_id = ?",
@@ -3065,7 +4295,8 @@ def pulse(
         sc,
         """SELECT m.* FROM so_messages m JOIN so_chat_members c ON c.chat_id = m.chat_id
         WHERE c.account_id = ? AND c.left_at IS NULL AND c.muted = 0 AND m.author_id != ? AND m.created_at > ?
-        AND m.created_at > c.last_read_at AND m.deleted_at IS NULL AND m.hidden_at IS NULL ORDER BY m.created_at LIMIT 5""",
+        AND m.created_at > c.last_read_at AND m.deleted_at IS NULL AND m.hidden_at IS NULL
+        AND m.chat_id NOT IN (SELECT id FROM so_chats WHERE context = 'dating') ORDER BY m.created_at LIMIT 5""",
         (acct["id"], acct["id"], cutoff),
     )
     for item in found:
@@ -3096,7 +4327,10 @@ def pulse(
 # ---------------------------------------------------------------------------
 
 
-def public_profile(sc: sqlite3.Connection, account_id: str) -> dict[str, Any]:
+def public_profile(
+    sc: sqlite3.Connection, account_id: str, token: str = ""
+) -> dict[str, Any]:
+    """The shared profile page; uploaded photos load through the link's own address (``token``)."""
     try:
         acct = account(sc, account_id)
     except LookupError:
@@ -3118,7 +4352,7 @@ def public_profile(sc: sqlite3.Connection, account_id: str) -> dict[str, Any]:
             {
                 "id": item["id"],
                 "text": item["text"],
-                "photos": store.loads(item["photos"], []),
+                "photos": photos.display_list(store.loads(item["photos"], []), token=token),
                 "created_at": item["created_at"],
                 "reactions": kit.count(
                     sc,
@@ -3133,7 +4367,9 @@ def public_profile(sc: sqlite3.Connection, account_id: str) -> dict[str, Any]:
         "person": {
             "name": acct["display_name"],
             "handle": acct["handle"],
-            "avatar": acct["avatar"],
+            "avatar": photos.display(acct["avatar"], token=token),
+            "cover": photos.display(acct.get("cover"), token=token),
+            "links": acct.get("links") or [],
             "bio": acct["bio"],
             "headline": acct["headline"],
             "open_to_work": acct["open_to_work"],
@@ -3142,3 +4378,22 @@ def public_profile(sc: sqlite3.Connection, account_id: str) -> dict[str, Any]:
         },
         "posts": posts,
     }
+
+
+def public_profile_photo(sc: sqlite3.Connection, account_id: str, photo_id: str) -> bool:
+    """Whether the shared profile page shows this uploaded photo (its picture, cover or a public post's photo)."""
+    page = public_profile(sc, account_id)
+    if not page.get("available"):
+        return False
+    acct = account(sc, account_id)
+    ref = f"media:{photo_id}"
+    if ref in (acct["avatar"], acct.get("cover")):
+        return True
+    return bool(
+        row(
+            sc,
+            """SELECT 1 AS x FROM so_posts WHERE author_id = ? AND audience = 'public' AND group_id IS NULL AND page_id IS NULL
+            AND deleted_at IS NULL AND hidden_at IS NULL AND photos LIKE ?""",
+            (acct["id"], f'%"{ref}"%'),
+        )
+    )

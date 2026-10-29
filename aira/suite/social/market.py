@@ -27,7 +27,7 @@ from typing import Any
 
 from aira import suite
 from aira.suite import kit, life
-from aira.suite.social import service, store
+from aira.suite.social import photos, service, store
 from aira.suite.social.store import new_id, row, rows, stamp
 
 CATEGORIES = (
@@ -147,7 +147,11 @@ def mine(
 
 
 def _values(
-    raw: dict[str, Any], current: dict[str, Any] | None = None
+    raw: dict[str, Any],
+    current: dict[str, Any] | None = None,
+    *,
+    sc: sqlite3.Connection | None = None,
+    owner: str = "",
 ) -> dict[str, Any]:
     merged = {**(current or {}), **raw}
     if (
@@ -174,7 +178,7 @@ def _values(
             merged.get("condition"), "the condition", CONDITIONS, default="used"
         ),
         "place": kit.text(merged.get("place"), "where to pick it up", max_len=80),
-        "photos": store.dumps(service._photos(merged.get("photos"))),
+        "photos": store.dumps(service._photos(merged.get("photos"), sc=sc, owner=owner)),
         "audience": kit.choice(
             merged.get("audience"), "who can see it", AUDIENCES, default="public"
         ),
@@ -208,7 +212,7 @@ def create(
     """A new listing, the seller's own (their payment link only) unless ``for_business`` and they may
     (``business`` from :func:`business_for`; None when they may not). ``currency`` is the default."""
     _seller_only(me_)
-    values = _values(raw)
+    values = _values(raw, sc=sc, owner=me_["id"])
     values.update(_business_values(raw, False, business))
     values["title"] = service.filtered(sc, values["title"])
     values["about"] = service.filtered(sc, values["about"])
@@ -273,7 +277,7 @@ def update(
     listing = mine(sc, me_, listing_id)
     service._active(me_)
     current = {**listing, "photos": store.loads(listing["photos"], [])}
-    values = _values(raw, current)
+    values = _values(raw, current, sc=sc, owner=me_["id"])
     if "for_business" in raw or business is not None:
         values.update(_business_values(raw, bool(listing["for_business"]), business))
     elif listing[
@@ -381,7 +385,7 @@ def view(
         "category": listing["category"],
         "condition": listing["condition"],
         "place": listing["place"],
-        "photos": store.loads(listing["photos"], []),
+        "photos": photos.display_list(store.loads(listing["photos"], []), sc=sc),
         "audience": listing["audience"],
         "payment_link": payment_link(listing),
         "for_business": bool(listing["for_business"]),
@@ -582,7 +586,9 @@ def ask_seller(
     return service.chat_summary(sc, me_, found)
 
 
-def public_page(sc: sqlite3.Connection, listing_id: str) -> dict[str, Any]:
+def public_page(
+    sc: sqlite3.Connection, listing_id: str, token: str = ""
+) -> dict[str, Any]:
     """What a visitor without Aira sees: only a public listing that is still for sale, from an adult."""
     try:
         listing = _row(sc, listing_id)
@@ -610,14 +616,17 @@ def public_page(sc: sqlite3.Connection, listing_id: str) -> dict[str, Any]:
             "category": listing["category"],
             "condition": listing["condition"],
             "place": listing["place"],
-            "photos": store.loads(listing["photos"], []),
+            "photos": photos.display_list(store.loads(listing["photos"], []), token=token),
             "status": listing["status"],
             "payment_link": payment_link(listing)
             if listing["status"] != "sold"
             else "",
             # a personal listing is headed with the seller's name, not the account's business
             "for_business": bool(listing["for_business"]),
-            "seller": {"name": seller["display_name"], "avatar": seller["avatar"]},
+            "seller": {
+                "name": seller["display_name"],
+                "avatar": photos.display(seller["avatar"], token=token),
+            },
             "created_at": listing["created_at"],
         },
     }
