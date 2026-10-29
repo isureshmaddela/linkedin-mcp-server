@@ -17,7 +17,12 @@ from monosage_cloud.rbac import SCOPE_LEVELS
 
 MB = 1024 * 1024
 GB = 1024 * MB
-PLAN_ORDER = ("trial", "starter", "team", "enterprise")
+# The built-in plans in their shipped order. The plans a superadmin sees and sells are the catalog's
+# (``PlanCatalog.order()``): these plus the ones they create, in the order they set.
+PLAN_ORDER = ("trial", "starter", "team", "enterprise", "all_access")
+BUILTIN_PLANS = frozenset(PLAN_ORDER)
+TRIAL = "trial"
+ALL_ACCESS = "all_access"  # the shipped default for new sign-ups: every app and every feature, free
 
 SUBSCRIPTION_STATES = (
     "trialing",
@@ -168,6 +173,16 @@ _ENTERPRISE: dict[str, Any] = {
     ],
 }
 
+# Every app and every feature, at no charge: what a new sign-up gets until the superadmin chooses otherwise
+# (platform console > Plans > New sign-ups). The limits are Team's; metered overage is left out (nothing is billed),
+# and so are searches on the platform's pooled SerpApi key (they cost the platform money): raise them per plan.
+_ALL_ACCESS: dict[str, Any] = {
+    **_TEAM,
+    "pooled_searches_per_month": 0,
+    "support": "email",
+    "features": [f for f in _ENTERPRISE["features"] if f != "overage"],
+}
+
 _PRICING = {
     "trial": {"currency": "usd", "seat_cents_month": 0, "min_seats": 0, "overage": {}},
     "starter": {
@@ -201,6 +216,12 @@ _PRICING = {
             "api_search_cents": 2,
         },
     },
+    "all_access": {
+        "currency": "usd",
+        "seat_cents_month": 0,
+        "min_seats": 0,
+        "overage": {},
+    },
 }
 
 DEFAULT_PLANS: dict[str, dict[str, Any]] = {
@@ -232,7 +253,60 @@ DEFAULT_PLANS: dict[str, dict[str, Any]] = {
         "sort_order": 3,
         "public": True,
     },
+    "all_access": {
+        "name": "All access",
+        "entitlements": _ALL_ACCESS,
+        "pricing": _PRICING["all_access"],
+        "sort_order": 4,
+        "public": False,
+    },
 }
+PLAN_DESCRIPTIONS = {
+    "trial": "A short trial with every app and small limits.",
+    "starter": "For small teams: Google Jobs and automatic submission.",
+    "team": "For larger teams: LinkedIn, the API, SSO and outreach email.",
+    "enterprise": "By contract: every feature and custom limits.",
+    "all_access": "Every app and every feature at no charge. New sign-ups start here unless the superadmin chooses another plan.",
+}
+
+# Every feature a plan can switch on, in the order the console lists them (the union of the shipped plans').
+KNOWN_FEATURES: tuple[str, ...] = tuple(
+    dict.fromkeys(
+        feature
+        for plan in DEFAULT_PLANS.values()
+        for feature in plan["entitlements"]["features"]
+    )
+)
+# The limits a plan sets (``None`` = no limit); a plan also sets the coach scope ceiling and the support level.
+LIMIT_NAMES = (
+    "candidate_seats",
+    "staff_seats",
+    "apps_per_candidate_day",
+    "apps_per_org_month",
+    "search_plans_per_candidate",
+    "cover_letters_per_month",
+    "api_searches_per_month",
+    "pooled_searches_per_month",
+    "leads_stored",
+    "lead_enrichments_per_month",
+    "lead_emails_per_month",
+    "lead_email_daily_cap",
+    "api_v1_keys",
+    "api_v1_per_minute",
+    "monitors_per_candidate",
+    "storage_bytes",
+    "retention_days",
+    "audit_days",
+)
+COACH_SCOPES = ("view", "act", "approve")
+SUPPORT_LEVELS = ("community", "email", "email_1bd", "named_contact_sla")
+OVERAGE_RATES = (
+    "application_cents",
+    "search_cents",
+    "cover_letter_cents",
+    "pooled_search_cents",
+    "api_search_cents",
+)
 
 # Apps sold per candidate seat per month, in cents: 0 = included in the plan, None = not available on it.
 # An app that is not listed (Careers) is part of every plan; the trial has every app.
@@ -250,8 +324,12 @@ APP_PRICING: dict[str, dict[str, int | None]] = {
         for app in app_catalog.LIFE_APPS
     },
 }
+for _prices in APP_PRICING.values():
+    _prices["all_access"] = 0  # All access includes every app
 APP_STATES = ("included", "addon", "unavailable")
-APP_PLANS = ("starter", "team", "enterprise")
+# The built-in plans whose app prices can be changed (the trial always has every app). A plan the superadmin creates
+# is priced the same way; its prices are stored like an operator's changes, with "not offered" as the default.
+APP_PLANS = ("starter", "team", "enterprise", "all_access")
 # An operator's price changes over APP_PRICING (monosage_cloud.entitlements.AppSettings): app -> plan -> cents or None.
 PriceOverrides = dict[str, dict[str, int | None]]
 
@@ -294,9 +372,14 @@ def app_price(
     return int(app_prices(app_id, overrides)[plan_id] or 0)
 
 
-def plan_for_app(app_id: str, overrides: PriceOverrides | None = None) -> str | None:
-    """The cheapest paid plan on which the app can be had (bought or included)."""
-    for plan_id in PLAN_ORDER[1:]:
+def plan_for_app(
+    app_id: str,
+    overrides: PriceOverrides | None = None,
+    order: list[str] | tuple[str, ...] | None = None,
+) -> str | None:
+    """The cheapest plan an organization can move to on which the app can be had (bought or included).
+    ``order`` lists those plans, cheapest first (``upgrade_order``); the built-in paid plans when not given."""
+    for plan_id in order if order is not None else ("starter", "team", "enterprise"):
         if app_state(plan_id, app_id, overrides) != "unavailable":
             return plan_id
     return None
@@ -456,9 +539,43 @@ class Entitlements:
         }
 
 
+def is_free(pricing: dict[str, Any]) -> bool:
+    """A plan nobody pays for: no seat price and not sold by contract (All access, a free plan the superadmin made)."""
+    return not int(pricing.get("seat_cents_month") or 0) and not pricing.get(
+        "contact_sales"
+    )
+
+
+def upgrade_order(plans: dict[str, dict[str, Any]]) -> list[str]:
+    """The plans an organization can be told to move to, cheapest first: public, not archived, not the trial.
+
+    Cheapest is the least an organization pays for the plan in a month (seat price x minimum seats); a plan sold by
+    contract comes last; a tie keeps the superadmin's order. A private plan (All access, or one made for a customer)
+    is given by an operator, so it is never offered as an upgrade.
+    """
+    candidates = [
+        {**entry, "plan_id": entry.get("plan_id") or plan_id}
+        for plan_id, entry in plans.items()
+        if plan_id != TRIAL and entry.get("public", True) and not entry.get("archived")
+    ]
+
+    def cost(entry: dict[str, Any]) -> tuple[int, int, int]:
+        pricing = entry.get("pricing") or {}
+        monthly = int(pricing.get("seat_cents_month") or 0) * max(
+            1, int(pricing.get("min_seats") or 0)
+        )
+        return (
+            int(bool(pricing.get("contact_sales"))),
+            monthly,
+            int(entry.get("sort_order") or 0),
+        )
+
+    return [entry["plan_id"] for entry in sorted(candidates, key=cost)]
+
+
 def plan_for_feature(plans: dict[str, dict[str, Any]], feature: str) -> str | None:
-    """The cheapest paid plan whose entitlements include the feature."""
-    for plan_id in PLAN_ORDER[1:]:
+    """The cheapest plan an organization can move to whose entitlements include the feature."""
+    for plan_id in upgrade_order(plans):
         entry = plans.get(plan_id)
         if entry and feature in entry["entitlements"].get("features", []):
             return plan_id
@@ -468,8 +585,8 @@ def plan_for_feature(plans: dict[str, dict[str, Any]], feature: str) -> str | No
 def plan_for_limit(
     plans: dict[str, dict[str, Any]], limit: str, needed: int
 ) -> str | None:
-    """The cheapest paid plan whose limit covers ``needed``."""
-    for plan_id in PLAN_ORDER[1:]:
+    """The cheapest plan an organization can move to whose limit covers ``needed``."""
+    for plan_id in upgrade_order(plans):
         entry = plans.get(plan_id)
         if not entry:
             continue

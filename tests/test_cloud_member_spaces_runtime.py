@@ -100,8 +100,8 @@ def _download(cloud, org_id, export_id) -> dict[str, bytes]:
 
 
 def test_public_links_record_the_member_on_sqlite_and_the_postgres_ddl_is_plain(cloud):
-    version, name, script = MIGRATIONS[-1]
-    assert name == "public_link_members" and "member_id" in script
+    version, name, script = next(m for m in MIGRATIONS if m[1] == "public_link_members")
+    assert version == 9 and "member_id" in script
     with cloud.db.read() as connection:
         assert "member_id" in table_columns(connection, "public_links")
     from monosage_cloud.db import _statements

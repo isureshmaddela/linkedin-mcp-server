@@ -1,4 +1,8 @@
-"""The platform (vendor) console API. Its own sign-in and cookie, with MFA, never a tenant's login."""
+"""The platform (vendor) console API: its own cookie and mandatory MFA, never a tenant's session.
+
+Operators sign in on the same page as everyone (``POST /api/auth/login`` opens the console session too);
+``/api/platform/auth/login`` stays for API clients.
+"""
 
 from __future__ import annotations
 
@@ -7,8 +11,15 @@ from contextlib import closing
 
 from aira.observability import metrics
 from monosage_cloud.db import many
-from monosage_cloud.errors import Conflict, ValidationFailed
-from monosage_cloud.webio import OPERATOR_COOKIE, Reply, Req, cloud_route, cookie_header
+from monosage_cloud.errors import Conflict, NotFound, ValidationFailed
+from monosage_cloud.webio import (
+    OPERATOR_COOKIE,
+    SESSION_COOKIE,
+    Reply,
+    Req,
+    cloud_route,
+    cookie_header,
+)
 
 
 def _cookie(req: Req, token: str, max_age: int | None = None) -> str:
@@ -35,6 +46,26 @@ def _me(req: Req) -> dict:
         }
         if principal.via_support
         else None,
+        "member": _member_side(req),
+    }
+
+
+def _member_side(req: Req) -> dict | None:
+    """The same person's organization session in this browser (one sign-in opened both): the way to their apps."""
+    principal = req.principal
+    if principal.via_support:
+        return None
+    member = req.app.identity.principal_for_token(req.request.cookie(SESSION_COOKIE))
+    if member is None or member.email != principal.email:
+        return None
+    try:
+        org = req.app.tenancy.org(member.org_id)
+    except NotFound:  # an organization that is going away: no way to it
+        return None
+    return {
+        "role": member.role,
+        "org": {"name": org["name"], "slug": org["slug"]},
+        "mfa_verified": member.mfa_verified or not member.mfa_enabled,
     }
 
 
@@ -61,8 +92,10 @@ def operator_login(req: Req):  # noqa: ANN201
 
 @cloud_route("POST", r"/api/platform/auth/logout", auth="public")
 def operator_logout(req: Req):  # noqa: ANN201
-    req.app.identity.logout(req.request.cookie(OPERATOR_COOKIE))
-    return Reply(200, {"ok": True}, cookies=[_cookie(req, "", 0)])
+    """Sign out signs out everything: the console session and the same browser's organization session."""
+    from monosage_cloud.routes.auth import end_both_sessions
+
+    return Reply(200, {"ok": True}, cookies=end_both_sessions(req))
 
 
 @cloud_route("GET", r"/api/platform/me", auth="operator", mfa=False)
@@ -304,24 +337,77 @@ def tenant_support_request(req: Req):  # noqa: ANN201
 # ----------------------------------------------------------------------------- plans and flags
 
 
+PLAN = r"([a-z][a-z0-9_]{2,29})"  # a plan id: built-in (starter) or created by the superadmin (growth_2027)
+
+
 @cloud_route("GET", r"/api/platform/plans", auth="operator")
 def plans(req: Req):  # noqa: ANN201
-    return 200, {"plans": req.app.platform.list_plans(req.principal)}
+    return 200, {
+        "plans": req.app.platform.list_plans(req.principal),
+        **req.app.platform.plan_options(),
+    }
 
 
-@cloud_route("PUT", r"/api/platform/plans/([a-z]{3,20})", auth="operator")
+@cloud_route("POST", r"/api/platform/plans", auth="operator")
+def plan_create(req: Req):  # noqa: ANN201
+    """Create a plan: ``plan_id``, ``name``, ``description``, ``pricing`` (or ``seat_cents_month``, ``min_seats``,
+    ``trial_days``, ``currency``), ``entitlements`` (limits and ``features``), ``apps`` and ``public``."""
+    return 201, {"plan": req.app.platform.create_plan(req.principal, req.body())}
+
+
+@cloud_route("PUT", r"/api/platform/plans/sort-order", auth="operator")
+def plan_order(req: Req):  # noqa: ANN201
+    return 200, {
+        "order": req.app.platform.order_plans(req.principal, req.body().get("order"))
+    }
+
+
+@cloud_route("PUT", r"/api/platform/plans/signup-default", auth="operator")
+def plan_signup_default(req: Req):  # noqa: ANN201
+    """The plan a new sign-up starts on (``plan_id``) and its trial days (``trial_days``, 0 = no trial end)."""
+    body = req.body()
+    return 200, {
+        "signup": req.app.billing.set_signup_default(
+            req.principal, str(body.get("plan_id") or ""), body.get("trial_days")
+        )
+    }
+
+
+@cloud_route("PUT", rf"/api/platform/plans/{PLAN}", auth="operator")
 def plan_update(req: Req):  # noqa: ANN201
     body = req.body()
+    for name in ("entitlements", "pricing", "apps"):
+        if body.get(name) is not None and not isinstance(body.get(name), dict):
+            raise ValidationFailed(f"{name} must be an object.")
+    public = body.get("public")
+    if public is not None and not isinstance(public, bool):
+        raise ValidationFailed("public is true or false.")
     version = req.app.platform.update_plan(
         req.principal,
         req.group(),
         entitlements=body.get("entitlements"),
         pricing=body.get("pricing"),
+        name=body.get("name"),
+        description=body.get("description"),
+        public=public,
+        apps=body.get("apps"),
     )
     return 200, {"version": version}
 
 
-@cloud_route("POST", r"/api/platform/plans/([a-z]{3,20})/migrate", auth="operator")
+@cloud_route("POST", rf"/api/platform/plans/{PLAN}/archive", auth="operator")
+def plan_archive(req: Req):  # noqa: ANN201
+    return 200, {"plan": req.app.platform.archive_plan(req.principal, req.group())}
+
+
+@cloud_route("POST", rf"/api/platform/plans/{PLAN}/restore", auth="operator")
+def plan_restore(req: Req):  # noqa: ANN201
+    return 200, {
+        "plan": req.app.platform.archive_plan(req.principal, req.group(), False)
+    }
+
+
+@cloud_route("POST", rf"/api/platform/plans/{PLAN}/migrate", auth="operator")
 def plan_migrate(req: Req):  # noqa: ANN201
     body = req.body()
     return 200, {

@@ -129,7 +129,7 @@ Sensitive profile fields (work authorization, visa, demographics, salary) are en
 
 ## 5. Plans and entitlements
 
-[pricing.md](pricing.md) lists every plan and limit. Enforcement:
+[pricing.md](pricing.md) lists every plan and limit. The catalog holds the built-in plans (Trial, Starter, Team, Enterprise, All access) and the ones the superadmin creates (`PlanCatalog.create`), each versioned, in the superadmin's order, archivable; a new organization starts on the plan chosen for new sign-ups (shipped: All access, every app and feature; `Billing.start_subscription`). Enforcement:
 
 1. The subscription resolves to an `Entitlements` object (plan version limits, plus per-organization overrides, plus operator feature flags, plus the limits implied by the subscription state) and is cached per organization for 60 seconds (`EntitlementService.resolve`); changes made through the services invalidate it at once in the same process.
 2. Route policy names a feature; a missing one is `402 plan_required` naming the cheapest paid plan that includes it (`EntitlementService.require_feature`). Before that, the gateway asks which app owns the path (`aira.apps.app_of_path`) and refuses with `402 app_required` unless the organization has that app (`EntitlementService.require_app`; `Entitlements.apps`); see Apps below.

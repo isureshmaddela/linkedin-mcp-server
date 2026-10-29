@@ -1,10 +1,68 @@
 # Plans, entitlements and billing rules
 
-The numbers are the defaults in `monosage_cloud/plans.py` (`DEFAULT_PLANS`). They are the scope document's proposal, not a pricing decision: validate them with pricing work. An operator can publish a new plan version without a deploy ([multitenant-operations.md](multitenant-operations.md)); new subscriptions use the new version and existing ones keep theirs until a migration date is scheduled. Prices below are the defaults in US dollars.
+The numbers are the defaults of the built-in plans in `monosage_cloud/plans.py` (`DEFAULT_PLANS`); the superadmin can also create plans (see below). They are the scope document's proposal, not a pricing decision: validate them with pricing work. An operator can publish a new plan version without a deploy ([multitenant-operations.md](multitenant-operations.md)); new subscriptions use the new version and existing ones keep theirs until a migration date is scheduled. Prices below are the defaults in US dollars.
 
 Applies to the hosted build only. See [multitenant.md](multitenant.md) for how limits are enforced.
 
+## What a new sign-up gets
+
+A new organization starts on the plan the superadmin chose for new sign-ups (platform console > **Plans** > **New
+sign-ups**, `PUT /api/platform/plans/signup-default`). Shipped, that is **All access**: every app and every feature,
+free, with no trial end. Every member the organization invites (role `candidate`, shown as "Member") opens every app the
+plan includes, because an app is for everyone in the organization until an owner limits it (Apps > Who can use it).
+
+The superadmin can point new sign-ups at any plan that is not archived:
+
+- with **0 trial days** the organization stays on the plan until someone changes it. Only a free plan (no seat price,
+  not sold by contract) can start this way, so nobody gets a paid plan without paying;
+- with **1 to 365 trial days** it is a trial of that plan: it ends like any trial (read-only for 30 days, then deleted)
+  unless a plan is bought, and an operator can extend it.
+
+Changing the default never changes an organization that exists already. If the chosen plan is archived later, new
+sign-ups fall back to All access (and to the trial if All access is gone). The choice is stored in the control plane
+(`cloud_kv`, key `signup_plan`); before anyone sets it the installation uses `CloudConfig.signup_plan` and
+`signup_trial_days` (`all_access`, 0).
+
+From a free plan, an owner buys a paid plan through checkout, as after a trial (`checkout_required` in
+`GET /api/org/billing`); a direct plan change from a free plan is refused (`409 not_subscribed`), so it can never become
+a free upgrade. A free plan renews by itself every 30 days without an invoice.
+
+## Plans the superadmin creates
+
+Next to the built-in plans (Trial, Starter, Team, Enterprise, All access) the superadmin creates plans in the platform
+console (**Plans** > **New plan**, `POST /api/platform/plans`): an id (3 to 30 lowercase letters, digits or `_`), a name
+and description, a price per candidate seat per month, minimum seats, trial days (used when new sign-ups start on it),
+the features (ticked from the known feature list), every limit below (a number, or empty for no limit), and for each
+app whether the plan includes it, sells it per seat (with its price) or does not offer it. A limit the form leaves out is
+copied from the plan it starts from, never "no limit" by accident.
+
+- **Editing** works as for the built-in plans: limits, features and prices publish a new version (new subscriptions
+  use it, existing ones keep theirs until a migration is scheduled); the name, description, whether it is sold on the
+  billing page, and its apps change at once.
+- **Archiving** stops new subscriptions (sign-up, checkout, operator set-up) and removes it from the billing page and
+  from upgrade suggestions; organizations on it keep it until an operator moves them (Set subscription on the tenant).
+  It can be restored. The trial cannot be archived, nor the plan new sign-ups start on.
+- **Order**: the superadmin orders the plans (Move up / Move down). The billing page lists them in that order and a
+  plan change to a plan further down is an upgrade (now, prorated), further up a downgrade (at the period end).
+- **Sold or private**: a plan with a seat price that is "on the billing page" can be bought through checkout like
+  Starter and Team. A private plan (All access, or one made for one customer) is given by an operator.
+- **Upgrade prompts** (`required_plan` in `402 plan_required`) name the cheapest plan an organization can move to that
+  has the feature or the limit: public, not archived, not the trial, cheapest by the least it costs a month (seat price ×
+  minimum seats), contract plans last, the superadmin's order breaking ties. A private plan is never named.
+
+**Real Stripe.** Nothing has to be created in Stripe for a plan: checkout and plan changes send the price inline
+(`price_data` with `unit_amount` = the plan's seat price and the plan's currency, one product per plan named
+"Monosage <plan> (per candidate seat)", `metadata.plan_id`), so a created plan can be bought the moment it is saved.
+To use Stripe Price objects instead (fixed prices for tax, reporting or Stripe's own pricing table), create a recurring
+monthly per-unit Price per plan and change `StripeProvider._price` to send `price` instead of `price_data`; that
+mapping does not exist yet. A price change of a created plan, like one of a built-in plan, reaches paying
+subscriptions from their next period.
+
 ## The plans
+
+All access (the default for new sign-ups, free, private) has every feature on this list except metered overage, every
+app included, and Team's limits, with no pooled SerpApi searches (they spend the platform's key; raise
+`pooled_searches_per_month` on the plan to allow them).
 
 | Entitlement | Trial (14 days) | Starter | Team | Enterprise |
 | --- | --- | --- | --- | --- |
@@ -65,12 +123,21 @@ Notes on rows: MFA is available on every plan; the plan only decides whether it 
 
 A plan sets seats, limits and the base price; the apps ([apps.md](apps.md), catalog `aira/apps.py`) are turned on per organization. The defaults are `APP_PRICING` in `monosage_cloud/plans.py`; `AppSettings.state(plan, app)` (the defaults with the superadmin's changes) is `included`, `addon` or `unavailable`.
 
-| App | Trial | Starter | Team | Enterprise |
-| --- | --- | --- | --- | --- |
-| Careers | included | included | included | included |
-| Developers (API) | included | not available | add-on, $3 per candidate seat per month | included |
-| Business apps: Sales, Marketing (with Leads), Service, Commerce, Courses & Events, Ads | included | add-on, $5 per candidate seat per month | add-on, $4 per candidate seat per month | included |
-| Everyday apps: Social, Health, Learn, Play, Planner, News, Videos, Life, AI, Stocks | included | add-on, $2 per candidate seat per month | add-on, $1.50 per candidate seat per month | included |
+| App | Trial | Starter | Team | Enterprise | All access |
+| --- | --- | --- | --- | --- | --- |
+| Careers | included | included | included | included | included |
+| Developers (API) | included | not available | add-on, $3 per candidate seat per month | included | included |
+| Business apps: Sales, Marketing (with Leads), Service, Commerce, Courses & Events, Ads | included | add-on, $5 per candidate seat per month | add-on, $4 per candidate seat per month | included | included |
+| Everyday apps: Social, Health, Learn, Play, Planner, News, Videos, Life, AI, Stocks | included | add-on, $2 per candidate seat per month | add-on, $1.50 per candidate seat per month | included | included |
+
+A plan the superadmin creates offers no app until they say so (Careers is always part of it); what it includes or sells
+is set on its Plans page and shows on the Apps page as its own column.
+
+**One organization.** On a tenant's page the superadmin grants an app (no charge), takes a grant back, or turns an app
+off for that organization only (`PUT /api/platform/tenants/<id>/apps/<app>` with `status: disabled`; its members get
+`403 app_disabled`, its data is kept; `enabled` returns it to what the plan says). An app the organization pays for is
+not switched off this way: it turns it off itself, or the operator reconciles billing first. Careers cannot be turned
+off.
 
 **Ads spend is separate from the seat price.** An advertiser prepays an ad balance: a top-up (`POST /api/org/ads/topup`,
 $5 to $10,000, owners and billing contacts) is one invoice item at the organization's billing provider, billed with
@@ -100,7 +167,7 @@ their next period. An app switched off is closed to everyone (trial, Enterprise 
 - **Upgrade** (higher plan, or more seats): applies immediately; the charge is prorated for the rest of the period and the period does not restart.
 - **Downgrade** (lower plan, or fewer seats): scheduled for the end of the period. At that moment the plan changes. If the organization is over any new limit (candidate seats, coach and admin seats, search plans per candidate) automation pauses until it is within them, and resumes by itself when removals bring it within. The owner and billing contacts are emailed.
 - **Seats** can be raised up to the plan's maximum; Starter needs at least 5 and Team at least 25. Checkout cannot buy fewer seats than are in use or invited.
-- **Trial**: 14 days. A notice goes out three days before it ends. Without a paid plan it becomes `cancelled`: read-only for 30 days (export available), then deleted. An operator can extend a trial by 1 to 90 days.
+- **Trial**: 14 days (the trial plan), or the days the superadmin set when new sign-ups start as a trial of another plan. A notice goes out three days before it ends. Without a paid plan it becomes `cancelled`: read-only for 30 days (export available), then deleted. An operator can extend a trial by 1 to 90 days.
 - **Payment failure**: automation stops immediately; reads and edits continue. After **14 days** from the first failure the organization is read-only. After **60 days** a deletion date is set for 30 days later and a final notice is sent. A successful payment at any time before deletion restores the organization. The owner and billing contacts are emailed at each step.
 - **Cancellation**: stops renewal; service continues to the end of the period; then 30 days of read-only export; then deletion. Reactivating before the period ends undoes it; afterwards the organization buys a plan again.
 - **Closure**: the owner confirms with their password; an export is created; the subscription is cancelled and the organization is deleted after the 30-day window unless the owner cancels the closure.

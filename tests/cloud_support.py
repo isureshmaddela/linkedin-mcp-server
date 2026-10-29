@@ -35,6 +35,9 @@ def make_app(tmp_path: Path, **overrides: Any) -> CloudApp:
         "data_root": tmp_path / "cloud",
         "base_url": "http://127.0.0.1:8780",
         "master_key": "",
+        # Most hosted-shell tests were written for a sign-up that starts on the 14-day trial; the shipped default
+        # (All access, every app and feature) is covered by tests/test_cloud_custom_plans.py.
+        "signup_plan": "trial",
         **limits,
     }
     if pg_support.enabled() and "db_backend" not in overrides:

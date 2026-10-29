@@ -64,7 +64,13 @@
   // While a gate (verify email, second factor) is up, the app behind it must not request anything: it routes to this blank view.
   let gated = false;
   Aira.views.gate = (stage) => stage.replaceChildren();
-  const reload = () => { if (parseAnonymous(location.hash) || location.hash === "#/gate") location.hash = ""; location.reload(); };
+  // Open an address afresh (the console and the apps are separate surfaces); replaceState fires no hashchange.
+  const openAt = (url) => { history.replaceState(null, "", url); location.reload(); };
+  const reload = () => {
+    if (String(location.hash).startsWith("#/platform")) { openAt("/"); return; } // a member has no console: Home
+    if (parseAnonymous(location.hash) || location.hash === "#/gate") location.hash = "";
+    location.reload();
+  };
 
   function field(label, attrs, hint) {
     const input = h("input", { required: true, ...attrs });
@@ -159,6 +165,9 @@
         try {
           const data = await api("/api/auth/login", { method: "POST", body: { email: email.input.value, password: password.input.value, org: orgChoice ? orgChoice.value : "" }, silent: true });
           password.input.value = "";
+          // A platform operator (also one who is a member) continues to the console, which asks its second factor.
+          if (data.operator) { Aira.remember("operatorConsole", true); openAt("/#/platform"); return; }
+          Aira.remember("operatorConsole", false);
           if (data.mfa_required) renderMfa({ gate: false }); else reload();
         } catch (error) {
           if (error.status === 409 && error.code === "org_required" && error.data && error.data.orgs) {
@@ -170,9 +179,10 @@
         }
       });
     });
-    show("Sign in", "Sign in to your organization's Monosage workspace.", form,
-      swap("New organization? ", link("Create one", "#/signup")), swap(link("Forgot your password?", "#/forgot")),
-      h("p", { class: "switch ca-staff" }, h("a", { href: "#/platform", text: "Monosage staff" })));
+    // One page for everyone: members, administrators and Monosage's own operators all sign in here.
+    show("Sign in", "Sign in to your Monosage account.", form,
+      swap("New organization? ", link("Create one", "#/signup")), swap(link("Forgot your password?", "#/forgot")));
+    if (prefill.message) say(notice, prefill.message, false);
   }
 
   function renderMfa({ gate }) {
@@ -385,15 +395,17 @@
   // -------------------------------------------------------------------------
   // Entry points the core and app.js use
   // -------------------------------------------------------------------------
-  auth.render = (screen) => {
+  // `options` reach the sign-in screen only: { email, message } (the console passes "Your session ended…").
+  auth.render = (screen, options = {}) => {
     const anonymous = parseAnonymous(location.hash);
     const target = screen || (anonymous && anonymous.screen) || "login";
     const token = anonymous ? anonymous.token : "";
-    ({ login: renderLogin, signup: renderSignup, forgot: renderForgot, verify: () => renderVerify(token), reset: () => renderReset(token), invite: () => renderInvite(token) }[target] || renderLogin)();
+    ({ login: () => renderLogin(options), signup: renderSignup, forgot: renderForgot, verify: () => renderVerify(token), reset: () => renderReset(token), invite: () => renderInvite(token) }[target] || (() => renderLogin(options)))();
   };
+  auth.show = show; // the console's second-factor screens use the same panel as this page
 
   cloud.showAuth = () => {
-    if (String(location.hash).startsWith("#/platform")) return; // the platform console has its own sign-in
+    if (String(location.hash).startsWith("#/platform")) return; // the console shows this page's sign-in itself (cloud-platform.js)
     auth.render();
   };
 

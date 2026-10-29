@@ -12,10 +12,17 @@ import logging
 import statistics
 from typing import TYPE_CHECKING, Any
 
-from aira.apps import LEGACY_IDS, current_id
+from aira.apps import APPS, LEGACY_IDS, current_id
 from monosage_cloud.config import DAY
 from monosage_cloud.db import dumps, loads, many, new_id, one, platform_scope
 from monosage_cloud.errors import Conflict, Forbidden, NotFound, ValidationFailed
+from monosage_cloud.plans import (
+    COACH_SCOPES,
+    KNOWN_FEATURES,
+    LIMIT_NAMES,
+    OVERAGE_RATES,
+    SUPPORT_LEVELS,
+)
 from monosage_cloud.rbac import ADMIN, AUDITOR, COACH, OWNER, Principal
 
 if TYPE_CHECKING:
@@ -252,8 +259,11 @@ class PlatformAdmin:
     # ------------------------------------------------------------------ plans and flags
 
     def list_plans(self, operator: Principal) -> list[dict[str, Any]]:
+        """Every plan, built-in and created, archived ones too, in the superadmin's order: versions, subscription
+        counts, scheduled migrations and what the plan says about each app."""
         self.app.authz.require(operator, "platform.tenants.read")
-        plans = list(self.app.catalog.current().values())
+        plans = list(self.app.catalog.current(include_archived=True).values())
+        signup = self.app.billing.signup_default()
         with self.db.read() as connection:
             for plan in plans:
                 row = one(
@@ -267,7 +277,99 @@ class PlatformAdmin:
                     "SELECT * FROM plan_migrations WHERE plan_id = ? ORDER BY id DESC LIMIT 5",
                     (plan["plan_id"],),
                 )
+        for plan in plans:
+            plan["apps"] = self.app.app_settings.for_plan(plan["plan_id"])
+            plan["signup_default"] = plan["plan_id"] == signup["plan_id"]
+            plan["self_serve"] = plan["plan_id"] in self.app.catalog.self_serve()
         return plans
+
+    def plan_options(self) -> dict[str, Any]:
+        """What the Plans page offers to choose from: the known features, the limit names and the sign-up default."""
+        return {
+            "features": list(KNOWN_FEATURES),
+            "app_features": sorted(
+                {f for a in APPS for f in (a.feature, *a.extra_features) if f}
+            ),
+            "limits": list(LIMIT_NAMES),
+            "coach_scopes": list(COACH_SCOPES),
+            "support_levels": list(SUPPORT_LEVELS),
+            "overage_rates": list(OVERAGE_RATES),
+            "signup": self.app.billing.signup_default(),
+            "order": self.app.catalog.order(include_archived=True),
+        }
+
+    def _plan_apps(self, operator: Principal, plan_id: str, apps: Any) -> list[str]:
+        if apps is None:
+            return []
+        changed = self.app.app_settings.set_plan_apps(
+            plan_id, apps, by=operator.operator_id
+        )
+        for app_id in changed:  # paying subscriptions on this plan move to the new price from their next period
+            self.app.billing.resync_app(app_id)
+        self.app.entitlements.invalidate()
+        return changed
+
+    def create_plan(self, operator: Principal, body: dict[str, Any]) -> dict[str, Any]:
+        """A new plan: id, name, description, price per seat, minimum seats, trial days, features, limits and apps."""
+        self.app.authz.require(operator, "platform.plans.manage")
+        if not isinstance(body, dict):
+            raise ValidationFailed("Send the plan as an object.")
+        pricing = dict(body.get("pricing") or {})
+        for key in (
+            "seat_cents_month",
+            "min_seats",
+            "trial_days",
+            "currency",
+            "contact_sales",
+        ):
+            if key in body and key not in pricing:
+                pricing[key] = body[key]
+        entitlements = dict(body.get("entitlements") or {})
+        if "features" in body and "features" not in entitlements:
+            entitlements["features"] = body["features"]
+        if isinstance(body.get("limits"), dict):
+            entitlements = {**body["limits"], **entitlements}
+        apps = body.get("apps")
+        if apps is not None and not isinstance(apps, dict):
+            raise ValidationFailed(
+                "apps maps an app to included, unavailable or cents per seat."
+            )
+        public = body.get("public", True)
+        if not isinstance(public, bool):
+            raise ValidationFailed("public is true or false.")
+        based_on = str(body.get("based_on") or "starter")
+        if apps is not None:
+            self.app.app_settings.check_plan_apps(
+                apps
+            )  # refused before anything is created
+        plan = self.app.catalog.create(
+            str(body.get("plan_id") or body.get("id") or ""),
+            name=str(body.get("name") or ""),
+            description=str(body.get("description") or ""),
+            entitlements=entitlements,
+            pricing=pricing,
+            public=public,
+            based_on=based_on,
+            by=operator.operator_id,
+        )
+        changed_apps = self._plan_apps(operator, plan["plan_id"], apps)
+        self.app.platform_audit.record(
+            "plan.create",
+            operator=operator,
+            target_type="plan",
+            target_id=plan["plan_id"],
+            detail={
+                "name": plan["name"],
+                "based_on": based_on,
+                "public": plan["public"],
+                "seat_cents_month": plan["pricing"].get("seat_cents_month", 0),
+                "features": plan["entitlements"].get("features", []),
+                "apps": changed_apps,
+            },
+        )
+        return next(
+            p for p in self.list_plans(operator) if p["plan_id"] == plan["plan_id"]
+        )
 
     def update_plan(
         self,
@@ -276,12 +378,31 @@ class PlatformAdmin:
         *,
         entitlements: dict[str, Any] | None = None,
         pricing: dict[str, Any] | None = None,
+        name: str | None = None,
+        description: str | None = None,
+        public: bool | None = None,
+        apps: dict[str, Any] | None = None,
     ) -> int:
-        """Publish a new plan version: new subscriptions use it, existing ones keep theirs until migrated."""
+        """Publish a new plan version: new subscriptions use it, existing ones keep theirs until migrated. The name,
+        description, whether it is sold on the billing page and its apps change at once (they are not versioned)."""
         self.app.authz.require(operator, "platform.plans.manage")
-        version = self.app.catalog.update(
-            plan_id, entitlements=entitlements, pricing=pricing, by=operator.operator_id
+        plan = self.app.catalog.get(plan_id)
+        version = plan["version"]
+        only_described = not (entitlements or pricing) and any(
+            v is not None for v in (name, description, public, apps)
         )
+        if not only_described:  # entitlements or prices: a new version (an empty change publishes one, as before)
+            version = self.app.catalog.update(
+                plan_id,
+                entitlements=entitlements,
+                pricing=pricing,
+                by=operator.operator_id,
+            )
+        self.app.catalog.describe(
+            plan_id, name=name, description=description, public=public
+        )
+        changed_apps = self._plan_apps(operator, plan_id, apps)
+        self.app.entitlements.invalidate()
         self.app.platform_audit.record(
             "plan.update",
             operator=operator,
@@ -291,9 +412,60 @@ class PlatformAdmin:
                 "version": version,
                 "entitlements": sorted((entitlements or {}).keys()),
                 "pricing": sorted((pricing or {}).keys()),
+                "described": sorted(
+                    k
+                    for k, v in (
+                        ("name", name),
+                        ("description", description),
+                        ("public", public),
+                    )
+                    if v is not None
+                ),
+                "apps": changed_apps,
             },
         )
         return version
+
+    def archive_plan(
+        self, operator: Principal, plan_id: str, archived: bool = True
+    ) -> dict[str, Any]:
+        """Archive a plan (no new subscriptions; organizations on it keep it until moved) or restore it."""
+        self.app.authz.require(operator, "platform.plans.manage")
+        if archived and self.app.billing.signup_default()["plan_id"] == plan_id:
+            raise Conflict(
+                "New sign-ups start on this plan. Choose another plan for new sign-ups first.",
+                code="signup_default",
+            )
+        self.app.catalog.archive(plan_id, archived)
+        self.app.entitlements.invalidate()
+        with self.db.read() as connection:
+            row = one(
+                connection,
+                "SELECT COUNT(*) AS n FROM subscriptions WHERE plan_id = ? AND status != 'deleted'",
+                (plan_id,),
+            )
+        self.app.platform_audit.record(
+            "plan.archive" if archived else "plan.restore",
+            operator=operator,
+            target_type="plan",
+            target_id=plan_id,
+            detail={"subscriptions": int(row["n"]) if row else 0},
+        )
+        return next(p for p in self.list_plans(operator) if p["plan_id"] == plan_id)
+
+    def order_plans(self, operator: Principal, order: Any) -> list[str]:
+        """The superadmin's order of the plans: the console, the billing page and plan changes follow it."""
+        self.app.authz.require(operator, "platform.plans.manage")
+        before = self.app.catalog.order(include_archived=True)
+        after = self.app.catalog.set_order(order)
+        self.app.platform_audit.record(
+            "plan.order",
+            operator=operator,
+            target_type="plan",
+            target_id="",
+            detail={"from": before, "to": after},
+        )
+        return after
 
     def schedule_migration(
         self, operator: Principal, plan_id: str, to_version: int, effective_at: int

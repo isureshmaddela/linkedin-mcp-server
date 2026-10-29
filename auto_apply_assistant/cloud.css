@@ -32,8 +32,6 @@
 .cloud-auth h1 { font-size: 24px; margin-bottom: 4px; }
 .cloud-auth form { margin-top: 6px; }
 .cloud-auth .switch + .switch { margin-top: 8px; }
-.cloud-auth .ca-staff { font-size: 12px; }
-.cloud-auth .ca-staff a { color: var(--muted); }
 .ca-notice { min-height: 20px; margin: 10px 0 0; font-size: 13px; color: var(--ink-2); }
 .ca-notice.bad { color: var(--danger); }
 .ca-sso { display: grid; }

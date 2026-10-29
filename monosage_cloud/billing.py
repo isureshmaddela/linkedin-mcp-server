@@ -33,7 +33,11 @@ from monosage_cloud.errors import (
     ValidationFailed,
 )
 from monosage_cloud.plans import (
-    PLAN_ORDER,
+    APP_PRICING,
+    COACH_SCOPES,
+    LIMIT_NAMES,
+    TRIAL,
+    is_free,
     month_key,
     with_later_rates,
 )
@@ -53,30 +57,11 @@ TRANSITIONS: dict[str, set[str]] = {
     "cancelled": {"active", "trialing", "deleted"},
     "deleted": set(),
 }
-PAID_PLANS = ("starter", "team")
+# The plans an owner buys through checkout are the catalog's self-serve ones (``PlanCatalog.self_serve``): the
+# built-in Starter and Team, and any public, priced plan the superadmin creates.
+SIGNUP_KEY = "signup_plan"  # cloud_kv: the plan a new sign-up starts on, set from the platform console
 
-
-CUSTOM_LIMIT_NAMES = (
-    "candidate_seats",
-    "staff_seats",
-    "apps_per_candidate_day",
-    "apps_per_org_month",
-    "search_plans_per_candidate",
-    "cover_letters_per_month",
-    "api_searches_per_month",
-    "pooled_searches_per_month",
-    "leads_stored",
-    "lead_enrichments_per_month",
-    "lead_emails_per_month",
-    "lead_email_daily_cap",
-    "api_v1_keys",
-    "api_v1_per_minute",
-    "monitors_per_candidate",
-    "storage_bytes",
-    "retention_days",
-    "audit_days",
-)
-COACH_SCOPES = ("view", "act", "approve")
+CUSTOM_LIMIT_NAMES = LIMIT_NAMES
 
 
 def validate_overrides(values: Any) -> dict[str, Any]:
@@ -173,28 +158,144 @@ class Billing:
 
     # -- creation ---------------------------------------------------------------------
 
-    def create_trial(self, org_id: str, connection: sqlite3.Connection) -> None:
-        plan = self.app.catalog.get("trial")
+    def signup_default(self) -> dict[str, Any]:
+        """The plan a new organization starts on and for how many trial days (0: no trial, the plan stays until
+        someone changes it). The superadmin sets it; until then it is the configured default (All access)."""
+        with self.db.read() as connection:
+            row = one(
+                connection, "SELECT value FROM cloud_kv WHERE key = ?", (SIGNUP_KEY,)
+            )
+        stored = loads(row["value"], {}) if row else {}
+        plan_id = str(stored.get("plan_id") or self.app.config.signup_plan)
+        if plan_id == TRIAL and not stored:
+            days = int(self.app.config.trial_days)
+        else:
+            days = int(stored.get("trial_days", self.app.config.signup_trial_days) or 0)
+        try:
+            plan = self.app.catalog.get(plan_id)
+        except NotFound:
+            plan = None
+        if plan is None or plan["archived"]:
+            # the chosen plan is gone: fall back to the shipped default, then to the trial
+            plan_id, days = (
+                self.app.config.signup_plan,
+                int(self.app.config.signup_trial_days),
+            )
+            try:
+                plan = self.app.catalog.get(plan_id)
+            except NotFound:
+                plan_id, days = TRIAL, int(self.app.config.trial_days)
+                plan = self.app.catalog.get(TRIAL)
+        if plan_id == TRIAL and days < 1:
+            days = int(self.app.config.trial_days)
+        return {
+            "plan_id": plan_id,
+            "plan_name": plan["name"],
+            "trial_days": days,
+            "set_by": stored.get("set_by", ""),
+            "set_at": stored.get("set_at"),
+            "configured": bool(stored),
+        }
+
+    def set_signup_default(
+        self, operator: Principal, plan_id: str, trial_days: Any = None
+    ) -> dict[str, Any]:
+        """The superadmin chooses what new sign-ups get. Existing organizations keep their plans.
+
+        ``trial_days`` 0 starts the organization on the plan with no end (only a free plan: nobody pays for it);
+        1 to 365 starts it as a trial of the plan that ends like any trial unless a plan is bought. Left out, it
+        is the plan's own trial length (the trial: the configured 14 days).
+        """
+        self.app.authz.require(operator, "platform.plans.manage")
+        plan_id = str(plan_id or "").strip()
+        plan = self.app.catalog.get(plan_id)
+        if plan["archived"]:
+            raise ValidationFailed("That plan is archived. Restore it first.")
+        if trial_days is None or trial_days == "":
+            trial_days = (
+                self.app.config.trial_days
+                if plan_id == TRIAL
+                else int(plan["pricing"].get("trial_days") or 0)
+            )
+        if (
+            isinstance(trial_days, bool)
+            or not isinstance(trial_days, int)
+            or not 0 <= trial_days <= 365
+        ):
+            raise ValidationFailed("Trial days are a whole number from 0 to 365.")
+        if trial_days == 0 and (plan_id == TRIAL or not is_free(plan["pricing"])):
+            raise ValidationFailed(
+                "A sign-up can start without a trial only on a free plan. Give this plan trial days, or choose a free plan (such as All access).",
+                code="trial_required",
+            )
+        before = self.signup_default()
+        value = {
+            "plan_id": plan_id,
+            "trial_days": trial_days,
+            "set_by": operator.operator_id,
+            "set_at": self.now,
+        }
+        with self.db.write() as connection:
+            connection.execute(
+                "INSERT INTO cloud_kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (SIGNUP_KEY, dumps(value)),
+            )
+        self.app.platform_audit.record(
+            "plan.signup_default",
+            operator=operator,
+            target_type="plan",
+            target_id=plan_id,
+            detail={
+                "from": {"plan": before["plan_id"], "trial_days": before["trial_days"]},
+                "to": {"plan": plan_id, "trial_days": trial_days},
+            },
+        )
+        return self.signup_default()
+
+    def start_subscription(
+        self, org_id: str, connection: sqlite3.Connection
+    ) -> dict[str, Any]:
+        """A new organization's subscription: the sign-up default, as a trial or (a free plan) with no end."""
+        default = self.signup_default()
+        plan = self.app.catalog.get(default["plan_id"])
         now = self.now
-        trial_end = now + self.app.config.trial_days * DAY
+        days = int(default["trial_days"])
+        seats = plan["entitlements"].get("candidate_seats") or 0
+        if days > 0:
+            status, trial_end = "trialing", now + days * DAY
+            period_end: int = trial_end
+        else:
+            status, trial_end, period_end = "active", None, now + PERIOD_SECONDS
         connection.execute(
             """INSERT INTO subscriptions (org_id, plan_id, plan_version, status, candidate_seats, period_start, period_end, trial_end, updated_at, created_at)
-            VALUES (?, 'trial', ?, 'trialing', ?, ?, ?, ?, ?, ?)""",
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 org_id,
+                plan["plan_id"],
                 plan["version"],
-                plan["entitlements"]["candidate_seats"],
+                status,
+                seats,
                 now,
-                trial_end,
+                period_end,
                 trial_end,
                 now,
                 now,
             ),
         )
         connection.execute(
-            "INSERT INTO subscription_events (org_id, from_status, to_status, reason, trigger_type, trigger_id, at) VALUES (?, '', 'trialing', 'signup', 'person', '', ?)",
-            (org_id, now),
+            "INSERT INTO subscription_events (org_id, from_status, to_status, reason, trigger_type, trigger_id, at) VALUES (?, '', ?, 'signup', 'person', '', ?)",
+            (org_id, status, now),
         )
+        return {
+            "plan_id": plan["plan_id"],
+            "status": status,
+            "trial_days": days,
+            "trial_end": trial_end,
+        }
+
+    def create_trial(self, org_id: str, connection: sqlite3.Connection) -> None:
+        """Kept for callers that predate the sign-up default: starts whatever the default is."""
+        self.start_subscription(org_id, connection)
 
     # -- state machine ----------------------------------------------------------------
 
@@ -279,7 +380,9 @@ class Billing:
     # -- pricing ----------------------------------------------------------------------
 
     def public_plans(self) -> list[dict[str, Any]]:
+        """The plans on the billing page, in the superadmin's order (archived and private plans are left out)."""
         out = []
+        self_serve = set(self.app.catalog.self_serve())
         for plan in self.app.catalog.current().values():
             if not plan["public"]:
                 continue
@@ -288,6 +391,8 @@ class Billing:
                 {
                     "plan_id": plan["plan_id"],
                     "name": plan["name"],
+                    "description": plan.get("description", ""),
+                    "self_serve": plan["plan_id"] in self_serve,
                     "seat_cents_month": pricing.get("seat_cents_month", 0),
                     "min_seats": pricing.get("min_seats", 0),
                     "contact_sales": bool(pricing.get("contact_sales")),
@@ -313,13 +418,33 @@ class Billing:
         ``apps`` names the add-ons to price (default: the ones the organization has bought that the target
         plan offers); an add-on the target plan does not offer is listed in ``dropped_apps``.
         """
-        if plan_id == "enterprise":
+        self_serve = self.app.catalog.self_serve()
+        if plan_id not in self_serve:
+            try:
+                wanted = self.app.catalog.get(plan_id)
+            except NotFound:
+                wanted = None
+            if (
+                wanted
+                and not wanted["archived"]
+                and wanted["pricing"].get("contact_sales")
+            ):
+                raise ValidationFailed(
+                    f"{wanted['name']} is arranged with our sales team; it is activated for you.",
+                    code="contact_sales",
+                )
+            names = [self.app.catalog.name(p) for p in self_serve]
             raise ValidationFailed(
-                "Enterprise is arranged with our sales team; it is activated for you.",
-                code="contact_sales",
+                "Choose "
+                + (
+                    " or ".join(names)
+                    if len(names) <= 2
+                    else ", ".join(names[:-1]) + " or " + names[-1]
+                )
+                + "."
+                if names
+                else "No plan can be bought here right now. Contact sales."
             )
-        if plan_id not in PAID_PLANS:
-            raise ValidationFailed("Choose Starter or Team.")
         plan = self.app.catalog.get(plan_id)
         pricing, ent = plan["pricing"], plan["entitlements"]
         try:
@@ -336,7 +461,7 @@ class Billing:
             larger = next(
                 (
                     p
-                    for p in PAID_PLANS
+                    for p in self_serve
                     if p != plan_id
                     and (
                         self.app.catalog.get(p)["entitlements"].get("candidate_seats")
@@ -349,7 +474,7 @@ class Billing:
             raise PlanRequired(
                 f"{plan['name']} includes up to {maximum} candidate seats."
                 + (
-                    f" Choose {larger.title()} for {seats}."
+                    f" Choose {self.app.catalog.name(larger)} for {seats}."
                     if larger
                     else " Contact sales for more."
                 ),
@@ -420,7 +545,9 @@ class Billing:
         self.app.authz.require(actor, "billing.manage")
         quote = self.quote(actor.org_id, plan_id, seats)
         subscription = self.subscription(actor.org_id)
-        if subscription["status"] == "active":
+        if subscription["status"] == "active" and not self.checkout_required(
+            subscription
+        ):
             raise Conflict(
                 "The organization already has a paid plan. Change plan instead.",
                 code="already_subscribed",
@@ -462,6 +589,18 @@ class Billing:
             "quote": quote,
         }
 
+    def checkout_required(self, subscription: dict[str, Any]) -> bool:
+        """A paid plan has to be bought through checkout first: in a trial, after cancellation, and on a free plan
+        that no provider subscription stands behind (All access, a free plan the superadmin made)."""
+        if subscription["status"] != "active":
+            return True
+        if subscription["billing_subscription_id"]:
+            return False
+        plan = self.app.catalog.get(
+            subscription["plan_id"], subscription["plan_version"]
+        )
+        return is_free(plan["pricing"])
+
     def _owner_email(self, org_id: str) -> str:
         with self.db.read() as connection:
             row = one(
@@ -477,7 +616,7 @@ class Billing:
         """Upgrade (and add seats) now with a prorated charge; downgrade (and remove seats) at period end."""
         self.app.authz.require(actor, "billing.manage")
         subscription = self.subscription(actor.org_id)
-        if subscription["status"] != "active":
+        if subscription["status"] != "active" or self.checkout_required(subscription):
             raise Conflict(
                 "Choose a plan through checkout first.", code="not_subscribed"
             )
@@ -486,12 +625,15 @@ class Billing:
         )
         # A downgrade may go below current usage: it applies at period end and automation pauses until within limits.
         quote = self.quote(actor.org_id, plan_id, target_seats, enforce_usage=False)
+        order = self.app.catalog.order(
+            include_archived=True
+        )  # the superadmin's order ranks the plans
         current_rank = (
-            PLAN_ORDER.index(subscription["plan_id"])
-            if subscription["plan_id"] in PLAN_ORDER
+            order.index(subscription["plan_id"])
+            if subscription["plan_id"] in order
             else 0
         )
-        target_rank = PLAN_ORDER.index(plan_id)
+        target_rank = order.index(plan_id)
         immediate = target_rank > current_rank or (
             target_rank == current_rank
             and target_seats > subscription["candidate_seats"]
@@ -729,6 +871,8 @@ class Billing:
         return {
             "plan_id": subscription["plan_id"],
             "plan_name": plan["name"],
+            "plan_free": is_free(plan["pricing"]),
+            "checkout_required": self.checkout_required(subscription),
             "status": subscription["status"],
             "candidate_seats": subscription["candidate_seats"],
             "seat_usage": usage,
@@ -789,7 +933,7 @@ class Billing:
     ) -> list[dict[str, Any]]:
         """Subscriptions to apps that became sections of a bigger app (Shop and Bookings -> Commerce) move to the
         new app once; when two old apps meet, the best one is kept (paid, then granted, then cancelled)."""
-        rank = {"active": 3, "granted": 2, "cancelled": 1}
+        rank = {"disabled": 4, "active": 3, "granted": 2, "cancelled": 1}
         best: dict[str, dict[str, Any]] = {}
         for row in rows:
             new_id = app_catalog.current_id(row["app_id"])
@@ -893,6 +1037,8 @@ class Billing:
             price = self.app.app_settings.price(plan_id, app.id)
             if not self.app.app_settings.enabled(app.id):
                 status = "disabled"
+            elif row and row["status"] == "disabled":
+                status = "blocked"  # an operator switched it off for this organization
             elif row and row["status"] == "granted":
                 status = "granted"
             elif state == "included":
@@ -938,6 +1084,12 @@ class Billing:
     def apps_for_member(self, org_id: str, entitlements: Any) -> list[dict[str, Any]]:
         """What the app switcher needs: each app, whether this organization may open it, and why not."""
         out = []
+        plan_name = self.app.catalog.name(entitlements.plan_id)
+        blocked = {
+            app_id
+            for app_id, row in self._app_rows(org_id).items()
+            if row["status"] == "disabled"
+        }
         for app in app_catalog.APPS:
             enabled = entitlements.has_app(app.id)
             state = self.app.app_settings.state(entitlements.plan_id, app.id)
@@ -946,9 +1098,11 @@ class Billing:
                 reason = (
                     "Switched off for now."
                     if not self.app.app_settings.enabled(app.id)
+                    else "Switched off for your organization."
+                    if app.id in blocked
                     else "Not turned on for your organization."
                     if state == "addon"
-                    else f"Not available on the {entitlements.plan_id.title()} plan."
+                    else f"Not available on the {plan_name} plan."
                 )
             out.append(
                 {
@@ -976,11 +1130,22 @@ class Billing:
                 app=app_id,
                 name=app.name,
             )
+        if self.app.entitlements.app_disabled_here(org_id, app_id):
+            raise AppDisabled(
+                f"{app.name} is switched off for your organization. Contact support to turn it back on.",
+                app=app_id,
+                name=app.name,
+                scope="organization",
+            )
         if state == "unavailable":
             needed = self.app.app_settings.plan_for(app_id)
             raise PlanRequired(
-                f"{app.name} is not available on the {plan_id.title()} plan."
-                + (f" Upgrade to {needed.title()} to turn it on." if needed else ""),
+                f"{app.name} is not available on the {self.app.catalog.name(plan_id)} plan."
+                + (
+                    f" Upgrade to {self.app.catalog.name(needed)} to turn it on."
+                    if needed
+                    else ""
+                ),
                 feature=app.feature,
                 required_plan=needed,
                 current_plan=plan_id,
@@ -1032,9 +1197,11 @@ class Billing:
         app = app_catalog.BY_ID[app_id]
         if quote["state"] == "included":
             raise Conflict(f"{app.name} is included in your plan.", code="included")
-        if subscription["status"] != "active":
+        if self.checkout_required(subscription):
             raise Conflict(
-                "Choose a plan through checkout first; the trial includes every app.",
+                "Choose a plan through checkout first; the trial includes every app."
+                if subscription["plan_id"] == TRIAL
+                else "Choose a plan through checkout first.",
                 code="not_subscribed",
             )
         rows = self._app_rows(actor.org_id)
@@ -1389,15 +1556,21 @@ class Billing:
         status: str,
         note: str = "",
     ) -> dict[str, Any]:
-        """An operator grants an app to a tenant without charge (a contract), or takes a grant back."""
+        """An operator grants an app to a tenant without charge (a contract), or takes a grant back; or switches an
+        app off for this one organization (``disabled``: closed to its members whatever the plan says, data kept)
+        and back on (``enabled``: the plan, add-ons and grants decide again)."""
         app_id = app_catalog.current_id(app_id)
         self.app.authz.require(operator, "platform.billing.manage")
         self.app.tenancy.org(org_id)
         if app_id not in app_catalog.BY_ID:
             raise NotFound("App not found.")
-        if status not in {"granted", "revoked"}:
-            raise ValidationFailed("status must be granted or revoked.")
+        if status not in {"granted", "revoked", "disabled", "enabled"}:
+            raise ValidationFailed(
+                "status must be granted, revoked, disabled or enabled."
+            )
         row = self._app_rows(org_id).get(app_id)
+        if status in {"disabled", "enabled"}:
+            return self._set_app_disabled(operator, org_id, app_id, status, row, note)
         with self.db.write() as connection:
             if status == "granted":
                 if row and row["status"] == "active":
@@ -1441,6 +1614,72 @@ class Billing:
         self.app.entitlements.invalidate(org_id)
         return {"org_id": org_id, "apps": self.apps_overview(org_id)}
 
+    def _set_app_disabled(
+        self,
+        operator: Principal,
+        org_id: str,
+        app_id: str,
+        status: str,
+        row: dict[str, Any] | None,
+        note: str,
+    ) -> dict[str, Any]:
+        app = app_catalog.BY_ID[app_id]
+        if app_id not in APP_PRICING:  # Careers is each candidate's own workspace
+            raise ValidationFailed(
+                f"{app.name} is part of every plan; it cannot be switched off."
+            )
+        with self.db.write() as connection:
+            if status == "disabled":
+                if row and row["status"] == "disabled":
+                    raise Conflict(
+                        f"{app.name} is switched off already.", code="unchanged"
+                    )
+                if row and row["status"] == "active":
+                    raise Conflict(
+                        f"The organization pays for {app.name}; it turns it off under Apps, or reconcile billing first.",
+                        code="already_subscribed",
+                    )
+                connection.execute(
+                    """INSERT INTO org_apps (org_id, app_id, status, seats_at_start, activated_at, cancelled_at, cancel_at_period_end, granted_by, note)
+                    VALUES (?, ?, 'disabled', 0, ?, NULL, 0, ?, ?)
+                    ON CONFLICT(org_id, app_id) DO UPDATE SET status = 'disabled', cancelled_at = NULL,
+                    cancel_at_period_end = 0, granted_by = excluded.granted_by, note = excluded.note""",
+                    (org_id, app_id, self.now, operator.operator_id, note[:300]),
+                )
+            else:
+                if not row or row["status"] != "disabled":
+                    raise Conflict(
+                        f"{app.name} is not switched off for this organization.",
+                        code="unchanged",
+                    )
+                connection.execute(
+                    "DELETE FROM org_apps WHERE org_id = ? AND app_id = ?",
+                    (org_id, app_id),
+                )
+            action = (
+                "billing.app_disabled"
+                if status == "disabled"
+                else "billing.app_enabled"
+            )
+            self.app.platform_audit.record(
+                action,
+                operator=operator,
+                org_id=org_id,
+                detail={"app": app_id, "note": note[:300]},
+                connection=connection,
+            )
+            self.app.audit.record(
+                org_id,
+                action,
+                actor=operator,
+                target_type="app",
+                target_id=app_id,
+                detail={"note": note[:300]},
+                connection=connection,
+            )
+        self.app.entitlements.invalidate(org_id)
+        return {"org_id": org_id, "apps": self.apps_overview(org_id)}
+
     def operator_set_subscription(
         self,
         operator: Principal,
@@ -1455,11 +1694,15 @@ class Billing:
         """The superadmin sets up a tenant's subscription directly: a customer who bought the plan outside the
         product (an invoice, a bank transfer, a contract). The plan, the seats and the paid-until date are set and
         the subscription is active; ``apps`` turns apps on (granted, no extra charge) or takes grants back. Apps the
-        organization pays for itself are left alone. Every change is recorded in both audit logs."""
+        organization pays for itself are left alone. Any plan but the trial can be set, built-in or created by the
+        superadmin, as long as it is not archived. Every change is recorded in both audit logs."""
         self.app.authz.require(operator, "platform.billing.manage")
         self.app.tenancy.org(org_id)
-        if plan_id not in PLAN_ORDER or plan_id == "trial":
-            raise ValidationFailed("Choose starter, team or enterprise.")
+        choices = [p for p in self.app.catalog.order() if p != TRIAL]
+        if plan_id not in choices:
+            raise ValidationFailed(
+                "Choose one of these plans: " + ", ".join(choices) + "."
+            )
         plan = self.app.catalog.get(plan_id)
         minimum = int(plan["pricing"].get("min_seats") or 0)
         try:
@@ -1859,7 +2102,7 @@ class Billing:
         subscription = self.subscription(org_id)
         window = (
             self.app.config.trial_retention_days
-            if subscription["plan_id"] == "trial"
+            if subscription["plan_id"] == TRIAL or subscription["status"] == "trialing"
             else self.app.config.cancelled_export_days
         )
         export_until = self.now + window * DAY
@@ -2017,6 +2260,25 @@ class Billing:
         self._bill_overage(sub)
         self._apply_app_cancellations(sub)
         sub = self.subscription(org_id)
+        plan = self.app.catalog.get(sub["plan_id"], sub["plan_version"])
+        if (
+            not sub["billing_subscription_id"]
+            and is_free(plan["pricing"])
+            and self._monthly_cents(sub) == 0
+        ):
+            # a free plan (All access): nothing to invoice, the period simply moves on
+            self.transition(
+                org_id,
+                "active",
+                reason="free plan renewed",
+                trigger_type="scheduler",
+                fields={
+                    "period_start": sub["period_end"],
+                    "period_end": sub["period_end"] + PERIOD_SECONDS,
+                },
+            )
+            done["renewed"].append(org_id)
+            return
         if sub["billing_provider"] == "standin" or not sub["billing_provider"]:
             payload, signature = self.standin.make_event(
                 "invoice.paid",
@@ -2190,7 +2452,10 @@ class Billing:
         ):
             try:
                 self.providers[sub["billing_provider"]].add_invoice_item(
-                    sub["billing_customer_id"], total, f"Monosage overage {previous}", "usd"
+                    sub["billing_customer_id"],
+                    total,
+                    f"Monosage overage {previous}",
+                    "usd",
                 )
             except Exception:  # noqa: BLE001
                 logger.exception(
@@ -2304,9 +2569,9 @@ class Billing:
         if not 1 <= int(days) <= 90:
             raise ValidationFailed("Extend a trial by 1 to 90 days.")
         subscription = self.subscription(org_id)
-        if (
-            subscription["status"] not in {"trialing", "cancelled"}
-            or subscription["plan_id"] != "trial"
+        # a trial of any plan (the sign-up default can be a trial of a paid plan); a paid subscription has no trial end
+        if subscription["status"] not in {"trialing", "cancelled"} or (
+            subscription["plan_id"] != TRIAL and not subscription["trial_end"]
         ):
             raise Conflict("Only a trial can be extended.")
         base = max(subscription["trial_end"] or self.now, self.now)

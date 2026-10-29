@@ -28,6 +28,7 @@
       case "included": return "Included in your plan";
       case "granted": return "Granted to your organization at no charge";
       case "disabled": return "Switched off by Monosage for now";
+      case "blocked": return "Switched off for your organization by Monosage";
       case "unavailable": return app.required_plan ? `Not on your plan: upgrade to ${titleCase(app.required_plan)}` : "Not available on your plan";
       default: return perSeat(app);
     }
@@ -42,6 +43,7 @@
       unavailable: ["Not on your plan", ""],
       off: ["Off", ""],
       disabled: ["Paused", "warn"],
+      blocked: ["Off", "warn"],
     };
     const [label, kind] = map[app.status] || [titleCase(app.status), ""];
     return h("span", { class: `badge ca-status ${kind}`, text: label });
@@ -52,6 +54,7 @@
     if (app.status === "cancelling") return `Turns off on ${app.effective_until ? fmt.date(app.effective_until) : "the period end"}. It keeps working until then.`;
     if (app.status === "granted") return app.note ? `Note from Monosage: ${app.note}` : "";
     if (app.status === "disabled") return "Nobody can open it until Monosage switches it back on. Your data is kept, and it is not billed meanwhile.";
+    if (app.status === "blocked") return "Monosage has switched it off for your organization. Your data is kept; contact support to turn it back on.";
     if (app.status === "off") return data.status === "active" ? "Turning it on is billed with your plan and prorated for the rest of this period." : "Choose a plan under Plan & billing first; the trial includes every app.";
     return "";
   }

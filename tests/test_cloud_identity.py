@@ -300,3 +300,61 @@ def test_a_password_alone_cannot_replace_an_enrolled_second_factor(cloud):
     assert cloud.identity.mfa_verify(
         attacker, crypto.totp_code(secret, cloud.clock.now())
     )["verified"]
+
+
+# ----------------------------------------------------------------------------- one sign-in for members and operators
+
+
+def test_sign_in_opens_whatever_the_password_matches(cloud):
+    signup(cloud)
+    cloud.identity.create_operator("owner@acme.test", PASSWORD, role="platform_admin")
+    cloud.identity.create_operator("ops@aira.test", PASSWORD, role="support")
+    both = cloud.identity.sign_in("owner@acme.test", PASSWORD)
+    assert (
+        both["member"]["role"] == "owner"
+        and both["operator"]["role"] == "platform_admin"
+    )
+    operator = cloud.identity.principal_for_token(
+        both["operator"]["token"], kind="operator"
+    )
+    assert operator.mfa_verified is False, "the console still needs its second factor"
+    only = cloud.identity.sign_in("ops@aira.test", PASSWORD)
+    assert only["member"] is None and only["operator"]["mfa_enrolled"] is False
+    member = cloud.identity.sign_in("owner@acme.test", PASSWORD)["member"]
+    assert principal(cloud, member["token"]).org_id
+    with pytest.raises(Unauthorized) as raised:
+        cloud.identity.sign_in("nobody@acme.test", PASSWORD)
+    assert str(raised.value) == "Email or password is incorrect."
+
+
+def test_sign_in_failures_lock_each_kind_only_when_nothing_matched(cloud):
+    signup(cloud)
+    cloud.identity.create_operator(
+        "owner@acme.test", "another long console passphrase", role="support"
+    )
+    for _ in range(cloud.config.max_failed_logins + 2):
+        assert cloud.identity.sign_in("owner@acme.test", PASSWORD)["operator"] is None
+    for _ in range(cloud.config.max_failed_logins):
+        with pytest.raises(Unauthorized):
+            cloud.identity.sign_in("owner@acme.test", "wrong password here")
+    with pytest.raises(Locked):
+        cloud.identity.sign_in("owner@acme.test", PASSWORD)
+    with pytest.raises(Locked):
+        cloud.identity.sign_in("owner@acme.test", "another long console passphrase")
+    cloud.clock.advance(seconds=cloud.config.lockout_seconds + 1)
+    assert cloud.identity.sign_in("owner@acme.test", PASSWORD)["member"]
+
+
+def test_sign_in_asks_for_the_organization_before_opening_anything(cloud):
+    signup(cloud, "First Org", "dual@x.test")
+    cloud.identity.signup_org("Second Org", "dual@x.test", PASSWORD)
+    cloud.identity.create_operator("dual@x.test", PASSWORD, role="support")
+    with pytest.raises(Conflict) as raised:
+        cloud.identity.sign_in("dual@x.test", PASSWORD)
+    assert raised.value.code == "org_required"
+    with cloud.db.read() as connection:
+        assert not connection.execute(
+            "SELECT COUNT(*) FROM sessions WHERE kind = 'operator'"
+        ).fetchone()[0]
+    result = cloud.identity.sign_in("dual@x.test", PASSWORD, org="first-org")
+    assert result["member"] and result["operator"]

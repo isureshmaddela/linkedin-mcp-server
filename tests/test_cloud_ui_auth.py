@@ -22,3 +22,31 @@ def test_linkedin_notice_needs_a_session(cloud):
 
     status, data = Browser(cloud).call("GET", "/api/me/linkedin-notice")
     assert status == 401
+
+
+def test_the_sign_in_page_is_one_page_for_everyone():
+    """No "Monosage staff" link and no separate operator form: the console uses the same sign-in."""
+    from pathlib import Path
+
+    static = Path(__file__).resolve().parents[1] / "auto_apply_assistant"
+    page = (static / "cloud-auth.js").read_text(encoding="utf-8")
+    console = (static / "cloud-platform.js").read_text(encoding="utf-8")
+    assert "Monosage staff" not in page and "ca-staff" not in page
+    assert '"/api/auth/login"' in page and "data.operator" in page
+    assert "Platform sign-in" not in console and "Operator email" not in console
+    assert "/api/platform/auth/login" not in console, "the console signs in on the page"
+    assert 'cloud.auth.render("login"' in console
+
+
+def test_the_sign_in_answer_says_where_the_page_goes(cloud):
+    from cloud_support import PASSWORD, Browser, signup
+
+    signup(cloud)
+    cloud.identity.create_operator("ops@aira.test", PASSWORD, role="support")
+    member = Browser(cloud).login("owner@acme.test")
+    assert member["next"] == "home" and member["signed_in"] == ["member"]
+    status, operator = Browser(cloud).call(
+        "POST", "/api/auth/login", {"email": "ops@aira.test", "password": PASSWORD}
+    )
+    assert status == 200 and operator["next"] == "console"
+    assert operator["operator"] == {"role": "support", "mfa_enrolled": False}

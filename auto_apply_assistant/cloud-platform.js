@@ -1,7 +1,9 @@
 /* Aira hosted build — the platform (vendor) console.
  *
- * A separate application surface for Aira's own operators at #/platform/...: its own sign-in with MFA (cookie
- * aira_operator, endpoints under /api/platform), never a tenant's login. Operators have no candidate workspace;
+ * A separate application surface for Aira's own operators at #/platform/...: its own session with mandatory MFA
+ * (cookie aira_operator, endpoints under /api/platform), never a tenant's session. Operators sign in on the same
+ * page as everyone (cloud-auth.js, POST /api/auth/login); that page continues here, where the second factor is
+ * asked (or set up the first time) before the console opens. Operators have no candidate workspace;
  * they reach a tenant's own screens only through a support grant the tenant owner approved (at most 24 hours),
  * and a banner stays on screen for as long as that access lasts.
  *
@@ -44,6 +46,14 @@
     return P.tenants;
   }
   const tenantName = (id) => ((P.tenants || []).find((t) => t.org_id === id) || {}).name || (id ? id.slice(0, 8) : "");
+  // The plans (built-in and the superadmin's, archived ones too) in the superadmin's order; loaded once per screen.
+  async function plansList(fresh = false) {
+    if (fresh || !P.planData) P.planData = await api("/api/platform/plans", { silent: true }).catch(() => ({ plans: [] }));
+    return P.planData.plans || [];
+  }
+  const planName = (id) => ((P.planData && P.planData.plans) || []).find((p) => p.plan_id === id)?.name || titleCase(id);
+  /** [id, label] pairs for a select: live plans (the trial only when asked), each named. */
+  const planChoices = ({ trial = true, archived = false } = {}) => ((P.planData && P.planData.plans) || []).filter((p) => (trial || p.plan_id !== "trial") && (archived || !p.archived)).map((p) => [p.plan_id, p.archived ? `${p.name} (archived)` : p.name]);
 
   /** A modal form: fields in, values out. Validation errors are thrown and shown without closing it. */
   function formModal({ title, intro, fields, submit = "Save", danger = false, onSubmit, wide = false }) {
@@ -80,6 +90,9 @@
   // Operator sign-in and MFA
   // ---------------------------------------------------------------------------
   function authShell(title, intro, ...children) {
+    P.screen = "auth";
+    // The same panel as the sign-in page (cloud-auth.js): one page for everyone.
+    if (cloud.auth && cloud.auth.show) { cloud.auth.show(title, intro, ...children); return; }
     $("boot").hidden = true;
     $("app").hidden = true;
     const screen = $("authScreen");
@@ -89,23 +102,12 @@
     if (first) setTimeout(() => first.focus(), 30);
   }
 
+  // No console session: the one sign-in page, which comes back here once an operator has signed in.
   function showLogin(message = "") {
-    const email = h("input", { id: "cpEmail", type: "email", autocomplete: "username", required: true, maxlength: "254" });
-    const password = h("input", { id: "cpPassword", type: "password", autocomplete: "current-password", required: true });
-    const notice = h("p", { class: "muted", role: "status", "aria-live": "polite", text: message });
-    const submit = h("button", { class: "btn", type: "submit", text: "Sign in", style: { width: "100%" } });
-    const form = h("form", { onsubmit: async (event) => {
-      event.preventDefault();
-      notice.textContent = "";
-      await Aira.withBusy(submit, async () => {
-        try {
-          const result = await api("/api/platform/auth/login", { method: "POST", body: { email: email.value, password: password.value } });
-          password.value = "";
-          if (result.mfa_enrolled) showMfaVerify(); else showMfaEnrol();
-        } catch (error) { notice.textContent = error.message; }
-      });
-    } }, ui.field("Operator email", email), ui.field("Password", password), notice, submit);
-    authShell("Platform sign-in", "For Monosage operators only. Organizations sign in at the main address.", form);
+    P.screen = "auth";
+    $("boot").hidden = true;
+    $("app").hidden = true;
+    if (cloud.auth && cloud.auth.render) cloud.auth.render("login", { message });
   }
 
   function showMfaVerify(message = "") {
@@ -154,12 +156,19 @@
     showConsole();
   }
 
+  // Signs out of everything (the console and the same person's organization session) and shows the sign-in page.
   async function signOut() {
     try { await api("/api/platform/auth/logout", { method: "POST", body: {} }); } catch { /* the session may already be gone */ }
     sessionStorage.removeItem(SUPPORT_KEY);
     Aira.remember("operatorConsole", false);
-    location.hash = "#/platform";
+    history.replaceState(null, "", "/");
     location.reload();
+  }
+
+  // Someone who is an operator and a member moves between the console and their apps without signing in again.
+  if (Aira.accountLinks) {
+    Aira.accountLinks.push({ label: "Your apps", href: "#/today", icon: "dashboard", when: () => P.active && !!P.me && !!P.me.member });
+    Aira.accountLinks.push({ label: "Admin console", href: "#/platform", icon: "settings", when: () => !P.active && !Aira.state.platformMode && !!cloud.me && !!cloud.me.console });
   }
 
   // ---------------------------------------------------------------------------
@@ -194,6 +203,7 @@
 
   function showConsole() {
     P.active = true;
+    P.screen = "console";
     Aira.state.platformMode = true;
     Aira.remember("operatorConsole", true); // the main address opens the console on this browser (cloud-spaces.js)
     P.items = NAV_DEFS.filter((item) => !item.admin || isAdmin());
@@ -228,7 +238,23 @@
     if (inPlatform()) { P.active = false; showLogin("Your session ended. Sign in again."); } else originalShowAuth();
   };
   const originalBoot = cloud.boot;
-  cloud.boot = async (user) => (inPlatform() ? false : originalBoot(user));
+  // Someone who is both an operator and a member, and has used the console on this browser, starts in the console
+  // when they open the main address (an app's own address, /careers, still opens that app).
+  const mainAddress = () => location.pathname === "/" && ["", "#", "#/"].includes(location.hash);
+  cloud.boot = async (user) => {
+    if (!inPlatform()) {
+      if (user && user.kind === "member" && user.console && mainAddress() && Aira.recall("operatorConsole", false)) {
+        history.replaceState(null, "", "/#/platform");
+        location.reload();
+        return new Promise(() => {}); // the member app does not start: the page is reloading into the console
+      }
+      return originalBoot(user);
+    }
+    // app.js shows the app as soon as a member session answers /api/auth/me (someone who is also a member); while
+    // the console's sign-in or second factor is up, that screen stays.
+    if (P.screen === "auth") { $("app").hidden = true; $("authScreen").hidden = false; }
+    return false;
+  };
   const originalOnApiError = cloud.onApiError;
   cloud.onApiError = (status, data, path) => {
     if (inPlatform() && path === "/api/auth/me" && status === 401) { P.memberProbe = true; return; }
@@ -272,7 +298,8 @@
     const item = P.items.find((i) => i.sub === sub);
     $("crumbs").replaceChildren(h("span", { text: item ? `Platform · ${item.label}` : "Platform" }));
     document.title = `${item ? item.label : "Platform"} · Monosage platform`;
-    if (!P.active || !P.me) { put(stage, empty("Sign in to the platform console", "Open #/platform and sign in as an operator.")); return; }
+    // Until the second factor is given the console draws nothing (a member session's app boot may ask for a page).
+    if (!P.active || !P.me || P.screen !== "console") { put(stage, empty("Sign in to the platform console", "Open #/platform and sign in as an operator.")); return; }
     if (!item) { put(stage, empty("Not available", "That console page does not exist or needs a platform admin.")); return; }
     await SCREENS[sub](stage, route);
   };
@@ -283,11 +310,12 @@
   // ---------------------------------------------------------------------------
   SCREENS.tenants = async (stage, route) => {
     if (route.path[2]) return tenantDetail(stage, route.path[2]);
+    await plansList(true);
     const filters = { q: route.query.q || "", status: route.query.status || "", plan: route.query.plan || "" };
     const listHost = h("div", {});
     const q = h("input", { type: "search", "data-search": "", placeholder: "Search by name or address", value: filters.q, "aria-label": "Search tenants" });
     const status = ui.select([["", "Any state"], ["trialing", "Trial"], ["active", "Active"], ["past_due", "Past due"], ["read_only", "Read-only"], ["cancelled", "Cancelled"]], filters.status, { "aria-label": "State" });
-    const plan = ui.select([["", "Any plan"], ["trial", "Trial"], ["starter", "Starter"], ["team", "Team"], ["enterprise", "Enterprise"]], filters.plan, { "aria-label": "Plan" });
+    const plan = ui.select([["", "Any plan"], ...planChoices({ archived: true })], filters.plan, { "aria-label": "Plan" });
     const flagSelect = ui.select([["", "Any health"], ["problems", "Needs a look"]], "", { "aria-label": "Health" });
     let timer = 0;
     async function load() {
@@ -300,7 +328,7 @@
       P.tenants = P.tenants || tenants;
       const shown = flagSelect.value === "problems" ? tenants.filter((t) => t.flags.length) : tenants;
       listHost.replaceChildren(table(["Organization", "Plan", "State", "#Seats", "#Applications this month", "Health", "Errors 24 h", "Created"], shown.map((t) => h("tr", {},
-        td(h("a", { href: `#/platform/tenants/${t.org_id}`, text: t.name }), "cp-name"), td(titleCase(t.plan_id)), td(statusBadge(t.status)),
+        td(h("a", { href: `#/platform/tenants/${t.org_id}`, text: t.name }), "cp-name"), td(planName(t.plan_id)), td(statusBadge(t.status)),
         td(`${t.seats.candidates}${t.seats.purchased ? ` / ${t.seats.purchased}` : ""} · ${t.seats.staff} staff`, "num"), td(String(t.applications_this_month), "num"),
         td(flagChips(t.flags)), td(t.error_rate_24h ? `${Math.round(t.error_rate_24h * 100)}%` : "—"), td(fmt.date(t.created_at)))), "No organizations match."));
     }
@@ -312,7 +340,7 @@
   };
 
   async function tenantDetail(stage, orgId) {
-    const [t, inv, appsData] = await Promise.all([api(`/api/platform/tenants/${orgId}`), api(`/api/platform/tenants/${orgId}/invoices`, { silent: true }).catch(() => ({ invoices: [] })), api(`/api/platform/tenants/${orgId}/apps`, { silent: true }).catch(() => ({ apps: [] }))]);
+    const [t, inv, appsData] = await Promise.all([api(`/api/platform/tenants/${orgId}`), api(`/api/platform/tenants/${orgId}/invoices`, { silent: true }).catch(() => ({ invoices: [] })), api(`/api/platform/tenants/${orgId}/apps`, { silent: true }).catch(() => ({ apps: [] })), plansList(true)]);
     const tenantApps = appsData.apps || [];
     const b = t.billing;
     const reload = () => Aira.router.render();
@@ -327,7 +355,7 @@
     act("Cancel deletion", async () => { await post("cancel-deletion"); done("Deletion cancelled."); }, { show: !!b.deletion_scheduled_at });
     act("Rate-limit", () => formModal({ title: `Rate-limit ${t.name}`, intro: "Cap the organization's requests per minute for a while (0 blocks automation as well).", fields: [{ name: "per_minute", label: "Requests per minute", type: "number", value: 60, min: 0, max: 10000 }, { name: "hours", label: "For (hours)", type: "number", value: 24, min: 1, max: 720 }], submit: "Apply limit", onSubmit: async (v) => { await post("rate-limit", v); done("Rate limit applied."); } }), { show: !t.flags.includes("rate_limited") });
     act("Clear rate limit", async () => { await post("rate-limit", {}, "DELETE"); done("Rate limit cleared."); }, { show: t.flags.includes("rate_limited") });
-    act("Extend trial", () => formModal({ title: "Extend the trial", fields: [{ name: "days", label: "Days (1 to 90)", type: "number", value: 14, min: 1, max: 90 }], submit: "Extend", onSubmit: async (v) => { const r = await post("extend-trial", v); done(`Trial now ends ${fmt.date(r.trial_end)}.`); } }), { show: b.plan_id === "trial" });
+    act("Extend trial", () => formModal({ title: "Extend the trial", fields: [{ name: "days", label: "Days (1 to 90)", type: "number", value: 14, min: 1, max: 90 }], submit: "Extend", onSubmit: async (v) => { const r = await post("extend-trial", v); done(`Trial now ends ${fmt.date(r.trial_end)}.`); } }), { show: b.status === "trialing" || (b.status === "cancelled" && (b.plan_id === "trial" || !!b.trial_end)) });
     act("Issue credit", () => formModal({ title: "Issue a credit", fields: [{ name: "amount", label: "Amount (USD)", type: "number", value: 50, min: 1, step: "0.01" }, { name: "reason", label: "Reason", type: "textarea", rows: 2 }], submit: "Issue credit", onSubmit: async (v) => { if (!v.amount || v.amount <= 0) throw new Error("Enter an amount."); await post("credit", { amount_cents: Math.round(v.amount * 100), reason: v.reason }); done(`Credit of ${dollars(Math.round(v.amount * 100))} issued.`); } }));
     act("Set subscription", () => subscriptionForm(t, tenantApps, post, done));
     act("Activate Enterprise", () => enterpriseForm(t, post, done));
@@ -344,15 +372,17 @@
       h("div", { class: "page-head" }, h("div", {}, h("a", { href: "#/platform/tenants", class: "muted", text: "← All tenants" }), h("h1", { text: t.name }), h("p", { class: "muted", text: `${t.slug} · ${t.region} · created ${fmt.date(t.created_at)}` })), h("div", { class: "cp-head-state" }, statusBadge(t.status), t.org_status === "suspended" ? chip("suspended", "danger") : null, flagChips(t.flags))),
       readonlyNote(),
       h("div", { class: "grid cols-4 cp-tiles" },
-        tile("Plan", titleCase(t.plan_id), b.cancel_at_period_end ? "cancels at period end" : b.period_end ? `renews ${fmt.date(b.period_end)}` : ""),
+        tile("Plan", planName(t.plan_id), b.status === "trialing" && b.trial_end ? `trial ends ${fmt.date(b.trial_end)}` : b.cancel_at_period_end ? "cancels at period end" : b.period_end ? `renews ${fmt.date(b.period_end)}` : ""),
         tile("Seats", `${b.seat_usage.candidates} / ${b.candidate_seats}`, `${b.seat_usage.staff} coach and admin`),
         tile("Applications this month", String(t.applications_this_month), `${Math.round((t.error_rate_24h || 0) * 100)}% errors in 24 h`),
         tile("Queue", `${t.queue.queued || 0} waiting`, `${t.queue.running || 0} running`)),
       section("Actions", actions.length ? h("div", { class: "btn-row cp-actions" }, ...actions) : h("p", { class: "muted", text: "Nothing to do here for your role." })),
       h("div", { class: "grid cols-2" },
-        section("Billing", ui.kv([["State", b.status.replace("_", " ")], ["Provider", b.provider || "none"], ["Pending change", b.pending ? `${titleCase(b.pending.plan_id)} (${b.pending.seats} seats) on ${fmt.date(b.pending.effective_at)}` : ""], ["Past due since", b.past_due_since ? ts(b.past_due_since) : ""], ["Read-only since", b.read_only_at ? ts(b.read_only_at) : ""], ["Deletion scheduled", b.deletion_scheduled_at ? ts(b.deletion_scheduled_at) : ""], ["Export until", b.export_until ? ts(b.export_until) : ""], ["Over limits", (b.over_limits || []).join(", ")]])),
+        section("Billing", ui.kv([["State", b.status.replace("_", " ")], ["Provider", b.provider || "none"], ["Pending change", b.pending ? `${planName(b.pending.plan_id)} (${b.pending.seats} seats) on ${fmt.date(b.pending.effective_at)}` : ""], ["Past due since", b.past_due_since ? ts(b.past_due_since) : ""], ["Read-only since", b.read_only_at ? ts(b.read_only_at) : ""], ["Deletion scheduled", b.deletion_scheduled_at ? ts(b.deletion_scheduled_at) : ""], ["Export until", b.export_until ? ts(b.export_until) : ""], ["Over limits", (b.over_limits || []).join(", ")]])),
         section("Usage this month", usage.length ? ui.kv(usage) : h("p", { class: "muted", text: "No usage yet." }))),
-      section("Apps", h("p", { class: "muted", text: "What this account can open. Included apps come with the plan; an add-on is either paid by the organization or granted here (no charge)." }), appsTable(tenantApps, orgId, done)),
+      section("Apps", h("p", { class: "muted", text: "What this organization can open. Included apps come with its plan; an add-on is paid by the organization or granted here at no charge. Turn an app off here to close it for this organization only (its data is kept)." }),
+        h("p", { class: "muted" }, h("span", { text: "To switch an app off for every organization, use " }), h("a", { href: "#/platform/apps", text: "Apps" }), h("span", { text: ". To change what a plan includes, use " }), h("a", { href: "#/platform/plans", text: "Plans" }), h("span", { text: "." })),
+        appsTable(tenantApps, orgId, done)),
       section("Policy", ui.kv(Object.entries(t.policy || {}).map(([k, v]) => [titleCase(k), Array.isArray(v) ? v.join(", ") || "none" : String(v)]))),
       section("Invoices", table(["Date", "Kind", "#Amount", "Status", ""], invoices, "No invoices.")),
       section("Support access", table(["Requested", "Role", "Status", "Reason", "Expires"], grants, "No support access requested.")),
@@ -360,18 +390,22 @@
     );
   }
 
-  const APP_STATUS_LEVEL = { included: "ok", active: "ok", granted: "ok", cancelling: "warn", off: "", unavailable: "danger" };
+  const APP_STATUS_LEVEL = { included: "ok", active: "ok", granted: "ok", cancelling: "warn", off: "", unavailable: "danger", blocked: "danger", disabled: "danger" };
+  const APP_STATUS_TEXT = { blocked: "off for this organization", disabled: "off for everyone" };
   function appsTable(apps, orgId, done) {
+    const change = (a, status, message) => async (event) => {
+      await Aira.withBusy(event.currentTarget, async () => {
+        await api(`/api/platform/tenants/${orgId}/apps/${a.id}`, { method: "PUT", body: { status, note: "set from the admin console" } });
+        done(message);
+      });
+    };
     const rows = apps.map((a) => {
-      const canGrant = isAdmin() && (a.status === "off" || a.status === "unavailable");
-      const canRevoke = isAdmin() && a.status === "granted";
-      const toggle = canGrant || canRevoke ? h("button", { type: "button", class: `btn sm ${canRevoke ? "danger secondary" : "secondary"}`, text: canRevoke ? "Take back" : "Grant", onclick: async (event) => {
-        await Aira.withBusy(event.currentTarget, async () => {
-          await api(`/api/platform/tenants/${orgId}/apps/${a.id}`, { method: "PUT", body: { status: canRevoke ? "revoked" : "granted", note: "set from the admin console" } });
-          done(canRevoke ? `${a.name} grant taken back.` : `${a.name} granted.`);
-        });
-      } }) : null;
-      return h("tr", {}, td(h("strong", { text: a.name })), td(a.category === "industry" ? a.industry || "Business" : a.category === "life" ? "Everyone, every day" : "Core"), td(chip(a.status, APP_STATUS_LEVEL[a.status] || "")), td(a.seat_cents_month === null ? "not on this plan" : a.seat_cents_month ? `${dollars(a.seat_cents_month)} / seat` : "included", "num"), td(a.monthly_cents ? dollars(a.monthly_cents) : "—", "num"), td(toggle || ""));
+      const buttons = [];
+      if (isAdmin() && (a.status === "off" || a.status === "unavailable")) buttons.push(h("button", { type: "button", class: "btn sm secondary", text: "Grant", "data-app-grant": a.id, onclick: change(a, "granted", `${a.name} granted.`) }));
+      if (isAdmin() && a.status === "granted") buttons.push(h("button", { type: "button", class: "btn sm danger secondary", text: "Take back", onclick: change(a, "revoked", `${a.name} grant taken back.`) }));
+      if (isAdmin() && a.id !== "careers" && ["included", "granted", "off", "unavailable"].includes(a.status)) buttons.push(h("button", { type: "button", class: "btn sm ghost", text: "Turn off here", "data-app-off": a.id, onclick: change(a, "disabled", `${a.name} is off for this organization.`) }));
+      if (isAdmin() && a.status === "blocked") buttons.push(h("button", { type: "button", class: "btn sm", text: "Turn on again", "data-app-on": a.id, onclick: change(a, "enabled", `${a.name} is back to what the plan allows.`) }));
+      return h("tr", {}, td(h("strong", { text: a.name })), td(a.category === "industry" ? a.industry || "Business" : a.category === "life" ? "Everyone, every day" : "Core"), td(chip(APP_STATUS_TEXT[a.status] || a.status, APP_STATUS_LEVEL[a.status] || "")), td(a.seat_cents_month === null ? "not on this plan" : a.seat_cents_month ? `${dollars(a.seat_cents_month)} / seat` : "included", "num"), td(a.monthly_cents ? dollars(a.monthly_cents) : "—", "num"), td(buttons.length ? h("div", { class: "btn-row" }, ...buttons) : ""));
     });
     return table(["App", "For", "Status", "#Price", "#Monthly", ""], rows, "No apps.");
   }
@@ -379,13 +413,14 @@
   // The superadmin sets a subscription the customer bought outside the product (an invoice, a transfer, a contract).
   function subscriptionForm(t, apps, post, done) {
     const b = t.billing;
-    const addons = apps.filter((a) => a.state !== "included" || a.status === "granted");
+    const addons = apps.filter((a) => (a.state !== "included" || a.status === "granted") && a.status !== "blocked");
+    const choices = planChoices({ trial: false });
     formModal({
       title: `Set ${t.name}'s subscription`,
       intro: "Use when the customer paid outside the product. The plan becomes active for the months you choose, with the seats you set. Ticked apps are granted at no extra charge; apps the organization pays for itself stay as they are.",
       wide: true,
       fields: [
-        { name: "plan_id", label: "Plan", type: "select", options: [["starter", "Starter"], ["team", "Team"], ["enterprise", "Enterprise"]], value: ["starter", "team", "enterprise"].includes(b.plan_id) ? b.plan_id : "team" },
+        { name: "plan_id", label: "Plan", type: "select", options: choices, value: choices.some(([id]) => id === b.plan_id) ? b.plan_id : (choices.find(([id]) => id === "team") || choices[0] || [""])[0] },
         { name: "seats", label: "Candidate seats", type: "number", value: Math.max(b.candidate_seats || 0, 5), min: 1, max: 100000 },
         { name: "months", label: "Paid for (months)", type: "number", value: 12, min: 1, max: 36 },
         ...addons.map((a) => ({ name: `app_${a.id}`, label: `${a.name}${a.status === "active" ? " (paid by the organization)" : ""}`, type: "checkbox", value: ["granted", "active", "cancelling"].includes(a.status) })),
@@ -397,7 +432,7 @@
         const chosen = {};
         for (const a of addons) chosen[a.id] = !!v[`app_${a.id}`];
         const r = await post("subscription", { plan_id: v.plan_id, seats: v.seats, months: v.months, apps: chosen, note: v.note });
-        done(`Subscription set: ${titleCase(r.subscription.plan_id)}, ${r.subscription.candidate_seats} seats.`);
+        done(`Subscription set: ${planName(r.subscription.plan_id)}, ${r.subscription.candidate_seats} seats.`);
       },
     });
   }
@@ -435,33 +470,274 @@
   // Plans
   // ---------------------------------------------------------------------------
   const MB = 1024 * 1024;
-  const FEATURES = ["sources.aira_jobs", "sources.company_boards", "sources.google_jobs", "sources.linkedin", "automation.submit", "ai.cover_letters", "api.console_read", "api.searches", "api.v1", "auth.mfa", "auth.sso", "auth.scim", "coach.act", "coach.approve", "branding", "overage", "pooled_serpapi", "byo_model", "siem_export", "legal_hold", "priority_sources", "custom_limits"];
-  const LIMIT_FIELDS = [["candidate_seats", "Candidate seats"], ["staff_seats", "Coach and admin seats"], ["apps_per_candidate_day", "Applications per candidate per day"], ["apps_per_org_month", "Applications per organization per month"], ["search_plans_per_candidate", "Search plans per candidate"], ["cover_letters_per_month", "AI cover letters per month"], ["api_searches_per_month", "API searches per month"], ["api_v1_keys", "API keys (/v1)"], ["api_v1_per_minute", "/v1 requests per minute"], ["monitors_per_candidate", "Monitors per candidate"], ["storage_mb", "Document storage (MB)"], ["retention_days", "Data retention (days)"], ["audit_days", "Audit log (days)"]];
-  const PRICE_FIELDS = [["seat_dollars", "Price per seat per month (USD)"], ["min_seats", "Minimum seats"], ["application_cents", "Overage: per application (cents)"], ["search_cents", "Overage: per search (cents)"], ["cover_letter_cents", "Overage: per cover letter (cents)"], ["pooled_search_cents", "Overage: per pooled search (cents)"]];
+  // Every feature a plan can switch on, with the words the console shows (the server sends the list it accepts).
+  const FEATURE_LABELS = {
+    "sources.aira_jobs": "Job source: free job boards", "sources.company_boards": "Job source: company career boards", "sources.google_jobs": "Job source: Google Jobs (SerpApi)", "sources.linkedin": "Job source: LinkedIn",
+    "automation.submit": "Automatic submission", "ai.cover_letters": "AI cover letters", "api.console_read": "API console: history", "api.searches": "API console: live searches", "api.v1": "The API (/v1) with keys",
+    "auth.mfa": "Two-step sign-in (MFA)", "auth.sso": "Single sign-on (SSO)", "auth.scim": "SCIM provisioning", "coach.act": "Coaches can act", "coach.approve": "Coaches can approve and submit",
+    branding: "Own name and logo in email", overage: "Metered overage (billed past the limits)", pooled_serpapi: "Searches on the platform's SerpApi key", leads_outreach: "Send lead email (outreach)",
+    leads: "Leads (comes with Marketing)", "api.console": "API console (comes with the Developers app)", byo_model: "Own AI model endpoint", siem_export: "Audit stream to a SIEM", legal_hold: "Legal hold", priority_sources: "Queue priority", custom_limits: "Custom limits per organization",
+  };
+  const featureLabel = (feature) => FEATURE_LABELS[feature] || feature;
+  const LIMIT_FIELDS = [["candidate_seats", "Candidate seats"], ["staff_seats", "Coach and admin seats"], ["apps_per_candidate_day", "Applications per candidate per day"], ["apps_per_org_month", "Applications per organization per month"], ["search_plans_per_candidate", "Search plans per candidate"], ["cover_letters_per_month", "AI cover letters per month"], ["api_searches_per_month", "API searches per month"], ["pooled_searches_per_month", "Pooled SerpApi searches per month"], ["api_v1_keys", "API keys (/v1)"], ["api_v1_per_minute", "/v1 requests per minute"], ["monitors_per_candidate", "Monitors per candidate"], ["leads_stored", "Saved leads"], ["lead_enrichments_per_month", "Lead enrichments per month"], ["lead_emails_per_month", "Outreach emails per month"], ["lead_email_daily_cap", "Outreach emails per day"], ["storage_mb", "Document storage (MB)"], ["retention_days", "Data retention (days)"], ["audit_days", "Audit log (days)"]];
+  const PRICE_FIELDS = [["seat_dollars", "Price per seat per month (USD)"], ["min_seats", "Minimum seats"], ["trial_days", "Trial days (when new sign-ups start on it)"], ["application_cents", "Overage: per application (cents)"], ["search_cents", "Overage: per search (cents)"], ["cover_letter_cents", "Overage: per cover letter (cents)"], ["pooled_search_cents", "Overage: per pooled search (cents)"], ["api_search_cents", "Overage: per API search (cents)"]];
+  const OVERAGE_KEYS = ["application_cents", "search_cents", "cover_letter_cents", "pooled_search_cents", "api_search_cents"];
+  const APP_STATE_LABEL = { included: "Included", addon: "Add-on (per seat)", unavailable: "Not offered" };
+  const signupText = (s) => `${s.plan_name}${s.trial_days ? `, as a ${s.trial_days}-day trial` : ", with no trial end"}`;
+  const priceSummary = (plan) => (plan.pricing.contact_sales ? "Contact sales" : plan.pricing.seat_cents_month ? `${dollars(plan.pricing.seat_cents_month)} per seat, from ${plan.pricing.min_seats || 0}` : "Free");
+  const appSummary = (plan) => {
+    const apps = Object.values(plan.apps || {}).filter((a) => a.priced);
+    const count = (state) => apps.filter((a) => a.state === state).length;
+    return plan.plan_id === "trial" ? "Every app" : `${count("included")} included, ${count("addon")} add-on, ${count("unavailable")} not offered`;
+  };
 
   SCREENS.plans = async (stage) => {
-    const [{ plans }, versions] = await Promise.all([api("/api/platform/plans"), api("/api/platform/plans/versions", { silent: true }).catch(() => ({ versions: {} }))]);
-    const cards = plans.map((plan) => {
+    const [data, versions] = await Promise.all([api("/api/platform/plans"), api("/api/platform/plans/versions", { silent: true }).catch(() => ({ versions: {} }))]);
+    P.planData = data;
+    const plans = data.plans;
+    const order = plans.map((p) => p.plan_id);
+    const move = async (planId, step) => {
+      const next = order.slice();
+      const at = next.indexOf(planId);
+      const to = at + step;
+      if (to < 0 || to >= next.length) return;
+      [next[at], next[to]] = [next[to], next[at]];
+      await api("/api/platform/plans/sort-order", { method: "PUT", body: { order: next } });
+      Aira.toast("Order saved.", "success");
+      Aira.router.render();
+    };
+    const cards = plans.map((plan, index) => {
       const counts = (versions.versions || {})[plan.plan_id] || {};
       const older = Object.entries(counts).filter(([v]) => Number(v) < plan.version).reduce((n, [, c]) => n + c, 0);
       const e = plan.entitlements;
-      return h("section", { class: "card cb-card cp-plan" }, h("div", { class: "cp-plan-head" }, h("h2", { text: `${plan.name} · version ${plan.version}` }), h("span", { class: "muted", text: `${plan.subscriptions} subscription${plan.subscriptions === 1 ? "" : "s"}${older ? `, ${older} on an older version` : ""}` })),
-        ui.kv([["Seats", `${e.candidate_seats ?? "no limit"} candidate, ${e.staff_seats ?? "no limit"} staff`], ["Applications", `${e.apps_per_candidate_day ?? "∞"} per candidate per day, ${e.apps_per_org_month ?? "∞"} per month`], ["Price", plan.pricing.contact_sales ? "Contact sales" : `${dollars(plan.pricing.seat_cents_month)} per seat, from ${plan.pricing.min_seats || 0}`], ["Features", (e.features || []).join(", ")]]),
-        h("div", { class: "btn-row" }, isAdmin() ? h("button", { type: "button", class: "btn", text: "Edit and publish a new version", onclick: () => planEditor(plan, counts) }) : null, isAdmin() ? h("button", { type: "button", class: "btn secondary", text: "Schedule migration", onclick: () => migrationForm(plan, counts) }) : null),
+      const chips = h("div", { class: "cp-chips" }, chip(plan.builtin ? "built-in" : "created"), chip(plan.public ? "on the billing page" : "private", plan.public ? "ok" : ""), plan.archived ? chip("archived", "warn") : null, plan.signup_default ? chip("new sign-ups start here", "ok") : null);
+      const buttons = !isAdmin() ? [] : [
+        h("button", { type: "button", class: "btn", text: "Edit", "data-plan-edit": plan.plan_id, onclick: () => planEditor(plan, counts) }),
+        h("button", { type: "button", class: "btn secondary", text: "Schedule migration", onclick: () => migrationForm(plan, counts) }),
+        plan.plan_id === "trial" ? null : plan.archived
+          ? h("button", { type: "button", class: "btn secondary", text: "Restore", onclick: async () => { await api(`/api/platform/plans/${plan.plan_id}/restore`, { method: "POST", body: {} }); Aira.toast(`${plan.name} can be chosen again.`, "success"); Aira.router.render(); } })
+          : h("button", { type: "button", class: "btn danger secondary", text: "Archive", "data-plan-archive": plan.plan_id, onclick: async () => { if (await Aira.confirm({ title: `Archive ${plan.name}?`, message: `No new organization can start on it or buy it. The ${plan.subscriptions} organization${plan.subscriptions === 1 ? "" : "s"} on it keep it until you move them (Set subscription on a tenant). You can restore it later.`, confirmLabel: "Archive", danger: true })) { await api(`/api/platform/plans/${plan.plan_id}/archive`, { method: "POST", body: {} }); Aira.toast(`${plan.name} is archived.`, "success"); Aira.router.render(); } } }),
+        h("button", { type: "button", class: "btn ghost sm", text: "Move up", disabled: index === 0, onclick: () => move(plan.plan_id, -1) }),
+        h("button", { type: "button", class: "btn ghost sm", text: "Move down", disabled: index === plans.length - 1, onclick: () => move(plan.plan_id, 1) }),
+      ];
+      return h("section", { class: `card cb-card cp-plan${plan.archived ? " cp-off" : ""}`, "data-plan": plan.plan_id },
+        h("div", { class: "cp-plan-head" }, h("h2", { text: `${plan.name} · version ${plan.version}` }), h("span", { class: "muted", text: `${plan.plan_id} · ${plan.subscriptions} subscription${plan.subscriptions === 1 ? "" : "s"}${older ? `, ${older} on an older version` : ""}` })),
+        chips,
+        plan.description ? h("p", { class: "muted", text: plan.description }) : null,
+        ui.kv([["Seats", `${e.candidate_seats ?? "no limit"} candidate, ${e.staff_seats ?? "no limit"} staff`], ["Applications", `${e.apps_per_candidate_day ?? "∞"} per candidate per day, ${e.apps_per_org_month ?? "∞"} per month`], ["Price", priceSummary(plan)], ["Trial days", plan.plan_id === "trial" ? "set under New sign-ups" : String(plan.pricing.trial_days || 0)], ["Features", `${(e.features || []).length} of ${(data.features || []).length}: ${(e.features || []).map(featureLabel).join(", ")}`], ["Apps", appSummary(plan)]]),
+        h("div", { class: "btn-row" }, ...buttons.filter(Boolean)),
         plan.migrations.length ? h("div", {}, h("h3", { text: "Migrations" }), table(["Moves to", "On", "Applied"], plan.migrations.map((m) => h("tr", {}, td(`version ${m.to_version}`), td(ts(m.effective_at)), td(m.applied_at ? ts(m.applied_at) : "waiting"))))) : null);
     });
-    put(stage, pageHead("Plans", "Entitlements and prices. A change publishes a new version: new subscriptions use it, existing ones keep theirs until a migration moves them."), readonlyNote(), ...cards);
+    const signup = data.signup || {};
+    const signupCard = h("section", { class: "card cb-card", id: "cpSignup" }, h("h2", { text: "New sign-ups" }),
+      h("p", { "data-signup": signup.plan_id, text: `A new organization starts on ${signupText(signup)}. Its members get every app and feature that plan includes. Existing organizations keep their plans.` }),
+      isAdmin() ? h("div", { class: "btn-row" }, h("button", { type: "button", class: "btn secondary", id: "cpSignupEdit", text: "Change the default plan", onclick: () => signupForm(data) })) : null);
+    put(stage, pageHead("Plans", "What each plan includes and costs. Entitlements and prices publish a new version: new subscriptions use it, existing ones keep theirs until a migration moves them. The order here is the order on the billing page and decides whether a change is an upgrade or a downgrade.", isAdmin() ? h("button", { type: "button", class: "btn", id: "cpPlanNew", text: "New plan", onclick: () => planEditor(null, {}, data) }) : null), readonlyNote(), signupCard, ...cards);
   };
+
+  function signupForm(data) {
+    const live = data.plans.filter((p) => !p.archived);
+    const signup = data.signup || {};
+    formModal({ title: "What new sign-ups get", intro: "Choose the plan a new organization starts on. With 0 trial days it keeps that plan until someone changes it (only a free plan, such as All access); with trial days it is a trial of the plan that ends unless a plan is bought. Existing organizations are not changed.", fields: [
+      { name: "plan_id", label: "Plan", type: "select", options: live.map((p) => [p.plan_id, `${p.name}${p.pricing.seat_cents_month || p.pricing.contact_sales ? "" : " (free)"}`]), value: signup.plan_id },
+      { name: "trial_days", label: "Trial days (0 = no trial end)", type: "number", value: signup.trial_days ?? 0, min: 0, max: 365 },
+    ], submit: "Save", onSubmit: async (v) => {
+      if (v.trial_days == null || v.trial_days < 0 || v.trial_days > 365) throw new Error("Trial days are 0 to 365.");
+      const r = await api("/api/platform/plans/signup-default", { method: "PUT", body: { plan_id: v.plan_id, trial_days: v.trial_days } });
+      Aira.toast(`New sign-ups start on ${signupText(r.signup)}.`, "success");
+      Aira.router.render();
+    } });
+  }
+
+  function planFormState(plan) {
+    const e = plan.entitlements, p = plan.pricing, o = p.overage || {};
+    const apps = {};
+    for (const [id, a] of Object.entries(plan.apps || {})) if (a.priced) apps[id] = { state: a.state, cents: a.seat_cents_month };
+    return { name: plan.name || "", description: plan.description || "", public: plan.public !== false, limits: Object.fromEntries(LIMIT_FIELDS.map(([k]) => [k, k === "storage_mb" ? (e.storage_bytes == null ? null : Math.round(e.storage_bytes / MB)) : (e[k] ?? null)])), coach_max_scope: e.coach_max_scope || "view", support: e.support || "email", features: new Set(e.features || []), price: { seat_dollars: (p.seat_cents_month || 0) / 100, min_seats: p.min_seats || 0, trial_days: p.trial_days || 0, ...Object.fromEntries(OVERAGE_KEYS.map((k) => [k, o[k] ?? null])) }, apps };
+  }
+
+  /** Create a plan (``plan`` null) or edit one: limits, features, prices, apps, name and whether it is sold. */
+  function planEditor(plan, counts, data = P.planData) {
+    const creating = !plan;
+    const all = (data && data.plans) || [];
+    const base = plan || all.find((p) => p.plan_id === "starter") || all[0];
+    const original = planFormState(base);
+    const edit = planFormState(base);
+    if (creating) { edit.name = ""; edit.description = ""; edit.price.trial_days = 0; }
+    const meta = { plan_id: "", based_on: base.plan_id };
+    const body = h("div", { class: "cp-editor" });
+    const diffHost = h("div", { class: "cp-diff", "aria-live": "polite" });
+    const publish = h("button", { type: "button", class: "btn", id: "cpPlanSave", text: creating ? "Create plan" : "Publish", disabled: !creating });
+
+    const numberField = (store, key, label) => {
+      const input = h("input", { type: "number", min: "0", step: key === "seat_dollars" ? "0.01" : "1", value: store[key] ?? "", placeholder: "no limit", id: `cpf-${key}` });
+      input.addEventListener("input", () => { store[key] = input.value === "" ? null : Number(input.value); preview(); });
+      return ui.field(label, input);
+    };
+    const textField = (label, value, onInput, attrs = {}) => {
+      const input = h("input", { type: "text", value, ...attrs });
+      input.addEventListener("input", () => { onInput(input.value); preview(); });
+      return ui.field(label, input);
+    };
+
+    function render() {
+      const about = h("div", { class: "cp-grid-form" });
+      if (creating) {
+        about.append(textField("Plan id (letters, digits, _)", meta.plan_id, (v) => { meta.plan_id = v.trim(); }, { id: "cpf-plan_id", placeholder: "growth", maxlength: "30" }));
+        const basedOn = ui.select(all.map((p) => [p.plan_id, p.name]), meta.based_on, { id: "cpf-based_on" });
+        basedOn.addEventListener("change", () => { meta.based_on = basedOn.value; const from = planFormState(all.find((p) => p.plan_id === basedOn.value)); Object.assign(edit, { limits: from.limits, coach_max_scope: from.coach_max_scope, support: from.support, features: from.features, apps: from.apps, price: { ...from.price, trial_days: edit.price.trial_days } }); render(); });
+        about.append(ui.field("Start from (limits, features and apps are copied)", basedOn));
+      }
+      about.append(textField("Name", edit.name, (v) => { edit.name = v; }, { id: "cpf-name", maxlength: "60" }), textField("Description", edit.description, (v) => { edit.description = v; }, { id: "cpf-description", maxlength: "300" }));
+      const publicBox = h("input", { type: "checkbox", id: "cpf-public", checked: edit.public });
+      publicBox.addEventListener("change", () => { edit.public = publicBox.checked; preview(); });
+      const publicField = (plan && plan.plan_id === "trial") ? null : h("label", { class: "check" }, publicBox, h("span", { text: "Sold on the billing page (owners can buy it when it has a seat price)" }));
+
+      const limits = h("div", { class: "cp-grid-form" });
+      for (const [key, label] of LIMIT_FIELDS) limits.append(numberField(edit.limits, key, label));
+      const scope = ui.select([["view", "view"], ["act", "view, act"], ["approve", "view, act, approve"]], edit.coach_max_scope, { id: "cpf-scope" });
+      scope.addEventListener("change", () => { edit.coach_max_scope = scope.value; preview(); });
+      const support = ui.select([["community", "Community"], ["email", "Email"], ["email_1bd", "Email, 1 business day"], ["named_contact_sla", "Named contact, SLA"]], edit.support, { id: "cpf-support" });
+      support.addEventListener("change", () => { edit.support = support.value; preview(); });
+      limits.append(ui.field("Coach scopes up to", scope), ui.field("Support", support));
+
+      const known = [...new Set([...((data && data.features) || Object.keys(FEATURE_LABELS)), ...edit.features])];
+      const features = h("fieldset", { class: "cp-features" }, h("legend", { text: "Features" }));
+      const allBox = h("button", { type: "button", class: "btn ghost sm", text: "Tick every feature", onclick: () => { for (const f of known) edit.features.add(f); render(); } });
+      const noneBox = h("button", { type: "button", class: "btn ghost sm", text: "Clear", onclick: () => { edit.features.clear(); render(); } });
+      features.append(h("div", { class: "btn-row" }, allBox, noneBox));
+      for (const feature of known) {
+        const box = h("input", { type: "checkbox", checked: edit.features.has(feature), "data-feature": feature });
+        box.addEventListener("change", () => { if (box.checked) edit.features.add(feature); else edit.features.delete(feature); preview(); });
+        features.append(h("label", { class: "check" }, box, h("span", { text: featureLabel(feature) }), h("code", { class: "muted", text: ` ${feature}` })));
+      }
+
+      const prices = h("div", { class: "cp-grid-form" }, ...PRICE_FIELDS.filter(([key]) => !(key === "trial_days" && plan && plan.plan_id === "trial")).map(([key, label]) => numberField(edit.price, key, label)));
+
+      const appRows = [];
+      const appIds = Object.keys(edit.apps);
+      if (plan && plan.plan_id === "trial") appRows.push(h("p", { class: "muted", text: "The trial always has every app that is on." }));
+      else {
+        const setAll = (state) => { for (const id of appIds) edit.apps[id] = { state, cents: state === "addon" ? edit.apps[id].cents || 200 : state === "included" ? 0 : null }; render(); };
+        appRows.push(h("div", { class: "btn-row" }, h("button", { type: "button", class: "btn ghost sm", id: "cpf-apps-all", text: "Include every app", onclick: () => setAll("included") }), h("button", { type: "button", class: "btn ghost sm", text: "Offer none", onclick: () => setAll("unavailable") })));
+        const rows = appIds.map((id) => {
+          const a = edit.apps[id];
+          const name = ((plan || base).apps[id] || {}).name || titleCase(id);
+          const select = ui.select(Object.entries(APP_STATE_LABEL), a.state, { "aria-label": `${id} on this plan`, "data-app": id });
+          const priceInput = h("input", { type: "number", min: "0.01", max: "1000", step: "0.01", value: a.state === "addon" && a.cents ? (a.cents / 100).toFixed(2) : "", placeholder: "USD per seat", "aria-label": `${id} price per seat`, disabled: a.state !== "addon" });
+          select.addEventListener("change", () => { a.state = select.value; a.cents = a.state === "included" ? 0 : a.state === "unavailable" ? null : a.cents || 200; priceInput.disabled = a.state !== "addon"; if (a.state === "addon") priceInput.value = (a.cents / 100).toFixed(2); preview(); });
+          priceInput.addEventListener("input", () => { a.cents = priceInput.value === "" ? null : Math.round(Number(priceInput.value) * 100); preview(); });
+          return h("tr", {}, td(h("strong", { text: name || id })), td(select), td(priceInput));
+        });
+        appRows.push(table(["App", "On this plan", "Add-on price per seat (USD)"], rows, "No app can be priced."));
+      }
+      body.replaceChildren(h("p", { class: "muted", text: creating ? "A new plan starts as version 1. Leave a number empty for no limit." : "Leave a number empty for no limit. Limits, features and prices publish a new version; the name, description, billing page and apps change at once." }), about, publicField || "", h("h3", { text: "Limits" }), limits, features, h("h3", { text: "Pricing" }), prices, h("h3", { text: "Apps" }), ...appRows, h("h3", { text: "What will change" }), diffHost, h("div", { class: "btn-row" }, publish));
+      preview();
+    }
+
+    function appChanges() {
+      const out = {};
+      for (const [id, a] of Object.entries(edit.apps)) {
+        const before = original.apps[id] || {};
+        const value = a.state === "included" ? 0 : a.state === "unavailable" ? null : a.cents;
+        const was = before.state === "included" ? 0 : before.state === "unavailable" ? null : before.cents;
+        if (creating || value !== was) out[id] = value;
+      }
+      return out;
+    }
+    function changes() {
+      const out = [];
+      if (creating) return out;
+      if (original.name !== edit.name) out.push(["Name", original.name, edit.name]);
+      if (original.description !== edit.description) out.push(["Description", original.description || "none", edit.description || "none"]);
+      if (original.public !== edit.public) out.push(["On the billing page", original.public ? "yes" : "no", edit.public ? "yes" : "no"]);
+      for (const [key, label] of LIMIT_FIELDS) if (original.limits[key] !== edit.limits[key]) out.push([label, original.limits[key] ?? "no limit", edit.limits[key] ?? "no limit"]);
+      if (original.coach_max_scope !== edit.coach_max_scope) out.push(["Coach scopes up to", original.coach_max_scope, edit.coach_max_scope]);
+      if (original.support !== edit.support) out.push(["Support", original.support, edit.support]);
+      for (const f of edit.features) if (!original.features.has(f)) out.push([`Feature: ${featureLabel(f)}`, "off", "on"]);
+      for (const f of original.features) if (!edit.features.has(f)) out.push([`Feature: ${featureLabel(f)}`, "on", "off"]);
+      for (const [key, label] of PRICE_FIELDS) if (original.price[key] !== edit.price[key]) out.push([label, original.price[key] ?? "none", edit.price[key] ?? "none"]);
+      for (const [id, value] of Object.entries(appChanges())) out.push([`App: ${id}`, APP_STATE_LABEL[original.apps[id].state], value === null ? "Not offered" : value === 0 ? "Included" : `${dollars(value)} / seat`]);
+      return out;
+    }
+    function preview() {
+      if (creating) { publish.disabled = false; diffHost.replaceChildren(h("p", { class: "muted", text: `A new plan with ${edit.features.size} features and ${Object.values(edit.apps).filter((a) => a.state === "included").length} included apps.` })); return; }
+      const list = changes();
+      publish.disabled = !list.length;
+      diffHost.replaceChildren(list.length ? table(["Change", "From", "To"], list.map(([label, from, to]) => h("tr", {}, td(label), td(h("span", { class: "cp-from", text: String(from) })), td(h("span", { class: "cp-to", text: String(to) }))))) : h("p", { class: "muted", text: "No changes yet." }));
+    }
+    function entitlementsBody(all) {
+      const out = {};
+      for (const [key] of LIMIT_FIELDS) if (all || original.limits[key] !== edit.limits[key]) { if (key === "storage_mb") out.storage_bytes = edit.limits[key] == null ? null : edit.limits[key] * MB; else out[key] = edit.limits[key]; }
+      if (all || original.coach_max_scope !== edit.coach_max_scope) out.coach_max_scope = edit.coach_max_scope;
+      if (all || original.support !== edit.support) out.support = edit.support;
+      if (all || [...edit.features].some((f) => !original.features.has(f)) || [...original.features].some((f) => !edit.features.has(f))) out.features = [...edit.features];
+      return out;
+    }
+    function pricingBody(all) {
+      const out = {};
+      if (all || original.price.seat_dollars !== edit.price.seat_dollars) out.seat_cents_month = Math.round((edit.price.seat_dollars || 0) * 100);
+      if (all || original.price.min_seats !== edit.price.min_seats) out.min_seats = edit.price.min_seats || 0;
+      if ((all || original.price.trial_days !== edit.price.trial_days) && !(plan && plan.plan_id === "trial")) out.trial_days = edit.price.trial_days || 0;
+      const overage = all ? {} : { ...((plan && plan.pricing.overage) || {}) };
+      let changed = all;
+      for (const key of OVERAGE_KEYS) if (all || original.price[key] !== edit.price[key]) { changed = true; if (edit.price[key] == null) delete overage[key]; else overage[key] = edit.price[key]; }
+      if (changed) out.overage = overage;
+      return out;
+    }
+    publish.addEventListener("click", (event) => Aira.withBusy(event.currentTarget, async () => {
+      for (const a of Object.values(edit.apps)) if (a.state === "addon" && !(a.cents > 0 && a.cents <= 100000)) throw new Error("Give every add-on a price between $0.01 and $1,000 per seat.");
+      if (creating) {
+        if (!/^[a-z][a-z0-9_]{2,29}$/.test(meta.plan_id)) throw new Error("The plan id is 3 to 30 lowercase letters, digits or underscores, starting with a letter.");
+        if (edit.name.trim().length < 2) throw new Error("Enter the plan's name.");
+        const r = await api("/api/platform/plans", { method: "POST", body: { plan_id: meta.plan_id, name: edit.name.trim(), description: edit.description.trim(), public: edit.public, based_on: meta.based_on, entitlements: entitlementsBody(true), pricing: pricingBody(true), apps: appChanges() } });
+        Aira.toast(`${r.plan.name} created.`, "success");
+      } else {
+        const list = changes();
+        const versioned = Object.keys(entitlementsBody(false)).length || Object.keys(pricingBody(false)).length;
+        if (!(await Aira.confirm({ title: versioned ? `Publish ${plan.name} version ${plan.version + 1}?` : `Save ${plan.name}?`, message: `${list.length} change${list.length === 1 ? "" : "s"}. ${versioned ? `New subscriptions use the new version at once; existing ones keep version ${plan.version} until you schedule a migration.` : "These apply at once."}`, confirmLabel: versioned ? "Publish" : "Save" }))) return;
+        const payload = {};
+        const ent = entitlementsBody(false), pricing = pricingBody(false), apps = appChanges();
+        if (Object.keys(ent).length) payload.entitlements = ent;
+        if (Object.keys(pricing).length) payload.pricing = pricing;
+        if (Object.keys(apps).length) payload.apps = apps;
+        if (original.name !== edit.name) payload.name = edit.name.trim();
+        if (original.description !== edit.description) payload.description = edit.description.trim();
+        if (original.public !== edit.public) payload.public = edit.public;
+        const result = await api(`/api/platform/plans/${plan.plan_id}`, { method: "PUT", body: payload });
+        Aira.toast(versioned ? `${plan.name} version ${result.version} published.` : `${plan.name} saved.`, "success");
+      }
+      Aira.closeDrawer();
+      Aira.router.render();
+    }));
+    render();
+    Aira.drawer({ title: creating ? "New plan" : `Edit ${plan.name}`, subtitle: h("span", { text: creating ? "Every limit, feature and app it gives" : `Currently version ${plan.version}` }), body });
+  }
+
+  function migrationForm(plan, counts) {
+    const options = Array.from({ length: plan.version }, (_, i) => [String(i + 1), `Version ${i + 1}${counts[String(i + 1)] ? ` (${counts[String(i + 1)]} subscriptions)` : ""}`]);
+    const tomorrow = new Date(Date.now() + 86400000);
+    const local = new Date(tomorrow.getTime() - tomorrow.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+    formModal({ title: `Migrate ${plan.name} subscriptions`, intro: "Existing subscriptions move to the chosen version on the date; entitlements change for them then.", fields: [{ name: "version", label: "Move subscriptions to", type: "select", options, value: String(plan.version) }, { name: "when", label: "On", type: "datetime-local", value: local }], submit: "Schedule migration", onSubmit: async (v) => {
+      const when = new Date(v.when).getTime();
+      if (!Number.isFinite(when) || when < Date.now() - 60000) throw new Error("Choose a time in the future.");
+      await api(`/api/platform/plans/${plan.plan_id}/migrate`, { method: "POST", body: { version: Number(v.version), effective_at: Math.floor(when / 1000) } });
+      Aira.toast("Migration scheduled.", "success");
+      Aira.router.render();
+    } });
+  }
 
   // ---------------------------------------------------------------------------
   // Apps: switched on or off for everyone, and seat prices per plan
   // ---------------------------------------------------------------------------
-  const APP_PLANS = [["starter", "Starter"], ["team", "Team"], ["enterprise", "Enterprise"]];
   const APP_GROUPS = { core: "Core", industry: "Business", life: "Everyday" };
   const priceText = (cents) => (cents == null ? "Not offered" : cents === 0 ? "Included" : `${dollars(cents)} / seat`);
+  // The plans an app is priced on: every plan but the trial (it has every app), archived ones last.
+  const appPlans = () => planChoices({ trial: false, archived: true });
 
   SCREENS.apps = async (stage) => {
-    const { apps } = await api("/api/platform/apps");
+    const [{ apps }] = await Promise.all([api("/api/platform/apps"), plansList(true)]);
+    const APP_PLANS = appPlans();
     const saved = (verb, app) => {
       const b = app.billing || {};
       Aira.toast(`${app.name} ${verb}.${b.organizations ? ` ${b.synced} of ${b.organizations} paying subscriptions updated${b.failed ? `; ${b.failed} failed: reconcile them from the tenant page` : ""}.` : ""}`, b.failed ? "error" : "success");
@@ -469,17 +745,17 @@
     };
     const save = (app, body) => api(`/api/platform/apps/${app.id}`, { method: "PUT", body });
     const rows = apps.map((app) => {
-      const cells = APP_PLANS.map(([plan]) => {
-        if (!app.priced) return td(plan === "starter" ? "Part of every plan" : "", "muted");
+      const cells = APP_PLANS.map(([plan], index) => {
+        if (!app.priced) return td(index === 0 ? "Part of every plan" : "", "muted");
         const changed = app.changed_plans.includes(plan);
         return td(h("div", {}, h("span", { text: priceText(app.prices[plan]) }), changed ? h("div", { class: "muted", text: `was ${priceText(app.default_prices[plan])}` }) : null), changed ? "cp-changed" : "");
       });
       const actions = !isAdmin() || !app.priced ? null : h("div", { class: "btn-row" },
-        h("button", { type: "button", class: "btn sm secondary", text: "Prices", onclick: () => appPriceForm(app, save, saved) }),
+        h("button", { type: "button", class: "btn sm secondary", text: "Prices", onclick: () => appPriceForm(app, save, saved, APP_PLANS) }),
         app.enabled
-          ? h("button", { type: "button", class: "btn sm danger secondary", text: "Switch off", onclick: () => formModal({ title: `Switch off ${app.name} for every organization?`, intro: `Within a minute nobody can open it, including trials, Enterprise and grants${app.paying ? `, and the organizations paying for it (${app.paying}) stop being billed for it from their next period` : ""}. Their data and choices are kept; switching it back on restores them.`, fields: [{ name: "note", label: "Reason (kept in the platform audit log)", type: "textarea", rows: 2 }], submit: "Switch off", danger: true, onSubmit: async (v) => { if (!v.note) throw new Error("Give a reason."); saved("is off for everyone", await save(app, { enabled: false, note: v.note })); } }) })
-          : h("button", { type: "button", class: "btn sm", text: "Switch on", onclick: async () => saved("is on again", await save(app, { enabled: true, note: "switched back on" })) }),
-        !app.enabled || app.changed_plans.length ? h("button", { type: "button", class: "btn sm ghost", text: "Reset", onclick: async () => { if (await Aira.confirm({ title: `Reset ${app.name} to the defaults?`, message: "It is on for everyone with the standard prices; paying subscriptions move to them from their next period.", confirmLabel: "Reset" })) saved("is back to the defaults", await api(`/api/platform/apps/${app.id}`, { method: "DELETE" })); } }) : null);
+          ? h("button", { type: "button", class: "btn sm danger secondary", text: "Switch off for everyone", "data-app-kill": app.id, onclick: () => formModal({ title: `Switch off ${app.name} for every organization?`, intro: `Within a minute nobody can open it, including trials, Enterprise and grants${app.paying ? `, and the organizations paying for it (${app.paying}) stop being billed for it from their next period` : ""}. Their data and choices are kept; switching it back on restores them.`, fields: [{ name: "note", label: "Reason (kept in the platform audit log)", type: "textarea", rows: 2 }], submit: "Switch off", danger: true, onSubmit: async (v) => { if (!v.note) throw new Error("Give a reason."); saved("is off for everyone", await save(app, { enabled: false, note: v.note })); } }) })
+          : h("button", { type: "button", class: "btn sm", text: "Switch on for everyone", onclick: async () => saved("is on again", await save(app, { enabled: true, note: "switched back on" })) }),
+        !app.enabled || app.changed_plans.length ? h("button", { type: "button", class: "btn sm ghost", text: "Reset", onclick: async () => { if (await Aira.confirm({ title: `Reset ${app.name} to the defaults?`, message: "It is on for everyone with the standard prices; paying subscriptions move to them from their next period. What plans you created say about it is kept.", confirmLabel: "Reset" })) saved("is back to the defaults", await api(`/api/platform/apps/${app.id}`, { method: "DELETE" })); } }) : null);
       return h("tr", { class: app.enabled ? "" : "cp-off" },
         td(h("div", {}, h("strong", { text: app.name }), h("div", { class: "muted", text: `${APP_GROUPS[app.category] || titleCase(app.category)}${app.note && !app.enabled ? ` · ${app.note}` : ""}` }))),
         td(app.enabled ? chip("on", "ok") : chip("OFF for everyone", "danger")),
@@ -488,11 +764,11 @@
         td(app.updated_at ? fmt.ago(app.updated_at) : "defaults"),
         td(actions));
     });
-    put(stage, pageHead("Apps", "Switch an app off for every organization, or change what it costs per candidate seat on each plan. Quotes and the Apps page use a new price at once; paying subscriptions move to it from their next billing period. The trial always has every app that is on."), readonlyNote(),
-      section(null, table(["App", "For everyone", "Starter", "Team", "Enterprise", "#Organizations", "Changed", ""], rows)));
+    put(stage, pageHead("Apps", "Switch an app off for every organization, or change what it costs per candidate seat on each plan. Quotes and the Apps page use a new price at once; paying subscriptions move to it from their next billing period. The trial always has every app that is on. To turn an app off for one organization only, open the tenant."), readonlyNote(),
+      section(null, table(["App", "For everyone", ...APP_PLANS.map(([, label]) => label), "#Organizations", "Changed", ""], rows)));
   };
 
-  function appPriceForm(app, save, saved) {
+  function appPriceForm(app, save, saved, APP_PLANS) {
     const fields = [];
     for (const [plan, label] of APP_PLANS) {
       const cents = app.prices[plan];
@@ -518,90 +794,6 @@
     } });
   }
 
-  function planFormState(plan) {
-    const e = plan.entitlements, p = plan.pricing, o = p.overage || {};
-    return { limits: Object.fromEntries(LIMIT_FIELDS.map(([k]) => [k, k === "storage_mb" ? (e.storage_bytes == null ? null : Math.round(e.storage_bytes / MB)) : (e[k] ?? null)])), coach_max_scope: e.coach_max_scope, support: e.support, features: new Set(e.features || []), price: { seat_dollars: (p.seat_cents_month || 0) / 100, min_seats: p.min_seats || 0, application_cents: o.application_cents ?? null, search_cents: o.search_cents ?? null, cover_letter_cents: o.cover_letter_cents ?? null, pooled_search_cents: o.pooled_search_cents ?? null } };
-  }
-
-  function planEditor(plan, counts) {
-    const original = planFormState(plan);
-    const edit = planFormState(plan);
-    const inputs = {};
-    const grid = h("div", { class: "cp-grid-form" });
-    const numberField = (store, key, label) => {
-      const input = h("input", { type: "number", min: "0", step: key === "seat_dollars" ? "0.01" : "1", value: store[key] ?? "", placeholder: "no limit", id: `cpf-${key}` });
-      input.addEventListener("input", () => { store[key] = input.value === "" ? null : Number(input.value); preview(); });
-      inputs[key] = input;
-      return ui.field(label, input);
-    };
-    for (const [key, label] of LIMIT_FIELDS) grid.append(numberField(edit.limits, key, label));
-    const scope = ui.select([["view", "view"], ["act", "view, act"], ["approve", "view, act, approve"]], edit.coach_max_scope, { id: "cpf-scope" });
-    scope.addEventListener("change", () => { edit.coach_max_scope = scope.value; preview(); });
-    const support = ui.select([["community", "Community"], ["email", "Email"], ["email_1bd", "Email, 1 business day"], ["named_contact_sla", "Named contact, SLA"]], edit.support, { id: "cpf-support" });
-    support.addEventListener("change", () => { edit.support = support.value; preview(); });
-    grid.append(ui.field("Coach scopes up to", scope), ui.field("Support", support));
-    const features = h("fieldset", { class: "cp-features" }, h("legend", { text: "Features" }));
-    for (const feature of [...new Set([...FEATURES, ...edit.features])]) {
-      const box = h("input", { type: "checkbox", checked: edit.features.has(feature) });
-      box.addEventListener("change", () => { box[box.checked ? "setAttribute" : "removeAttribute"]("checked", ""); if (box.checked) edit.features.add(feature); else edit.features.delete(feature); preview(); });
-      features.append(h("label", { class: "check" }, box, h("span", { text: feature })));
-    }
-    const prices = h("div", { class: "cp-grid-form" }, ...PRICE_FIELDS.map(([key, label]) => numberField(edit.price, key, label)));
-    const diffHost = h("div", { class: "cp-diff", "aria-live": "polite" });
-    const publish = h("button", { type: "button", class: "btn", text: "Publish new version", disabled: true });
-
-    function changes() {
-      const out = [];
-      for (const [key, label] of LIMIT_FIELDS) if (original.limits[key] !== edit.limits[key]) out.push([label, original.limits[key] ?? "no limit", edit.limits[key] ?? "no limit"]);
-      if (original.coach_max_scope !== edit.coach_max_scope) out.push(["Coach scopes up to", original.coach_max_scope, edit.coach_max_scope]);
-      if (original.support !== edit.support) out.push(["Support", original.support, edit.support]);
-      for (const f of edit.features) if (!original.features.has(f)) out.push([`Feature ${f}`, "off", "on"]);
-      for (const f of original.features) if (!edit.features.has(f)) out.push([`Feature ${f}`, "on", "off"]);
-      for (const [key, label] of PRICE_FIELDS) if (original.price[key] !== edit.price[key]) out.push([label, original.price[key] ?? "none", edit.price[key] ?? "none"]);
-      return out;
-    }
-    function preview() {
-      const list = changes();
-      publish.disabled = !list.length;
-      diffHost.replaceChildren(list.length ? table(["Change", "From", "To"], list.map(([label, from, to]) => h("tr", {}, td(label), td(h("span", { class: "cp-from", text: String(from) })), td(h("span", { class: "cp-to", text: String(to) }))))) : h("p", { class: "muted", text: "No changes yet." }));
-    }
-    publish.addEventListener("click", (event) => Aira.withBusy(event.currentTarget, async () => {
-      const list = changes();
-      if (!(await Aira.confirm({ title: `Publish ${plan.name} version ${plan.version + 1}?`, message: `${list.length} change${list.length === 1 ? "" : "s"}. New subscriptions use it at once; existing ones keep version ${plan.version} until you schedule a migration.`, confirmLabel: "Publish" }))) return;
-      const entitlements = {};
-      for (const [key] of LIMIT_FIELDS) if (original.limits[key] !== edit.limits[key]) { if (key === "storage_mb") entitlements.storage_bytes = edit.limits[key] == null ? null : edit.limits[key] * MB; else entitlements[key] = edit.limits[key]; }
-      if (original.coach_max_scope !== edit.coach_max_scope) entitlements.coach_max_scope = edit.coach_max_scope;
-      if (original.support !== edit.support) entitlements.support = edit.support;
-      if (list.some(([label]) => label.startsWith("Feature "))) entitlements.features = [...edit.features];
-      const pricing = {};
-      if (original.price.seat_dollars !== edit.price.seat_dollars) pricing.seat_cents_month = Math.round((edit.price.seat_dollars || 0) * 100);
-      if (original.price.min_seats !== edit.price.min_seats) pricing.min_seats = edit.price.min_seats || 0;
-      const overage = { ...(plan.pricing.overage || {}) };
-      let overageChanged = false;
-      for (const key of ["application_cents", "search_cents", "cover_letter_cents", "pooled_search_cents"]) if (original.price[key] !== edit.price[key]) { overageChanged = true; if (edit.price[key] == null) delete overage[key]; else overage[key] = edit.price[key]; }
-      if (overageChanged) pricing.overage = overage;
-      const result = await api(`/api/platform/plans/${plan.plan_id}`, { method: "PUT", body: { entitlements, pricing } });
-      Aira.toast(`${plan.name} version ${result.version} published.`, "success");
-      Aira.closeDrawer();
-      Aira.router.render();
-    }));
-    preview();
-    Aira.drawer({ title: `Edit ${plan.name}`, subtitle: h("span", { text: `Currently version ${plan.version}` }), body: h("div", { class: "cp-editor" }, h("p", { class: "muted", text: "Leave a number empty for no limit. Nothing changes until you publish." }), grid, features, h("h3", { text: "Pricing" }), prices, h("h3", { text: "What will change" }), diffHost, h("div", { class: "btn-row" }, publish)) });
-  }
-
-  function migrationForm(plan, counts) {
-    const options = Array.from({ length: plan.version }, (_, i) => [String(i + 1), `Version ${i + 1}${counts[String(i + 1)] ? ` (${counts[String(i + 1)]} subscriptions)` : ""}`]);
-    const tomorrow = new Date(Date.now() + 86400000);
-    const local = new Date(tomorrow.getTime() - tomorrow.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
-    formModal({ title: `Migrate ${plan.name} subscriptions`, intro: "Existing subscriptions move to the chosen version on the date; entitlements change for them then.", fields: [{ name: "version", label: "Move subscriptions to", type: "select", options, value: String(plan.version) }, { name: "when", label: "On", type: "datetime-local", value: local }], submit: "Schedule migration", onSubmit: async (v) => {
-      const when = new Date(v.when).getTime();
-      if (!Number.isFinite(when) || when < Date.now() - 60000) throw new Error("Choose a time in the future.");
-      await api(`/api/platform/plans/${plan.plan_id}/migrate`, { method: "POST", body: { version: Number(v.version), effective_at: Math.floor(when / 1000) } });
-      Aira.toast("Migration scheduled.", "success");
-      Aira.router.render();
-    } });
-  }
-
   // ---------------------------------------------------------------------------
   // Feature flags
   // ---------------------------------------------------------------------------
@@ -614,7 +806,7 @@
   ];
 
   SCREENS.flags = async (stage) => {
-    const [{ flags }] = await Promise.all([api("/api/platform/flags"), tenantsList()]);
+    const [{ flags }] = await Promise.all([api("/api/platform/flags"), tenantsList(), plansList(true)]);
     const rows = flags.map((f) => h("tr", {}, td(h("code", { text: f.flag })), td(f.scope_type === "global" ? chip("everyone", f.enabled ? "ok" : "danger") : chip(`${f.scope_type}: ${f.scope_type === "org" ? tenantName(f.scope_id) : f.scope_id}`)), td(f.enabled ? "on" : f.scope_type === "global" ? "OFF: kill switch" : "off"), td(f.enabled ? `${f.percent}%` : "—", "num"), td(`${f.updated_by ? "operator" : ""} ${fmt.ago(f.updated_at)}`), td(isAdmin() ? h("button", { type: "button", class: "btn sm secondary", text: "Remove", onclick: async () => { await api(`/api/platform/flags?flag=${encodeURIComponent(f.flag)}&scope_type=${f.scope_type}&scope_id=${encodeURIComponent(f.scope_id)}`, { method: "DELETE" }); Aira.toast("Flag removed.", "success"); Aira.router.render(); } }) : null)));
     const quick = QUICK_FLAGS.map(([flag, label, text]) => {
       const kill = flags.find((f) => f.flag === flag && f.scope_type === "global" && !f.enabled);
@@ -625,12 +817,13 @@
       const tenants = P.tenants || [];
       formModal({ title: "Set a feature flag", intro: "Precedence: a tenant's flag, then its plan's, then everyone's. A global flag switched OFF is a kill switch and overrides everything. A tenant or plan flag switched ON grants a feature the plan lacks (a beta).", wide: true, fields: [
         { name: "flag", label: "Flag", list: "cpFlagNames", placeholder: "sources.linkedin" }, { name: "scope_type", label: "Applies to", type: "select", options: [["global", "Everyone"], ["plan", "A plan"], ["org", "One organization"]] },
-        { name: "scope_id", label: "Plan id or organization", type: "select", options: [["", "(everyone)"], ["trial", "plan: trial"], ["starter", "plan: starter"], ["team", "plan: team"], ["enterprise", "plan: enterprise"], ...tenants.map((t) => [t.org_id, `org: ${t.name}`])] },
+        { name: "scope_id", label: "Plan id or organization", type: "select", options: [["", "(everyone)"], ...planChoices({ archived: true }).map(([id, label]) => [id, `plan: ${label}`]), ...tenants.map((t) => [t.org_id, `org: ${t.name}`])] },
         { name: "enabled", label: "On (untick for off)", type: "checkbox", value: true }, { name: "percent", label: "Roll out to this percentage of organizations", type: "number", value: 100, min: 0, max: 100 }], submit: "Save flag", onSubmit: async (v) => {
         if (!v.flag) throw new Error("Enter a flag name.");
         if (v.scope_type !== "global" && !v.scope_id) throw new Error("Choose the plan or organization.");
-        if (v.scope_type === "plan" && !["trial", "starter", "team", "enterprise"].includes(v.scope_id)) throw new Error("Choose a plan, not an organization.");
-        if (v.scope_type === "org" && ["trial", "starter", "team", "enterprise"].includes(v.scope_id)) throw new Error("Choose an organization, not a plan.");
+        const planIds = planChoices({ archived: true }).map(([id]) => id);
+        if (v.scope_type === "plan" && !planIds.includes(v.scope_id)) throw new Error("Choose a plan, not an organization.");
+        if (v.scope_type === "org" && planIds.includes(v.scope_id)) throw new Error("Choose an organization, not a plan.");
         await api("/api/platform/flags", { method: "PUT", body: { flag: v.flag, scope_type: v.scope_type, scope_id: v.scope_type === "global" ? "" : v.scope_id, enabled: v.enabled, percent: v.percent ?? 100 } });
         Aira.toast(v.scope_type === "global" && !v.enabled ? `${v.flag} is off for everyone.` : "Flag saved.", "success");
         Aira.router.render();
@@ -804,7 +997,7 @@
   // Announcements
   // ---------------------------------------------------------------------------
   SCREENS.announcements = async (stage) => {
-    await tenantsList();
+    await Promise.all([tenantsList(), plansList(true)]);
     const { announcements } = await api("/api/platform/announcements");
     const now = Date.now() / 1000;
     const state = (a) => (a.cancelled_at ? "cancelled" : a.ends_at && a.ends_at < now ? "ended" : "live");
@@ -812,7 +1005,7 @@
     const compose = () => formModal({ title: "New announcement", intro: "Shown to every organization's members in their banner area (or one plan, or one organization).", fields: [
       { name: "title", label: "Title", maxlength: 160 }, { name: "body", label: "Message", type: "textarea", rows: 3 }, { name: "severity", label: "Severity", type: "select", options: [["info", "Information"], ["warning", "Warning"], ["danger", "Outage"]] },
       { name: "scope_type", label: "Audience", type: "select", options: [["all", "Everyone"], ["plan", "One plan"], ["org", "One organization"]] },
-      { name: "scope_id", label: "Plan or organization", type: "select", options: [["", "(everyone)"], ["trial", "plan: trial"], ["starter", "plan: starter"], ["team", "plan: team"], ["enterprise", "plan: enterprise"], ...(P.tenants || []).map((t) => [t.org_id, `org: ${t.name}`])] },
+      { name: "scope_id", label: "Plan or organization", type: "select", options: [["", "(everyone)"], ...planChoices().map(([id, label]) => [id, `plan: ${label}`]), ...(P.tenants || []).map((t) => [t.org_id, `org: ${t.name}`])] },
       { name: "hours", label: "Show for (hours; empty = until cancelled)", type: "number", min: 1, max: 720 }], submit: "Publish", onSubmit: async (v) => {
       if (!v.title) throw new Error("Enter a title.");
       if (v.scope_type !== "all" && !v.scope_id) throw new Error("Choose the plan or organization.");

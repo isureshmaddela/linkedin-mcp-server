@@ -8,6 +8,7 @@ from monosage_cloud.db import one
 from monosage_cloud.errors import (
     Conflict,
     Forbidden,
+    Locked,
     NotFound,
     Unauthorized,
     ValidationFailed,
@@ -148,7 +149,22 @@ def me_payload(app: Any, principal: Principal) -> dict[str, Any]:
 
 @cloud_route("GET", r"/api/auth/me", verified=False, mfa=False)
 def auth_me(req: Req):  # noqa: ANN201
-    return 200, me_payload(req.app, req.principal)
+    payload = me_payload(req.app, req.principal)
+    if not req.principal.is_operator:
+        # The same person also signed in to the platform console here: the account menu offers the way back to it.
+        operator = req.app.identity.principal_for_token(
+            req.request.cookie(OPERATOR_COOKIE), kind="operator"
+        )
+        if (
+            operator is not None
+            and not operator.via_support
+            and operator.email == req.principal.email
+        ):
+            payload["console"] = {
+                "role": operator.operator_role,
+                "mfa_verified": operator.mfa_verified,
+            }
+    return 200, payload
 
 
 @cloud_route("GET", r"/api/cloud/config", auth="public")
@@ -181,41 +197,79 @@ def signup_org(req: Req):  # noqa: ANN201
     )
 
 
+def operator_cookie(req: Req, token: str) -> str:
+    """The console's cookie, exactly as the platform sign-in sets it."""
+    return cookie_header(
+        OPERATOR_COOKIE,
+        token,
+        max_age=req.app.config.operator_session_ttl,
+        secure=req.app.config.cookie_secure,
+    )
+
+
+def end_both_sessions(req: Req) -> list[str]:
+    """Revoke whatever member and operator sessions this browser holds; the cookies that clear them."""
+    for name in (SESSION_COOKIE, OPERATOR_COOKIE):
+        req.app.identity.logout(req.request.cookie(name))
+    return [clear_cookie(req), clear_cookie(req, OPERATOR_COOKIE)]
+
+
 @cloud_route("POST", r"/api/auth/login", auth="public")
 def login(req: Req):  # noqa: ANN201
+    """The one sign-in page: a member, a platform operator, or both (see ``Identity.sign_in``)."""
     body = req.body()
     email = str(body.get("email", "")).strip().lower()
     limiter = req.app.gateway.auth_limiter
-    key = f"login:{req.request.client_ip}:{email}"
-    result = None
     try:
-        result = req.app.identity.login(
+        result = req.app.identity.sign_in(
             email,
             str(body.get("password", "")),
             org=str(body.get("org", "")),
             ip=req.request.client_ip,
             user_agent=req.request.headers.get("user-agent", ""),
         )
-    except Unauthorized:
-        limiter.hit(key)
+    except (Unauthorized, Locked):
+        limiter.hit(f"login:{req.request.client_ip}:{email}")
+        limiter.hit(f"auth:{req.request.client_ip}")
         raise
-    limiter.reset(f"auth:{req.request.client_ip}")
-    principal = req.app.identity.principal_for_token(result["token"])
-    return Reply(
-        200,
-        {
-            "ok": True,
-            "mfa_required": result["mfa_required"],
-            "me": me_payload(req.app, principal) if principal else None,
-        },
-        cookies=[session_cookie(req, result["token"])],
+    member = result["member"]
+    operator = result["operator"]
+    # A sign-in replaces what this browser held: the old sessions end, and a kind not signed in now is cleared.
+    for name in (SESSION_COOKIE, OPERATOR_COOKIE):
+        req.app.identity.logout(req.request.cookie(name))
+    cookies = [
+        session_cookie(req, member["token"]) if member else clear_cookie(req),
+        operator_cookie(req, operator["token"])
+        if operator
+        else clear_cookie(req, OPERATOR_COOKIE),
+    ]
+    if member:
+        limiter.reset(f"auth:{req.request.client_ip}")
+    principal = (
+        req.app.identity.principal_for_token(member["token"]) if member else None
     )
+    payload: dict[str, Any] = {
+        "ok": True,
+        "signed_in": [
+            kind for kind, done in (("member", member), ("operator", operator)) if done
+        ],
+        "mfa_required": bool(member and member["mfa_required"]),
+        "me": me_payload(req.app, principal) if principal else None,
+        "operator": {"role": operator["role"], "mfa_enrolled": operator["mfa_enrolled"]}
+        if operator
+        else None,
+        # Where the page goes next: an operator to the console (its second factor first), a member to Home.
+        "next": "console" if operator else "home",
+    }
+    if result["member_notice"]:
+        payload["member_notice"] = result["member_notice"]
+    return Reply(200, payload, cookies=cookies)
 
 
 @cloud_route("POST", r"/api/auth/logout", auth="public")
 def logout(req: Req):  # noqa: ANN201
-    req.app.identity.logout(req.request.cookie(SESSION_COOKIE))
-    return Reply(200, {"ok": True}, cookies=[clear_cookie(req)])
+    """Sign out of everything this browser is signed in to: the member session and the console session."""
+    return Reply(200, {"ok": True}, cookies=end_both_sessions(req))
 
 
 @cloud_route("POST", r"/api/auth/verify-email", auth="public")

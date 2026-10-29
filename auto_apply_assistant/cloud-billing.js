@@ -12,7 +12,9 @@
   if (!cloud) return;
   const { fmt, ui } = Aira;
 
-  const PLAN_ORDER = ["trial", "starter", "team", "enterprise"];
+  // The built-in order; the page replaces it with the superadmin's (plans they create included) from /api/org/billing.
+  let PLAN_ORDER = ["trial", "starter", "team", "enterprise", "all_access"];
+  const setPlanOrder = (order) => { if (Array.isArray(order) && order.length) PLAN_ORDER = order.slice(); };
   const DAY = 86400;
   const SUPPORT = { community: "Community", email: "Email", email_1bd: "Email, 1 business day", named_contact_sla: "Named contact, SLA" };
 
@@ -30,6 +32,7 @@
   };
   const retention = (days) => (days >= 365 ? `${+(days / 365).toFixed(1)} year${days >= 730 ? "s" : ""}` : `${days} days`);
   const rank = (plan) => PLAN_ORDER.indexOf(plan);
+  const lim = (value) => (value == null ? "No limit" : num(value));
 
   /** What a subscription state means to a person, with the dates that matter. */
   function statusInfo(b, now = Date.now() / 1000) {
@@ -83,16 +86,16 @@
   }
 
   const LIMIT_ROWS = [
-    ["Candidate seats", (p) => (p.plan_id === "enterprise" ? "Custom" : `up to ${num(p.limits.candidate_seats)}`)],
-    ["Coach and admin seats", (p) => (p.plan_id === "enterprise" ? "Custom" : num(p.limits.staff_seats))],
-    ["Applications per candidate per day", (p) => (p.plan_id === "enterprise" ? "Custom" : num(p.limits.apps_per_candidate_day))],
-    ["Applications per organization per month", (p) => (p.plan_id === "enterprise" ? "Custom" : num(p.limits.apps_per_org_month))],
+    ["Candidate seats", (p) => (p.plan_id === "enterprise" ? "Custom" : `up to ${lim(p.limits.candidate_seats)}`)],
+    ["Coach and admin seats", (p) => (p.plan_id === "enterprise" ? "Custom" : lim(p.limits.staff_seats))],
+    ["Applications per candidate per day", (p) => (p.plan_id === "enterprise" ? "Custom" : lim(p.limits.apps_per_candidate_day))],
+    ["Applications per organization per month", (p) => (p.plan_id === "enterprise" ? "Custom" : lim(p.limits.apps_per_org_month))],
     ["Job sources", (p) => ["aira_jobs", "company_boards", "google_jobs", "linkedin"].filter((s) => p.features.includes(`sources.${s}`)).map((s) => ({ aira_jobs: "Free job boards", company_boards: "Company boards", google_jobs: "Google Jobs (own SerpApi key)", linkedin: "LinkedIn (own session)" }[s])).join(", ")],
     ["Automatic submission", (p) => (p.features.includes("automation.submit") ? "Yes" : "Review mode only")],
-    ["Search plans per candidate", (p) => (p.plan_id === "enterprise" ? "Custom" : num(p.limits.search_plans_per_candidate))],
-    ["AI cover letters per month", (p) => (p.plan_id === "enterprise" ? "Custom, or your own model endpoint" : p.features.includes("ai.cover_letters") ? num(p.limits.cover_letters_per_month) : "—")],
-    ["API (console and /v1)", (p) => (p.features.includes("api.v1") ? (p.plan_id === "enterprise" ? "Custom" : `${num(p.limits.api_searches_per_month)} searches, /v1 with ${p.limits.api_v1_keys} keys`) : p.features.includes("api.searches") ? `${num(p.limits.api_searches_per_month)} searches, no /v1` : "Read-only history")],
-    ["Monitors and alerts per candidate", (p) => (p.plan_id === "enterprise" ? "Custom" : num(p.limits.monitors_per_candidate))],
+    ["Search plans per candidate", (p) => (p.plan_id === "enterprise" ? "Custom" : lim(p.limits.search_plans_per_candidate))],
+    ["AI cover letters per month", (p) => (p.plan_id === "enterprise" ? "Custom, or your own model endpoint" : p.features.includes("ai.cover_letters") ? lim(p.limits.cover_letters_per_month) : "—")],
+    ["API (console and /v1)", (p) => (p.features.includes("api.v1") ? (p.plan_id === "enterprise" ? "Custom" : `${lim(p.limits.api_searches_per_month)} searches, /v1 with ${p.limits.api_v1_keys} keys`) : p.features.includes("api.searches") ? `${lim(p.limits.api_searches_per_month)} searches, no /v1` : "Read-only history")],
+    ["Monitors and alerts per candidate", (p) => (p.plan_id === "enterprise" ? "Custom" : lim(p.limits.monitors_per_candidate))],
     ["Document storage and retention", (p) => (p.plan_id === "enterprise" ? "Custom, legal hold" : `${bytes(p.limits.storage_bytes)}, ${p.plan_id === "trial" ? `${p.limits.retention_days} days after the trial ends` : retention(p.limits.retention_days)}`)],
     ["Audit log", (p) => (p.plan_id === "enterprise" ? "7 years, export to SIEM" : retention(p.limits.audit_days))],
     ["Coach scopes", (p) => ["view", "act", "approve"].slice(0, ["view", "act", "approve"].indexOf(p.limits.coach_max_scope) + 1).join(", ")],
@@ -101,7 +104,7 @@
   ];
   function priceCell(p) {
     if (p.contact_sales) return "Contact sales";
-    if (!p.seat_cents_month) return "Free for the trial";
+    if (!p.seat_cents_month) return p.plan_id === "trial" ? "Free for the trial" : "Free";
     return `${money(p.seat_cents_month, p.currency)} per candidate seat per month${p.min_seats ? `, from ${p.min_seats} seats` : ""}`;
   }
   function overageCell(p) {
@@ -109,7 +112,7 @@
     const parts = [["application_cents", "application"], ["search_cents", "search"], ["cover_letter_cents", "cover letter"], ["pooled_search_cents", "pooled search"]].filter(([k]) => o[k]).map(([k, name]) => `${money(o[k], p.currency)} per extra ${name}`);
     return parts.length ? parts.join("; ") : p.plan_id === "starter" ? "Stops at the limit" : "—";
   }
-  window.AiraBillingLogic = { statusInfo, exceedPreview, direction, money, bytes, retention, LIMIT_ROWS, priceCell, overageCell, rank };
+  window.AiraBillingLogic = { statusInfo, exceedPreview, direction, money, bytes, retention, LIMIT_ROWS, priceCell, overageCell, rank, setPlanOrder };
 
   // ---------------------------------------------------------------------------
   // The page
@@ -131,6 +134,7 @@
 
   async function loadAll(manage) {
     const billing = await Aira.api("/api/org/billing");
+    setPlanOrder(billing.order);
     let trial = null;
     try { trial = (await Aira.api("/api/billing/trial-plan", { silent: true })).plan; } catch { /* the table just omits the trial column */ }
     const usage = await Aira.api("/api/org/usage").catch(() => null);
@@ -235,8 +239,9 @@
   // -- picker: plan, seats, live quote, checkout / change ----------------------------------
   function pickerCard(data, state) {
     const { billing } = data;
-    const paid = data.plans.filter((p) => !p.contact_sales);
-    const active = billing.status === "active";
+    const paid = data.plans.filter((p) => (p.self_serve === undefined ? !p.contact_sales : p.self_serve));
+    // on a free plan nobody pays for (All access) the first paid plan is bought through checkout, like after a trial
+    const active = billing.status === "active" && !billing.checkout_required;
     const card = h("section", { class: "card cb-card" });
     const planSelect = ui.select(paid.map((p) => [p.plan_id, `${p.name}`]), state.plan, { id: "cbPlan" });
     const seats = h("input", { id: "cbSeats", type: "number", inputmode: "numeric", step: "1" });
@@ -293,6 +298,7 @@
 
     card.append(h("h2", { text: active ? "Change plan or seats" : "Choose a plan" }), h("p", { class: "muted", text: active ? "Upgrades and added seats apply now with a prorated charge. Downgrades and fewer seats apply at the end of the period." : "Pay once for the seats you need; seats can change later." }),
       h("div", { class: "cb-picker" }, ui.field("Plan", planSelect), ui.field("Candidate seats", seats), h("div", { class: "field cb-range" }, range)), quote, h("div", { class: "btn-row" }, go, h("button", { type: "button", class: "btn ghost", text: "Enterprise: contact sales", onclick: enterpriseInfo })), note);
+    if (!paid.length) { card.replaceChildren(h("h2", { text: "Choose a plan" }), h("p", { class: "muted", text: "No plan can be bought here right now. Contact sales." })); return card; }
     if (!paid.some((p) => p.plan_id === state.plan)) state.plan = paid[0].plan_id;
     planSelect.value = state.plan;
     sync(false);

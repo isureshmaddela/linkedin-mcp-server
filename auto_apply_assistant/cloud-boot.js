@@ -30,13 +30,16 @@
   });
 
   // Moving between the member app and the platform console is a different application surface: start it cleanly.
+  // From the sign-in page (no one signed in yet) the console opens in place; from the apps (the account menu's
+  // Admin console) it is a fresh page load, so nothing of the member's screens stays behind in the console.
   let wasPlatform = isPlatform();
   window.addEventListener("hashchange", () => {
     const now = isPlatform();
     if (now !== wasPlatform) {
       wasPlatform = now;
-      if (now && Aira.cloud.platformBoot) Aira.cloud.platformBoot();
-      else if (!now) location.reload();
+      const fromApps = now && !!(Aira.cloud && Aira.cloud.me);
+      if (now && !fromApps && Aira.cloud.platformBoot) Aira.cloud.platformBoot();
+      else location.reload();
     }
   });
 })();

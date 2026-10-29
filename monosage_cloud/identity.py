@@ -75,7 +75,8 @@ class Identity:
         ip: str = "",
         user_agent: str = "",
     ) -> dict[str, Any]:
-        """Create an organization, its owner and a trial subscription; the owner verifies their email next."""
+        """Create an organization, its owner and its subscription: the plan the superadmin chose for new sign-ups
+        (All access, every app and feature, until they choose otherwise); the owner verifies their email next."""
         name = str(name or "").strip()
         if not 2 <= len(name) <= 120:
             raise ValidationFailed("Enter the organization name (2 to 120 characters).")
@@ -114,7 +115,7 @@ class Identity:
                     now,
                 ),
             )
-            self.app.billing.create_trial(org_id, connection)
+            started = self.app.billing.start_subscription(org_id, connection)
             self.app.audit.record(
                 org_id,
                 "org.create",
@@ -124,7 +125,12 @@ class Identity:
                 actor_role="owner",
                 target_type="organization",
                 target_id=org_id,
-                detail={"name": name, "slug": slug, "plan": "trial"},
+                detail={
+                    "name": name,
+                    "slug": slug,
+                    "plan": started["plan_id"],
+                    "trial_days": started["trial_days"],
+                },
                 connection=connection,
             )
         self.send_verification(org_id, member_id)
@@ -138,6 +144,7 @@ class Identity:
         )
         return {
             "org": {"org_id": org_id, "name": name, "slug": slug},
+            "subscription": started,
             "member": {"member_id": member_id, "email": email, "role": "owner"},
             "token": token,
             "session_id": session,
@@ -462,16 +469,8 @@ class Identity:
 
     # ---------------------------------------------------------------- sign-in
 
-    def login(
-        self,
-        email: str,
-        password: str,
-        *,
-        org: str = "",
-        ip: str = "",
-        user_agent: str = "",
-    ) -> dict[str, Any]:
-        email = str(email or "").strip().lower()
+    def _members_for_login(self, email: str, org: str = "") -> list[dict[str, Any]]:
+        """The member rows an email signs in to (one per organization), narrowed to ``org`` when given."""
         with self.db.read() as connection:
             members = many(
                 connection,
@@ -486,12 +485,19 @@ class Identity:
                 for m in members
                 if m["org_slug"] == org.strip().lower() or m["org_id"] == org
             ]
+        return members
+
+    def _check_member_passwords(
+        self, members: list[dict[str, Any]], password: str
+    ) -> tuple[list[dict[str, Any]], list[dict[str, Any]], int]:
+        """(members the password opens, members it failed for, latest lockout end). No side effects."""
         if not members:
             crypto.verify_password(
                 password or "", DUMMY_HASH
             )  # constant-ish time for unknown emails
-            raise Unauthorized("Email or password is incorrect.")
+            return [], [], 0
         candidates: list[dict[str, Any]] = []
+        failed: list[dict[str, Any]] = []
         locked_until = 0
         for member in members:
             if member["locked_until"] and member["locked_until"] > self.now:
@@ -502,14 +508,17 @@ class Identity:
             ):
                 candidates.append(member)
             else:
-                self._failed_login(member)
-        if not candidates:
-            if locked_until:
-                raise Locked(
-                    f"Too many failed sign-ins. Try again in {max(1, (locked_until - self.now) // 60 + 1)} minutes.",
-                    retry_after=locked_until - self.now,
-                )
-            raise Unauthorized("Email or password is incorrect.")
+                failed.append(member)
+        return candidates, failed, locked_until
+
+    def _locked_error(self, locked_until: int) -> Locked:
+        return Locked(
+            f"Too many failed sign-ins. Try again in {max(1, (locked_until - self.now) // 60 + 1)} minutes.",
+            retry_after=locked_until - self.now,
+        )
+
+    def _pick_member(self, candidates: list[dict[str, Any]]) -> dict[str, Any]:
+        """The one membership to sign in to, or why it cannot be (several organizations, inactive, suspended, SSO)."""
         if len(candidates) > 1:
             raise Conflict(
                 "This email belongs to more than one organization. Choose one.",
@@ -535,6 +544,11 @@ class Identity:
                 "This organization requires single sign-on. Use the SSO sign-in.",
                 code="sso_required",
             )
+        return member
+
+    def _open_member_session(
+        self, member: dict[str, Any], *, ip: str = "", user_agent: str = ""
+    ) -> dict[str, Any]:
         with self.db.write() as connection:
             connection.execute(
                 "UPDATE members SET failed_logins = 0, locked_until = NULL, last_sign_in_at = ? WHERE member_id = ?",
@@ -565,7 +579,101 @@ class Identity:
             "session_id": session_id,
             "member_id": member["member_id"],
             "org_id": member["org_id"],
+            "role": member["role"],
             "mfa_required": mfa_enabled,
+        }
+
+    def login(
+        self,
+        email: str,
+        password: str,
+        *,
+        org: str = "",
+        ip: str = "",
+        user_agent: str = "",
+    ) -> dict[str, Any]:
+        """A member's sign-in to their organization only. ``sign_in`` is the one page's sign-in for everyone."""
+        email = str(email or "").strip().lower()
+        members = self._members_for_login(email, org)
+        candidates, failed, locked_until = self._check_member_passwords(
+            members, password
+        )
+        for member in failed:
+            self._failed_login(member)
+        if not candidates:
+            if locked_until:
+                raise self._locked_error(locked_until)
+            raise Unauthorized("Email or password is incorrect.")
+        member = self._pick_member(candidates)
+        return self._open_member_session(member, ip=ip, user_agent=user_agent)
+
+    def sign_in(
+        self,
+        email: str,
+        password: str,
+        *,
+        org: str = "",
+        ip: str = "",
+        user_agent: str = "",
+    ) -> dict[str, Any]:
+        """One sign-in for everyone: an organization member, a platform operator, or a person who is both.
+
+        The password is checked against the operator account and against every membership of the email, always
+        with at least two password-hash checks, so a wrong password and an unknown email answer the same and take
+        about as long. Whatever matches opens a session:
+        ``{"member": <login result> | None, "operator": <operator result> | None, "member_notice": {...} | None}``.
+
+        - Failed checks count towards lockout only when nothing matched: a person whose two accounts have
+          different passwords does not lock one by signing in to the other.
+        - Several organizations always ask which one first (``409 org_required``), before any session opens.
+        - A membership that cannot be entered (organization suspended, SSO required, account inactive) stops the
+          sign-in only when there is no operator account to open instead; otherwise it is ``member_notice``.
+        - The operator session opens without its second factor (``mfa_verified`` 0): the console answers only
+          after ``/api/platform/auth/mfa/verify`` (or ``begin`` and ``enable`` the first time).
+        """
+        email = str(email or "").strip().lower()
+        operator = self._operator_for_login(email)
+        operator_ok, operator_locked = self._check_operator_password(operator, password)
+        members = self._members_for_login(email, org)
+        candidates, failed, member_locked = self._check_member_passwords(
+            members, password
+        )
+        if not operator_ok and not candidates:
+            for member in failed:
+                self._failed_login(member)
+            if operator is not None and not operator_locked:
+                self._failed_operator_login(operator)
+            locked_until = max(member_locked, operator_locked)
+            if locked_until:
+                raise self._locked_error(locked_until)
+            raise Unauthorized("Email or password is incorrect.")
+        member: dict[str, Any] | None = None
+        notice: dict[str, Any] | None = None
+        if candidates:
+            for failed_member in failed:
+                self._failed_login(failed_member)  # the rule a member-only sign-in has
+            try:
+                member = self._pick_member(candidates)
+            except Conflict:
+                raise  # which organization is asked before any session opens
+            except (Unauthorized, Forbidden) as error:
+                if not operator_ok:
+                    raise
+                notice = {"error": str(error), "code": getattr(error, "code", "")}
+        member_result = (
+            self._open_member_session(member, ip=ip, user_agent=user_agent)
+            if member is not None
+            else None
+        )
+        operator_result = (
+            self._open_operator_session(operator, ip=ip, user_agent=user_agent)
+            if operator_ok and operator is not None
+            else None
+        )
+        return {
+            "member": member_result,
+            "operator": operator_result,
+            "member_notice": notice,
         }
 
     def _failed_login(self, member: dict[str, Any]) -> None:
@@ -1252,35 +1360,50 @@ class Identity:
             )
         return operator_id
 
-    def operator_login(
-        self, email: str, password: str, *, ip: str = "", user_agent: str = ""
-    ) -> dict[str, Any]:
-        email = str(email or "").strip().lower()
+    def _operator_for_login(self, email: str) -> dict[str, Any] | None:
+        """The active operator account for an email, if there is one."""
         with self.db.read() as connection:
             operator = one(
                 connection, "SELECT * FROM operators WHERE email = ?", (email,)
             )
         if operator is None or operator["status"] != "active":
+            return None
+        return operator
+
+    def _check_operator_password(
+        self, operator: dict[str, Any] | None, password: str
+    ) -> tuple[bool, int]:
+        """(the password opens this operator account, its lockout end or 0). One hash check whatever the case."""
+        if operator is None:
             crypto.verify_password(password or "", DUMMY_HASH)
-            raise Unauthorized("Email or password is incorrect.")
+            return False, 0
         if operator["locked_until"] and operator["locked_until"] > self.now:
-            raise Locked(
-                "Too many failed sign-ins. Try again later.",
-                retry_after=operator["locked_until"] - self.now,
+            crypto.verify_password(password or "", DUMMY_HASH)
+            return False, int(operator["locked_until"])
+        return crypto.verify_password(password or "", operator["password_hash"]), 0
+
+    def _failed_operator_login(self, operator: dict[str, Any]) -> None:
+        with self.db.write() as connection:
+            row = one(
+                connection,
+                "SELECT failed_logins FROM operators WHERE operator_id = ?",
+                (operator["operator_id"],),
             )
-        if not crypto.verify_password(password or "", operator["password_hash"]):
-            with self.db.write() as connection:
-                attempts = operator["failed_logins"] + 1
-                locked = (
-                    self.now + self.app.config.lockout_seconds
-                    if attempts >= self.app.config.max_failed_logins
-                    else None
-                )
-                connection.execute(
-                    "UPDATE operators SET failed_logins = ?, locked_until = ? WHERE operator_id = ?",
-                    (0 if locked else attempts, locked, operator["operator_id"]),
-                )
-            raise Unauthorized("Email or password is incorrect.")
+            attempts = (int(row["failed_logins"]) if row else 0) + 1
+            locked = (
+                self.now + self.app.config.lockout_seconds
+                if attempts >= self.app.config.max_failed_logins
+                else None
+            )
+            connection.execute(
+                "UPDATE operators SET failed_logins = ?, locked_until = ? WHERE operator_id = ?",
+                (0 if locked else attempts, locked, operator["operator_id"]),
+            )
+
+    def _open_operator_session(
+        self, operator: dict[str, Any], *, ip: str = "", user_agent: str = ""
+    ) -> dict[str, Any]:
+        """A console session: it needs the operator's second factor before anything but MFA answers."""
         token = crypto.new_token()
         with self.db.write() as connection:
             connection.execute(
@@ -1312,7 +1435,30 @@ class Identity:
             "token": token,
             "mfa_enrolled": bool(operator["mfa_enabled_at"]),
             "operator_id": operator["operator_id"],
+            "role": operator["role"],
         }
+
+    def operator_login(
+        self, email: str, password: str, *, ip: str = "", user_agent: str = ""
+    ) -> dict[str, Any]:
+        """The console's own sign-in (kept for API clients); the sign-in page uses ``sign_in``."""
+        email = str(email or "").strip().lower()
+        with self.db.read() as connection:
+            operator = one(
+                connection, "SELECT * FROM operators WHERE email = ?", (email,)
+            )
+        if operator is None or operator["status"] != "active":
+            crypto.verify_password(password or "", DUMMY_HASH)
+            raise Unauthorized("Email or password is incorrect.")
+        if operator["locked_until"] and operator["locked_until"] > self.now:
+            raise Locked(
+                "Too many failed sign-ins. Try again later.",
+                retry_after=operator["locked_until"] - self.now,
+            )
+        if not crypto.verify_password(password or "", operator["password_hash"]):
+            self._failed_operator_login(operator)
+            raise Unauthorized("Email or password is incorrect.")
+        return self._open_operator_session(operator, ip=ip, user_agent=user_agent)
 
 
 __all__ = ["Identity", "slugify", "MfaRequired", "PlanRequired"]

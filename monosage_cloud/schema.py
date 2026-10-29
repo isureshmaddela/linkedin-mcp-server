@@ -752,6 +752,15 @@ ALTER TABLE public_links ADD COLUMN member_id TEXT NOT NULL DEFAULT '';
 CREATE INDEX public_links_member ON public_links (org_id, member_id);
 """
 
+# Plans the superadmin creates (entitlements.PlanCatalog.create): a description shown in the console and on the
+# billing page, who made it, and when it was archived (``active`` is then 0: no new subscriptions; existing ones keep
+# it). The default plan for new sign-ups is a ``cloud_kv`` row (``signup_plan``), so it needs no table.
+_V10 = """
+ALTER TABLE plans ADD COLUMN description TEXT NOT NULL DEFAULT '';
+ALTER TABLE plans ADD COLUMN archived_at INTEGER;
+ALTER TABLE plans ADD COLUMN created_by TEXT NOT NULL DEFAULT '';
+"""
+
 # (version, name, SQL script)
 MIGRATIONS: list[tuple[int, str, str]] = [
     (1, "initial", _V1),
@@ -763,4 +772,5 @@ MIGRATIONS: list[tuple[int, str, str]] = [
     (7, "developer_platform", _V7),
     (8, "platform_apps", _V8),
     (9, "public_link_members", _V9),
+    (10, "custom_plans", _V10),
 ]

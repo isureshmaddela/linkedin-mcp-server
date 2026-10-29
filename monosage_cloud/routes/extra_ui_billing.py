@@ -15,6 +15,10 @@ def trial_plan(req: Req):  # noqa: ANN201
         "plan": {
             "plan_id": "trial",
             "name": plan["name"],
+            "description": req.app.catalog.current(include_archived=True)["trial"][
+                "description"
+            ],
+            "self_serve": False,
             "seat_cents_month": pricing.get("seat_cents_month", 0),
             "min_seats": pricing.get("min_seats", 0),
             "contact_sales": False,

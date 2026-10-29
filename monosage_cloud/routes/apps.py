@@ -137,11 +137,12 @@ def tenant_apps(req: Req):  # noqa: ANN201
     "PUT", r"/api/platform/tenants/([0-9a-f]{32})/apps/([a-z0-9_-]+)", auth="operator"
 )
 def tenant_app_grant(req: Req):  # noqa: ANN201
-    """Grant an app to a tenant without charge (a contract), or take the grant back."""
+    """Grant an app to a tenant without charge (a contract), or take the grant back; or switch an app off for this
+    one organization (``disabled``) and back on (``enabled``)."""
     body = req.body()
     status = str(body.get("status", "")).strip()
-    if status not in {"granted", "revoked"}:
-        raise ValidationFailed("status must be granted or revoked.")
+    if status not in {"granted", "revoked", "disabled", "enabled"}:
+        raise ValidationFailed("status must be granted, revoked, disabled or enabled.")
     return 200, req.app.billing.set_app_grant(
         req.principal,
         req.group(1),

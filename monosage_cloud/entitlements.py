@@ -11,7 +11,9 @@ from __future__ import annotations
 
 import builtins
 import hashlib
+import re
 import threading
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import Any
 
@@ -21,6 +23,7 @@ from aira import apps as app_catalog
 from monosage_cloud.errors import (
     AppDisabled,
     AppRequired,
+    Conflict,
     NotFound,
     PlanRequired,
     SubscriptionInactive,
@@ -29,8 +32,16 @@ from monosage_cloud.errors import (
 from monosage_cloud.plans import (
     APP_PLANS,
     APP_PRICING,
+    BUILTIN_PLANS,
+    COACH_SCOPES,
     DEFAULT_PLANS,
+    KNOWN_FEATURES,
+    LIMIT_NAMES,
+    OVERAGE_RATES,
+    PLAN_DESCRIPTIONS,
     STATUS_RESTRICTIONS,
+    SUPPORT_LEVELS,
+    TRIAL,
     Entitlements,
     PriceOverrides,
     app_price,
@@ -42,6 +53,7 @@ from monosage_cloud.plans import (
     plan_for_app,
     plan_for_feature,
     plan_for_limit,
+    upgrade_order,
     with_later_limits,
 )
 
@@ -53,7 +65,111 @@ STAFF_LIMIT_ROLES = ("owner", "admin", "coach", "billing", "auditor")
 # --------------------------------------------------------------------------- #
 
 
+PLAN_ID = re.compile(r"[a-z][a-z0-9_]{2,29}")
+# Words the console's routes use after /api/platform/plans/, so no plan may be called that.
+RESERVED_PLAN_IDS = frozenset({"versions", "order", "new", "default", "signup"})
+MAX_SEAT_CENTS = 10_000_000  # $100,000 per seat per month
+MAX_LIMIT = 10**13
+
+
+def validate_entitlements(
+    values: Any, *, allowed_features: Iterable[str] = ()
+) -> dict[str, Any]:
+    """A plan's entitlements as the superadmin gives them: known limits as whole numbers or ``None`` (no limit), the
+    coach scope ceiling, the support level, and features from the known list (or ones the plan already has)."""
+    if not isinstance(values, dict):
+        raise ValidationFailed("Entitlements must be an object of limit name to value.")
+    allowed = set(KNOWN_FEATURES) | set(allowed_features)
+    clean: dict[str, Any] = {}
+    for name, value in values.items():
+        if name == "features":
+            if not isinstance(value, list) or not all(
+                isinstance(item, str) for item in value
+            ):
+                raise ValidationFailed("features is a list of feature names.")
+            unknown = sorted(set(value) - allowed)
+            if unknown:
+                raise ValidationFailed(f"Unknown feature: {', '.join(unknown)}.")
+            clean[name] = list(dict.fromkeys(value))
+        elif name == "coach_max_scope":
+            if value not in COACH_SCOPES:
+                raise ValidationFailed(
+                    f"coach_max_scope must be one of {', '.join(COACH_SCOPES)}."
+                )
+            clean[name] = value
+        elif name == "support":
+            if value not in SUPPORT_LEVELS:
+                raise ValidationFailed(
+                    f"support must be one of {', '.join(SUPPORT_LEVELS)}."
+                )
+            clean[name] = value
+        elif name in LIMIT_NAMES:
+            if value is not None and (
+                isinstance(value, bool)
+                or not isinstance(value, int)
+                or not 0 <= value <= MAX_LIMIT
+            ):
+                raise ValidationFailed(
+                    f"{name} must be a non-negative whole number or empty."
+                )
+            clean[name] = value
+        else:
+            raise ValidationFailed(f"{name} is not a plan limit.")
+    return clean
+
+
+def validate_pricing(values: Any) -> dict[str, Any]:
+    """A plan's price: cents per candidate seat per month, minimum seats, currency, contract-only, trial days, and
+    the overage rates (cents per unit)."""
+    if not isinstance(values, dict):
+        raise ValidationFailed("Pricing must be an object.")
+    clean: dict[str, Any] = {}
+
+    def whole(name: str, value: Any, high: int) -> int:
+        if (
+            isinstance(value, bool)
+            or not isinstance(value, int)
+            or not 0 <= value <= high
+        ):
+            raise ValidationFailed(f"{name} must be a whole number from 0 to {high}.")
+        return value
+
+    for name, value in values.items():
+        if name == "seat_cents_month":
+            clean[name] = whole(name, value, MAX_SEAT_CENTS)
+        elif name == "min_seats":
+            clean[name] = whole(name, value, 100_000)
+        elif name == "trial_days":
+            clean[name] = whole(name, value, 365)
+        elif name == "currency":
+            if not isinstance(value, str) or not re.fullmatch(r"[a-z]{3}", value):
+                raise ValidationFailed("currency is a three-letter code such as usd.")
+            clean[name] = value
+        elif name == "contact_sales":
+            if not isinstance(value, bool):
+                raise ValidationFailed("contact_sales is true or false.")
+            clean[name] = value
+        elif name == "overage":
+            if not isinstance(value, dict) or set(value) - set(OVERAGE_RATES):
+                raise ValidationFailed(
+                    f"overage rates are {', '.join(OVERAGE_RATES)} in cents."
+                )
+            clean[name] = {
+                key: whole(f"overage {key}", rate, 100_000)
+                for key, rate in value.items()
+            }
+        else:
+            raise ValidationFailed(f"{name} is not part of a plan's price.")
+    return clean
+
+
 class PlanCatalog:
+    """The plans: the built-in ones (``plans.DEFAULT_PLANS``) and the ones the superadmin creates, each versioned.
+
+    The superadmin's order is ``sort_order``; an archived plan (``active = 0``) takes no new subscriptions and is
+    left out of :meth:`current`, while organizations already on it keep it (:meth:`get` still answers for it).
+    """
+
     def __init__(self, db: ControlDB, clock: Clock) -> None:
         self.db = db
         self.clock = clock
@@ -65,16 +181,21 @@ class PlanCatalog:
                     connection, "SELECT 1 AS x FROM plans WHERE plan_id = ?", (plan_id,)
                 ):
                     continue
+                last = one(connection, "SELECT MAX(sort_order) AS n FROM plans", ())
+                order = plan["sort_order"]
+                if last and last["n"] is not None:
+                    order = max(order, int(last["n"]) + 1)
                 connection.execute(
-                    "INSERT INTO plans (plan_id, name, version, entitlements, pricing, sort_order, public, active, updated_at) VALUES (?, ?, 1, ?, ?, ?, ?, 1, ?)",
+                    "INSERT INTO plans (plan_id, name, version, entitlements, pricing, sort_order, public, active, updated_at, description) VALUES (?, ?, 1, ?, ?, ?, ?, 1, ?, ?)",
                     (
                         plan_id,
                         plan["name"],
                         dumps(plan["entitlements"]),
                         dumps(plan["pricing"]),
-                        plan["sort_order"],
+                        order,
                         int(plan["public"]),
                         self.clock.now(),
+                        PLAN_DESCRIPTIONS.get(plan_id, ""),
                     ),
                 )
                 connection.execute(
@@ -87,36 +208,75 @@ class PlanCatalog:
                     ),
                 )
 
-    def current(self) -> dict[str, dict[str, Any]]:
+    @staticmethod
+    def _entry(row: dict[str, Any]) -> dict[str, Any]:
+        plan_id = row["plan_id"]
+        return {
+            "plan_id": plan_id,
+            "name": row["name"],
+            "description": row.get("description") or PLAN_DESCRIPTIONS.get(plan_id, ""),
+            "version": row["version"],
+            "entitlements": loads(row["entitlements"], {}),
+            "pricing": loads(row["pricing"], {}),
+            "sort_order": row["sort_order"],
+            "public": bool(row["public"]),
+            "archived": not row["active"],
+            "archived_at": row.get("archived_at"),
+            "builtin": plan_id in BUILTIN_PLANS,
+            "created_by": row.get("created_by")
+            or ("system" if plan_id in BUILTIN_PLANS else ""),
+        }
+
+    def current(self, *, include_archived: bool = False) -> dict[str, dict[str, Any]]:
+        """Every plan in the superadmin's order (archived ones only when asked)."""
         with self.db.read() as connection:
             rows = many(
-                connection, "SELECT * FROM plans WHERE active = 1 ORDER BY sort_order"
+                connection,
+                "SELECT * FROM plans"
+                + ("" if include_archived else " WHERE active = 1")
+                + " ORDER BY sort_order, plan_id",
             )
-        return {
-            row["plan_id"]: {
-                "plan_id": row["plan_id"],
-                "name": row["name"],
-                "version": row["version"],
-                "entitlements": loads(row["entitlements"], {}),
-                "pricing": loads(row["pricing"], {}),
-                "sort_order": row["sort_order"],
-                "public": bool(row["public"]),
-            }
-            for row in rows
-        }
+        return {row["plan_id"]: self._entry(row) for row in rows}
+
+    def order(self, *, include_archived: bool = False) -> builtins.list[str]:
+        """The plan ids, built-in and created, in the superadmin's order."""
+        return list(self.current(include_archived=include_archived))
+
+    def upgrade_order(self) -> builtins.list[str]:
+        """The plans an organization can be pointed to, cheapest first (``plans.upgrade_order``)."""
+        return upgrade_order(self.current())
+
+    def self_serve(self) -> builtins.list[str]:
+        """The plans an owner can buy through checkout: public, priced per seat, not by contract, not archived."""
+        return [
+            plan_id
+            for plan_id, entry in self.current().items()
+            if plan_id != TRIAL
+            and entry["public"]
+            and not entry["pricing"].get("contact_sales")
+            and int(entry["pricing"].get("seat_cents_month") or 0) > 0
+        ]
+
+    def name(self, plan_id: str) -> str:
+        """The plan's display name ("All access"), for messages; the id in title case if it is unknown."""
+        with self.db.read() as connection:
+            row = one(
+                connection, "SELECT name FROM plans WHERE plan_id = ?", (plan_id,)
+            )
+        return row["name"] if row else str(plan_id).replace("_", " ").title()
 
     def get(self, plan_id: str, version: int | None = None) -> dict[str, Any]:
         with self.db.read() as connection:
             if version is None:
                 row = one(
                     connection,
-                    "SELECT plan_id, name, version, entitlements, pricing FROM plans WHERE plan_id = ?",
+                    "SELECT plan_id, name, version, entitlements, pricing, active FROM plans WHERE plan_id = ?",
                     (plan_id,),
                 )
             else:
                 row = one(
                     connection,
-                    """SELECT v.plan_id, p.name, v.version, v.entitlements, v.pricing FROM plan_versions v
+                    """SELECT v.plan_id, p.name, v.version, v.entitlements, v.pricing, p.active FROM plan_versions v
                     JOIN plans p ON p.plan_id = v.plan_id WHERE v.plan_id = ? AND v.version = ?""",
                     (plan_id, version),
                 )
@@ -128,7 +288,88 @@ class PlanCatalog:
             "version": row["version"],
             "entitlements": loads(row["entitlements"], {}),
             "pricing": loads(row["pricing"], {}),
+            "archived": not row["active"],
         }
+
+    def create(
+        self,
+        plan_id: str,
+        *,
+        name: str,
+        description: str = "",
+        entitlements: dict[str, Any] | None = None,
+        pricing: dict[str, Any] | None = None,
+        public: bool = True,
+        based_on: str = "starter",
+        by: str,
+    ) -> dict[str, Any]:
+        """A new plan, version 1. Every limit it does not name is copied from ``based_on`` (never "no limit" by
+        accident); the features are exactly the ones given, or the base plan's when none are."""
+        plan_id = str(plan_id or "").strip()
+        if not PLAN_ID.fullmatch(plan_id) or plan_id in RESERVED_PLAN_IDS:
+            raise ValidationFailed(
+                "The plan id is 3 to 30 lowercase letters, digits or underscores, starting with a letter."
+            )
+        name = str(name or "").strip()
+        if not 2 <= len(name) <= 60:
+            raise ValidationFailed("Enter the plan's name (2 to 60 characters).")
+        base = self.get(based_on)
+        new_entitlements = {
+            **{
+                key: value
+                for key, value in base["entitlements"].items()
+                if key in LIMIT_NAMES
+                or key in {"coach_max_scope", "support", "features"}
+            },
+            **validate_entitlements(entitlements or {}),
+        }
+        for key in LIMIT_NAMES:
+            new_entitlements.setdefault(key, 0)
+        new_entitlements.setdefault("coach_max_scope", "view")
+        new_entitlements.setdefault("support", "email")
+        new_pricing = {
+            "currency": "usd",
+            "seat_cents_month": 0,
+            "min_seats": 0,
+            "overage": {},
+            "trial_days": 0,
+            **validate_pricing(pricing or {}),
+        }
+        with self.db.write() as connection:
+            if one(
+                connection, "SELECT 1 AS x FROM plans WHERE plan_id = ?", (plan_id,)
+            ):
+                raise Conflict(
+                    "A plan with that id exists already.", code="plan_exists"
+                )
+            last = one(connection, "SELECT MAX(sort_order) AS n FROM plans", ())
+            order = int(last["n"]) + 1 if last and last["n"] is not None else 0
+            connection.execute(
+                """INSERT INTO plans (plan_id, name, version, entitlements, pricing, sort_order, public, active, updated_at,
+                description, created_by) VALUES (?, ?, 1, ?, ?, ?, ?, 1, ?, ?, ?)""",
+                (
+                    plan_id,
+                    name,
+                    dumps(new_entitlements),
+                    dumps(new_pricing),
+                    order,
+                    int(bool(public)),
+                    self.clock.now(),
+                    str(description or "").strip()[:300],
+                    by,
+                ),
+            )
+            connection.execute(
+                "INSERT INTO plan_versions (plan_id, version, entitlements, pricing, created_at, created_by) VALUES (?, 1, ?, ?, ?, ?)",
+                (
+                    plan_id,
+                    dumps(new_entitlements),
+                    dumps(new_pricing),
+                    self.clock.now(),
+                    by,
+                ),
+            )
+        return self.current(include_archived=True)[plan_id]
 
     def update(
         self,
@@ -140,19 +381,12 @@ class PlanCatalog:
     ) -> int:
         """Publish a new plan version. Existing subscriptions stay on their version until migrated."""
         current = self.get(plan_id)
-        new_entitlements = {**current["entitlements"], **(entitlements or {})}
-        new_pricing = {**current["pricing"], **(pricing or {})}
-        for name in (
-            "candidate_seats",
-            "staff_seats",
-            "apps_per_candidate_day",
-            "apps_per_org_month",
-        ):
-            value = new_entitlements.get(name)
-            if value is not None and (not isinstance(value, int) or value < 0):
-                raise ValidationFailed(
-                    f"{name} must be a non-negative whole number or empty."
-                )
+        checked = validate_entitlements(
+            entitlements or {},
+            allowed_features=current["entitlements"].get("features") or [],
+        )
+        new_entitlements = {**current["entitlements"], **checked}
+        new_pricing = {**current["pricing"], **validate_pricing(pricing or {})}
         version = current["version"] + 1
         with self.db.write() as connection:
             connection.execute(
@@ -177,6 +411,76 @@ class PlanCatalog:
                 ),
             )
         return version
+
+    def describe(
+        self,
+        plan_id: str,
+        *,
+        name: str | None = None,
+        description: str | None = None,
+        public: bool | None = None,
+    ) -> None:
+        """Change what a plan is called and whether it is sold on the billing page; no new version is needed."""
+        self.get(plan_id)
+        values: dict[str, Any] = {}
+        if name is not None:
+            name = str(name).strip()
+            if not 2 <= len(name) <= 60:
+                raise ValidationFailed("Enter the plan's name (2 to 60 characters).")
+            values["name"] = name
+        if description is not None:
+            values["description"] = str(description).strip()[:300]
+        if public is not None:
+            if plan_id == TRIAL:
+                raise ValidationFailed("The trial is never sold on the billing page.")
+            values["public"] = int(bool(public))
+        if not values:
+            return
+        values["updated_at"] = self.clock.now()
+        sets = ", ".join(f"{column} = ?" for column in values)
+        with self.db.write() as connection:
+            connection.execute(
+                f"UPDATE plans SET {sets} WHERE plan_id = ?",
+                (*values.values(), plan_id),
+            )
+
+    def archive(self, plan_id: str, archived: bool = True) -> None:
+        """Archive (no new subscriptions; existing ones keep the plan) or restore a plan. The trial stays."""
+        plan = self.get(plan_id)
+        if plan_id == TRIAL:
+            raise ValidationFailed("The trial cannot be archived.")
+        if plan["archived"] == archived:
+            raise Conflict(
+                "The plan is archived already."
+                if archived
+                else "The plan is not archived.",
+                code="unchanged",
+            )
+        with self.db.write() as connection:
+            connection.execute(
+                "UPDATE plans SET active = ?, archived_at = ?, updated_at = ? WHERE plan_id = ?",
+                (
+                    0 if archived else 1,
+                    self.clock.now() if archived else None,
+                    self.clock.now(),
+                    plan_id,
+                ),
+            )
+
+    def set_order(self, plan_ids: builtins.list[str]) -> builtins.list[str]:
+        """The superadmin's order: every plan, archived ones included, each once."""
+        every = self.order(include_archived=True)
+        if not isinstance(plan_ids, list) or sorted(map(str, plan_ids)) != sorted(
+            every
+        ):
+            raise ValidationFailed("Give every plan exactly once, in the new order.")
+        with self.db.write() as connection:
+            for index, plan_id in enumerate(plan_ids):
+                connection.execute(
+                    "UPDATE plans SET sort_order = ? WHERE plan_id = ?",
+                    (index, plan_id),
+                )
+        return self.order(include_archived=True)
 
     def schedule_migration(
         self, plan_id: str, to_version: int, effective_at: int, by: str
@@ -363,15 +667,28 @@ class AppSettings:
     ``plans.APP_PRICING`` per plan (cents per candidate seat per month, 0 = included, None = not offered); only the
     differences are stored. Invoices and quotes read them when they are made, so a subscriber pays a new price from
     its next billing period. Careers is part of every plan and cannot be priced or switched off.
+
+    A plan the superadmin creates has no defaults ("not offered" for every app); what it includes or sells is stored
+    here like a change to a built-in plan, so the Apps page and the Plans page edit the same thing. Resetting an app
+    to the defaults keeps what the created plans say about it.
     """
 
     MAX_CENTS = 100_000  # $1,000 per seat per month
 
-    def __init__(self, db: ControlDB, clock: Clock) -> None:
+    def __init__(
+        self, db: ControlDB, clock: Clock, catalog: PlanCatalog | None = None
+    ) -> None:
         self.db = db
         self.clock = clock
+        self.catalog = catalog
         self._lock = threading.Lock()
         self._cache: tuple[int, dict[str, dict[str, Any]]] | None = None
+
+    def plan_ids(self) -> builtins.list[str]:
+        """The plans an app can be priced on: every plan in the catalog but the trial (which has every app)."""
+        if self.catalog is None:
+            return list(APP_PLANS)
+        return [p for p in self.catalog.order(include_archived=True) if p != TRIAL]
 
     def _rows(self) -> dict[str, dict[str, Any]]:
         now = self.clock.now()
@@ -409,15 +726,39 @@ class AppSettings:
         return app_price(plan_id, app_id, self.overrides())
 
     def plan_for(self, app_id: str) -> str | None:
-        return plan_for_app(app_id, self.overrides())
+        order = self.catalog.upgrade_order() if self.catalog is not None else None
+        return plan_for_app(app_id, self.overrides(), order)
+
+    def for_plan(self, plan_id: str) -> dict[str, dict[str, Any]]:
+        """What one plan says about every app: ``state`` (included, addon, unavailable) and ``seat_cents_month``."""
+        out = {}
+        for app in app_catalog.APPS:
+            out[app.id] = {
+                "name": app.name,
+                "state": self.state(plan_id, app.id),
+                "seat_cents_month": self.price(plan_id, app.id),
+                "priced": app.id in APP_PRICING,
+                "enabled": self.enabled(app.id),
+            }
+        return out
 
     def describe(self) -> builtins.list[dict[str, Any]]:
         """Every app with its switch, its default and current prices per plan, and who changed it last."""
         rows = self._rows()
+        plan_ids = self.plan_ids()
         out = []
         for app in app_catalog.APPS:
             row = rows.get(app.id) or {}
             sold = app.id in APP_PRICING
+            current = app_prices(app.id, self.overrides()) if sold else {}
+            defaults = dict(APP_PRICING.get(app.id, {}))
+            if sold:
+                for plan_id in (
+                    plan_ids
+                ):  # a created plan offers nothing until the superadmin says so
+                    current.setdefault(plan_id, None)
+                    if plan_id not in BUILTIN_PLANS:
+                        defaults.setdefault(plan_id, None)
             out.append(
                 {
                     "id": app.id,
@@ -425,15 +766,27 @@ class AppSettings:
                     "category": app.category,
                     "enabled": not row or bool(row["enabled"]),
                     "priced": sold,
-                    "default_prices": dict(APP_PRICING.get(app.id, {})),
-                    "prices": app_prices(app.id, self.overrides()) if sold else {},
-                    "changed_plans": sorted((row.get("prices") or {}).keys()),
+                    "default_prices": defaults if sold else {},
+                    "prices": current,
+                    "changed_plans": sorted(
+                        p for p in (row.get("prices") or {}) if p in BUILTIN_PLANS
+                    ),
                     "note": row.get("note", ""),
                     "updated_by": row.get("updated_by", ""),
                     "updated_at": row.get("updated_at"),
                 }
             )
         return out
+
+    def _check_price(self, value: Any) -> None:
+        if value is not None and (
+            isinstance(value, bool)
+            or not isinstance(value, int)
+            or not 0 <= value <= self.MAX_CENTS
+        ):
+            raise ValidationFailed(
+                "A price is whole cents per seat per month from 0 (included) to 100000, or null (not offered)."
+            )
 
     def update(
         self,
@@ -455,41 +808,105 @@ class AppSettings:
         row = self._rows().get(app_id) or {}
         changes = dict(row.get("prices") or {})
         if prices is not None:
-            if not isinstance(prices, dict) or set(prices) - set(APP_PLANS):
+            plan_ids = self.plan_ids()
+            if not isinstance(prices, dict) or set(prices) - set(plan_ids):
                 raise ValidationFailed(
-                    "Prices are given per plan: starter, team or enterprise."
+                    f"Prices are given per plan: {', '.join(plan_ids)}."
                 )
             for plan_id, value in prices.items():
-                if value is not None and (
-                    isinstance(value, bool)
-                    or not isinstance(value, int)
-                    or not 0 <= value <= self.MAX_CENTS
-                ):
-                    raise ValidationFailed(
-                        "A price is whole cents per seat per month from 0 (included) to 100000, or null (not offered)."
-                    )
+                self._check_price(value)
                 if value == APP_PRICING[app_id].get(plan_id):
                     changes.pop(plan_id, None)  # back to the default: nothing to store
                 else:
                     changes[plan_id] = value
         on = bool(row["enabled"]) if row and enabled is None else enabled is not False
+        self._write(app_id, on, changes, note[:300], by)
+        return next(a for a in self.describe() if a["id"] == app_id)
+
+    def _write(
+        self, app_id: str, enabled: bool, prices: dict[str, Any], note: str, by: str
+    ) -> None:
         with self.db.write() as connection:
             connection.execute(
                 """INSERT INTO platform_apps (app_id, enabled, prices, note, updated_by, updated_at)
                 VALUES (?, ?, ?, ?, ?, ?) ON CONFLICT(app_id) DO UPDATE SET enabled = excluded.enabled,
                 prices = excluded.prices, note = excluded.note, updated_by = excluded.updated_by,
                 updated_at = excluded.updated_at""",
-                (app_id, int(on), dumps(changes), note[:300], by, self.clock.now()),
+                (app_id, int(enabled), dumps(prices), note, by, self.clock.now()),
             )
         self.invalidate()
-        return next(a for a in self.describe() if a["id"] == app_id)
+
+    def check_plan_apps(self, apps: Any) -> dict[str, Any]:
+        """``{app: 0 | cents | None | "included" | "unavailable"}`` checked, as ``{app: cents or None}``."""
+        if not isinstance(apps, dict):
+            raise ValidationFailed(
+                "apps maps an app to 0 (included), cents (add-on) or null."
+            )
+        wanted: dict[str, Any] = {}
+        for raw, value in apps.items():
+            app_id = app_catalog.current_id(str(raw))
+            if app_id not in app_catalog.BY_ID:
+                raise NotFound(f"App not found: {raw}.")
+            if app_id not in APP_PRICING:
+                continue  # Careers: part of every plan
+            if value == "included":
+                value = 0
+            elif value in ("unavailable", "none"):
+                value = None
+            self._check_price(value)
+            wanted[app_id] = value
+        return wanted
+
+    def set_plan_apps(
+        self, plan_id: str, apps: dict[str, Any], *, by: str = ""
+    ) -> builtins.list[str]:
+        """What one plan includes, sells per seat or does not offer, app by app (``0``, cents, ``None``); the apps
+        whose price on the plan changed are returned. Apps not named keep what they have."""
+        if plan_id == TRIAL:
+            raise ValidationFailed("The trial always has every app.")
+        if plan_id not in self.plan_ids():
+            raise NotFound("Plan not found.")
+        wanted = self.check_plan_apps(apps)
+        changed = []
+        rows = self._rows()
+        for app_id, value in wanted.items():
+            if app_price(plan_id, app_id, self.overrides()) == value:
+                continue
+            row = rows.get(app_id) or {}
+            prices = dict(row.get("prices") or {})
+            if value == APP_PRICING[app_id].get(plan_id):
+                prices.pop(plan_id, None)
+            else:
+                prices[plan_id] = value
+            self._write(
+                app_id,
+                not row or bool(row["enabled"]),
+                prices,
+                row.get("note", "") or "",
+                by,
+            )
+            rows = self._rows()
+            changed.append(app_id)
+        return changed
 
     def reset(self, app_id: str) -> bool:
-        """Back to the catalog's defaults: on, with the prices in ``plans.APP_PRICING``."""
+        """Back to the catalog's defaults: on, with the prices in ``plans.APP_PRICING``. What a plan the superadmin
+        created says about the app is kept (those plans have no defaults to go back to)."""
+        app_id = app_catalog.current_id(app_id)
+        row = self._rows().get(app_id)
+        if not row:
+            return False
+        kept = {
+            p: v for p, v in (row.get("prices") or {}).items() if p not in BUILTIN_PLANS
+        }
+        if kept:
+            if bool(row["enabled"]) and kept == row["prices"]:
+                return False
+            self._write(app_id, True, kept, "", row.get("updated_by", "") or "")
+            return True
         with self.db.write() as connection:
             removed = connection.execute(
-                "DELETE FROM platform_apps WHERE app_id = ?",
-                (app_catalog.current_id(app_id),),
+                "DELETE FROM platform_apps WHERE app_id = ?", (app_id,)
             ).rowcount
         self.invalidate()
         return removed > 0
@@ -547,7 +964,7 @@ class EntitlementService:
         with self.db.read() as connection:
             app_rows = many(
                 connection,
-                "SELECT app_id, status FROM org_apps WHERE org_id = ? AND status IN ('active', 'granted')",
+                "SELECT app_id, status FROM org_apps WHERE org_id = ? AND status IN ('active', 'granted', 'disabled')",
                 (org_id,),
             )
         plan = self.catalog.get(sub["plan_id"], sub["plan_version"])
@@ -572,8 +989,17 @@ class EntitlementService:
                 features.discard(flag)
         status = sub["status"]
         # rows stored under an old app id ("shop") count for the app it became (Commerce)
-        subscribed = {app_catalog.current_id(r["app_id"]) for r in app_rows}
-        apps = self._apps_for(sub["plan_id"], features, subscribed)
+        subscribed = {
+            app_catalog.current_id(r["app_id"])
+            for r in app_rows
+            if r["status"] in ("active", "granted")
+        }
+        disabled = {
+            app_catalog.current_id(r["app_id"])
+            for r in app_rows
+            if r["status"] == "disabled"
+        }
+        apps = self._apps_for(sub["plan_id"], features, subscribed, disabled)
         for app_id in apps:  # an app that is on carries its features: the feature checks below keep working
             app = app_catalog.BY_ID[app_id]
             for feature in (app.feature, *app.extra_features):
@@ -611,13 +1037,17 @@ class EntitlementService:
         return entitlements
 
     def _apps_for(
-        self, plan_id: str, features: builtins.set[str], subscribed: builtins.set[str]
+        self,
+        plan_id: str,
+        features: builtins.set[str],
+        subscribed: builtins.set[str],
+        disabled: builtins.set[str] | frozenset[str] = frozenset(),
     ) -> builtins.set[str]:
         """The apps an organization may open: included by the plan, bought as add-ons, or granted by an operator,
-        unless an operator has switched the app off for everyone."""
+        unless an operator has switched the app off for everyone or for this organization."""
         apps: builtins.set[str] = set()
         for app in app_catalog.APPS:
-            if not self.app_settings.enabled(app.id):
+            if not self.app_settings.enabled(app.id) or app.id in disabled:
                 continue
             state = self.app_settings.state(plan_id, app.id)
             if state == "included":
@@ -631,7 +1061,18 @@ class EntitlementService:
     # -- checks ----------------------------------------------------------------
 
     def required_plan(self, feature: str) -> str | None:
+        """The cheapest plan an organization can move to that includes ``feature`` (built-in or created)."""
         return plan_for_feature(self.catalog.current(), feature)
+
+    def app_disabled_here(self, org_id: str, app_id: str) -> bool:
+        """An operator switched this app off for this one organization."""
+        with self.db.read() as connection:
+            row = one(
+                connection,
+                "SELECT 1 AS x FROM org_apps WHERE org_id = ? AND app_id = ? AND status = 'disabled'",
+                (org_id, app_catalog.current_id(app_id)),
+            )
+        return row is not None
 
     def require_app(
         self, org_id: str, app_id: str, *, audience: str = "staff"
@@ -648,19 +1089,27 @@ class EntitlementService:
                 app=app_id,
                 name=app.name,
             )
+        if self.app_disabled_here(org_id, app_id):
+            raise AppDisabled(
+                f"{app.name} is switched off for your organization. Your data is kept; contact support to turn it back on.",
+                app=app_id,
+                name=app.name,
+                scope="organization",
+            )
         state = self.app_settings.state(entitlements.plan_id, app_id)
         needed = self.app_settings.plan_for(app_id)
+        plan_name = self.catalog.name(entitlements.plan_id)
         if audience == "candidate":
             message = f"{app.name} is not enabled for your organization."
             hint = "Ask an owner or administrator to turn it on."
         elif state == "addon":
             message = f"{app.name} is not turned on for your organization."
-            hint = f"Turn it on under Apps (billed per candidate seat on your {entitlements.plan_id.title()} plan)."
+            hint = f"Turn it on under Apps (billed per candidate seat on your {plan_name} plan)."
         elif needed:
-            message = f"{app.name} is not available on the {entitlements.plan_id.title()} plan."
-            hint = f"Upgrade to {needed.title()} and turn it on under Apps."
+            message = f"{app.name} is not available on the {plan_name} plan."
+            hint = f"Upgrade to {self.catalog.name(needed)} and turn it on under Apps."
         else:
-            message = f"{app.name} is not available on the {entitlements.plan_id.title()} plan."
+            message = f"{app.name} is not available on the {plan_name} plan."
             hint = "Contact sales."
         raise AppRequired(
             message + " " + hint,
@@ -686,9 +1135,9 @@ class EntitlementService:
         elif audience == "candidate":
             message = f"{name} is not enabled for your organization."
         elif needed:
-            message = f"{name} is not part of your {entitlements.plan_id.title()} plan. Upgrade to {needed.title()} to use it."
+            message = f"{name} is not part of your {self.catalog.name(entitlements.plan_id)} plan. Upgrade to {self.catalog.name(needed)} to use it."
         else:
-            message = f"{name} is not part of your {entitlements.plan_id.title()} plan."
+            message = f"{name} is not part of your {self.catalog.name(entitlements.plan_id)} plan."
         raise PlanRequired(
             message,
             feature=feature,
@@ -1082,9 +1531,10 @@ class Enforcer:
             message = f"Your organization's limit of {rule} has been reached. It resets automatically."
             needed = None
         else:
-            message = f"The {entitlements.plan_id.title()} plan allows {rule}, and it has been reached."
+            catalog = self.entitlements.catalog
+            message = f"The {catalog.name(entitlements.plan_id)} plan allows {rule}, and it has been reached."
             if needed and needed != entitlements.plan_id:
-                message += f" Upgrade to {needed.title()} for a higher limit."
+                message += f" Upgrade to {catalog.name(needed)} for a higher limit."
         return PlanRequired(
             message,
             limit=name,

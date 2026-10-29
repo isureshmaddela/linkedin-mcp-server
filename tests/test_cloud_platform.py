@@ -115,6 +115,31 @@ def test_a_tenant_login_is_not_an_operator_login_and_the_reverse(cloud):
     assert ops.call("GET", "/api/jobs", as_candidate=org.candidate.member_id)[0] == 401
 
 
+def test_operators_sign_in_on_the_main_page_and_sign_out_of_everything(cloud):
+    """The sign-in page for everyone opens the console session; MFA is still mandatory; logout ends both."""
+    org = build_org(cloud, plan="starter", seats=10)
+    cloud.identity.create_operator(org.owner.email, PASSWORD, role="platform_admin")
+    browser = Browser(cloud)
+    status, data = browser.call(
+        "POST", "/api/auth/login", {"email": org.owner.email, "password": PASSWORD}
+    )
+    assert status == 200 and set(data["signed_in"]) == {"member", "operator"}
+    assert browser.call("GET", "/api/platform/tenants")[1]["code"] == "mfa_required"
+    status, begun = browser.call("POST", "/api/platform/auth/mfa/begin", {})
+    assert status == 200
+    status, _ = browser.call(
+        "POST",
+        "/api/platform/auth/mfa/enable",
+        {"code": crypto.totp_code(begun["secret"], cloud.clock.now())},
+    )
+    assert status == 200
+    assert browser.call("GET", "/api/platform/tenants")[0] == 200
+    assert browser.call("GET", "/api/platform/me")[1]["member"]["role"] == "owner"
+    assert browser.call("POST", "/api/platform/auth/logout", {})[0] == 200
+    assert browser.call("GET", "/api/platform/me")[0] == 401
+    assert browser.call("GET", "/api/auth/me")[0] == 401
+
+
 def test_support_operators_are_read_mostly_and_admins_do_everything(cloud):
     org = build_org(cloud, plan="team")
     support = operator_browser(cloud, "support@aira.test", "support")

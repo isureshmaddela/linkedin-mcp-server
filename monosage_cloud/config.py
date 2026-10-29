@@ -98,6 +98,10 @@ class CloudConfig:
 
     # subscription lifecycle (days)
     trial_days: int = 14
+    # What a new sign-up starts on until the superadmin chooses (platform console > Plans > New sign-ups, stored in
+    # the control plane): All access, every app and feature, with no trial end (0 days).
+    signup_plan: str = "all_access"
+    signup_trial_days: int = 0
     past_due_read_only_days: int = 14
     past_due_deletion_days: int = 60
     cancelled_export_days: int = 30

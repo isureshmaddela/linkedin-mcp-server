@@ -84,7 +84,7 @@ class CloudApp:
         self.catalog = PlanCatalog(self.db, self.clock)
         self.catalog.seed()
         self.flags = FlagService(self.db, self.clock)
-        self.app_settings = AppSettings(self.db, self.clock)
+        self.app_settings = AppSettings(self.db, self.clock, self.catalog)
         self.entitlements = EntitlementService(
             self.db,
             self.clock,

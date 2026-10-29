@@ -13,9 +13,16 @@ from monosage_cloud.webio import Reply, Req, cloud_route
 
 @cloud_route("GET", r"/api/billing/plans", auth="public")
 def public_plans(req: Req):  # noqa: ANN201
+    signup = req.app.billing.signup_default()
     return 200, {
         "plans": req.app.billing.public_plans(),
         "trial_days": req.app.config.trial_days,
+        # what a new sign-up gets (the superadmin's choice): the plan and its trial days (0: no trial end)
+        "signup": {
+            "plan_id": signup["plan_id"],
+            "plan_name": signup["plan_name"],
+            "trial_days": signup["trial_days"],
+        },
     }
 
 
@@ -23,7 +30,13 @@ def public_plans(req: Req):  # noqa: ANN201
 def billing_get(req: Req):  # noqa: ANN201
     app, principal = req.app, req.principal
     summary = app.billing.summary(principal.org_id)
-    payload: dict[str, Any] = {"billing": summary, "plans": app.billing.public_plans()}
+    payload: dict[str, Any] = {
+        "billing": summary,
+        "plans": app.billing.public_plans(),
+        "order": app.catalog.order(
+            include_archived=True
+        ),  # ranks a plan change up or down
+    }
     if app.authz.can(principal, "billing.manage"):
         payload["invoices"] = app.billing.invoices(principal)
         payload["can_manage"] = True

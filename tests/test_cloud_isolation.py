@@ -54,6 +54,7 @@ EXEMPT_GROUPS = {
     r"[A-Za-z0-9_.-]+": "static file names",
     r"[A-Za-z0-9_-]{20,80}": "bearer tokens: possession is the credential (invitations, downloads)",
     r"[a-z]{3,20}": "provider and plan names are global",
+    r"[a-z][a-z0-9_]{2,29}": "plan ids (built-in and created by the superadmin) are platform-wide, operator-only",
     r"[a-z_]{3,30}": "consent kinds are a fixed vocabulary",
     r"[a-z0-9_-]{1,40}": "source names are a fixed vocabulary",
     r"company-intel|salary|trends|interview-prep|travel|learn": "report kinds are a fixed vocabulary",
