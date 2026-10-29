@@ -17,11 +17,13 @@ import time
 
 from aira.airaapi.http import Raw, Request, aira_route
 from aira.suite import kit, life, public
-from aira.suite.social import db, market, service, store
+from aira.suite.social import db, market, photos, service, store
+from aira.suite.social import dating_routes as _dating_routes  # noqa: F401 - registers Dating's routes (/api/social/dating/*)
 from aira.suite.social.store import APP
 
 BASE = "/api/social"
 ID = "([0-9a-f]{32})"
+TOKEN = f"({public.TOKEN_PATTERN})"
 
 
 def _account_db(request: Request) -> sqlite3.Connection:
@@ -86,7 +88,7 @@ def me_get(request: Request) -> tuple[int, dict[str, Any]]:
                 "moderator": ident["moderator"],
             }
         return 200, {
-            "account": me,
+            "account": service.account_out(me),
             "moderator": ident["moderator"],
             "badge": {
                 "messages": service.unread_messages(sc, me),
@@ -98,14 +100,16 @@ def me_get(request: Request) -> tuple[int, dict[str, Any]]:
 @aira_route("POST", f"{BASE}/me")
 def me_create(request: Request) -> tuple[int, dict[str, Any]]:
     with _identity(request) as (sc, ident):
-        account = service.create_account(sc, ident, request.payload)
+        account = service.account_out(service.create_account(sc, ident, request.payload))
     return 201, {"account": account}
 
 
 @aira_route("PATCH", f"{BASE}/me")
 def me_update(request: Request) -> tuple[int, dict[str, Any]]:
     with _open(request) as (sc, me):
-        return 200, {"account": service.update_account(sc, me, request.payload)}
+        return 200, {
+            "account": service.account_out(service.update_account(sc, me, request.payload))
+        }
 
 
 @aira_route("GET", f"{BASE}/me/share")
@@ -186,9 +190,65 @@ def person_get(request: Request) -> tuple[int, dict[str, Any]]:
             view["relation"] in ("self", "friends") or target["visibility"] == "public"
         )
         return 200, {
-            "person": view,
+            "person": {**view, "videos_channel": _videos_channel(target) if full else ""},
             "posts": service.person_posts(sc, me, target) if full else [],
+            "highlights": service.highlights(sc, me, target) if full else [],
         }
+
+
+def _videos_channel(target: dict[str, Any]) -> str:
+    """The person's channel in Videos (their reels live there), or "" (no channel, or Videos is not set up)."""
+    if target.get("age_group") == "child":
+        return ""  # children's channels are not shown to others
+    try:
+        from aira.suite.videos import db as videos_db
+
+        with closing(videos_db.connect()) as vsc:
+            found = store.row(
+                vsc,
+                "SELECT id FROM vi_channels WHERE person_key = ? AND suspended_at IS NULL",
+                (target["person_key"],),
+            )
+    except (RuntimeError, sqlite3.Error, KeyError):
+        return ""
+    return found["id"] if found else ""
+
+
+@aira_route("GET", f"{BASE}/people/{ID}/grid")
+def person_grid(request: Request) -> tuple[int, dict[str, Any]]:
+    """``?kind=photos`` their photos, ``?kind=tagged`` posts that mention them, as grid squares."""
+    with _open(request) as (sc, me):
+        target = service.visible_account(sc, me, _id(request))
+        view = service.profile_view(sc, me, target)
+        if not view["full"]:
+            return 200, {"tiles": []}
+        return 200, {"tiles": service.person_grid(sc, me, target, request.q("kind") or "photos")}
+
+
+@aira_route("GET", f"{BASE}/people/{ID}/follows")
+def person_follows(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        target = service.visible_account(sc, me, _id(request))
+        return 200, service.follow_lists(sc, me, target)
+
+
+@aira_route("POST", f"{BASE}/people/{ID}/close")
+def person_close(request: Request) -> tuple[int, dict[str, Any]]:
+    """Put a friend on your close friends list."""
+    with _open(request) as (sc, me):
+        return 200, service.set_close_friend(sc, me, _id(request), True)
+
+
+@aira_route("DELETE", f"{BASE}/people/{ID}/close")
+def person_unclose(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        return 200, service.set_close_friend(sc, me, _id(request), False)
+
+
+@aira_route("GET", f"{BASE}/close-friends")
+def close_friends(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        return 200, {"people": service.close_friends(sc, me)}
 
 
 @aira_route("POST", f"{BASE}/people/{ID}/follow")
@@ -774,7 +834,9 @@ def market_unshare(request: Request) -> tuple[int, dict[str, Any]]:
 @public.page(APP, "listing")
 def listing_page(connection: Any, link: dict[str, Any]) -> dict[str, Any]:
     with closing(db.connect()) as sc:
-        page = market.public_page(sc, str(link.get("ref_id") or ""))
+        page = market.public_page(
+            sc, str(link.get("ref_id") or ""), str(link.get("token") or "")
+        )
     if not (page.get("listing") or {}).get("for_business"):
         page["brand"] = (
             False  # a person's own listing: not the business's name, contacts or payment link
@@ -794,6 +856,220 @@ def listing_interested(
 
 
 # ---------------------------------------------------------------------------
+# photos from the device (photos.py): uploaded once, attached by ``media:<id>``, shown by signed addresses
+# ---------------------------------------------------------------------------
+
+
+@aira_route("POST", f"{BASE}/photos")
+def photo_upload(request: Request) -> tuple[int, dict[str, Any]]:
+    """``{"data": base64}``: a JPEG, PNG or WebP up to 8 MB; its metadata (where, when, the camera) is removed."""
+    with _open(request) as (sc, me):
+        service._active(me)
+        service.rate(sc, me, "photo")
+        sc.commit()
+        return 201, {"photo": photos.save(sc, me, request.payload.get("data"))}
+
+
+_PHOTO_HEADERS = (
+    ("Cache-Control", "private, max-age=21600"),
+    ("Content-Disposition", "inline"),
+    ("X-Content-Type-Options", "nosniff"),
+    ("Content-Security-Policy", "default-src 'none'; sandbox"),
+)
+
+
+@aira_route("GET", f"{BASE}/photos/{ID}")
+def photo_get(request: Request) -> Raw:
+    """A photo by the signed address a view gave someone allowed to see it (an <img> sends no profile header)."""
+    with closing(db.connect()) as sc:
+        photos.verify(_id(request), request.q("e"), request.q("s"), sc)
+        body, mime = photos.read(sc, _id(request))
+    return Raw(200, body, mime, headers=_PHOTO_HEADERS)
+
+
+@aira_route("GET", f"/api/public/{TOKEN}/social-photo/{ID}", auth="public_link")
+def public_photo(request: Request) -> Raw:
+    """A photo on a shared profile or listing page: only one that page shows."""
+    with closing(request.connect()) as connection:
+        link = public.resolve(connection, request.match.group(1))
+    if link["app"] != APP or link["kind"] not in ("profile", "listing"):
+        raise LookupError("This link is no longer available.")
+    photo_id = _id(request, 2)
+    ref = f"media:{photo_id}"
+    with closing(db.connect()) as sc:
+        ref_id = str(link.get("ref_id") or "")
+        if link["kind"] == "profile":
+            shown = service.public_profile_photo(sc, ref_id, photo_id)
+        else:
+            page = market.public_page(sc, ref_id)
+            listing = store.row(
+                sc, "SELECT photos, seller_id FROM so_listings WHERE id = ?", (ref_id,)
+            )
+            seller = store.row(
+                sc,
+                "SELECT avatar FROM so_accounts WHERE id = ?",
+                ((listing or {}).get("seller_id", ""),),
+            )
+            shown = bool(page.get("available") and listing) and (
+                ref in store.loads((listing or {}).get("photos"), [])
+                or (seller or {}).get("avatar") == ref
+            )
+        if not shown:
+            raise LookupError("That photo was not found.")
+        body, mime = photos.read(sc, photo_id)
+    return Raw(200, body, mime, headers=_PHOTO_HEADERS)
+
+
+# ---------------------------------------------------------------------------
+# more on posts: pins, polls, saved posts and collections, comment likes, memories, Explore
+# ---------------------------------------------------------------------------
+
+
+@aira_route("POST", f"{BASE}/posts/{ID}/pin")
+def post_pin(request: Request) -> tuple[int, dict[str, Any]]:
+    """``{"pinned": true|false}``: keep up to three of your posts at the top of your profile."""
+    with _open(request) as (sc, me):
+        on = kit.flag(request.payload.get("pinned", True))
+        return 200, {"post": service.pin_post(sc, me, _id(request), on)}
+
+
+@aira_route("POST", f"{BASE}/posts/{ID}/vote")
+def post_vote(request: Request) -> tuple[int, dict[str, Any]]:
+    """``{"choice": 0..3}``: one vote per person in the post's poll."""
+    with _open(request) as (sc, me):
+        return 200, {
+            "post": service.vote(sc, me, _id(request), request.payload.get("choice"))
+        }
+
+
+@aira_route("POST", f"{BASE}/posts/{ID}/save")
+def post_save(request: Request) -> tuple[int, dict[str, Any]]:
+    """``{"collection_id"?}`` saves the post (into a collection, or All saved); ``{"saved": false}`` unsaves it."""
+    with _open(request) as (sc, me):
+        return 200, service.save_post(sc, me, _id(request), request.payload)
+
+
+@aira_route("POST", f"{BASE}/comments/{ID}/like")
+def comment_like(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        on = kit.flag(request.payload.get("liked", True))
+        return 200, service.like_comment(sc, me, _id(request), on)
+
+
+@aira_route("GET", f"{BASE}/saved")
+def saved(request: Request) -> tuple[int, dict[str, Any]]:
+    """Saved posts (``?collection=<id>``: one collection's), and the collections."""
+    with _open(request) as (sc, me):
+        return 200, {
+            "posts": service.saved_posts(sc, me, request.q("collection")),
+            "collections": service.collections(sc, me),
+        }
+
+
+@aira_route("GET", f"{BASE}/collections")
+def collections(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        return 200, {"collections": service.collections(sc, me)}
+
+
+@aira_route("POST", f"{BASE}/collections")
+def collection_create(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        return 201, {"collection": service.create_collection(sc, me, request.payload)}
+
+
+@aira_route("PATCH", f"{BASE}/collections/{ID}")
+def collection_rename(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        return 200, {
+            "collection": service.rename_collection(
+                sc, me, _id(request), request.payload
+            )
+        }
+
+
+@aira_route("DELETE", f"{BASE}/collections/{ID}")
+def collection_delete(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        service.delete_collection(sc, me, _id(request))
+    return 200, {"deleted": True}
+
+
+@aira_route("GET", f"{BASE}/memories")
+def memories(request: Request) -> tuple[int, dict[str, Any]]:
+    """On this day: your posts from earlier years (``?day=MM-DD``, today in your time zone)."""
+    with _open(request) as (sc, me):
+        return 200, {"posts": service.memories(sc, me, request.q("day"))}
+
+
+@aira_route("GET", f"{BASE}/explore")
+def explore(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        return 200, service.explore(sc, me)
+
+
+@aira_route("GET", f"{BASE}/explore/search")
+def explore_search(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        return 200, service.explore_search(sc, me, request.q("q"))
+
+
+# ---------------------------------------------------------------------------
+# more on stories: who saw them, reactions, replies, and highlights
+# ---------------------------------------------------------------------------
+
+
+@aira_route("GET", f"{BASE}/stories/mine")
+def stories_mine(request: Request) -> tuple[int, dict[str, Any]]:
+    """Your stories of the last year, to choose for a highlight."""
+    with _open(request) as (sc, me):
+        return 200, {"stories": service.my_stories(sc, me)}
+
+
+@aira_route("GET", f"{BASE}/stories/{ID}/viewers")
+def story_viewers(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        return 200, {"viewers": service.story_viewers(sc, me, _id(request))}
+
+
+@aira_route("POST", f"{BASE}/stories/{ID}/react")
+def story_react(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        return 200, service.react_story(
+            sc, me, _id(request), request.payload.get("emoji")
+        )
+
+
+@aira_route("POST", f"{BASE}/stories/{ID}/reply")
+def story_reply(request: Request) -> tuple[int, dict[str, Any]]:
+    """``{"text"}``: a private message to the story's author."""
+    with _open(request) as (sc, me):
+        return 201, service.reply_story(sc, me, _id(request), request.payload)
+
+
+@aira_route("POST", f"{BASE}/highlights")
+def highlight_create(request: Request) -> tuple[int, dict[str, Any]]:
+    """``{"title", "story_ids"}``: keep these stories on your profile."""
+    with _open(request) as (sc, me):
+        return 201, {"highlight": service.save_highlight(sc, me, request.payload)}
+
+
+@aira_route("PATCH", f"{BASE}/highlights/{ID}")
+def highlight_update(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        return 200, {
+            "highlight": service.save_highlight(sc, me, request.payload, _id(request))
+        }
+
+
+@aira_route("DELETE", f"{BASE}/highlights/{ID}")
+def highlight_delete(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        service.delete_highlight(sc, me, _id(request))
+    return 200, {"deleted": True}
+
+
+# ---------------------------------------------------------------------------
 # notifications, reports and moderation
 # ---------------------------------------------------------------------------
 
@@ -802,6 +1078,12 @@ def listing_interested(
 def notifications(request: Request) -> tuple[int, dict[str, Any]]:
     with _open(request) as (sc, me):
         return 200, service.notifications(sc, me)
+
+
+@aira_route("POST", f"{BASE}/notifications/{ID}/read")
+def notification_read(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        return 200, {"unread": service.read_notification(sc, me, _id(request))}
 
 
 @aira_route("POST", f"{BASE}/notifications/read")
@@ -878,7 +1160,9 @@ def moderation_words(request: Request) -> tuple[int, dict[str, Any]]:
 def profile_page(connection: Any, link: dict[str, Any]) -> dict[str, Any]:
     with closing(db.connect()) as sc:
         return {
-            **service.public_profile(sc, str(link.get("ref_id") or "")),
+            **service.public_profile(
+                sc, str(link.get("ref_id") or ""), str(link.get("token") or "")
+            ),
             "brand": False,
         }
 

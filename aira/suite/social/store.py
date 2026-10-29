@@ -257,6 +257,80 @@ SCHEMA = (
         created_at TEXT NOT NULL,
         PRIMARY KEY (account_id, listing_id)
     )""",
+    # photos uploaded from a device (photos.py): the file is on disk under the media folder, never in here
+    """CREATE TABLE IF NOT EXISTS so_media (
+        id TEXT PRIMARY KEY,
+        owner_id TEXT NOT NULL,
+        home TEXT NOT NULL DEFAULT '',
+        mime TEXT NOT NULL,
+        size INTEGER NOT NULL DEFAULT 0,
+        width INTEGER NOT NULL DEFAULT 0,
+        height INTEGER NOT NULL DEFAULT 0,
+        path TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS so_media_owner ON so_media (owner_id, created_at)",
+    # a poll on a post: 2 to 4 options, one vote each, open until closes_at
+    """CREATE TABLE IF NOT EXISTS so_polls (
+        post_id TEXT PRIMARY KEY,
+        options TEXT NOT NULL DEFAULT '[]',
+        closes_at TEXT NOT NULL,
+        notified_at TEXT
+    )""",
+    """CREATE TABLE IF NOT EXISTS so_poll_votes (
+        post_id TEXT NOT NULL,
+        account_id TEXT NOT NULL,
+        choice INTEGER NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (post_id, account_id)
+    )""",
+    """CREATE TABLE IF NOT EXISTS so_comment_likes (
+        comment_id TEXT NOT NULL,
+        account_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (comment_id, account_id)
+    )""",
+    # the close friends list: a smaller audience for posts and stories
+    """CREATE TABLE IF NOT EXISTS so_close_friends (
+        owner_id TEXT NOT NULL,
+        friend_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (owner_id, friend_id)
+    )""",
+    # saved posts, each in one of the person's named collections ('' is "All saved")
+    """CREATE TABLE IF NOT EXISTS so_collections (
+        id TEXT PRIMARY KEY,
+        owner_id TEXT NOT NULL,
+        name TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS so_saves (
+        account_id TEXT NOT NULL,
+        post_id TEXT NOT NULL,
+        collection_id TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (account_id, post_id)
+    )""",
+    # story highlights keep chosen stories on the profile after their day is over
+    """CREATE TABLE IF NOT EXISTS so_highlights (
+        id TEXT PRIMARY KEY,
+        owner_id TEXT NOT NULL,
+        title TEXT NOT NULL,
+        created_at TEXT NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS so_highlight_items (
+        highlight_id TEXT NOT NULL,
+        story_id TEXT NOT NULL,
+        added_at TEXT NOT NULL,
+        PRIMARY KEY (highlight_id, story_id)
+    )""",
+    """CREATE TABLE IF NOT EXISTS so_story_reactions (
+        story_id TEXT NOT NULL,
+        account_id TEXT NOT NULL,
+        emoji TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (story_id, account_id)
+    )""",
 )
 
 # Columns added after a table first shipped: (table, column, definition). db.connect adds the missing ones.
@@ -267,6 +341,22 @@ COLUMNS = (
     # a listing is the seller's own unless they sell it for the business they run (owner, admin, coach)
     ("so_listings", "for_business", "INTEGER NOT NULL DEFAULT 0"),
     ("so_listings", "business_link", "TEXT NOT NULL DEFAULT ''"),
+    # posts: a feeling or activity, a place, a photo filter, alt text per photo, pinned to the profile
+    ("so_posts", "feeling", "TEXT NOT NULL DEFAULT ''"),
+    ("so_posts", "place", "TEXT NOT NULL DEFAULT ''"),
+    ("so_posts", "filter", "TEXT NOT NULL DEFAULT ''"),
+    ("so_posts", "alts", "TEXT NOT NULL DEFAULT '[]'"),
+    ("so_posts", "pinned_at", "TEXT"),
+    # one level of replies under a comment
+    ("so_comments", "parent_id", "TEXT NOT NULL DEFAULT ''"),
+    # a cover photo and links in the bio
+    ("so_accounts", "cover", "TEXT NOT NULL DEFAULT ''"),
+    ("so_accounts", "links", "TEXT NOT NULL DEFAULT '[]'"),
+    # a story for close friends only
+    ("so_stories", "audience", "TEXT NOT NULL DEFAULT 'friends'"),
+    # a picture for a group or a page
+    ("so_groups", "photo", "TEXT NOT NULL DEFAULT ''"),
+    ("so_pages", "photo", "TEXT NOT NULL DEFAULT ''"),
 )
 
 
@@ -276,6 +366,11 @@ def migrate(connection: sqlite3.Connection) -> None:
         have = {r[1] for r in connection.execute(f"PRAGMA table_info({table})")}  # noqa: S608 - fixed names
         if column not in have:
             connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")  # noqa: S608
+    # the key that signs photo addresses (photos.py), made here so a view never writes while it reads
+    connection.execute(
+        "INSERT OR IGNORE INTO so_settings (key, value) VALUES ('photo_key', ?)",
+        (json.dumps(uuid.uuid4().hex + uuid.uuid4().hex),),
+    )
 
 
 HEX = re.compile(r"[0-9a-f]{32}")

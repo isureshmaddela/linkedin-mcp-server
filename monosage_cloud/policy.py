@@ -551,7 +551,8 @@ def suite_rules() -> dict[str, Rule]:
     GET routes, a member who may manage it (``suite.manage``) the others. The life apps and their core
     (``/api/life``) use ``life.read`` / ``life.manage``, which every member has. A route module can mark a
     non-GET route as a read with ``HOSTED_RULES = {"handler_name": "read"}``, or refuse it in the hosted build with
-    ``"deny"`` (a computer owner's page that the platform console replaces). Public link routes answer a
+    ``"deny"`` (a computer owner's page that the platform console replaces), or keep it out of the organization's
+    audit log with ``"private"`` (a member's own private life, such as Dating). Public link routes answer a
     business's customers without a session (``public_link``: the token names the organization).
     """
     import sys
@@ -576,9 +577,15 @@ def suite_rules() -> dict[str, Rule]:
         if override == "deny":
             rules[entry.attr] = DENY
             continue
-        reads = override == "read" or (override is None and entry.method == "GET")
+        reads = override == "read" or (
+            override in (None, "private") and entry.method == "GET"
+        )
         family = "life" if _is_life_module(module) else "suite"
-        rules[entry.attr] = _org(f"{family}.read" if reads else f"{family}.manage")
+        rules[entry.attr] = _org(
+            f"{family}.read" if reads else f"{family}.manage",
+            # "private": the person's own private life (Dating), never written to the organization's audit log
+            **({"audit": False} if override == "private" else {}),
+        )
     return rules
 
 

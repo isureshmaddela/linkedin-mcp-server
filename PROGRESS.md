@@ -675,3 +675,33 @@ Request: "aira cloud change to monosage cloud and implement all of them into one
   spent the 1200/minute limit on static files, so later pages got 429 for their own scripts.
 - **Not done:** the user's 8780 server must be restarted to load this (it has run since 02:19), and the import was not
   run on the real data (it changes the user's workspace; the command is in the README).
+
+## Social: everything of a social network in one app, easy to find your way (2026-10-29)
+Request: "Social app should contain all Facebook, Instagram, dating apps... easy navigation and understandable,
+attractive, with latest features." Original features only (no other product's names, looks or screens). Dating is a
+separate piece (`aira/suite/social/dating.py`, `views-social-dating.js`); this part is the rest of Social.
+- **Finding your way:** the frame's left menu is Social's rail with icons and counts (Home, Explore, Reels, Chats,
+  Friends, Dating, Groups, Pages, Marketplace, Notifications, Saved, Profile); on a phone a bottom bar (Home, Explore,
+  Reels, Chats, Notifications, More) replaces the page's tab bar and the frame's bar. **+ Create** on every page (post,
+  photo, story, reel in Videos, poll, group, page, listing); "+ New" offers the same. Light and dark; no sideways
+  scroll at 390 px. Old links (`tab=feed`) still work: Home is the `feed` tab.
+- **Photos from the device** (`aira/suite/social/photos.py`): base64 upload to `POST /api/social/photos`, sniffed by
+  content (JPEG/PNG/WebP, 8 MB), EXIF/XMP/comment/text chunks removed before writing, stored in the Videos media
+  folder (`AIRA_MEDIA_DIR` or the host's) under `social/`, attached as `media:<id>` by their owner only, shown through
+  hour-rounded HMAC-signed addresses handed only to people who may see the thing (`GET /api/social/photos/<id>`), and
+  on shared profile/listing pages through `/api/public/<token>/social-photo/<id>` (only that page's photos). The browser
+  shrinks to 2048 px first (which also drops metadata). Unused uploads go after a day; erasure removes the files.
+- **Posts:** carousels with alt text, filters by name (CSS on display), feelings/activities, a place, close friends
+  audience, polls (2–4 answers, 1/3/7 days, one vote, results after voting, "poll is over" notifications), pin up to 3,
+  save into named collections (Saved), one-level comment replies and comment likes.
+- **Stories:** a full viewer (progress bars, pause, arrows), quick reactions, replies that become a chat message under
+  the messaging rules, close-friends stories, who-viewed with reactions, highlights that keep stories on the profile.
+- **Explore** (trending public posts of 14 days as a grid, people to follow, popular #tags, search across people,
+  posts, groups, pages and tags; children see only friends' and household posts), **Reels** (the Videos app's reels in a
+  vertical feed; like/comment through Videos' API), **On this day** on Home, **Profile** (cover, links, counts that
+  open follower/following lists, highlights, Posts | Photos | Reels | Tagged, a "finish your profile" nudge),
+  **Notifications** (grouped by day, filters, mark one or all read).
+- Schema: new tables and columns are additive (`store.SCHEMA` / `store.COLUMNS`); hosted rules come from the routes
+  (life.read / life.manage); no new path groups beyond hex ids and the public-link token.
+- Tests: `tests/test_suite_social_plus.py` (server and HTTP), `tests/test_suite_social_ui_plus.py` (browser, desktop and
+  phone light/dark, screenshots in `D:/aira-test-tmp/social-shots`); the shell test follows the new names.
