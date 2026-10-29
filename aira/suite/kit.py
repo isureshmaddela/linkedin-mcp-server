@@ -62,10 +62,6 @@ def parse_time(value: str) -> datetime:
     return moment if moment.tzinfo else moment.replace(tzinfo=timezone.utc)
 
 
-def month_of(value: str) -> str:
-    return str(value or "")[:7]
-
-
 # ---------------------------------------------------------------------------
 # validation
 # ---------------------------------------------------------------------------

@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import functools
+import gzip
 import hashlib
 import hmac
 import html
@@ -4909,6 +4910,44 @@ _login_limiter = RateLimiter(limit=8, window_seconds=600, lockout_seconds=900)
 _api_limiter = RateLimiter(limit=600, window_seconds=60)
 # Routes that serve the web page and its static files (not rate limited).
 PAGE_ROUTES = frozenset({"ui_index", "ui_app_page", "ui_static", "ui_i18n"})
+# The page and its static files are checked on every load (an edit on disk shows at once) but sent again only when
+# they changed: the ETag is the file's size and modification time, and a match answers 304 with no body. Text files
+# go gzip-compressed to a browser that accepts it (compressed once per version of the file and kept in memory).
+STATIC_COMPRESSIBLE = frozenset(
+    {".css", ".js", ".json", ".svg", ".html", ".webmanifest"}
+)
+_static_gzip: dict[str, tuple[str, bytes]] = {}
+_static_gzip_lock = threading.Lock()
+
+
+def _static_etag(stat: os.stat_result) -> str:
+    return f'"{stat.st_mtime_ns:x}-{stat.st_size:x}"'
+
+
+def _accepts_gzip(header: str | None) -> bool:
+    """Whether Accept-Encoding allows gzip (``gzip;q=0`` refuses it)."""
+    for part in str(header or "").split(","):
+        token, _, params = part.strip().partition(";")
+        if token.strip().lower() not in {"gzip", "*"}:
+            continue
+        quality = params.strip().lower().removeprefix("q=")
+        try:
+            return not params.strip() or float(quality) > 0
+        except ValueError:
+            return False
+    return False
+
+
+def _gzipped(target: Path, etag: str, data: bytes) -> bytes:
+    key = str(target)
+    with _static_gzip_lock:
+        hit = _static_gzip.get(key)
+    if hit and hit[0] == etag:
+        return hit[1]
+    packed = gzip.compress(data, compresslevel=6, mtime=0)
+    with _static_gzip_lock:
+        _static_gzip[key] = (etag, packed)
+    return packed
 
 
 def canonical_fields_as_dicts() -> list[dict[str, Any]]:
@@ -8085,8 +8124,12 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.send_response(status)
         self.send_header("Content-Type", content_type)
         self.send_header("Content-Length", str(length))
+        # Every response gets the security headers; only Cache-Control may be set by the response itself (the
+        # page's static files are revalidated with an ETag, "no-cache", instead of "no-store").
+        cached = any(name.lower() == "cache-control" for name, _value in extra or ())
         for name, value in SECURITY_HEADERS:
-            self.send_header(name, value)
+            if not (cached and name.lower() == "cache-control"):
+                self.send_header(name, value)
         correlation = getattr(_request_context, "correlation_id", None)
         if correlation:
             self.send_header("X-Request-ID", str(correlation))
@@ -8116,6 +8159,40 @@ class RequestHandler(BaseHTTPRequestHandler):
         self._write_headers(status, content_type, len(data), extra)
         self.wfile.write(data)
         self._status = status
+
+    def _send_static(self, target: Path, content_type: str) -> None:
+        """A file of the web page: 304 when the browser has this version, else the bytes (gzip when accepted)."""
+        try:
+            stat = target.stat()
+        except OSError:
+            self.send_error(404)
+            return
+        etag = _static_etag(stat)
+        headers = [
+            ("Cache-Control", "no-cache"),
+            ("ETag", etag),
+            ("Vary", "Accept-Encoding"),
+        ]
+        asked = self.headers.get("If-None-Match") or ""
+        known = {tag.strip() for tag in asked.split(",")}
+        if etag in known or "*" in known:
+            self.send_response(304)
+            for name, value in headers:
+                self.send_header(name, value)
+            self.end_headers()
+            self._status = 304
+            return
+        data = target.read_bytes()
+        if (
+            target.suffix in STATIC_COMPRESSIBLE
+            and len(data) > 1024
+            and _accepts_gzip(self.headers.get("Accept-Encoding"))
+        ):
+            data = _gzipped(target, etag, data)
+            headers.append(("Content-Encoding", "gzip"))
+        self._write_headers(200, content_type, len(data), headers)
+        self.wfile.write(data)
+        self._status = 200
 
     def _send_auth_json(
         self,
@@ -8368,12 +8445,10 @@ class RequestHandler(BaseHTTPRequestHandler):
         query: dict[str, list[str]],
         user: dict[str, Any] | None,
     ) -> None:
-        try:
-            body = UI_FILE.read_bytes()
-        except OSError:
+        if not UI_FILE.is_file():
             self.send_error(500, "Dashboard assets are missing.")
             return
-        self._send_bytes(200, body, "text/html; charset=utf-8")
+        self._send_static(UI_FILE, "text/html; charset=utf-8")
 
     @route("GET", aira_apps.PAGE_PATH_PATTERN, auth=False)
     def ui_app_page(
@@ -8431,7 +8506,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         if not target.is_file():
             self._send_json(404, {"error": "No translation for that language."})
             return
-        self._send_bytes(200, target.read_bytes(), "application/json; charset=utf-8")
+        self._send_static(target, "application/json; charset=utf-8")
 
     @route("GET", r"/static/([A-Za-z0-9_.-]+)", auth=False)
     def ui_static(
@@ -8450,7 +8525,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         ):
             self.send_error(404)
             return
-        self._send_bytes(200, target.read_bytes(), STATIC_TYPES[target.suffix])
+        self._send_static(target, STATIC_TYPES[target.suffix])
 
     @route("GET", r"/api/health", auth=False)
     def api_health(

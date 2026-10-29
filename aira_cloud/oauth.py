@@ -39,7 +39,6 @@ from aira_cloud.errors import (
     Conflict,
     Forbidden,
     NotFound,
-    Unauthorized,
     ValidationFailed,
 )
 from aira_cloud.rbac import ADMIN, Principal
@@ -1039,8 +1038,3 @@ class OAuth:
             "organization": {"id": principal.org_id, "name": org["name"]},
             "role": principal.role,
         }
-
-    def require_unauthenticated_bearer(self, token: str) -> None:
-        raise Unauthorized(
-            "The access token is not valid or has expired.", code="invalid_token"
-        )

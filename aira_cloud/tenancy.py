@@ -1162,9 +1162,6 @@ class Tenancy:
             "complete": all(i["done"] for i in required),
         }
 
-    def _system_principal(self, org_id: str) -> Principal:
-        return Principal(kind="member", org_id=org_id, role=OWNER)
-
     # ------------------------------------------------------------------- candidate list
 
     def list_candidates(

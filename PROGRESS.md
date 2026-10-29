@@ -517,3 +517,26 @@ app working end to end with one account, tests per app, more features where they
   `test_suite_careers_shell_ui.py` folder list updated. te/hi: 147 new strings, `i18n_check` clean for both.
 - **Not built:** a public unsubscribe link (opt-out is by reply, detected in imported emails and the inbox); recruiter
   email in the hosted build; automatic follow-up sequences.
+
+## Cleanup and faster page loads (2026-10-28, night)
+- **Page loads:** every response carried `Cache-Control: no-store`, so the browser downloaded the page's ~3.8 MB of
+  scripts and styles (plus a 2 MB translation table) again on every load. The page, `/static/*` and
+  `/static/i18n/<lang>.json` now answer with an ETag (size and modification time) and `Cache-Control: no-cache`:
+  the browser revalidates each time (an edit on disk shows at once) and gets `304 Not Modified` with no body when
+  nothing changed. Text files over 1 KB are gzip-compressed for browsers that accept it (compressed once per file
+  version, kept in memory). API responses keep `no-store`; only Cache-Control can be set by a response, every other
+  security header is always sent (`_send_static`, `_write_headers` in auto_apply_assistant.py). Test:
+  `test_static_files_are_revalidated_compressed_and_answered_304`.
+- **Dead code removed** (each had no caller anywhere, checked with vulture and `git grep -w` over code, tests and
+  docs): `board_labels` (jobboards), `owned_saved_ids` (rank), `preparation_as_dict` (applications),
+  `DocumentStore._blob_path`, `scoring._as_int`, `ai.service._valid_actions`, `kit.month_of`,
+  `UsageService.set_gauge`, `OAuth.require_unauthenticated_bearer`, `policy.unclassified`, `Authorizer.effective_role`,
+  `Tenancy._system_principal`, the empty `aira_cloud/routes/extra_ui_org.py`, and two unused JS helpers (`apiOf` in
+  views-leads.js, `syncedText` in views-messages.js), with the imports they left unused.
+- **Leftover files deleted** (git-ignored, referenced nowhere): `.aira-run*.txt` logs and `.aira-shots/` screenshots
+  from 2026-10-24, and `dist/` (old package builds; the release workflow builds its own). Kept on purpose:
+  `.aira-test2/` (a scratch hosted database with secrets, the owner's call), `.aira-cloud/` (the hosted data),
+  the resume PDF, `scripts/debug_cookie_bridge.py` and `scripts/dump_snapshots.py` (manual developer tools; both
+  still import real names).
+- **Validation:** full suite 3434 passed, 28 skipped, 2 failed: `test_suite_play.py` plans a watch for 23:00 UTC
+  "today", which has passed between 23:00 and midnight UTC (time-of-day dependent, unrelated). JS tests: 69 passed.

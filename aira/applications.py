@@ -16,7 +16,6 @@ import json
 import sqlite3
 import uuid
 from collections.abc import Mapping, Sequence
-from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
@@ -557,10 +556,6 @@ def auto_submit_policy(settings: Mapping[str, str]) -> dict[str, Any]:
         "paused": settings.get("auto_apply_paused") == "1",
         "reason": "Search plans in Auto-apply fill and submit forms for jobs that clear the plan's bar. Questions without a confirmed answer are held for you; nothing is guessed.",
     }
-
-
-def preparation_as_dict(value: Any) -> dict[str, Any]:
-    return asdict(value) if hasattr(value, "__dataclass_fields__") else dict(value)
 
 
 def stale_preparations(

@@ -436,7 +436,8 @@ def test_the_watch_list_is_shared_and_each_person_rates_it(db, people):
         )  # a child cannot remove an adult's item
     with pytest.raises(ValueError):
         service.add_item(db, kid, {"title": "X", "link": "javascript:alert(1)"})
-    when = kit.iso(kit.utcnow().replace(hour=18, minute=0, second=0))
+    # Soon, so the plan is still today whatever the hour the suite runs.
+    when = kit.iso(kit.utcnow().replace(microsecond=0) + timedelta(minutes=2))
     service.add_plan(db, owner, item["id"], {"planned_for": when, "who": [kid["id"]]})
     assert [p["title"] for p in service.plans_today(db, kid)] == ["Paddington"]
     assert service.plans_today(db, gran) == []
@@ -563,7 +564,8 @@ def test_a_family_plays_together_on_the_local_build(env, api, local_index):
     item = pat.post(
         "/api/play/watch", {"kind": "film", "title": "Paddington"}, expect=201
     )["item"]
-    when = kit.iso(kit.utcnow().replace(hour=23, minute=0, second=0))
+    # Soon, so the plan is still today whatever the hour the suite runs.
+    when = kit.iso(kit.utcnow().replace(microsecond=0) + timedelta(minutes=2))
     pat.post(
         f"/api/play/watch/{item['id']}/plans",
         {"planned_for": when, "who": [mia.id]},

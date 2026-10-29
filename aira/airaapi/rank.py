@@ -192,15 +192,6 @@ def _checks(
     return list(reversed(rows))
 
 
-def owned_saved_ids(connection: sqlite3.Connection) -> set[str]:
-    """Saved searches that belong to a rank project (the Monitors tab groups them)."""
-    store.ensure_extras(connection)
-    return {
-        str(row[0])
-        for row in connection.execute("SELECT saved_id FROM airaapi_rank_keywords")
-    }
-
-
 def _move(latest: int | None, previous: int | None) -> int | None:
     """Places gained since the previous check (positive is better); None when not comparable."""
     if latest is None and previous is None:

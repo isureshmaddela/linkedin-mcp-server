@@ -1334,10 +1334,6 @@ def _outcome_line(outcome: dict[str, Any]) -> str:
 Proposal = tuple[registry.Agent, registry.Action, dict[str, Any]]
 
 
-def _valid_actions(proposed: Any, usable: dict[str, registry.Agent]) -> list[Proposal]:
-    return _sort_actions(proposed, usable)[0]
-
-
 def _sort_actions(
     proposed: Any, usable: dict[str, registry.Agent]
 ) -> tuple[list[Proposal], list[Proposal]]:

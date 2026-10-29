@@ -557,9 +557,6 @@ class DocumentStore:
             raise ValueError("The clock must return a datetime.")
         return _utc(value)
 
-    def _blob_path(self, owner_id: str, document_id: str) -> Path:
-        return self._root / owner_id / f"{document_id}.bin"
-
     def _fetch(
         self, connection: sqlite3.Connection, document_id: str
     ) -> dict[str, Any] | None:

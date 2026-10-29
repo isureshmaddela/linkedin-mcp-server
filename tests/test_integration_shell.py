@@ -244,3 +244,40 @@ def test_sources_hint_points_to_the_key_page(env, api) -> None:
     google = next(item for item in sources if item["source"] == "google_jobs")
     assert "API > Account" in google["connection_hint"]
     assert "API" in google["access_method"]
+
+
+def test_static_files_are_revalidated_compressed_and_answered_304(env, api) -> None:
+    """The page's files are sent again only when they changed, and gzip-compressed for a browser that accepts it."""
+    import gzip
+    import urllib.error
+
+    source = (STATIC / "app.js").read_bytes()
+    plain = urllib.request.Request(env.base + "/static/app.js")
+    with urllib.request.urlopen(plain, timeout=30) as reply:
+        etag = reply.headers["ETag"]
+        assert reply.headers["Cache-Control"] == "no-cache"
+        assert reply.headers.get("Content-Encoding") is None
+        assert reply.read() == source
+    packed = urllib.request.Request(
+        env.base + "/static/app.js", headers={"Accept-Encoding": "gzip, br"}
+    )
+    with urllib.request.urlopen(packed, timeout=30) as reply:
+        assert reply.headers["Content-Encoding"] == "gzip"
+        assert reply.headers["ETag"] == etag
+        body = reply.read()
+        assert len(body) < len(source) / 2 and gzip.decompress(body) == source
+    refused = urllib.request.Request(
+        env.base + "/static/app.js", headers={"Accept-Encoding": "gzip;q=0"}
+    )
+    with urllib.request.urlopen(refused, timeout=30) as reply:
+        assert reply.headers.get("Content-Encoding") is None
+    # The browser already has this version: 304 and no body, for the page, a script and a translation table.
+    for path in ("/static/app.js", "/", "/static/i18n/te.json"):
+        with urllib.request.urlopen(env.base + path, timeout=30) as reply:
+            tag = reply.headers["ETag"]
+        again = urllib.request.Request(env.base + path, headers={"If-None-Match": tag})
+        try:
+            urllib.request.urlopen(again, timeout=30)
+            raise AssertionError(f"{path} was sent again")
+        except urllib.error.HTTPError as error:
+            assert error.code == 304 and error.read() == b"", path

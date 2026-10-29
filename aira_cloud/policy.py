@@ -528,13 +528,6 @@ def remote_assignment(name: str, rule: "Rule", payload: dict) -> bool | None:
     return None
 
 
-def unclassified(routes: list[tuple[str, object, str, bool]]) -> list[str]:
-    """Route handler names that have no rule (the tests require this to be empty)."""
-    return sorted(
-        {name for _method, _pattern, name, _auth in routes if name not in POLICY}
-    )
-
-
 def suite_rules() -> dict[str, Rule]:
     """Rules for the industry apps and the Business hub (aira.suite), derived from their routes.
 

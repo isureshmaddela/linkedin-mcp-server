@@ -244,9 +244,6 @@
     node.style.setProperty("--h", String(hueOf(name)));
     return node;
   }
-  function syncedText(seconds) {
-    return seconds ? `Synced ${fmt.ago(seconds)}` : "Not synced yet";
-  }
 
   // -------------------------------------------------------------------------
   // Messages tab

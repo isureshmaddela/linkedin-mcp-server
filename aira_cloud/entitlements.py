@@ -1005,13 +1005,6 @@ class UsageService:
                 )
         return over
 
-    def set_gauge(self, org_id: str, metric: str, value: int) -> None:
-        with self.db.write() as connection:
-            connection.execute(
-                "INSERT INTO usage_counters (org_id, period, metric, value) VALUES (?, ?, ?, ?) ON CONFLICT(org_id, period, metric) DO UPDATE SET value = excluded.value",
-                (org_id, month_key(self.clock.now()), metric, value),
-            )
-
     def delete_org(self, org_id: str) -> None:
         with self.db.write() as connection:
             connection.execute("DELETE FROM usage_counters WHERE org_id = ?", (org_id,))

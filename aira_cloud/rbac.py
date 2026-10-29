@@ -327,9 +327,6 @@ class Authorizer:
 
     # -- decisions -------------------------------------------------------------
 
-    def effective_role(self, principal: Principal) -> str:
-        return principal.role
-
     def can(
         self, principal: Principal, permission: str, *, candidate_id: str | None = None
     ) -> bool:

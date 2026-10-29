@@ -1605,11 +1605,6 @@ def _as_number(value: Any) -> float | None:
     return number
 
 
-def _as_int(value: Any) -> int | None:
-    number = _as_number(value)
-    return None if number is None else int(number)
-
-
 def _candidate_skills(profile: Mapping[str, Any], resume_norm: str) -> dict[str, str]:
     """Canonical skill -> evidence source ('verified_skill' beats 'resume')."""
     sources: dict[str, str] = {}

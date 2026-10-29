@@ -42,7 +42,7 @@ import time
 import urllib.error
 import urllib.parse
 import urllib.request
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Mapping
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import Any
@@ -1075,7 +1075,3 @@ def board_of(url: str) -> str:
     return BOARD_HOSTS.get(
         (urllib.parse.urlsplit(str(url or "")).hostname or "").casefold(), ""
     )
-
-
-def board_labels(ids: Sequence[str] | None = None) -> list[str]:
-    return [BOARDS[board].label for board in (ids or BOARDS)]

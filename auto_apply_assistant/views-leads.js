@@ -550,7 +550,6 @@
     offeredCache = offered.slice();
     const deep = parseDeepLink(ctx.route.query);
     const sourceInfo = Object.fromEntries((overview.sources || []).map((s) => [s.id, s]));
-    const apiOf = (id) => (sourceById(id) || {}).api;
     const availability = (id) => {
       const source = sourceById(id);
       if (id === "csv") return { ok: true };
