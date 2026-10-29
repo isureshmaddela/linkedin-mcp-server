@@ -144,10 +144,36 @@ class PlatformAdmin:
                 "SELECT * FROM support_access WHERE org_id = ? ORDER BY requested_at DESC LIMIT 20",
                 (org_id,),
             )
+            # The people who run it, and whether their email is confirmed (the console can confirm it). Members'
+            # own details stay out of the console: only how many there are.
+            people = many(
+                connection,
+                """SELECT member_id, email, name, role, status, email_verified_at, last_sign_in_at FROM members
+                WHERE org_id = ? AND removed_at IS NULL AND role IN ('owner', 'admin') ORDER BY created_at LIMIT 100""",
+                (org_id,),
+            )
+            others = one(
+                connection,
+                "SELECT COUNT(*) AS n FROM members WHERE org_id = ? AND removed_at IS NULL AND role NOT IN ('owner', 'admin')",
+                (org_id,),
+            )
         if row is None:
             raise NotFound("Organization not found.")
         return {
             **self._tenant_row(row),
+            "members": [
+                {
+                    "member_id": person["member_id"],
+                    "email": person["email"],
+                    "name": person["name"] or "",
+                    "role": person["role"],
+                    "status": person["status"],
+                    "email_verified": bool(person["email_verified_at"]),
+                    "last_sign_in_at": person["last_sign_in_at"],
+                }
+                for person in people
+            ],
+            "other_members": int(others["n"] if others else 0),
             "policy": org["policy"],
             "billing": self.app.billing.summary(org_id),
             "usage": self.app.usage.snapshot(org_id),

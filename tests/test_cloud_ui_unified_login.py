@@ -35,7 +35,9 @@ def _wait(page, check, timeout: int = 30000) -> None:
 
 
 def _hash(page) -> str:
-    return page.evaluate("location.hash")
+    # Read from the browser's address, not with a script: a script fails while the page is navigating.
+    url = page.url
+    return url[url.index("#") :] if "#" in url else ""
 
 
 def _fresh(chromium, base: str, path: str = ""):

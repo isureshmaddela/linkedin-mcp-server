@@ -176,6 +176,9 @@ def cloud_config(req: Req):  # noqa: ANN201
         "billing_provider": config.billing_provider,
         "trial_days": config.trial_days,
         "plans": req.app.billing.public_plans(),
+        # Whether this server sends email: without it, confirmation emails stay on the server and the page says
+        # how to get in (a platform admin confirms the email in the console).
+        "mail_delivery": bool(config.smtp_url),
         # What a new organization starts on (the superadmin's choice): the sign-up page says so.
         "signup": {
             key: value

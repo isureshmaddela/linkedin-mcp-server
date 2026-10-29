@@ -74,13 +74,20 @@ class Identity:
         owner_name: str = "",
         ip: str = "",
         user_agent: str = "",
+        verified: bool = False,
+        audit_actor: Principal | None = None,
     ) -> dict[str, Any]:
-        """Create an organization, its owner and its subscription: the plan the superadmin chose for new sign-ups
-        (All access, every app and feature, until they choose otherwise); the owner verifies their email next."""
+        """Create an account: an organization, its owner and its subscription (the plan the superadmin chose for new
+        sign-ups: All access, every app and feature, until they choose otherwise). One person on their own needs no
+        organization name: theirs is "<name>'s workspace". The owner verifies their email next, unless a platform
+        admin made the account (``verified``)."""
+        email = crypto.normalize_email(email)
         name = str(name or "").strip()
+        if not name:
+            person = str(owner_name or "").strip() or email.split("@", 1)[0]
+            name = f"{person[:100]}'s workspace"
         if not 2 <= len(name) <= 120:
             raise ValidationFailed("Enter the organization name (2 to 120 characters).")
-        email = crypto.normalize_email(email)
         crypto.check_password_policy(password, email)
         org_id, member_id = new_id(), new_id()
         now = self.now
@@ -104,8 +111,8 @@ class Identity:
                 ),
             )
             connection.execute(
-                """INSERT INTO members (member_id, org_id, email, name, password_hash, role, status, created_at)
-                VALUES (?, ?, ?, ?, ?, 'owner', 'active', ?)""",
+                """INSERT INTO members (member_id, org_id, email, name, password_hash, role, status, created_at, email_verified_at)
+                VALUES (?, ?, ?, ?, ?, 'owner', 'active', ?, ?)""",
                 (
                     member_id,
                     org_id,
@@ -113,16 +120,23 @@ class Identity:
                     owner_name.strip()[:120],
                     crypto.hash_password(password),
                     now,
+                    now if verified else None,
                 ),
             )
             started = self.app.billing.start_subscription(org_id, connection)
             self.app.audit.record(
                 org_id,
                 "org.create",
-                actor_type="member",
-                actor_id=member_id,
-                actor_label=f"owner:{email}",
-                actor_role="owner",
+                **(
+                    {"actor": audit_actor}
+                    if audit_actor is not None
+                    else {
+                        "actor_type": "member",
+                        "actor_id": member_id,
+                        "actor_label": f"owner:{email}",
+                        "actor_role": "owner",
+                    }
+                ),
                 target_type="organization",
                 target_id=org_id,
                 detail={
@@ -133,7 +147,8 @@ class Identity:
                 },
                 connection=connection,
             )
-        self.send_verification(org_id, member_id)
+        if not verified:
+            self.send_verification(org_id, member_id)
         token, session = self._create_session(
             org_id,
             member_id,
@@ -149,6 +164,76 @@ class Identity:
             "token": token,
             "session_id": session,
         }
+
+    def create_account(
+        self,
+        operator: Principal,
+        *,
+        name: str,
+        email: str,
+        password: str,
+        organization: str = "",
+    ) -> dict[str, Any]:
+        """A platform admin makes an account for someone (the console's "New account"): the same as signing up,
+        on the plan for new sign-ups, with the email counted as confirmed because the admin vouches for it. The
+        person signs in with the password the admin gives them and can change it under Security."""
+        self.app.authz.require(operator, "platform.tenants.manage")
+        name = str(name or "").strip()
+        if not 2 <= len(name) <= 120:
+            raise ValidationFailed("Enter the person's name (2 to 120 characters).")
+        made = self.signup_org(
+            organization,
+            email,
+            password,
+            owner_name=name,
+            verified=True,
+            audit_actor=operator,
+        )
+        # The session signup makes is the new person's, not the admin's: end it at once.
+        self.logout(made.pop("token"))
+        made.pop("session_id", None)
+        self.app.platform_audit.record(
+            "account.create",
+            operator=operator,
+            org_id=made["org"]["org_id"],
+            detail={
+                "member_id": made["member"]["member_id"],
+                "plan": made["subscription"]["plan_id"],
+            },
+        )
+        return made
+
+    def operator_verify_email(
+        self, operator: Principal, org_id: str, member_id: str
+    ) -> dict[str, Any]:
+        """A platform admin confirms a member's email (for example when this server cannot send email)."""
+        self.app.authz.require(operator, "platform.tenants.manage")
+        member = self.app.tenancy.member(org_id, member_id)
+        if member["role"] not in ("owner", "admin"):
+            # The console shows only the people who run an organization; its members confirm through their own email.
+            raise NotFound("Member not found.")
+        if member.get("email_verified_at"):
+            return {"member_id": member_id, "verified": True, "already": True}
+        with self.db.write() as connection:
+            connection.execute(
+                "UPDATE members SET email_verified_at = ? WHERE member_id = ? AND org_id = ?",
+                (self.now, member_id, org_id),
+            )
+            self.app.audit.record(
+                org_id,
+                "member.email_verified",
+                actor=operator,
+                target_type="member",
+                target_id=member_id,
+                connection=connection,
+            )
+        self.app.platform_audit.record(
+            "member.email_verified",
+            operator=operator,
+            org_id=org_id,
+            detail={"member_id": member_id},
+        )
+        return {"member_id": member_id, "verified": True, "already": False}
 
     # ------------------------------------------------------------ email verification
 

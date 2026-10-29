@@ -125,6 +125,30 @@ def operator_mfa_verify(req: Req):  # noqa: ANN201
 # ----------------------------------------------------------------------------- tenants
 
 
+@cloud_route("POST", r"/api/platform/accounts", auth="operator")
+def account_create(req: Req):  # noqa: ANN201
+    """A platform admin makes an account for someone: on the plan for new sign-ups, email already confirmed."""
+    body = req.body()
+    made = req.app.identity.create_account(
+        req.principal,
+        name=str(body.get("name") or ""),
+        email=str(body.get("email") or ""),
+        password=str(body.get("password") or ""),
+        organization=str(body.get("organization") or ""),
+    )
+    return 201, made
+
+
+@cloud_route(
+    "POST",
+    r"/api/platform/tenants/([0-9a-f]{32})/members/([0-9a-f]{32})/verify-email",
+    auth="operator",
+)
+def member_verify_email(req: Req):  # noqa: ANN201
+    org_id, member_id = req.group(1), req.group(2)
+    return 200, req.app.identity.operator_verify_email(req.principal, org_id, member_id)
+
+
 @cloud_route("GET", r"/api/platform/tenants", auth="operator")
 def tenants(req: Req):  # noqa: ANN201
     return 200, {

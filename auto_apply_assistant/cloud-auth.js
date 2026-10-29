@@ -287,15 +287,15 @@
   }
 
   function renderSignup() {
-    const org = field("Organization name", { type: "text", autocomplete: "organization", maxlength: 120 });
     const name = field("Your name", { type: "text", autocomplete: "name", maxlength: 120 });
-    const email = field("Work email", { type: "email", autocomplete: "email", maxlength: 254 });
+    const email = field("Email", { type: "email", autocomplete: "email", maxlength: 254 });
+    const org = field("Business or organization name (optional)", { type: "text", autocomplete: "organization", maxlength: 120 }, "Leave it empty if it is just you. You can invite people later.");
     const password = field("Password", { type: "password", autocomplete: "new-password", minlength: 12, maxlength: 1024 }, "At least 12 characters. A few random words work well.");
     const meter = strengthMeter(password.input, () => email.input.value);
     const notice = noticeNode();
-    const submit = h("button", { class: "btn", type: "submit", style: { width: "100%", marginTop: "8px" }, text: "Create organization" });
+    const submit = h("button", { class: "btn", type: "submit", style: { width: "100%", marginTop: "8px" }, text: "Create account" });
     const trial = (cloud.config && cloud.config.trial_days) || 14;
-    const form = h("form", { novalidate: true }, org.node, name.node, email.node, password.node, meter.node, notice, submit);
+    const form = h("form", { novalidate: true }, name.node, email.node, password.node, meter.node, org.node, notice, submit);
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       if (!strength(password.input.value, email.input.value).ok) { say(notice, "Choose a password of at least 12 characters that does not contain your email name."); password.input.focus(); return; }
@@ -308,7 +308,7 @@
     });
     const offer = (cloud.config && cloud.config.signup) || null;
     const start = offer && offer.trial_days > 0 ? `Start a ${offer.trial_days}-day trial of ${offer.plan_name}.` : offer ? `Start on ${offer.plan_name}: every app and feature it includes, from the first day.` : `Start a ${trial}-day trial.`;
-    show("Create your organization", `${start} Your organization's members and administrators join by invitation.`, form, swap("Already registered? ", link("Sign in", "#/login")));
+    show("Create your account", `${start} What you earn in your own apps is yours.`, form, swap("Already registered? ", link("Sign in", "#/login")));
   }
 
   function renderCheckEmail(address) {
@@ -318,7 +318,10 @@
       try { await api("/api/auth/resend-verification", { method: "POST", body: {}, silent: true }); say(notice, "Sent again.", false); }
       catch (error) { say(notice, error.message); }
     }));
-    show("Check your email", `We sent a confirmation link to ${address}. Open it to finish setting up your organization.`, notice,
+    // Without a mail server this server cannot send the link: say who can let the person in.
+    const noMail = cloud.config && cloud.config.mail_delivery === false;
+    if (noMail) say(notice, "This server does not send email yet, so the link will not arrive. Ask the administrator to confirm your email in the admin console, then choose “I confirmed it”.", false);
+    show("Check your email", `We sent a confirmation link to ${address}. Open it to finish setting up your account.`, notice,
       h("div", { class: "btn-row" }, resend, h("button", { type: "button", class: "btn", text: "I confirmed it", onclick: reload })));
   }
 

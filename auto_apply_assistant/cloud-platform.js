@@ -335,7 +335,25 @@
     const debounced = () => { clearTimeout(timer); timer = setTimeout(load, 250); };
     q.addEventListener("input", debounced);
     for (const control of [status, plan, flagSelect]) control.addEventListener("change", load);
-    put(stage, pageHead("Tenants", "Every organization, its plan, usage and health. Open one for actions.", h("button", { type: "button", class: "btn secondary", text: "Refresh", onclick: () => { P.tenants = null; load(); } })), readonlyNote(), h("div", { class: "cp-filters" }, q, status, plan, flagSelect), listHost);
+    // A platform admin makes an account for someone: on the plan for new sign-ups, with the email confirmed.
+    const newAccount = isAdmin() ? h("button", { type: "button", class: "btn", text: "New account", "data-new-account": "1", onclick: () => formModal({
+      title: "New account",
+      intro: "Creates the person's account on the plan for new sign-ups, with every app it includes. Their email counts as confirmed; give them the password, and they can change it under Security.",
+      fields: [
+        { name: "name", label: "Their name", maxlength: 120 },
+        { name: "email", label: "Email", type: "email", maxlength: 254 },
+        { name: "password", label: "Password (at least 12 characters)", type: "password", maxlength: 1024 },
+        { name: "organization", label: "Business or organization name (optional)", maxlength: 120, placeholder: "Leave empty for “<name>'s workspace”" },
+      ],
+      submit: "Create account",
+      onSubmit: async (v) => {
+        const made = await api("/api/platform/accounts", { method: "POST", body: v });
+        Aira.toast(`Account created for ${made.member.email} on ${planName(made.subscription.plan_id)}. Recorded in the platform audit as ${P.me.email}.`, "success", { timeout: 8000 });
+        P.tenants = null;
+        location.hash = `#/platform/tenants/${made.org.org_id}`;
+      },
+    }) }) : null;
+    put(stage, pageHead("Tenants", "Every organization, its plan, usage and health. Open one for actions.", h("div", { class: "btn-row" }, newAccount, h("button", { type: "button", class: "btn secondary", text: "Refresh", onclick: () => { P.tenants = null; load(); } }))), readonlyNote(), h("div", { class: "cp-filters" }, q, status, plan, flagSelect), listHost);
     await load();
   };
 
@@ -383,6 +401,8 @@
       section("Apps", h("p", { class: "muted", text: "What this organization can open. Included apps come with its plan; an add-on is paid by the organization or granted here at no charge. Turn an app off here to close it for this organization only (its data is kept)." }),
         h("p", { class: "muted" }, h("span", { text: "To switch an app off for every organization, use " }), h("a", { href: "#/platform/apps", text: "Apps" }), h("span", { text: ". To change what a plan includes, use " }), h("a", { href: "#/platform/plans", text: "Plans" }), h("span", { text: "." })),
         appsTable(tenantApps, orgId, done)),
+      section("Owners and admins", t.other_members ? h("p", { class: "muted", text: `And ${t.other_members} more members; their details stay with the organization.` }) : null, table(["Name", "Email", "Role", "Email confirmed", ""], (t.members || []).map((m) => h("tr", {}, td(m.name || "—"), td(m.email), td(titleCase(m.role)), td(m.email_verified ? chip("confirmed", "ok") : chip("not confirmed", "warn")),
+        td(!m.email_verified && isAdmin() ? h("button", { type: "button", class: "btn sm secondary", text: "Confirm email", "data-confirm-email": m.member_id, onclick: async () => { await api(`/api/platform/tenants/${orgId}/members/${m.member_id}/verify-email`, { method: "POST", body: {} }); done(`${m.email} is confirmed and can sign in.`); } }) : null))), "No owners or admins.")),
       section("Policy", ui.kv(Object.entries(t.policy || {}).map(([k, v]) => [titleCase(k), Array.isArray(v) ? v.join(", ") || "none" : String(v)]))),
       section("Invoices", table(["Date", "Kind", "#Amount", "Status", ""], invoices, "No invoices.")),
       section("Support access", table(["Requested", "Role", "Status", "Reason", "Expires"], grants, "No support access requested.")),
