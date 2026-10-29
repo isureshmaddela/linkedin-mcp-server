@@ -146,6 +146,56 @@ SCHEMA_V3 = (
     "CREATE INDEX IF NOT EXISTS jr_pledges_owner ON jr_pledges (owner_id, read_at)",
 )
 
+# Version 4: life stages: the lives a person keeps (their own and the people they look after), the stage
+# checklist they ticked, and the life book's records (growth, vaccines, check-ups, schools, work, homes, milestones).
+SCHEMA_V4 = (
+    """CREATE TABLE IF NOT EXISTS jr_lives (
+        id TEXT PRIMARY KEY,
+        owner_id TEXT NOT NULL,
+        relation TEXT NOT NULL DEFAULT 'self',
+        name TEXT NOT NULL DEFAULT '',
+        birth_date TEXT NOT NULL DEFAULT '',
+        birth_time TEXT NOT NULL DEFAULT '',
+        birth_place TEXT NOT NULL DEFAULT '',
+        blood_group TEXT NOT NULL DEFAULT '',
+        interests TEXT NOT NULL DEFAULT '[]',
+        notes TEXT NOT NULL DEFAULT '',
+        wishes TEXT NOT NULL DEFAULT '{}',
+        wishes_at TEXT NOT NULL DEFAULT '',
+        died_on TEXT NOT NULL DEFAULT '',
+        died_place TEXT NOT NULL DEFAULT '',
+        died_note TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS jr_lives_owner ON jr_lives (owner_id, relation)",
+    """CREATE TABLE IF NOT EXISTS jr_life_items (
+        life_id TEXT NOT NULL,
+        item_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'open',
+        goal_id TEXT NOT NULL DEFAULT '',
+        at TEXT NOT NULL,
+        PRIMARY KEY (life_id, item_id)
+    )""",
+    """CREATE TABLE IF NOT EXISTS jr_records (
+        id TEXT PRIMARY KEY,
+        owner_id TEXT NOT NULL,
+        life_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        title TEXT NOT NULL DEFAULT '',
+        detail TEXT NOT NULL DEFAULT '',
+        day TEXT NOT NULL DEFAULT '',
+        end_day TEXT NOT NULL DEFAULT '',
+        next_due TEXT NOT NULL DEFAULT '',
+        data TEXT NOT NULL DEFAULT '{}',
+        notes TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS jr_records_life ON jr_records (life_id, kind, day)",
+    "CREATE INDEX IF NOT EXISTS jr_records_due ON jr_records (owner_id, next_due)",
+)
+
 # Columns added after version 1 (a database made by version 1 gets them on first use).
 COLUMNS = {
     "jr_goals": (
@@ -179,7 +229,12 @@ def _add_columns(connection: sqlite3.Connection) -> None:
         have = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
         for name, kind in columns:
             if name not in have:
-                connection.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
+                try:
+                    connection.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")
+                except sqlite3.OperationalError as error:
+                    # Two first requests at once (a page asks for two things): the other one added it.
+                    if "duplicate column" not in str(error).lower():
+                        raise
     connection.commit()
 
 
@@ -189,4 +244,5 @@ def ensure(connection: sqlite3.Connection) -> None:
     kit.ensure(connection, "journey.v1", SCHEMA)
     kit.ensure(connection, "journey.v2", SCHEMA_V2)
     kit.ensure(connection, "journey.v3", SCHEMA_V3)
+    kit.ensure(connection, "journey.v4", SCHEMA_V4)
     _add_columns(connection)

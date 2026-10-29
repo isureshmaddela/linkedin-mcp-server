@@ -429,13 +429,14 @@ VIDEOS = _life(
 JOURNEY = _life(
     "journey",  # not "life": /api/life is the everyday apps' shared core (people, Today, pulse)
     "Life",
-    "Goals, milestones and documents",
+    "Life stages, goals and documents",
     "",
-    "Your life in one place: goals with steps and check-ins, a life score, a timeline of the milestones of your "
-    "life, and a vault for passports, certificates and insurance cards with reminders before they expire.",
+    "Your life in one place, from birth onwards: each stage of life with what matters in it and ideas for your "
+    "interests, a life book for you and the people you look after, goals, habits, a journal, a timeline of your "
+    "milestones, and a vault for passports, certificates and insurance cards with reminders before they expire.",
     (
+        "Every stage of life, with guidance",
         "Goals with steps and progress",
-        "A life score and what is coming up",
         "A timeline of your milestones",
         "A document vault with expiry reminders",
     ),

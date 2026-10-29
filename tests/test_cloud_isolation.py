@@ -70,6 +70,7 @@ EXEMPT_GROUPS = {
     r"[0-9]{1,6}": "Sites version numbers, inside the project the path's own id (or public link token) names",
     r"github|netlify|vercel": "Sites deploy targets are a fixed vocabulary; the tokens saved for them are the caller's own",
     r"/.*": "a file inside the site the public link token names",
+    r"[a-z_]{2,20}\.[a-z0-9_.]{1,40}": "Life stage suggestions are a fixed catalog; their ticks live inside the life the path's own id names",
 }
 # Routes with no tenant selector in the path; mutating ones are covered by body-identifier tests below.
 PUBLIC_OR_OWN_SESSION = {

@@ -176,6 +176,23 @@ def _life_facts(connection: sqlite3.Connection, me: dict[str, Any]) -> list[str]
         out.append(
             f"Documents: {docs['total']} in the vault, {docs['expires_soon']} expire within 90 days, {docs['expired']} expired."
         )
+    from aira.suite.journey import lifebook
+
+    stage = lifebook.summary(connection, me)
+    out.append(
+        f"Stage of life: {stage['life']['stage']['title']} ({stage['life']['stage']['label']}), "
+        f"{stage['done']} of {stage['total']} things done in it"
+        + (
+            "; next: " + "; ".join(item["title"] for item in stage["next"])
+            if stage["next"]
+            else ""
+        )
+        + "."
+    )
+    for item in stage["due"][:4]:
+        out.append(
+            f'Due: {item["kind"]} "{item["title"]}" for {item["who"]} on {item["next_due"]}.'
+        )
     return out
 
 

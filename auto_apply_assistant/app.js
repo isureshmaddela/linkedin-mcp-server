@@ -408,7 +408,7 @@ const APPS = [
   { id: "planner", name: "Planner", tagline: "Chores, shopping and bills", icon: "planner", home: "planner", path: "planner", category: "life", scope: "org" },
   { id: "news", name: "News", tagline: "Today's headlines in your language", icon: "news", home: "news", path: "news", category: "life", scope: "org" },
   { id: "videos", name: "Videos", tagline: "Watch, upload and earn", icon: "videos", home: "videos", path: "videos", category: "life", scope: "org" },
-  { id: "journey", name: "Life", tagline: "Goals, milestones and documents", icon: "journey", home: "journey", path: "life", category: "life", scope: "org" },
+  { id: "journey", name: "Life", tagline: "Life stages, goals and documents", icon: "journey", home: "journey", path: "life", category: "life", scope: "org" },
   { id: "ai", name: "AI", tagline: "Chat with Monosage and manage its agents", icon: "ai", home: "ai", path: "ai", category: "life", scope: "org" },
   { id: "stocks", name: "Stocks", tagline: "Markets, predictions and your portfolio", icon: "stocks", home: "stocks", path: "stocks", category: "life", scope: "org" },
 ];

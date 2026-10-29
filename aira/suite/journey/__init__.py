@@ -12,6 +12,10 @@
 * A goal's **public page**: friends cheer, and (adults) **supporters** back it with an amount paid to the owner
   directly; the owner marks each pledge received, which adds it to a money goal.
 
+* **Life stages** (:mod:`.lifebook`, :mod:`.stages`): a life from before birth to remembrance, one's own and those
+  of the people one looks after: the stage by age with its checklist, milestones and ideas for each interest, the life
+  book (growth, vaccines and check-ups with reminders, schools, work, homes), wishes and legacy, and a death recorded.
+
 Everything belongs to the person who wrote it (:func:`aira.suite.life.current`); a shared timeline event is the
 only thing other people in the household may read.
 """

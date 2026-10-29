@@ -65,3 +65,101 @@ input.jr-grow { min-width: 160px; }
 .jr-result-text { display: grid; min-width: 0; }
 .jr-result-label { font-weight: 600; overflow-wrap: anywhere; }
 .jr-empty-actions { justify-content: center; margin-top: 8px; }
+
+/* Life stages (views-journey-stages.js): whose life, the stage now, the road of every stage, its checklist, the
+   ideas for each interest, the life book and the wishes. */
+.jr-people { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.jr-person { display: inline-flex; align-items: center; gap: 8px; min-height: 48px; padding: 6px 14px 6px 8px; border-radius: 999px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink); font: inherit; cursor: pointer; text-align: left; }
+.jr-person:hover { background: var(--brand-soft); }
+.jr-person:focus-visible { outline: 3px solid var(--focus, var(--brand)); outline-offset: 2px; }
+.jr-person.on { border-color: var(--brand); background: var(--brand-soft); box-shadow: inset 0 0 0 1px var(--brand); }
+.jr-person.passed { opacity: .8; }
+.jr-person-mark { font-size: 22px; line-height: 1; }
+.jr-person-text { display: grid; line-height: 1.2; }
+.jr-person-name { font-weight: 600; }
+
+.jr-stage-hero { display: flex; gap: 18px; align-items: flex-start; padding: 20px; background: linear-gradient(135deg, var(--brand-soft), var(--surface) 70%); }
+.jr-stage-hero.passed { background: linear-gradient(135deg, var(--surface-2), var(--surface) 70%); }
+.jr-stage-mark { flex: none; width: 64px; height: 64px; border-radius: 50%; display: grid; place-items: center; font-size: 34px; background: var(--surface); border: 1px solid var(--line); }
+.jr-stage-mark.sm { width: 44px; height: 44px; font-size: 24px; }
+.jr-stage-text { display: grid; gap: 6px; }
+.jr-stage-text p { margin: 0; }
+.jr-stage-title { margin: 0; font-size: 26px; line-height: 1.15; }
+.jr-stage-ages { font-weight: 600; color: var(--brand-ink, var(--brand)); }
+.jr-stage-progress { display: flex; gap: 10px; align-items: center; max-width: 480px; }
+.jr-stage-progress .small { white-space: nowrap; }
+.jr-memorial { font-style: italic; }
+.jr-memorial-note { margin: 0; padding: 8px 12px; border-left: 3px solid var(--line-strong); white-space: pre-wrap; }
+.jr-birth-prompt { display: flex; flex-wrap: wrap; gap: 8px; align-items: flex-end; padding: 10px 12px; border: 1px dashed var(--brand); border-radius: var(--radius-sm, 8px); }
+.jr-birth-prompt label { display: grid; gap: 4px; }
+@media (max-width: 600px) { .jr-stage-hero { flex-direction: column; padding: 16px; } .jr-stage-progress { flex-wrap: wrap; } }
+
+/* The road of life: one stop per stage, scrolling sideways on a narrow screen. */
+.jr-road { list-style: none; margin: 0; padding: 4px 2px 10px; display: flex; gap: 8px; overflow-x: auto; scroll-snap-type: x proximity; }
+.jr-road li { flex: none; scroll-snap-align: center; }
+.jr-road-stop { display: grid; justify-items: center; align-content: start; gap: 2px; width: 118px; min-height: 112px; padding: 10px 6px; border-radius: 14px; border: 1px solid var(--line); background: var(--surface); color: var(--ink); font: inherit; text-align: center; cursor: pointer; }
+.jr-road-stop:hover { border-color: var(--brand); }
+.jr-road-stop:focus-visible { outline: 3px solid var(--focus, var(--brand)); outline-offset: 2px; }
+.jr-road-stop.past { background: var(--surface-2); }
+.jr-road-stop.current { border: 2px solid var(--brand); }
+.jr-road-stop.on { box-shadow: 0 0 0 3px var(--brand-soft); background: var(--brand-soft); }
+.jr-road-mark { font-size: 24px; line-height: 1.2; }
+.jr-road-title { font-weight: 600; line-height: 1.2; }
+.jr-road-note { color: var(--brand-ink, var(--brand)); font-weight: 600; }
+
+/* A stage's checklist, by area of life. */
+.jr-stage-items { display: grid; gap: 14px; }
+.jr-area-group { display: grid; gap: 8px; }
+.jr-area-title { margin: 6px 0 0; font-size: 15px; }
+.jr-items { list-style: none; margin: 0; padding: 0; display: grid; gap: 8px; }
+.jr-item { display: flex; gap: 12px; align-items: flex-start; padding: 10px 12px; border: 1px solid var(--line); border-radius: 12px; background: var(--surface); }
+.jr-item p { margin: 2px 0 0; }
+.jr-item .btn-row { margin-top: 6px; flex-wrap: wrap; }
+.jr-item.done { background: var(--surface-2); }
+.jr-item.done .jr-item-title { text-decoration: line-through; text-decoration-color: var(--good); }
+.jr-item.skipped { opacity: .7; }
+.jr-item-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; }
+.jr-item-title { overflow-wrap: anywhere; }
+.jr-carried { padding-top: 6px; border-top: 1px dashed var(--line-strong); }
+.jr-then summary { cursor: pointer; font-weight: 600; padding: 6px 0; }
+.jr-milestones { display: flex; flex-wrap: wrap; gap: 6px; }
+.jr-milestone { display: inline-flex; align-items: center; min-height: 36px; padding: 4px 12px; border-radius: 999px; border: 1px dashed var(--line-strong); background: var(--surface); color: var(--ink); font: inherit; font-size: 14px; cursor: pointer; }
+button.jr-milestone:hover { border-color: var(--brand); background: var(--brand-soft); }
+button.jr-milestone:focus-visible { outline: 3px solid var(--focus, var(--brand)); outline-offset: 2px; }
+.jr-milestone.done { border-style: solid; border-color: var(--good); cursor: default; }
+.jr-milestone.ahead { cursor: default; color: var(--muted); }
+
+/* Interests and the ideas they bring. */
+.jr-interests { display: flex; flex-wrap: wrap; gap: 6px; }
+.jr-interest { min-height: 40px; padding: 6px 12px; border-radius: 999px; border: 1px solid var(--line-strong); background: var(--surface); color: var(--ink); font: inherit; font-size: 14px; cursor: pointer; }
+.jr-interest:hover { background: var(--brand-soft); }
+.jr-interest:focus-visible { outline: 3px solid var(--focus, var(--brand)); outline-offset: 2px; }
+.jr-interest.on { border-color: var(--brand); background: var(--brand-soft); box-shadow: inset 0 0 0 1px var(--brand); font-weight: 600; }
+.jr-idea h3 { margin: 4px 0 0; font-size: 16px; }
+.jr-idea p { margin: 0; }
+.jr-idea .btn-row { flex-wrap: wrap; margin-top: auto; }
+.jr-idea.done, .jr-idea.skipped { opacity: .75; }
+
+/* The life book. */
+.jr-book { display: grid; gap: 14px; }
+.jr-book-head { display: flex; flex-wrap: wrap; gap: 8px; align-items: center; justify-content: space-between; }
+.jr-record .btn-row { flex: none; }
+.jr-due .late .life-line-sub { color: var(--danger); }
+.jr-sparks { display: flex; flex-wrap: wrap; gap: 16px; }
+.jr-spark-box { margin: 0; flex: 1 1 220px; max-width: 360px; }
+.jr-spark { width: 100%; height: 64px; }
+.jr-spark path { fill: none; stroke: var(--brand); stroke-width: 2.5; stroke-linecap: round; stroke-linejoin: round; }
+.jr-growth td.num { text-align: right; font-variant-numeric: tabular-nums; }
+.jr-wish-text { white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
+
+/* A plan for the stage, and the overview's card. */
+.jr-plan { display: grid; gap: 12px; }
+.jr-plan-summary { margin: 0; font-size: 16px; }
+.jr-plan-steps { list-style: none; margin: 0; padding: 0; display: grid; gap: 10px; }
+.jr-plan-step { display: flex; gap: 10px; align-items: flex-start; flex-wrap: wrap; }
+.jr-plan-step p { margin: 2px 0 0; }
+.jr-stage-mini { display: flex; gap: 12px; align-items: center; color: inherit; text-decoration: none; padding: 4px; border-radius: 12px; }
+.jr-stage-mini:hover { background: var(--brand-soft); }
+.jr-stage-mini:focus-visible { outline: 3px solid var(--focus, var(--brand)); outline-offset: 2px; }
+.jr-stage-mini-text { display: grid; gap: 4px; }
+.jr-due-line { margin: 4px 0 0; }

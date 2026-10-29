@@ -586,3 +586,44 @@ and others, tested end to end, pushable to git and deployable to any cloud. Buil
   step by step. `qwen2.5-coder:7b` is listed by this machine's Ollama but cannot load ("not found, try pulling it").
 - **Not built**: server code/forms inbox for generated sites, custom domains, Cloudflare Pages direct upload (kit +
   wrangler command instead), multi-person editing of one file, image generation.
+
+## Life stages: a whole life, from before birth to remembrance (2026-10-29)
+
+The Life app (`journey`) gains a **Life stages** tab: track a life from birth (or pregnancy) to death, with what
+matters at each stage and guidance from the person's interests. Docs: `docs/apps/journey.md` "Life stages".
+
+- **Knowledge** (`aira/suite/journey/stages.py`): 13 stages by age in months (Before birth, Baby, Toddler, Early
+  childhood, School years, Teenage, Young adult, Building years, Midlife, Later working years, Retirement, Elder,
+  Remembered), each with a checklist in 7 areas (health, mind, family, money, purpose, papers, legacy; ~120 items, each
+  saying how it is done: tick, goal, money goal, habit, document kind, record kind, wishes, interests, another app;
+  important ones `carry` into later stages until done) and milestones; 14 interests x 5 age groups x 2 ideas
+  (learn/do/career/earn/give, earn ideas link Sites, Courses & Events, Commerce, Sales, Videos, Play, Stocks). Health
+  items say what to ask a doctor; no doses.
+- **Rules** (`lifebook.py`, tables `jr_lives`, `jr_life_items`, `jr_records` as `journey.v4`): one's own life (birth
+  date shared with the profile's birthday; the age group guesses the stage until it is set) and, for adults, lives they
+  look after (a baby up to 300 days before it is due, a parent...). Items: done / skipped / planned (a goal: done when
+  the goal completes) and interest ideas the same way. Records: growth (cm/kg/head), vaccine and check-up with
+  `next_due` (the latest record of the same name answers an earlier one), education, work, home, milestone (own
+  milestones become timeline events). Due within 30 days (or 60 days late) -> Today card "Vaccines and check-ups",
+  pulse alerts at 7/1/0 days, badge for those within a week; none for someone who has died. Wishes (adults, own
+  life): 7 fields + organ donation, text download. A death on a looked-after life -> stage Remembered (reminders stop,
+  bereavement checklist, optional timeline event), undoable. A plan for the stage from `kit.draft` (no name sent) or
+  from the open checklist and ideas. Life book CSV. The AI app's Life agent reads the stage and what is due.
+- **Routes** (`lifebook_routes.py`, imported by `journey_routes.py`): `/api/journey/lives`, `/lives/me`,
+  `/lives/<id>` (+ `/items/<item>`, `/records`, `/milestones`, `/passed`, `/plan` = hosted read), `/records/<id>`,
+  `/wishes`, `/export/wishes`, `/export/lives/<id>`, `/stages`; overview gains `stage`.
+- **UI** (`views-journey-stages.js`, styles in `app-journey.css`): person switcher, stage hero (age, progress, next
+  stage, birth-date prompt, plan, download, record a passing), the road of life (scrolls inside itself on a phone),
+  checklist by area with actions, carried items, milestones, interests and idea cards, the life book (due list, growth
+  table and sparkline), wishes. Overview card "Your stage of life"; `+ New` adds "Record a milestone" and "Someone
+  you look after". `views-journey.js` exposes its goal/habit/document forms as `Aira.journeyKit` (goal and habit
+  forms take an `after` callback).
+- **Fix found by the browser test**: `journey/store._add_columns` raced when two first requests upgraded a fresh
+  database at once ("duplicate column name"); a column the other request just added is now accepted.
+- **i18n**: 863 new strings in Telugu and Hindi (four translator agents, merged in the files' sorted format).
+- **Tests**: `tests/test_suite_journey_stages.py` (14: knowledge, ages, lives, privacy, items, ideas, records, due,
+  Today and pulse, wishes, a death, the plan with and without a model, the household server, hosted members and
+  organizations), `tests/test_suite_journey_stages_ui.py` (3, real Chromium, phone in dark mode); shell UI test lists
+  updated; `tests/test_cloud_isolation.py` exempts the suggestion-id group.
+- **Not built**: handing a child's life book over to their own profile when they grow up, sharing a life book with a
+  partner, search over life book records, growth percentiles against WHO charts, country-specific vaccine schedules.

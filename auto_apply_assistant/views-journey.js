@@ -29,6 +29,7 @@
     "jr-habit": '<svg viewBox="0 0 24 24"><path d="M20 12a8 8 0 1 1-2.3-5.6"/><path d="M20 4v4h-4"/><path d="m8.5 12 2.5 2.5 4.5-5"/></svg>',
     "jr-journal": '<svg viewBox="0 0 24 24"><path d="M6 3h11a1 1 0 0 1 1 1v17H7a2 2 0 0 1-2-2V5a2 2 0 0 1 1-2z"/><path d="M5 19a2 2 0 0 1 2-2h11M9 7h5M9 11h4"/></svg>',
     "jr-timeline": '<svg viewBox="0 0 24 24"><path d="M12 3v18"/><circle cx="12" cy="7" r="2"/><circle cx="12" cy="17" r="2"/><path d="M14 7h6M4 17h6"/></svg>',
+    "jr-stages": '<svg viewBox="0 0 24 24"><path d="M3 20c4 0 4-6 9-6s5-6 9-6"/><circle cx="3.5" cy="20" r="1.5"/><circle cx="12" cy="14" r="1.5"/><circle cx="20.5" cy="8" r="1.5"/><path d="M20 3v3"/></svg>',
   };
   for (const [name, svg] of Object.entries(GLYPHS)) if (Aira.ICONS && !Aira.ICONS[name]) Aira.ICONS[name] = svg;
 
@@ -85,6 +86,7 @@
     const values = editing
       ? { ...goal, target: plain(goal.target_amount), source: earning(goal) }
       : { category: "personal", measure: "percent", currency: business.currency || "USD", ...preset, source: preset.source === "earnings" };
+    delete values.after;
     const fields = [
       { name: "title", label: "Goal", required: true, placeholder: "Run a 5K" },
       { name: "category", label: "Area of life", type: "select", options: CATEGORIES },
@@ -162,7 +164,9 @@
           if (editing) body.status = read.status;
           else if (read.measure === "percent") body.steps = (read.steps || "").split("\n").map((s) => s.trim()).filter(Boolean);
           try {
-            await api(editing ? `/goals/${goal.id}` : "/goals", { method: editing ? "PATCH" : "POST", body });
+            const saved = await api(editing ? `/goals/${goal.id}` : "/goals", { method: editing ? "PATCH" : "POST", body });
+            // Life stages turns a suggestion into a goal and remembers which goal it became.
+            if (!editing && preset.after) await preset.after(saved.goal);
           } catch (error) { form.setError(error.message); return false; }
           Aira.toast(editing ? "Goal saved." : "Goal added.", "success");
           rerender();
@@ -420,7 +424,7 @@
   }
 
   // ---------------------------------------------------------------- habits
-  async function habitForm(habit, rerender, title = "") {
+  async function habitForm(habit, rerender, title = "", after = null) {
     const goals = (await api("/goals?status=active")).goals.filter((g) => measured(g) && !earning(g));
     const options = [["", "No goal"], ...goals.map((g) => [g.id, g.title])];
     if (habit && habit.goal_id && !goals.some((g) => g.id === habit.goal_id)) options.push([habit.goal_id, habit.goal_title]);
@@ -443,7 +447,10 @@
           const read = form.read();
           if (!read.title) { form.setError("Enter the habit."); form.inputs.title.control.focus(); return false; }
           const body = { title: read.title, per_week: Number(read.per_week), goal_id: read.goal_id, amount: read.goal_id ? read.amount || "0" : "0" };
-          try { await api(habit ? `/habits/${habit.id}` : "/habits", { method: habit ? "PATCH" : "POST", body }); } catch (error) { form.setError(error.message); return false; }
+          try {
+            await api(habit ? `/habits/${habit.id}` : "/habits", { method: habit ? "PATCH" : "POST", body });
+            if (!habit && after) await after();
+          } catch (error) { form.setError(error.message); return false; }
           Aira.toast(habit ? "Habit saved." : "Habit added. Tick it here or on Today.", "success");
           rerender();
           return true;
@@ -571,7 +578,7 @@
   }
 
   // ---------------------------------------------------------------- documents
-  function documentForm(doc, rerender) {
+  function documentForm(doc, rerender, preset = {}) {
     const form = S.form([
       { name: "title", label: "Name", required: true, placeholder: "My passport" },
       { name: "kind", label: "Kind", type: "select", options: DOC_KINDS },
@@ -583,7 +590,7 @@
       { name: "tags", label: "Tags (comma separated)", placeholder: "travel, identity" },
       { name: "notes", label: "Notes", type: "textarea", rows: 2 },
       doc && doc.file ? { name: "remove_file", label: `Remove the scan (${doc.file.name})`, type: "checkbox" } : null,
-    ].filter(Boolean), doc ? { ...doc, number: "", tags: (doc.tags || []).join(", ") } : { kind: "passport" });
+    ].filter(Boolean), doc ? { ...doc, number: "", tags: (doc.tags || []).join(", ") } : { kind: "passport", ...preset });
     const file = h("input", { type: "file", accept: "application/pdf,image/png,image/jpeg,image/webp,image/gif,text/plain,.txt" });
     form.node.insertBefore(Aira.ui.field(doc && doc.file ? `Replace the scan (now: ${doc.file.name}, ${size(doc.file.size)})` : "Scan or photo (optional)", file, "PDF, photo or text file, up to 10 MB. Stored encrypted."), form.node.lastChild);
     Aira.modal({
@@ -889,6 +896,7 @@
         { label: "Journal", value: data.journal.streak, hint: data.journal.written_today ? `Days in a row · ${data.journal.mood_today ? `today: ${MOOD[data.journal.mood_today].label.toLowerCase()}` : "written today"}` : "Days in a row · not written today", tone: data.journal.written_today ? "good" : "" },
         { label: "Timeline events", value: data.events, hint: "Lifetime milestones" },
       ]),
+      data.stage && Aira.journeyStages ? Aira.journeyStages.overviewCard(data.stage) : null,
       data.memories.length ? memoriesSection(data.memories) : null,
       S.grid(
         S.section("Recent goals", data.recent_goals.length ? h("ul", { class: "life-lines" }, ...data.recent_goals.map((goal) => h("li", { class: "life-line jr-goal-line" },
@@ -981,7 +989,7 @@
 
   // ---------------------------------------------------------------- "+ New"
   // Life is each person's own (children and every hosted member too), so every create is offered to everyone.
-  const NEW_TAB = { goal: "goals", habit: "habits", entry: "journal", event: "timeline", document: "documents" };
+  const NEW_TAB = { goal: "goals", habit: "habits", entry: "journal", event: "timeline", document: "documents", life: "stages", milestone: "stages" };
   Aira.appNew = Aira.appNew || {};
   Aira.appNew.journey = () => [
     { label: "New goal", icon: "jr-goal", href: "#/journey?tab=goals&new=goal" },
@@ -989,6 +997,8 @@
     { label: "Write in your journal", icon: "jr-journal", href: "#/journey?tab=journal&new=entry" },
     { label: "Add to your timeline", icon: "jr-timeline", href: "#/journey?tab=timeline&new=event" },
     { label: "Add a document", icon: "documents", href: "#/journey?tab=documents&new=document" },
+    { label: "Record a milestone", icon: "jr-stages", href: "#/journey?tab=stages&new=milestone" },
+    { label: "Someone you look after", icon: "jr-stages", href: "#/journey?tab=stages&new=life" },
   ];
 
   // What "+ New" or the search box asked for, once the tab is drawn: open the form, or show the record found.
@@ -998,7 +1008,7 @@
         const mood = panel.querySelector(".jr-moods-pick .jr-mood.on") || panel.querySelector(".jr-moods-pick .jr-mood");
         if (mood) { mood.scrollIntoView({ block: "center" }); mood.focus({ preventScroll: true }); }
       };
-      const make = { goal: () => newGoal(rerender), habit: () => habitForm(null, rerender), entry: focusJournal, event: () => editEvent(null, rerender), document: () => documentForm(null, rerender) }[ask.new];
+      const make = { goal: () => newGoal(rerender), habit: () => habitForm(null, rerender), entry: focusJournal, event: () => editEvent(null, rerender), document: () => documentForm(null, rerender), life: () => Aira.journeyStages.addLife(rerender), milestone: () => Aira.journeyStages.milestone(rerender) }[ask.new];
       if (make) Promise.resolve(make()).catch((error) => Aira.reportError(error));
       return;
     }
@@ -1012,9 +1022,13 @@
     node.addEventListener("blur", () => node.classList.remove("jr-found"), { once: true });
   }
 
+  // The Life stages tab (views-journey-stages.js) builds on these.
+  Aira.journeyKit = { api, put, plural, inDays, progressBar, statePill, newGoal, habitForm, documentForm, editEvent, localDay, KIND_MARK };
+
   // ---------------------------------------------------------------- the page
   const TABS = [
     { id: "overview", label: "Overview", icon: "dashboard", about: "Your goals, habits, journal, your story and the papers that matter, at a glance." },
+    { id: "stages", label: "Life stages", icon: "jr-stages", about: "Every stage of life from birth onwards: what matters now, what to record, and ideas that fit your interests." },
     { id: "goals", label: "Goals", icon: "jr-goal", about: "Big or small: tick off steps, count a number, save money, or earn it with your apps." },
     { id: "habits", label: "Habits", icon: "jr-habit", about: "Small things you do often. Tick them here or on Today and watch your streak grow." },
     { id: "journal", label: "Journal", icon: "jr-journal", about: "How each day went, in a mood and a few lines. Only you can read it." },
@@ -1055,7 +1069,8 @@
     const render = async () => {
       const holder = h("div", { class: "suite-body" });
       try {
-        if (tab === "goals") await goalsTab(holder, route, render);
+        if (tab === "stages") await Aira.journeyStages.tab(holder, route, render);
+        else if (tab === "goals") await goalsTab(holder, route, render);
         else if (tab === "habits") await habitsTab(holder, render);
         else if (tab === "journal") await journalTab(holder, route, render);
         else if (tab === "timeline") await timelineTab(holder, route, render);

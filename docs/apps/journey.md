@@ -42,6 +42,63 @@ shows that record; both leave the address once answered, so Back or a reload doe
 A link can open one item: `#/journey?tab=goals&goal=<id>` opens a goal, `#/journey?tab=documents&doc=<id>` a
 document.
 
+## Life stages: from before birth to remembrance
+
+The **Life stages** tab follows a whole life, stage by stage, and says what matters at each one.
+
+* **Whose life.** Your own life, and (adults) the people you look after: a child, even one not born yet (enter the
+  day the baby is due), a grandchild, a partner, an older parent. The buttons at the top switch between them
+  (`?life=<id>`). A child's or a teen's profile keeps their own life only.
+* **The stage now** comes from the birth date (your own is shared with your profile's birthday). The stages are:
+  Before birth, Baby (0-1), Toddler (1-3), Early childhood (3-5), School years (6-12), Teenage years (13-17),
+  Young adult (18-25), Building years (26-39), Midlife (40-54), Later working years (55-64), Retirement (65-79),
+  Elder years (80+) and Remembered. With no birth date, your profile's age group gives a first guess and the page
+  asks for the date. The card shows the age, what the stage is about, how much of it is done and when the next
+  stage starts.
+* **The road of life**: one stop per stage. Pick one to look back at it (its milestones first: "When did you learn
+  to ride a bike?") or ahead to what is coming (`?stage=<id>`).
+* **What matters now**: the stage's checklist in seven areas of life: health and body, mind and learning, family and
+  friends, money, work and purpose, papers and rights, legacy and wishes. Each item says why it matters. Tick it
+  **Done**, set it aside (**Not for me**, which leaves it out of the count), or act on it: **Make it a goal** (the
+  goal form opens filled in; the item is done when the goal is reached), **Make it a habit**, **Add the document**
+  (the vault form, with the right kind), **Add a vaccine / a check-up / a measurement**, **Write your wishes**,
+  **Choose interests**, or open the app that does it (Health for medicine reminders). Important items not done in an
+  earlier stage (an emergency fund, a will, health checks, written wishes) come along under **Still to do from
+  earlier stages** until they are done.
+* **Milestones**: the moments of each stage (first smile, first steps, first day of school, first job, a home, a
+  grandchild, retiring). **＋** records one with its date: your own go on your timeline, those of someone you look
+  after into their life book. **Record another moment** adds any other.
+* **Guided by interests**: choose what the person loves (music, art and design, sport, nature and animals, science,
+  technology, reading and writing, business and money, helping people, cooking, travel, building and fixing, drama
+  and dance, games and puzzles). Each brings two ideas for their age group (children, teenagers, young adults, adults,
+  older adults): something to learn or do, a career to explore, a way to earn (often with a Monosage app, such as
+  building websites for clients in Sites or selling a course in Courses & Events) or a way to give back. An idea can
+  become a goal, be marked done or set aside. Babies and toddlers get no ideas yet: play, talk and read together.
+* **Ask for a plan**: five or six next steps for this stage, written by Monosage's writing helper from the stage,
+  the interests, the open checklist and the person's goals (the model is not told the name), or taken from the
+  checklist when no model runs. Each step can become a goal.
+* **The life book**: growth (height, weight and, under three, head size, with a small chart), vaccines and
+  check-ups with the date the next one is due, schools and courses, work and homes. **Coming up** lists what is due;
+  a later dose of the same vaccine answers the earlier reminder. **Download life book** gives it all as a
+  spreadsheet. Medicines, readings and the emergency card stay in the Health app.
+* **Wishes and legacy** (your own life, adults): who decides for you if you cannot, the care you want and do not
+  want, where your will and papers are, who looks after your children or pets, funeral wishes, your online accounts
+  (never passwords) and words for the people you love, plus organ donation. **Download to print** gives a text file
+  to sign and keep; Monosage says that a will or an advance directive may need witnesses where you live.
+* **When someone dies**: on the life of someone you looked after, **Record their passing** (the date, the place, a
+  few words; optionally "In memory of ..." on your timeline). Their book becomes a remembrance: its reminders stop,
+  and its stage lists what the family needs to do (the death certificate, banks and insurers, their will and wishes,
+  their online accounts, gathering their stories, looking after yourself). **Undo the date of death** reverses a
+  mistake.
+* **Today and reminders**: vaccines and check-ups due within 30 days (or late) are a Today card ("Mira: Rotavirus,
+  in 7 days") and pop up 7 days, 1 day and on the day before; the Life menu item counts the ones due within a week.
+  The overview shows your stage of life and the next three things to do. The AI app's Life agent knows your stage and
+  what is due.
+* **+ New** also offers **Record a milestone** and **Someone you look after**.
+
+Health items say what to ask a doctor about; they never give doses or diagnoses. Everything is private to the person
+who keeps it.
+
 ## Goals
 
 * A goal has an area of life, an optional target date, why it matters, and how it is measured:
@@ -141,7 +198,13 @@ can add a goal, update a goal's progress or add a timeline event when you ask it
 
 ## For developers
 
-`aira/suite/journey/` (`store.py`: tables `jr_*`, versions 1 to 3; `service.py`: the rules; `journey_routes.py`:
+Life stages: `stages.py` (every stage's checklist, milestones, the interests and their ideas), `lifebook.py` (the
+lives, ticks, records, due dates, wishes, a death, the plan), `lifebook_routes.py` (`/api/journey/lives`,
+`/lives/me`, `/lives/<id>[/items/<item>|/records|/milestones|/passed|/plan]`, `/records/<id>`, `/wishes`,
+`/export/wishes`, `/export/lives/<id>`, `/stages`), `auto_apply_assistant/views-journey-stages.js`; tests
+`tests/test_suite_journey_stages.py` and, in a real browser, `tests/test_suite_journey_stages_ui.py`.
+
+`aira/suite/journey/` (`store.py`: tables `jr_*`, versions 1 to 4; `service.py`: the rules; `journey_routes.py`:
 routes, the public page `goal_page` with the actions `cheer` and `pledge`, Today and pulse),
 `auto_apply_assistant/views-journey.js`, `public-journey.js`, `app-journey.css`. Tests:
 `tests/test_suite_journey.py`, `tests/test_suite_journey_features.py`, `tests/test_suite_journey_journal.py`,

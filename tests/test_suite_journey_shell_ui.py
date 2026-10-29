@@ -35,8 +35,18 @@ NEW_ITEMS = [
     "Write in your journal",
     "Add to your timeline",
     "Add a document",
+    "Record a milestone",
+    "Someone you look after",
 ]
-FOLDERS = ["Overview", "Goals", "Habits", "Journal", "Timeline", "Documents"]
+FOLDERS = [
+    "Overview",
+    "Life stages",
+    "Goals",
+    "Habits",
+    "Journal",
+    "Timeline",
+    "Documents",
+]
 SUBNAV = ".shell-subnav[data-section='journey'] a.shell-sublink"
 
 
@@ -354,6 +364,7 @@ def test_a_phone_in_dark_mode_has_no_sideways_scroll(browser, env):
     seed(context, env)
     for tab in [
         "overview",
+        "stages",
         "goals",
         "habits",
         "journal",

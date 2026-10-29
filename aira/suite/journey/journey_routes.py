@@ -10,7 +10,8 @@ from typing import Any
 
 from aira.airaapi.http import Raw, Request, aira_route
 from aira.suite import kit, life, public
-from aira.suite.journey import service, store
+from aira.suite.journey import lifebook, service, store
+from aira.suite.journey import lifebook_routes as _lifebook_routes  # noqa: F401 - registers the life stages routes
 
 APP = store.APP
 BASE = "/api/journey"
@@ -30,7 +31,10 @@ def _open(request: Request) -> tuple[Any, dict[str, Any]]:
 def overview(request: Request) -> tuple[int, dict[str, Any]]:
     connection, me = _open(request)
     with connection:
-        return 200, service.overview(connection, me)
+        return 200, {
+            **service.overview(connection, me),
+            "stage": lifebook.summary(connection, me),
+        }
 
 
 @aira_route("GET", f"{BASE}/search")
@@ -680,6 +684,29 @@ def _today(connection: Any, me: dict[str, Any]) -> list[dict[str, Any]]:
                 icon="journey",
             )
         )
+    health = lifebook.due(connection, me)
+    if health:
+        cards.append(
+            life.card(
+                APP,
+                "Vaccines and check-ups",
+                lines=[
+                    {
+                        "text": item["title"]
+                        if item["self"]
+                        else f"{item['who']}: {item['title']}",
+                        "sub": f"{'Was due' if item['days_left'] < 0 else 'Due'}: {_when(item['days_left'])}",
+                        "done": False,
+                        "link": "#/journey?tab=stages"
+                        + ("" if item["self"] else f"&life={item['life_id']}"),
+                    }
+                    for item in health[:6]
+                ],
+                link="#/journey?tab=stages",
+                tone="warn" if any(item["days_left"] < 0 for item in health) else "",
+                icon="journey",
+            )
+        )
     day = _your_day(connection, me)
     if day:
         cards.append(day)
@@ -780,6 +807,21 @@ def _pulse(connection: Any, me: dict[str, Any], since: str) -> dict[str, Any]:
         }
         for cheer in cheers[:3]
     ]
+    health = lifebook.due(connection, me)
+    alerts += [
+        {
+            "id": f"journey:due:{item['id']}:{item['next_due']}",
+            "title": f"{item['who']}: a vaccine is due"
+            if item["kind"] == "vaccine"
+            else f"{item['who']}: a check-up is due",
+            "body": f"{item['title']}: {_when(item['days_left'])}",
+            "tone": "warn",
+            "speak": False,
+            "actions": [],
+        }
+        for item in health
+        if item["days_left"] in (7, 1, 0)
+    ]
     pledges = service.unread_pledges(connection, me)
     alerts += [
         {
@@ -795,6 +837,10 @@ def _pulse(connection: Any, me: dict[str, Any], since: str) -> dict[str, Any]:
         for pledge in pledges[:3]
     ]
     return {
-        "badge": len(due["goals"]) + len(due["documents"]) + len(cheers) + len(pledges),
+        "badge": len(due["goals"])
+        + len(due["documents"])
+        + len(cheers)
+        + len(pledges)
+        + sum(1 for item in health if item["days_left"] <= 7),
         "alerts": alerts,
     }
