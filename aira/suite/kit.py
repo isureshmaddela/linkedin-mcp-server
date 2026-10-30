@@ -524,9 +524,14 @@ BUSINESS_DEFAULTS: dict[str, Any] = {
     "logo_url": "",
     "tax_rate_bp": 0,  # hundredths of a percent added to invoices and orders (750 = 7.5%)
     "tax_label": "Tax",
+    "tax_id": "",  # the business's own tax or registration number (VAT, GSTIN, EIN), printed on business invoices
     "payment_link": "",  # the business's own payment page (Stripe, PayPal, Razorpay, UPI), shown to customers
     "payment_instructions": "",  # bank transfer details or "pay at the venue"
+    # Who the business sells to: consumers (B2C), other businesses (B2B) or both. The apps read it: the shop offers
+    # trade accounts, wholesale prices and payment terms to businesses; Sites writes for the right buyer.
+    "sell_to": "consumers",
 }
+SELL_TO = ("consumers", "businesses", "both")
 
 
 def business(connection: sqlite3.Connection) -> dict[str, Any]:
@@ -557,12 +562,16 @@ def save_business(
             merged["tax_rate_bp"], "the tax rate", default=0, minimum=0, maximum=5000
         ),
         "tax_label": text(merged["tax_label"], "the tax label", max_len=30) or "Tax",
+        "tax_id": text(merged["tax_id"], "your tax or registration number", max_len=40),
         "payment_link": url(merged["payment_link"], "the payment link"),
         "payment_instructions": text(
             merged["payment_instructions"],
             "payment instructions",
             max_len=600,
             multiline=True,
+        ),
+        "sell_to": choice(
+            merged["sell_to"], "who you sell to", SELL_TO, default="consumers"
         ),
     }
     set_setting(connection, "core", "business", clean)
@@ -587,6 +596,7 @@ def public_business(connection: sqlite3.Connection) -> dict[str, Any]:
             "logo_url",
             "payment_link",
             "payment_instructions",
+            "tax_id",
         )
     }
 

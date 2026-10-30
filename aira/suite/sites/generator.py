@@ -80,6 +80,21 @@ def system_prompt(stack: str) -> str:
 
 
 MAX_CONTEXT_CHARS = 90_000
+# Who the person's business sells to (kit.business()["sell_to"]): a site for business buyers (B2B) reads differently
+# from one for consumers (B2C). Nothing is said for consumers, the usual case.
+BUYER_NOTES = {
+    "businesses": (
+        "The business sells to other businesses (B2B). Write for business buyers: what it supplies, trade or "
+        "wholesale terms, bulk and repeat orders, minimum orders, delivery and account (invoice) terms, proof such "
+        "as client logos, case studies and certifications, and a clear call to action such as \"Request a quote\" "
+        "or \"Apply for a trade account\"."
+    ),
+    "both": (
+        "The business sells to consumers and to other businesses (B2C and B2B). Serve both: the main path is for "
+        "consumers, with a clear section for business buyers (wholesale and trade accounts, bulk orders, "
+        "invoices) and its own call to action, such as \"Trade and wholesale\"."
+    ),
+}
 
 
 def user_prompt(
@@ -89,9 +104,12 @@ def user_prompt(
     history: list[dict[str, Any]] | None = None,
     assets: list[dict[str, Any]] | None = None,
     project_name: str = "",
+    sell_to: str = "",
 ) -> str:
     """The message for one run: the request, and for a change the site's current files and the recent turns."""
     lines: list[str] = []
+    if sell_to in BUYER_NOTES:
+        lines.extend([BUYER_NOTES[sell_to], ""])
     if assets:
         lines.append("Files the person uploaded (use them where they fit):")
         lines.extend(f"- assets/{a['name']} ({a['mime']})" for a in assets)

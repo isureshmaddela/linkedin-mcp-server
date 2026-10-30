@@ -1,7 +1,9 @@
 """Shop rules: product input, pricing (options, discount codes, delivery, tax), stock, orders and customers.
 
 Prices on an order are always worked out here from the stored products, never taken from the customer's
-browser. Placing an order is one transaction: stock is checked and taken, the discount use counted and the order
+browser. A shop sells to consumers (B2C), to businesses (B2B) or both (kit.business()["sell_to"]): a business buyer
+signs in with its trade account (trade.py) and pays trade prices (a wholesale price, quantity price breaks and its
+own percent off), orders at least a product's minimum quantity, and pays on its terms with a due date. Placing an order is one transaction: stock is checked and taken, the discount use counted and the order
 numbered together, so two customers cannot buy the last item twice.
 """
 
@@ -14,11 +16,13 @@ from datetime import date, timedelta
 from typing import Any
 
 from aira.suite import kit, public
-from aira.suite.shop import store
+from aira.suite.shop import store, trade
 from aira.suite.shop.store import APP, amount
 
 MAX_LINES = 50
 MAX_QUANTITY = 99
+MAX_TRADE_QUANTITY = 100_000  # a business buys by the case and the pallet
+MAX_PRICE_BREAKS = 10
 MAX_IMAGES = 8
 MAX_OPTIONS = 30
 DELIVERY_METHODS = ("pickup", "delivery")
@@ -85,6 +89,33 @@ def _images(raw: Any) -> list[str]:
     return images
 
 
+def _price_breaks(raw: Any) -> list[dict[str, int]]:
+    """``[{"min_quantity": 10, "unit_cents": 900}]``: from 10, a business pays 9.00 each. Sorted, one per quantity."""
+    if raw in (None, ""):
+        return []
+    if not isinstance(raw, list):
+        raise ValueError("Price breaks must be a list.")
+    found: dict[int, int] = {}
+    for item in raw[: MAX_PRICE_BREAKS + 1]:
+        if not isinstance(item, Mapping):
+            raise ValueError("Each price break needs a quantity and a price.")
+        quantity = kit.integer(
+            item.get("min_quantity"),
+            "the price break quantity",
+            minimum=2,
+            maximum=MAX_TRADE_QUANTITY,
+        )
+        if quantity in found:
+            raise ValueError(f"There are two price breaks from {quantity}.")
+        found[quantity] = amount(item.get("unit_cents"), "the price break price")
+    if len(found) > MAX_PRICE_BREAKS:
+        raise ValueError(f"A product can have at most {MAX_PRICE_BREAKS} price breaks.")
+    return [
+        {"min_quantity": quantity, "unit_cents": found[quantity]}
+        for quantity in sorted(found)
+    ]
+
+
 def product_values(raw: Mapping[str, Any], *, partial: bool = False) -> dict[str, Any]:
     """Validated product fields. ``partial`` keeps only the fields that were sent (an edit)."""
     values: dict[str, Any] = {}
@@ -136,6 +167,24 @@ def product_values(raw: Mapping[str, Any], *, partial: bool = False) -> dict[str
         values["position"] = kit.integer(
             raw.get("position"), "the position", default=0, minimum=0, maximum=100_000
         )
+    if has("audience"):
+        values["audience"] = kit.choice(
+            raw.get("audience"), "who it is for", store.AUDIENCES, default="all"
+        )
+    if has("wholesale_cents"):
+        values["wholesale_cents"] = amount(
+            raw.get("wholesale_cents"), "the trade price"
+        )
+    if has("min_quantity"):
+        values["min_quantity"] = kit.integer(
+            raw.get("min_quantity"),
+            "the minimum quantity",
+            default=1,
+            minimum=1,
+            maximum=MAX_TRADE_QUANTITY,
+        )
+    if has("price_breaks"):
+        values["price_breaks"] = _price_breaks(raw.get("price_breaks"))
     if (
         values.get("compare_at_cents")
         and values.get("price_cents") is not None
@@ -225,6 +274,37 @@ def unit_price(product: Mapping[str, Any], option: str = "") -> int:
     if entry is not None and entry.get("price_cents") is not None:
         return int(entry["price_cents"])
     return int(product["price_cents"])
+
+
+def business_unit_price(
+    product: Mapping[str, Any],
+    option: str = "",
+    quantity: int = 1,
+    account: Mapping[str, Any] | None = None,
+) -> int:
+    """What a business pays for one: the price break its quantity reaches (the quantity of this product across
+    options), else the trade price, else the price; an option keeps its difference from the product's price; then
+    the account's own percent off."""
+    base = int(product["price_cents"])
+    trade_base = int(product.get("wholesale_cents") or 0) or base
+    for entry in product.get("price_breaks") or []:
+        if quantity >= int(entry["min_quantity"]):
+            trade_base = int(entry["unit_cents"])
+    unit = max(0, trade_base + unit_price(product, option) - base)
+    percent = int((account or {}).get("discount_percent") or 0)
+    return unit - kit.percent_of(unit, percent * 100) if percent else unit
+
+
+def buyer_problem(
+    product: Mapping[str, Any], account: Mapping[str, Any] | None
+) -> str:
+    """Why this buyer cannot buy this product ('' = they can)."""
+    audience = product.get("audience") or "all"
+    if account is not None and audience == "consumers":
+        return f"{product['name']} is not sold to businesses."
+    if account is None and audience == "businesses":
+        return f"{product['name']} is sold to business buyers only. Sign in with your trade account."
+    return ""
 
 
 def is_low(product: Mapping[str, Any]) -> bool:
@@ -414,7 +494,7 @@ def discount_amount(
 # ---------------------------------------------------------------------------
 
 
-def _cart(items: Any) -> list[tuple[str, str, int]]:
+def _cart(items: Any, max_quantity: int = MAX_QUANTITY) -> list[tuple[str, str, int]]:
     """Merge the requested lines: [(product_id, option, quantity)]."""
     if not isinstance(items, list) or not items:
         raise ValueError("Add at least one product to the order.")
@@ -433,12 +513,12 @@ def _cart(items: Any) -> list[tuple[str, str, int]]:
             "the quantity",
             default=1,
             minimum=1,
-            maximum=MAX_QUANTITY,
+            maximum=max_quantity,
         )
         key = (product_id, option.lower())
         merged[key] = merged.get(key, 0) + quantity
-        if merged[key] > MAX_QUANTITY:
-            raise ValueError(f"At most {MAX_QUANTITY} of one product per order.")
+        if merged[key] > max_quantity:
+            raise ValueError(f"At most {max_quantity:,} of one product per order.")
     return [
         (product_id, option, quantity)
         for (product_id, option), quantity in merged.items()
@@ -455,8 +535,12 @@ def price(
     business: Mapping[str, Any] | None = None,
     include_drafts: bool = False,
     today: str = "",
+    account: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """The order as the shop prices it. Raises ValueError for anything that cannot be bought."""
+    """The order as the shop prices it. Raises ValueError for anything that cannot be bought.
+
+    ``account`` is the business buyer's approved trade account: trade prices, minimum quantities, the business
+    minimum order, its terms and (for a reseller) no tax. Without it the order is a consumer's."""
     shop = settings if settings is not None else store.settings(connection)
     profile = business if business is not None else kit.business(connection)
     method = kit.choice(
@@ -468,7 +552,12 @@ def price(
         raise ValueError("This shop offers pickup only.")
     lines = []
     subtotal = 0
-    for product_id, option, quantity in _cart(items):
+    retail = 0
+    cart = _cart(items, MAX_TRADE_QUANTITY if account is not None else MAX_QUANTITY)
+    per_product: dict[str, int] = {}
+    for product_id, _option, quantity in cart:
+        per_product[product_id] = per_product.get(product_id, 0) + quantity
+    for product_id, option, quantity in cart:
         row = kit.fetch_one(
             connection, "SELECT * FROM sh_products WHERE id = ?", (product_id,)
         )
@@ -477,6 +566,14 @@ def price(
         if product is None or product["status"] not in allowed:
             raise ValueError(
                 "A product in the cart is no longer available. Remove it and try again."
+            )
+        problem = buyer_problem(product, account)
+        if problem:
+            raise ValueError(problem)
+        least = int(product.get("min_quantity") or 1)
+        if account is not None and per_product[product_id] < least:
+            raise ValueError(
+                f"The least a business can order of {product['name']} is {least:,}."
             )
         entry = None
         if product["options"]:
@@ -492,9 +589,15 @@ def price(
             raise ValueError(
                 f"Only {left} left of {label}." if left else f"{label} is sold out."
             )
-        unit = unit_price(product, option_name)
+        retail_unit = unit_price(product, option_name)
+        unit = (
+            business_unit_price(product, option_name, per_product[product_id], account)
+            if account is not None
+            else retail_unit
+        )
         line_cents = unit * quantity
         subtotal += line_cents
+        retail += retail_unit * quantity
         lines.append(
             {
                 "product_id": product["id"],
@@ -506,13 +609,17 @@ def price(
                 "line_cents": line_cents,
             }
         )
+    if account is not None and subtotal < int(shop.get("trade_min_order_cents") or 0):
+        raise ValueError(
+            f"Business orders start at {kit.fmt_money(int(shop['trade_min_order_cents']), str(profile.get('currency') or 'USD'))}."
+        )
     discount_code = (code or "").strip().upper()
     discount = None
     referrer = None
     discount_cents = 0
     if discount_code:
         discount = store.discount_by_code(connection, discount_code)
-        if discount is None and shop.get("referrals_enabled"):
+        if discount is None and shop.get("referrals_enabled") and account is None:
             referrer = store.referrer_by_code(connection, discount_code)
         if referrer is not None:
             # A friend's referral code: a percent off a new customer's first order (checked when it is placed).
@@ -535,8 +642,24 @@ def price(
         delivery_cents = int(shop["delivery_fee_cents"] or 0)
         if free_over and goods >= free_over:
             delivery_cents = 0
-    tax_cents = kit.percent_of(goods, int(profile.get("tax_rate_bp") or 0))
+    tax_exempt = account is not None and bool(account.get("tax_exempt"))
+    tax_cents = (
+        0 if tax_exempt else kit.percent_of(goods, int(profile.get("tax_rate_bp") or 0))
+    )
+    terms = str((account or {}).get("terms") or "prepay")
+    buyer: dict[str, Any] = {"buyer_type": "consumer"}
+    if account is not None:
+        buyer = {
+            "buyer_type": "business",
+            "company": account["company"],
+            "terms": terms,
+            "terms_label": trade.terms_label(terms),
+            "due_on": trade.due_on(terms, today),
+            "savings_cents": max(0, retail - subtotal),
+            "tax_exempt": tax_exempt,
+        }
     return {
+        **buyer,
         "lines": lines,
         "subtotal_cents": subtotal,
         "discount_code": discount_code if discount or referrer else "",
@@ -640,6 +763,28 @@ def customer_values(raw: Mapping[str, Any], method: str) -> dict[str, Any]:
     }
 
 
+def business_customer(
+    account: Mapping[str, Any], raw: Mapping[str, Any], method: str
+) -> dict[str, Any]:
+    """A business order's contact details come from its trade account; the order adds its PO number, a delivery
+    address (the account's unless another is given) and a note."""
+    address = kit.text(
+        raw.get("address"), "the delivery address", max_len=500, multiline=True
+    ) or str(account.get("address") or "")
+    if method == "delivery" and not address:
+        raise ValueError("Enter the delivery address.")
+    return {
+        "customer_name": str(account.get("contact_name") or account["company"]),
+        "customer_email": str(account["email"]),
+        "customer_phone": str(account.get("phone") or ""),
+        "address": address if method == "delivery" else "",
+        "note": kit.text(raw.get("note"), "a note", max_len=1000, multiline=True),
+        "po_number": kit.text(
+            raw.get("po_number"), "the purchase-order number", max_len=60
+        ),
+    }
+
+
 def place_order(
     connection: sqlite3.Connection,
     raw: Mapping[str, Any],
@@ -648,10 +793,13 @@ def place_order(
     allow_closed: bool = False,
     include_drafts: bool = False,
     origin: str = "",
+    account: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Price, take stock, count the discount use and number the order in one transaction.
 
-    ``origin`` is the address the request used, for the order link in the confirmation (kit.public_url)."""
+    ``origin`` is the address the request used, for the order link in the confirmation (kit.public_url).
+    ``account`` makes it a business order: the trade account's contact details, a purchase-order number, its terms
+    and due date, checked against its credit limit."""
     store.ensure(connection)
     shop = store.settings(connection)
     profile = kit.business(connection)
@@ -663,7 +811,12 @@ def place_order(
         DELIVERY_METHODS,
         default="pickup",
     )
-    customer = customer_values(raw, method)
+    if account is not None:
+        customer = business_customer(account, raw, method)
+        if shop["trade_require_po"] and not customer["po_number"]:
+            raise ValueError("Enter your purchase-order (PO) number.")
+    else:
+        customer = customer_values(raw, method)
     connection.commit()
     connection.execute("BEGIN IMMEDIATE")
     try:
@@ -675,7 +828,10 @@ def place_order(
             settings=shop,
             business=profile,
             include_drafts=include_drafts,
+            account=account,
         )
+        if account is not None:
+            trade.check_credit(connection, account, quote["total_cents"])
         if quote["referrer_id"]:
             _check_referral(connection, quote["referrer_id"], customer)
         for line in quote["lines"]:
@@ -690,11 +846,20 @@ def place_order(
         order_id = kit.new_id()
         number = store.next_number(connection)
         stamp = kit.now()
+        placed_note = (
+            "Placed online" if source == "storefront" else "Entered by the shop"
+        )
+        if account is not None:
+            placed_note += f" for {account['company']}" + (
+                f" · PO {customer['po_number']}" if customer["po_number"] else ""
+            )
+            placed_note += f" · {quote['terms_label']}, due {quote['due_on']}"
         connection.execute(
             """INSERT INTO sh_orders (id, number, source, customer_name, customer_email, customer_phone, delivery_method,
             address, note, items, subtotal_cents, discount_code, discount_cents, delivery_cents, tax_cents, total_cents,
-            currency, payment_status, fulfilment_status, history, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unpaid', 'placed', ?, ?, ?)""",
+            currency, payment_status, fulfilment_status, history, created_at, updated_at, buyer_type, trade_account_id,
+            company, tax_id, po_number, terms, due_on)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'unpaid', 'placed', ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
             (
                 order_id,
                 number,
@@ -713,19 +878,16 @@ def place_order(
                 quote["tax_cents"],
                 quote["total_cents"],
                 quote["currency"],
-                kit.dumps(
-                    [
-                        {
-                            "status": "placed",
-                            "at": stamp,
-                            "note": "Placed online"
-                            if source == "storefront"
-                            else "Entered by the shop",
-                        }
-                    ]
-                ),
+                kit.dumps([{"status": "placed", "at": stamp, "note": placed_note}]),
                 stamp,
                 stamp,
+                quote["buyer_type"],
+                str((account or {}).get("id") or ""),
+                str((account or {}).get("company") or ""),
+                str((account or {}).get("tax_id") or ""),
+                customer.get("po_number", ""),
+                quote.get("terms", "prepay"),
+                quote.get("due_on", ""),
             ),
         )
         connection.commit()
@@ -737,7 +899,7 @@ def place_order(
         connection,
         APP,
         "order",
-        f"Order #{number} from {order['customer_name']}",
+        f"Order #{number} from {order['company'] or order['customer_name']}",
         detail=f"{sum(line['quantity'] for line in order['items'])} items",
         ref_type="order",
         ref_id=order_id,
@@ -790,7 +952,7 @@ def mark_paid(
         amount_cents=int(order["total_cents"]),
         currency_code=order["currency"],
         label=f"Order #{order['number']}",
-        customer=order["customer_name"],
+        customer=order.get("company") or order["customer_name"],
     )
     kit.log(
         connection,
@@ -976,6 +1138,12 @@ def update_order(
         )
     if "tracking_url" in raw:
         values["tracking_url"] = kit.url(raw.get("tracking_url"), "the tracking link")
+    if "po_number" in raw:
+        values["po_number"] = kit.text(
+            raw.get("po_number"), "the purchase-order number", max_len=60
+        )
+    if "due_on" in raw:
+        values["due_on"] = kit.day(raw.get("due_on"), "the due date")
     if values:
         values["updated_at"] = kit.now()
         kit.update_row(connection, "sh_orders", order_id, values)
@@ -1488,6 +1656,17 @@ def _items_text(order: Mapping[str, Any]) -> str:
     return "\n".join(lines)
 
 
+def _business_terms_text(order: Mapping[str, Any]) -> str:
+    parts = [f"Business: {order['company']}"]
+    if order.get("po_number"):
+        parts.append(f"PO number: {order['po_number']}")
+    if order.get("terms") and order["terms"] != "prepay":
+        parts.append(
+            f"Terms: {trade.terms_label(order['terms'])}. Please pay by {order['due_on']}."
+        )
+    return "\n".join(parts)
+
+
 def queue_message(
     connection: sqlite3.Connection,
     order: Mapping[str, Any],
@@ -1512,6 +1691,8 @@ def queue_message(
             pay.append(str(profile["payment_instructions"]))
         if pay:
             pay.append(f"Please use order number {number} as the reference.")
+        if order.get("buyer_type") == "business":
+            pay.insert(0, _business_terms_text(order))
         delivery = (
             f"We will deliver to:\n{order['address']}"
             if order["delivery_method"] == "delivery"
@@ -1556,6 +1737,33 @@ def queue_message(
                 f"We received your payment of {kit.fmt_money(int(order['total_cents']), order['currency'])} for order #{number}. Thank you!",
                 share_text,
                 f"Your order: {link}" if link else "",
+                f"Thanks,\n{name}",
+            )
+            if part
+        )
+    elif kind == "payment_reminder":
+        late = bool(order.get("due_on")) and order["due_on"] < kit.today()
+        subject = f"{'Overdue' if late else 'Reminder'}: payment for order #{number} - {name}"
+        pay = [
+            f"Pay here: {profile['payment_link']}" if profile.get("payment_link") else "",
+            str(profile.get("payment_instructions") or ""),
+        ]
+        owed = kit.fmt_money(int(order["total_cents"]), order["currency"])
+        po = f" (PO {order['po_number']})" if order.get("po_number") else ""
+        when = (
+            f"was due on {order['due_on']}"
+            if late
+            else f"is due on {order['due_on'] or 'receipt'}"
+        )
+        body = "\n\n".join(
+            part
+            for part in (
+                f"Hi {first},",
+                f"This is a reminder that {owed} for order #{number}{po} {when}.",
+                "\n".join(part for part in pay if part),
+                f"Please use order number {number} as the reference.",
+                f"Your order and invoice: {link}" if link else "",
+                "If you have already paid, thank you, and please ignore this message.",
                 f"Thanks,\n{name}",
             )
             if part
@@ -1615,6 +1823,8 @@ def customers(connection: sqlite3.Connection, *, q: str = "") -> list[dict[str, 
                 "name": order["customer_name"],
                 "email": order["customer_email"],
                 "phone": order["customer_phone"],
+                "company": order.get("company") or "",
+                "buyer_type": order.get("buyer_type") or "consumer",
                 "orders": 0,
                 "spend_cents": 0,
                 "first_order_at": order["created_at"],
@@ -1630,13 +1840,16 @@ def customers(connection: sqlite3.Connection, *, q: str = "") -> list[dict[str, 
             entry["name"] = order["customer_name"] or entry["name"]
         entry["email"] = entry["email"] or order["customer_email"]
         entry["phone"] = entry["phone"] or order["customer_phone"]
+        if order.get("buyer_type") == "business":
+            entry["buyer_type"] = "business"
+            entry["company"] = order.get("company") or entry["company"]
     rows = list(found.values())
     if q:
         needle = q.strip().lower()
         rows = [
             row
             for row in rows
-            if needle in f"{row['name']} {row['email']} {row['phone']}".lower()
+            if needle in f"{row['name']} {row['email']} {row['phone']} {row['company']}".lower()
         ]
     for row in rows:
         row["repeat"] = row["orders"] > 1
@@ -1696,8 +1909,35 @@ def overview(connection: sqlite3.Connection) -> dict[str, Any]:
         ),
         key=lambda item: (-item["waiting"], item["name"].lower()),
     )[:5]
+    split = {
+        buyer: {"this_month_cents": 0, "orders_this_month": 0}
+        for buyer in store.BUYER_TYPES
+    }
+    for order in live:
+        side = split.get(order.get("buyer_type") or "consumer", split["consumer"])
+        if order["created_at"][:7] == month:
+            side["orders_this_month"] += 1
+        if order["payment_status"] == "paid" and (order["paid_at"] or "")[:7] == month:
+            side["this_month_cents"] += int(order["total_cents"])
+    owed = trade.receivables(connection)
     return {
         "revenue": kit.revenue(connection, app=APP),
+        "sell_to": kit.business(connection)["sell_to"],
+        # B2C (consumers) and B2B (businesses) this month: paid sales and orders placed
+        "buyers": split,
+        "trade": {
+            "pending": kit.count(
+                connection,
+                "SELECT COUNT(*) FROM sh_trade_accounts WHERE status = 'pending'",
+            ),
+            "approved": kit.count(
+                connection,
+                "SELECT COUNT(*) FROM sh_trade_accounts WHERE status = 'approved'",
+            ),
+            "open_cents": owed["open_cents"],
+            "overdue_cents": owed["overdue_cents"],
+            "overdue_orders": owed["overdue_orders"],
+        },
         "wanted": wanted,
         "orders_this_month": sum(
             1 for order in live if order["created_at"][:7] == month
@@ -1733,15 +1973,31 @@ def overview(connection: sqlite3.Connection) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
-def public_product(product: Mapping[str, Any]) -> dict[str, Any]:
+def public_product(
+    product: Mapping[str, Any],
+    account: Mapping[str, Any] | None = None,
+    *,
+    hide_prices: bool = False,
+) -> dict[str, Any]:
+    """A product as the storefront shows it: a consumer's prices, a signed-in business's trade prices (at its
+    minimum quantity, with the price breaks), or no prices (a shop that sells only to businesses, before sign-in)."""
     left = available(product)
+    least = int(product.get("min_quantity") or 1) if account is not None else 1
+
+    def shown(option: str = "") -> int | None:
+        if hide_prices:
+            return None
+        if account is not None:
+            return business_unit_price(product, option, least, account)
+        return unit_price(product, option)
+
     options = []
     for entry in product.get("options") or []:
         option_left = available(product, entry["name"])
         options.append(
             {
                 "name": entry["name"],
-                "price_cents": unit_price(product, entry["name"]),
+                "price_cents": shown(entry["name"]),
                 "available": option_left is None or option_left > 0,
                 "left": option_left
                 if option_left is not None
@@ -1753,13 +2009,33 @@ def public_product(product: Mapping[str, Any]) -> dict[str, Any]:
         in_stock = any(option["available"] for option in options)
     else:
         in_stock = left is None or left > 0
+    business_view: dict[str, Any] = {}
+    if account is not None:
+        business_view = {
+            "retail_cents": int(product["price_cents"]),
+            "min_quantity": least,
+            "price_breaks": [
+                {
+                    "min_quantity": int(entry["min_quantity"]),
+                    "unit_cents": business_unit_price(
+                        product, "", int(entry["min_quantity"]), account
+                    ),
+                }
+                for entry in product.get("price_breaks") or []
+                if int(entry["min_quantity"]) > least
+            ],
+        }
     return {
+        **business_view,
         "id": product["id"],
         "name": product["name"],
         "description": product["description"],
-        "price_cents": int(product["price_cents"]),
-        "compare_at_cents": int(product["compare_at_cents"] or 0),
+        "price_cents": shown(),
+        "compare_at_cents": 0
+        if hide_prices or account is not None
+        else int(product["compare_at_cents"] or 0),
         "category": product["category"],
+        "audience": product.get("audience") or "all",
         "images": list(product["images"]),
         "options": options,
         "in_stock": in_stock,
@@ -1771,12 +2047,31 @@ def public_product(product: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
-def storefront(connection: sqlite3.Connection) -> dict[str, Any]:
+def storefront(
+    connection: sqlite3.Connection, account: Mapping[str, Any] | None = None
+) -> dict[str, Any]:
+    """The storefront page: for a consumer, or for a signed-in business (``account``) with its trade prices."""
     shop = store.settings(connection)
+    sell_to = kit.business(connection)["sell_to"]
+    hide = account is None and sell_to == "businesses"
     products = [
-        public_product(p) for p in store.list_products(connection, status="active")
+        public_product(p, account, hide_prices=hide)
+        for p in store.list_products(connection, status="active")
+        if not buyer_problem(p, account)
+        # a shop that sells only to businesses still shows its catalogue, without prices, before sign-in
+        or (hide and (p.get("audience") or "all") == "businesses")
     ]
     return {
+        "sell_to": sell_to,
+        "business_buyers": {
+            "enabled": sell_to != "consumers",
+            "only": sell_to == "businesses",
+            "approval": shop["trade_approval"],
+            "min_order_cents": int(shop["trade_min_order_cents"] or 0),
+            "require_po": bool(shop["trade_require_po"]),
+            "intro": shop["trade_intro"],
+        },
+        "account": trade.public_account(connection, account) if account else None,
         "open": shop["open"],
         "closed_message": shop["closed_message"] if not shop["open"] else "",
         "notice": shop["notice"],
@@ -1791,15 +2086,33 @@ def storefront(connection: sqlite3.Connection) -> dict[str, Any]:
         },
         "categories": sorted({p["category"] for p in products if p["category"]}),
         "products": products,
-        "has_discounts": shop["referrals_enabled"]
+        "has_discounts": (shop["referrals_enabled"] and account is None)
         or kit.count(connection, "SELECT COUNT(*) FROM sh_discounts WHERE active = 1")
         > 0,
         "referral_percent": int(shop["referral_friend_percent"] or 0)
-        if shop["referrals_enabled"]
+        if shop["referrals_enabled"] and account is None
         else 0,
         # a ?ref= link counts even when friends get 0% off: the sharer still earns their reward
-        "referrals": bool(shop["referrals_enabled"]),
+        "referrals": bool(shop["referrals_enabled"]) and account is None,
     }
+
+
+def storefront_buyer(
+    connection: sqlite3.Connection, payload: Mapping[str, Any]
+) -> dict[str, Any] | None:
+    """The trade account a storefront request signs in with (``trade_email`` and ``trade_code``), None for a
+    consumer. Refuses a consumer where the shop sells only to businesses, and a wrong code."""
+    sell_to = kit.business(connection)["sell_to"]
+    email_address = payload.get("trade_email")
+    if email_address or payload.get("trade_code"):
+        if sell_to == "consumers":
+            raise PermissionError("This shop does not sell to businesses.")
+        return trade.sign_in(connection, email_address, payload.get("trade_code"))
+    if sell_to == "businesses":
+        raise PermissionError(
+            "This shop sells to businesses only. Sign in with your trade account, or apply for one."
+        )
+    return None
 
 
 def public_order(
@@ -1831,6 +2144,13 @@ def public_order(
         "fulfilment_status": order["fulfilment_status"],
         "tracking_url": order["tracking_url"],
         "customer_says_paid": bool(order["customer_says_paid_at"]),
+        "buyer_type": order.get("buyer_type") or "consumer",
+        "company": order.get("company") or "",
+        "tax_id": order.get("tax_id") or "",
+        "po_number": order.get("po_number") or "",
+        "terms": order.get("terms") or "prepay",
+        "terms_label": trade.terms_label(order.get("terms") or "prepay"),
+        "due_on": order.get("due_on") or "",
         "steps": steps,
         "history": [
             {"status": entry.get("status"), "at": entry.get("at")}

@@ -49,3 +49,6 @@
 /* "New booking" in the page head where "+ New" is out of sight (a phone or a tablet), in the tabs on a wide screen. */
 @media (min-width: 901px) { .btn.cm-head-new { display: none; } }
 @media (max-width: 900px) { .cm-has-head-new .btn.cm-tab-new { display: none; } }
+
+/* A trade code, shown once to pass on to a business buyer. */
+.cm-code { display: inline-block; padding: 8px 14px; border: 1px dashed var(--line, #cbd5e1); border-radius: 8px; font: 600 1.25rem/1.2 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; letter-spacing: 0.08em; user-select: all; }

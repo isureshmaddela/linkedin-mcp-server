@@ -13,6 +13,12 @@ PRODUCT_STATUSES = ("draft", "active", "archived")
 PAYMENT_STATUSES = ("unpaid", "paid", "refunded")
 FULFILMENT_STATUSES = ("placed", "packed", "shipped", "delivered", "cancelled")
 DISCOUNT_KINDS = ("percent", "fixed")
+# Selling to businesses as well as to consumers (B2B and B2C): who a product is for, who placed an order, the state of
+# a business buyer's trade account and the payment terms it buys on (days to pay after the order; prepay = now).
+AUDIENCES = ("all", "consumers", "businesses")
+BUYER_TYPES = ("consumer", "business")
+TRADE_STATUSES = ("pending", "approved", "declined", "paused")
+TRADE_TERMS: dict[str, int] = {"prepay": 0, "net7": 7, "net15": 15, "net30": 30, "net60": 60}
 FIRST_ORDER_NUMBER = 1001
 
 SCHEMA = (
@@ -115,10 +121,73 @@ SCHEMA_V2 = (
 )
 
 
+# Added for business buyers: trade accounts (approved by the shop, signed in on the storefront with an email and a
+# trade code, which is stored only as a hash), and the business columns on products and orders below.
+SCHEMA_V3 = (
+    """CREATE TABLE IF NOT EXISTS sh_trade_accounts (
+        id TEXT PRIMARY KEY,
+        company TEXT NOT NULL,
+        contact_name TEXT NOT NULL DEFAULT '',
+        email TEXT NOT NULL UNIQUE,
+        phone TEXT NOT NULL DEFAULT '',
+        tax_id TEXT NOT NULL DEFAULT '',
+        address TEXT NOT NULL DEFAULT '',
+        status TEXT NOT NULL DEFAULT 'pending',
+        terms TEXT NOT NULL DEFAULT 'prepay',
+        discount_percent INTEGER NOT NULL DEFAULT 0,
+        credit_limit_cents INTEGER NOT NULL DEFAULT 0,
+        tax_exempt INTEGER NOT NULL DEFAULT 0,
+        code_hash TEXT NOT NULL DEFAULT '',
+        note TEXT NOT NULL DEFAULT '',
+        source TEXT NOT NULL DEFAULT 'storefront',
+        approved_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS sh_trade_accounts_status ON sh_trade_accounts (status)",
+)
+ADDED_COLUMNS = (
+    ("sh_products", "audience", "TEXT NOT NULL DEFAULT 'all'"),
+    ("sh_products", "wholesale_cents", "INTEGER NOT NULL DEFAULT 0"),  # 0 = businesses pay the price
+    ("sh_products", "min_quantity", "INTEGER NOT NULL DEFAULT 1"),  # the least a business may order
+    ("sh_products", "price_breaks", "TEXT NOT NULL DEFAULT '[]'"),  # [{min_quantity, unit_cents}] for businesses
+    ("sh_orders", "buyer_type", "TEXT NOT NULL DEFAULT 'consumer'"),
+    ("sh_orders", "trade_account_id", "TEXT NOT NULL DEFAULT ''"),
+    ("sh_orders", "company", "TEXT NOT NULL DEFAULT ''"),
+    ("sh_orders", "tax_id", "TEXT NOT NULL DEFAULT ''"),
+    ("sh_orders", "po_number", "TEXT NOT NULL DEFAULT ''"),
+    ("sh_orders", "terms", "TEXT NOT NULL DEFAULT 'prepay'"),
+    ("sh_orders", "due_on", "TEXT NOT NULL DEFAULT ''"),
+)
+
+
+def _add_columns(connection: sqlite3.Connection) -> None:
+    """Add the business columns to a database made by an older Shop (safe to run any number of times)."""
+    marker = (kit._db_file(connection), "shop.columns.v3")  # noqa: SLF001 - kit.ensure's own marker,
+    if marker in kit._ensured:  # noqa: SLF001 - so kit.forget_schema() resets it too
+        return
+    tables: dict[str, set[str]] = {}
+    for table, column, definition in ADDED_COLUMNS:
+        if table not in tables:
+            tables[table] = {
+                row[1] for row in connection.execute(f"PRAGMA table_info({table})")
+            }
+        if column not in tables[table]:
+            connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+            tables[table].add(column)
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS sh_orders_trade ON sh_orders (trade_account_id, payment_status)"
+    )
+    connection.commit()
+    kit._ensured.add(marker)  # noqa: SLF001
+
+
 def ensure(connection: sqlite3.Connection) -> None:
     kit.ensure_core(connection)
     kit.ensure(connection, "shop.v1", SCHEMA)
     kit.ensure(connection, "shop.v2", SCHEMA_V2)
+    kit.ensure(connection, "shop.v3", SCHEMA_V3)
+    _add_columns(connection)
 
 
 # ---------------------------------------------------------------------------
@@ -130,6 +199,7 @@ def decode_product(row: Mapping[str, Any]) -> dict[str, Any]:
     product = dict(row)
     product["images"] = kit.loads(product.get("images"), []) or []
     product["options"] = kit.loads(product.get("options"), []) or []
+    product["price_breaks"] = kit.loads(product.get("price_breaks"), []) or []
     product["track_stock"] = bool(product.get("track_stock"))
     return product
 
@@ -176,6 +246,7 @@ def insert_product(connection: sqlite3.Connection, values: Mapping[str, Any]) ->
     row = {**values, "id": product_id, "created_at": stamp, "updated_at": stamp}
     row["images"] = kit.dumps(row.get("images") or [])
     row["options"] = kit.dumps(row.get("options") or [])
+    row["price_breaks"] = kit.dumps(row.get("price_breaks") or [])
     row["track_stock"] = 1 if row.get("track_stock") else 0
     columns = ", ".join(row)
     marks = ", ".join(f":{key}" for key in row)
@@ -191,6 +262,8 @@ def update_product(
         row["images"] = kit.dumps(row["images"] or [])
     if "options" in row:
         row["options"] = kit.dumps(row["options"] or [])
+    if "price_breaks" in row:
+        row["price_breaks"] = kit.dumps(row["price_breaks"] or [])
     if "track_stock" in row:
         row["track_stock"] = 1 if row["track_stock"] else 0
     row["updated_at"] = kit.now()
@@ -231,9 +304,13 @@ def list_orders(
     payment: str = "",
     q: str = "",
     open_only: bool = False,
+    buyer: str = "",
     limit: int = 500,
 ) -> list[dict[str, Any]]:
     clauses, params = [], []
+    if buyer:
+        clauses.append("buyer_type = ?")
+        params.append(buyer)
     if fulfilment:
         clauses.append("fulfilment_status = ?")
         params.append(fulfilment)
@@ -245,10 +322,10 @@ def list_orders(
     if q:
         text = q.lstrip("#")
         clauses.append(
-            "(customer_name LIKE ? OR customer_email LIKE ? OR customer_phone LIKE ? OR CAST(number AS TEXT) = ?)"
+            "(customer_name LIKE ? OR customer_email LIKE ? OR customer_phone LIKE ? OR company LIKE ? OR po_number LIKE ? OR CAST(number AS TEXT) = ?)"
         )
         like = f"%{q}%"
-        params.extend([like, like, like, text])
+        params.extend([like, like, like, like, like, text])
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
     rows = kit.fetch_all(
         connection,
@@ -351,7 +428,15 @@ SETTINGS_DEFAULTS: dict[str, Any] = {
     "referral_friend_percent": 10,
     "referral_reward_cents": 500,
     "referral_reward_days": 180,
+    # Business buyers (when the business sells to businesses: kit.business()["sell_to"]). "manual": the shop approves
+    # each trade account; "auto": a business that applies gets its trade code at once, on the default terms.
+    "trade_approval": "manual",
+    "trade_default_terms": "prepay",
+    "trade_min_order_cents": 0,  # the least a business order may come to before tax and delivery (0 = none)
+    "trade_require_po": False,  # business orders must carry a purchase-order number
+    "trade_intro": "",  # shown to businesses on the storefront: "Wholesale for cafes and shops. Net 30 available."
 }
+TRADE_APPROVALS = ("manual", "auto")
 
 
 def settings(connection: sqlite3.Connection) -> dict[str, Any]:
@@ -410,6 +495,32 @@ def save_settings(
                 default=180,
                 minimum=1,
                 maximum=3650,
+            ),
+        }
+    )
+    clean.update(
+        {
+            "trade_approval": kit.choice(
+                merged["trade_approval"],
+                "how trade accounts are approved",
+                TRADE_APPROVALS,
+                default="manual",
+            ),
+            "trade_default_terms": kit.choice(
+                merged["trade_default_terms"],
+                "the default payment terms",
+                tuple(TRADE_TERMS),
+                default="prepay",
+            ),
+            "trade_min_order_cents": amount(
+                merged["trade_min_order_cents"], "the business minimum order"
+            ),
+            "trade_require_po": kit.flag(merged["trade_require_po"]),
+            "trade_intro": kit.text(
+                merged["trade_intro"],
+                "the message for businesses",
+                max_len=300,
+                multiline=True,
             ),
         }
     )
