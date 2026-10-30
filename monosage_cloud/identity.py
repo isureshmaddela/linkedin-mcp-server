@@ -44,6 +44,9 @@ logger = logging.getLogger("monosage_cloud.identity")
 
 SLUG_RE = re.compile(r"[^a-z0-9]+")
 DUMMY_HASH = crypto.hash_password("dummy-password-for-timing")
+# A setup key stays the same this long, so a page that asks again (a reload, a second tab) shows the key already typed
+# into the authenticator app instead of a new one.
+MFA_PENDING_SECONDS = 300
 
 
 def slugify(name: str) -> str:
@@ -826,13 +829,25 @@ class Identity:
             raise MfaRequired("Give your current second factor before changing it.")
         table, column, scope = self._subject(principal)
         subject_id = principal.actor_id
-        secret = crypto.new_totp_secret()
-        self.app.secrets.put(scope, f"mfa-pending:{subject_id}", secret)
-        with self.db.write() as connection:
-            connection.execute(
-                f"UPDATE {table} SET mfa_pending_secret = 'set' WHERE {column} = ?",
+        # mfa_pending_secret holds when the pending key was made ('set' from before it did: treated as old).
+        with self.db.read() as connection:
+            row = one(
+                connection,
+                f"SELECT mfa_pending_secret FROM {table} WHERE {column} = ?",
                 (subject_id,),
             )
+        begun = str((row or {}).get("mfa_pending_secret") or "")
+        secret = ""
+        if begun.isdigit() and self.now - int(begun) < MFA_PENDING_SECONDS:
+            secret = self.app.secrets.get(scope, f"mfa-pending:{subject_id}") or ""
+        if not secret:
+            secret = crypto.new_totp_secret()
+            self.app.secrets.put(scope, f"mfa-pending:{subject_id}", secret)
+            with self.db.write() as connection:
+                connection.execute(
+                    f"UPDATE {table} SET mfa_pending_secret = ? WHERE {column} = ?",
+                    (str(self.now), subject_id),
+                )
         return {
             "secret": secret,
             "otpauth_uri": crypto.provisioning_uri(

@@ -63,6 +63,7 @@
 
   // While a gate (verify email, second factor) is up, the app behind it must not request anything: it routes to this blank view.
   let gated = false;
+  let gateOn = ""; // the gate on screen now: a request refused by the same gate must not redraw it (a new setup key)
   Aira.views.gate = (stage) => stage.replaceChildren();
   // Open an address afresh (the console and the apps are separate surfaces); replaceState fires no hashchange.
   const openAt = (url) => { history.replaceState(null, "", url); location.reload(); };
@@ -405,6 +406,7 @@
     const anonymous = parseAnonymous(location.hash);
     const target = screen || (anonymous && anonymous.screen) || "login";
     const token = anonymous ? anonymous.token : "";
+    gateOn = "";
     ({ login: () => renderLogin(options), signup: renderSignup, forgot: renderForgot, verify: () => renderVerify(token), reset: () => renderReset(token), invite: () => renderInvite(token) }[target] || (() => renderLogin(options)))();
   };
   auth.show = show; // the console's second-factor screens use the same panel as this page
@@ -415,6 +417,8 @@
   };
 
   cloud.showGate = (code) => {
+    if (gateOn === code && !$("authScreen").hidden) return;
+    gateOn = code;
     if (code === "email_unverified") renderEmailGate();
     else if (code === "mfa_required") renderMfa({ gate: true });
     else if (code === "mfa_enrollment_required") renderMfaSetup();
@@ -426,11 +430,12 @@
     if (user.kind === "member") {
       const anonymous = parseAnonymous(location.hash);
       if (anonymous && anonymous.screen !== "login") { cloud.me = user; auth.render(); return false; }
-      if (user.verified === false) { cloud.me = user; gated = true; renderEmailGate(); return false; }
-      if (user.mfa && user.mfa.enabled && !user.mfa.verified) { cloud.me = user; gated = true; renderMfa({ gate: true }); return false; }
-      if (user.mfa && user.mfa.required && !user.mfa.enabled) { cloud.me = user; gated = true; renderMfaSetup(); return false; }
+      if (user.verified === false) { cloud.me = user; gated = true; gateOn = "email_unverified"; renderEmailGate(); return false; }
+      if (user.mfa && user.mfa.enabled && !user.mfa.verified) { cloud.me = user; gated = true; gateOn = "mfa_required"; renderMfa({ gate: true }); return false; }
+      if (user.mfa && user.mfa.required && !user.mfa.enabled) { cloud.me = user; gated = true; gateOn = "mfa_enrollment_required"; renderMfaSetup(); return false; }
     }
     gated = false;
+    gateOn = "";
     try {
       return await coreBoot(user);
     } catch (error) {
