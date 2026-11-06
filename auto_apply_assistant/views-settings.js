@@ -8,7 +8,7 @@
     const tab = route.path[1] || "profile";
     const content = h("div", {});
     main.replaceChildren(
-      h("div", { class: "page-head" }, h("div", {}, h("h1", { text: "Settings" }), h("p", { text: "Your profile, resume, confirmed answers, connections, automation policy, and data controls." }))),
+      h("div", { class: "page-head" }, h("div", {}, h("h1", { text: "Settings" }), h("p", { text: "Your profile, resume, confirmed answers, connections, automation policy, and data controls." })), Aira.notify ? Aira.notify.controls({ compact: true }) : null),
       h("nav", { class: "subnav", "aria-label": "Settings sections" }, ...TABS.map(([id, label]) => h("a", { href: `#/settings/${id}`, "aria-current": id === tab ? "page" : "false", text: label }))),
       content,
     );

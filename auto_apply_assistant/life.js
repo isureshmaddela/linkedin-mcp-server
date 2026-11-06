@@ -237,7 +237,8 @@
     if (until && until > Date.now()) return;
     if (queue.some((item) => item.id === alert.id)) return;
     queue.push(alert);
-    if (document.hidden && "Notification" in window && Notification.permission === "granted") {
+    // With notifications on, the server's push (sw.js) already tells a hidden tab: only without it does the page.
+    if (document.hidden && !(Aira.notify && Aira.notify.pushOn) && "Notification" in window && Notification.permission === "granted") {
       try { new Notification(alert.title, { body: alert.body || "", tag: alert.id }); } catch { /* not allowed here */ }
     }
     nextAlert();
@@ -279,10 +280,13 @@
       for (const alert of data.alerts || []) showAlert(alert);
     } catch { /* the next beat tries again */ }
   }
+  // Reminders are made on the server (aira/notify/reminders.py) and reach a closed tab by Web Push. An open page hears
+  // about anything new at once through the live stream (realtime.js) and pulses then; it still pulses every minute
+  // while the stream is up (every 20 s without one) for the badges and alerts no hint announces.
   function startPulse() {
     if (L.timer) return;
     tick();
-    L.timer = setInterval(tick, 20000);
+    L.timer = Aira.realtime ? Aira.realtime.every(tick, { fallbackMs: 20000, liveMs: 60000, delayMs: 500 }) : setInterval(tick, 20000);
     document.addEventListener("visibilitychange", () => { if (!document.hidden) tick(); });
   }
   L.tick = tick;

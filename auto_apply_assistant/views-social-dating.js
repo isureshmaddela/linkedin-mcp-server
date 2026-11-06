@@ -624,7 +624,7 @@
       h("div", { class: "sd-composer" }, input, sendButton)));
     draw(true);
     markRead();
-    S.live(poll, 2000, thread);
+    if (Aira.realtime) Aira.realtime.live(["dating"], poll, 2000, thread); else S.live(poll, 2000, thread); // the live stream, else a poll
   }
 
   // ---------------------------------------------------------------------------

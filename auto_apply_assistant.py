@@ -26,7 +26,8 @@ import threading
 import time
 import uuid
 import zipfile
-from collections.abc import Callable, Mapping, Sequence
+from collections.abc import Callable, Iterator, Mapping, Sequence
+from contextlib import contextmanager as _contextmanager
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
 from email.utils import formataddr
@@ -138,6 +139,8 @@ from aira.airaapi import careers as airaapi_careers
 from aira.airaapi import careers_tracker
 from aira.leads import mail as leads_mail
 from aira.leads import service as leads_service
+from aira import notify as aira_notify
+from aira.notify import realtime as notify_realtime
 from aira import suite as aira_suite
 from aira.suite import kit as suite_kit
 from aira.suite import life as suite_life
@@ -4880,6 +4883,10 @@ def _scheduler_loop() -> None:
             _run_suite_background()
         except Exception:
             logger.exception("Suite background tick failed")
+        try:
+            _run_notify_reminders()
+        except Exception:
+            logger.exception("Reminder tick failed")
 
 
 _suite_background_last = 0.0
@@ -4912,6 +4919,74 @@ def _run_suite_background() -> None:
             logger.exception("Suite background failed for %s", user.get("user_id"))
         finally:
             _unbind_user()
+
+
+_notify_last = 0.0
+NOTIFY_INTERVAL_SECONDS = 60
+
+
+def _run_notify_reminders() -> None:
+    """Every minute, for each account: reminders that reach a person with every tab closed (a dose that is due,
+    a Careers follow-up or interview, an appointment a staff member gives, a stock alert), through
+    aira.notify (the notification centre, Web Push, and email where the person chose it)."""
+    global _notify_last
+    from aira.notify import reminders
+
+    now = time.monotonic()
+    if now - _notify_last < NOTIFY_INTERVAL_SECONDS:
+        return
+    _notify_last = now
+    with _auth_connect() as connection:
+        users = [
+            dict(row) for row in connection.execute("SELECT * FROM users").fetchall()
+        ]
+    for user in users:
+        if not Path(str(user.get("data_path") or "")).exists():
+            continue
+        _bind_user(user)
+        _request_context.actor = "system:notify"
+        try:
+            with _connect() as connection:
+                reminders.run(connection)
+        except Exception:
+            logger.exception("Reminders failed for %s", user.get("user_id"))
+        finally:
+            _unbind_user()
+
+
+def _notify_home() -> str:
+    """The live channel of the account bound to this thread (aira.notify.realtime)."""
+    user_id = getattr(_request_context, "user_id", None)
+    return f"local:{user_id}" if user_id else ""
+
+
+@_contextmanager
+def _open_notify_home(home: str) -> Iterator[sqlite3.Connection | None]:
+    """Another account's database on this computer, by its channel: a Social message to someone in another
+    household lands in their notification centre."""
+    user_id = home.removeprefix("local:") if home.startswith("local:") else ""
+    path = None
+    if user_id:
+        with _auth_connect() as auth:
+            row = auth.execute(
+                "SELECT data_path FROM users WHERE user_id = ?", (user_id,)
+            ).fetchone()
+        path = Path(str(row["data_path"])) if row else None
+    if path is None or not path.exists():
+        yield None
+        return
+    connection = sqlite3.connect(path, timeout=10, factory=_ManagedConnection)
+    connection.row_factory = sqlite3.Row
+    connection.execute("PRAGMA busy_timeout = 5000")
+    with connection:
+        yield connection
+
+
+aira_notify.configure(
+    key_dir=lambda: DB_PATH.parent,  # the data directory: the VAPID key is made once and kept there
+    home=_notify_home,
+    open_home=_open_notify_home,
+)
 
 
 # ---------------------------------------------------------------------------
@@ -4971,7 +5046,9 @@ _document_key_cache: dict[str, bytes] = {}
 _login_limiter = RateLimiter(limit=8, window_seconds=600, lockout_seconds=900)
 _api_limiter = RateLimiter(limit=600, window_seconds=60)
 # Routes that serve the web page and its static files (not rate limited).
-PAGE_ROUTES = frozenset({"ui_index", "ui_app_page", "ui_static", "ui_i18n"})
+PAGE_ROUTES = frozenset(
+    {"ui_index", "ui_app_page", "ui_static", "ui_i18n", "ui_service_worker", "ui_manifest"}
+)
 # The page and its static files are checked on every load (an edit on disk shows at once) but sent again only when
 # they changed: the ETag is the file's size and modification time, and a match answers 304 with no body. Text files
 # go gzip-compressed to a browser that accepts it (compressed once per version of the file and kept in memory).
@@ -8891,7 +8968,12 @@ class RequestHandler(BaseHTTPRequestHandler):
         self.wfile.write(data)
         self._status = status
 
-    def _send_static(self, target: Path, content_type: str) -> None:
+    def _send_static(
+        self,
+        target: Path,
+        content_type: str,
+        extra: list[tuple[str, str]] | None = None,
+    ) -> None:
         """A file of the web page: 304 when the browser has this version, else the bytes (gzip when accepted)."""
         try:
             stat = target.stat()
@@ -8903,6 +8985,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             ("Cache-Control", "no-cache"),
             ("ETag", etag),
             ("Vary", "Accept-Encoding"),
+            *(extra or []),
         ]
         asked = self.headers.get("If-None-Match") or ""
         known = {tag.strip() for tag in asked.split(",")}
@@ -9284,6 +9367,123 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.send_error(404)
             return
         self._send_static(target, STATIC_TYPES[target.suffix])
+
+    def _send_page_file(
+        self, target: Path, content_type: str, extra: list[tuple[str, str]] | None = None
+    ) -> None:
+        """A file the page needs at the site's root (the service worker, the web manifest). The hosted build runs
+        this handler through its capturing shim, which takes the bytes as they are (no revalidation there)."""
+        if getattr(self, "_captured", None) is not None:
+            try:
+                data = target.read_bytes()
+            except OSError:
+                self._send_json(404, {"error": "Not found."})
+                return
+            self._write_headers(
+                200, content_type, len(data), [("Cache-Control", "no-cache"), *(extra or [])]
+            )
+            self.wfile.write(data)
+            self._status = 200
+            return
+        self._send_static(target, content_type, extra)
+
+    @route("GET", r"/sw\.js", auth=False)
+    def ui_service_worker(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        """The service worker (push, notification clicks, the offline page), from the root so its scope is the
+        whole site. Always revalidated: a new deploy replaces it at once."""
+        self._send_page_file(STATIC_DIR / "sw.js", "text/javascript; charset=utf-8")
+
+    @route("GET", r"/manifest\.webmanifest", auth=False)
+    def ui_manifest(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        """The web app manifest that makes Monosage installable."""
+        self._send_page_file(
+            STATIC_DIR / "manifest.webmanifest", "application/manifest+json; charset=utf-8"
+        )
+
+    @route("GET", r"/api/notify/stream")
+    def api_notify_stream(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        """Live hints for this account's open pages, as Server-Sent Events (aira/notify/realtime.py): a heartbeat
+        every few seconds, ``Last-Event-ID`` (or ``?last=``) resumes, and past the cap the page keeps polling."""
+        if not aira_notify.live():
+            self._send_json(404, {"error": "Live updates are off here.", "code": "live_off"})
+            return
+        channel = aira_notify.home_of(user)
+        last = str(self.headers.get("Last-Event-ID") or _query_str(query, "last") or "")[:64]
+        hub = notify_realtime.HUB
+        try:
+            after = hub.open(channel)
+        except notify_realtime.Busy as error:
+            self._send_json(429, {"error": str(error), "code": "live_busy"})
+            return
+        try:
+            self._stream_events(channel, last, after)
+        finally:
+            hub.close(channel)
+
+    def _stream_events(self, channel: str, last: str, after: int) -> None:
+        hub = notify_realtime.HUB
+        self.close_connection = True
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("X-Accel-Buffering", "no")
+        self.send_header("Connection", "close")
+        for name, value in SECURITY_HEADERS:
+            self.send_header(name, value)  # Cache-Control: no-store suits a stream
+        correlation = getattr(_request_context, "correlation_id", None)
+        if correlation:
+            self.send_header("X-Request-ID", str(correlation))
+        self.end_headers()
+        self._status = 200
+        _unbind_user()  # the stream reads no database; a long-lived binding would outlast the request
+
+        def write(text: str) -> None:
+            self.wfile.write(text.encode("utf-8"))
+            self.wfile.flush()
+
+        try:
+            write(f"retry: {notify_realtime.RETRY_MS}\n\n")
+            backlog, resync = hub.since(channel, last)
+            seq = after
+            if resync:
+                write(notify_realtime.resync_wire(after))
+            for event in backlog:
+                write(event.wire())
+                seq = max(seq, event.seq)
+            deadline = time.monotonic() + notify_realtime.STREAM_SECONDS
+            while not hub.closed:
+                left = deadline - time.monotonic()
+                if left <= 0:
+                    break
+                events = hub.wait(channel, seq, min(notify_realtime.HEARTBEAT_SECONDS, left))
+                if events:
+                    for event in events:
+                        write(event.wire())
+                        seq = event.seq
+                else:
+                    write(": ping\n\n")
+        except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
+            # The page went away: nothing more can be written, so the server's final flush must not try.
+            import io
+
+            self.wfile = io.BytesIO()
 
     @route("GET", r"/api/health", auth=False)
     def api_health(

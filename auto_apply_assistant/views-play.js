@@ -591,7 +591,7 @@
         if (state.is_host) parts.push(h("div", { class: "btn-row" }, S.button(state.index + 1 >= state.total ? "Finish" : "Next question", async () => { state = (await post(`/rooms/${roomId}/next`)).room; draw(); }, { kind: "secondary" }), S.button("End the game", async () => { state = (await post(`/rooms/${roomId}/end`)).room; draw(); }, { kind: "ghost" })));
         if (stopClock) stopClock();
         if (state.phase === "question") {
-          const timer = setInterval(() => { localLeft = Math.max(0, localLeft - 1); left.textContent = `${localLeft} s`; }, 1000);
+          const timer = setInterval(() => { if (!left.isConnected) { clearInterval(timer); return; } localLeft = Math.max(0, localLeft - 1); left.textContent = `${localLeft} s`; if (localLeft === 0) refresh().catch(() => {}); }, 1000);
           stopClock = () => clearInterval(timer);
         }
       } else {
@@ -611,7 +611,8 @@
       if (data.phase === "finished" || data.phase === "expired") { if (stopLive) stopLive(); stopLive = null; }
     };
     refresh().catch((error) => holder.replaceChildren(Aira.ui.error(error, () => openRoom(panel, roomId))));
-    stopLive = S.live(refresh, 1500);
+    // The live stream refreshes on every move; a question's clock runs out with no move, so it still checks every 5 s.
+    stopLive = Aira.realtime ? Aira.realtime.live(["trivia"], refresh, 1500, null, { safetyMs: 5000 }) : S.live(refresh, 1500);
   }
 
   // ---------------------------------------------------------------------------

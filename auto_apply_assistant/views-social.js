@@ -116,7 +116,9 @@
   const familyOpen = () => (Aira.visibleNav ? Aira.visibleNav() : []).some((item) => item.id === "family") && !(Aira.apps && Aira.apps.blocked && Aira.apps.blocked("family"));
   // Poll while this screen is on the page. (Aira.suite.live alone keeps going while the person moves between tabs
   // of Social, because tabs live in the query: every visit would add another loop.)
-  const live = (node, fn, ms) => {
+  // With topics, the live stream (realtime.js) refreshes it when something changes and `ms` is the fallback poll.
+  const live = (node, fn, ms, topics) => {
+    if (topics && Aira.realtime) return Aira.realtime.live(topics, fn, ms, node);
     const stop = S.live(async () => { if (!node.isConnected) { stop(); return; } await fn(); }, ms);
     return stop;
   };
@@ -937,7 +939,7 @@
       // A wide screen keeps the conversation's place beside the list, like a messenger.
       body.append(narrow ? S.section("", listBox) : h("div", { class: "so-chat-grid" }, S.section("", listBox),
         h("section", { class: "card suite-section so-chat-pick" }, Aira.ui.empty(listData.chats.length ? "Choose a chat" : "Start a conversation", listData.chats.length ? "Pick a chat on the left to read and reply." : "Message a friend, or start a group chat.", S.button("New chat", newChat, { kind: "secondary sm", icon: "plus" })))));
-      live(listBox, async () => { listData = await api("/chats", { silent: true }); drawList(listData); }, 4000);
+      live(listBox, async () => { listData = await api("/chats", { silent: true }); drawList(listData); }, 4000, ["chat"]);
       return;
     }
 
@@ -1031,7 +1033,7 @@
       h("div", { style: { display: "flex", gap: "8px", alignItems: "flex-end", flexWrap: "wrap" } }, h("div", { style: { flex: "1 1 240px" } }, input), closed ? null : photoButton, closed ? null : linkButton, sendButton)));
     body.append(narrow ? threadCard : h("div", { class: "so-chat-grid" }, S.section("", listBox), threadCard));
     thread.scrollTop = thread.scrollHeight;
-    live(thread, poll, 2000);
+    live(thread, poll, 2000, ["chat"]);
   }
 
   // ---------------------------------------------------------------------------

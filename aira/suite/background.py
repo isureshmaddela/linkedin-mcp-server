@@ -8,6 +8,9 @@ organization's database). An app registers a task::
     def _tick(connection):            # e.g. find missed doses and tell caregivers
         ...
 
+After the tasks, reminders go to the people they are for (:mod:`aira.notify.reminders`): their notification
+centre, their browsers (Web Push) and, where they chose it, email.
+
 Then approved messages whose time has come (a booking reminder the day before, a caregiver's notice) go out
 through the business's own mail server, if it set one up (Business hub > Email). Nothing is sent that a person
 did not approve, except the kinds the business chose to send automatically and safety notices
@@ -62,6 +65,14 @@ def run(connection: sqlite3.Connection, secret_store: Any) -> dict[str, Any]:
         except Exception:  # noqa: BLE001 - one app must not stop the others or the mail
             suite.logger.exception("Background task for %s failed", app_id)
             result["tasks"][app_id] = "failed"
+    # Reminders that reach a person with every tab closed (a dose that is due, an appointment a staff member gives,
+    # a stock alert): the notification centre, Web Push and email (aira/notify/reminders.py). Each is told once, so
+    # the single-user build's minute-by-minute reminder tick and this pass never repeat one.
+    from aira.notify import reminders
+
+    result["reminders"] = reminders.run(
+        connection, only=("medicine", "bookings", "stocks")
+    )
     settings = kit.email_settings(connection)
     # its own mail server, or (hosted, a member's own space) the organization's it is lent
     if (settings.get("smtp_host") and settings.get("from_email")) or kit.lent_mail():

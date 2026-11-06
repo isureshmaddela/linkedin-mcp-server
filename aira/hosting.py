@@ -118,6 +118,8 @@ class Hooks:
     # () -> the mail an application by email leaves with (aira/email_apply.py), or None when there is none: hosted,
     # the organization's Business hub > Email with the member's name on it and Reply-To their own address
     application_mail: Callable[[], OutreachMail | None] | None = None
+    # notifications (aira/notify.configure keys): where the VAPID key lives, the platform mail, live updates off
+    notify: dict[str, Any] | None = None
 
     def reset(self) -> None:
         """Clear every hook (tests, and a shell shutting down)."""
@@ -142,6 +144,7 @@ class Hooks:
         self.outreach_mail = None
         self.business_mail = None
         self.application_mail = None
+        self.notify = None
         self.submission_listeners.clear()
 
 

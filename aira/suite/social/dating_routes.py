@@ -18,6 +18,7 @@ from contextlib import contextmanager
 from typing import Any
 
 from aira.airaapi.http import Raw, Request, aira_route
+from aira.notify import events as notify_events
 from aira.suite.social import dating, service, store
 
 BASE = "/api/social/dating"
@@ -164,9 +165,12 @@ def dating_profile(request: Request) -> tuple[int, dict[str, Any]]:
 def dating_swipe(request: Request) -> tuple[int, dict[str, Any]]:
     """``{"action": "like" | "pass" | "star"}``; a like back answers with the match."""
     with _open(request) as (sc, ident, me):
-        return 200, dating.swipe(
+        result = dating.swipe(
             sc, ident, me, _id(request), str(request.payload.get("action") or "")
         )
+        if result.get("match"):
+            notify_events.dating_match(sc, me, result["match"]["id"])
+        return 200, result
 
 
 @aira_route("POST", f"{BASE}/profiles/{ID}/block")
@@ -218,11 +222,14 @@ def dating_messages(request: Request) -> tuple[int, dict[str, Any]]:
 @aira_route("POST", f"{BASE}/matches/{ID}/messages")
 def dating_send(request: Request) -> tuple[int, dict[str, Any]]:
     with _open(request) as (sc, ident, me):
-        return 201, dating.chat_send(sc, ident, me, _id(request), request.payload)
+        sent = dating.chat_send(sc, ident, me, _id(request), request.payload)
+        notify_events.dating_message(sc, me, _id(request))  # live pages; the match is told (no names)
+        return 201, sent
 
 
 @aira_route("POST", f"{BASE}/matches/{ID}/read")
 def dating_read(request: Request) -> tuple[int, dict[str, Any]]:
     with _open(request) as (sc, ident, me):
         dating.chat_read(sc, ident, me, _id(request))
+        notify_events.dating_changed(sc, _id(request))
     return 200, {"read": True}
