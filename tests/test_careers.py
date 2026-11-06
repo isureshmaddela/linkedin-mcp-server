@@ -654,7 +654,8 @@ def test_build_posting_rederives_everything_from_google_fields():
     assert posting.posted_at is not None and posting.posted_at.isoformat().startswith(
         "2026-10-19"
     )
-    assert posting.application_url == "https://www.linkedin.com/jobs/view/1001"
+    # Google lists LinkedIn first; the job applies on the other option, which is not an aggregator
+    assert posting.application_url == "https://careers.example.com/jobs/1001"
     no_description = {**job, "description": "", "salary": None}
     built = careers.build_posting(no_description)
     assert "Qualifications" in built.description and built.salary_min is None
@@ -1529,7 +1530,8 @@ def test_search_then_import_is_duplicate_safe_and_scored(env, connected):
         "USD",
     )
     assert row["match_score"] is not None and row["posted_at"].startswith("2026-10-19")
-    assert row["application_url"] == "https://www.linkedin.com/jobs/view/1003"
+    # the employer's own option, not LinkedIn's relisting (Google lists LinkedIn first)
+    assert row["application_url"] == "https://careers.example.com/jobs/1003"
     assert row["workplace_type"] == ""
     again = connected.post("/api/careers/jobs/import", {"job": manager})
     assert again["created"] is False and again["duplicate_of"] == row["job_id"]
