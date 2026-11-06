@@ -59,6 +59,12 @@ def _kind(app: str, kind: str) -> PublicKind:
     return KINDS.setdefault((app, kind), PublicKind(app, kind))
 
 
+def register_kind(app: str, kind: str) -> None:
+    """A kind of link that is not a page: its token only names the account (a payment provider's webhook
+    address, ``aira.payments``). ``GET /api/public/<token>`` answers 404 for it."""
+    _kind(app, kind)
+
+
 def page(app: str, kind: str) -> Callable[[PageFn], PageFn]:
     def wrap(fn: PageFn) -> PageFn:
         _kind(app, kind).render = fn
@@ -258,7 +264,15 @@ def view(connection: sqlite3.Connection, token: str) -> dict[str, Any]:
             business = {
                 k: v
                 for k, v in business.items()
-                if k not in ("payment_link", "payment_instructions")
+                if k
+                not in (
+                    "payment_link",
+                    "payment_instructions",
+                    "payment_provider",
+                    "online_payments",
+                    "upi_id",
+                    "upi_name",
+                )
             }
     return {
         "app": link["app"],
