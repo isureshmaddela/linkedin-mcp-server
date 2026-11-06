@@ -22,6 +22,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from aira import autopilot
 from monosage_cloud import context, redaction
 from monosage_cloud.db import dumps, loads, many, one
 from monosage_cloud.errors import NotFound
@@ -634,8 +635,12 @@ class WorkspaceManager:
             snapshot["placed"] = int(
                 scalar("SELECT COUNT(*) FROM jobs WHERE stage = 'accepted'")
             )
+            # held: everything Needs you lists except a filled form waiting for one click (counted as ready below)
+            needs_you, needs_args = autopilot.needs_you_run_ids_sql()
             held = connection.execute(
-                "SELECT COUNT(*) AS n, MIN(COALESCE(finished_at, created_at)) AS oldest FROM application_runs WHERE status = 'needs_review'"
+                "SELECT COUNT(*) AS n, MIN(COALESCE(finished_at, created_at)) AS oldest FROM application_runs "  # noqa: S608 - fixed SQL from aira.autopilot
+                f"WHERE status != 'ready' AND run_id IN ({needs_you})",
+                needs_args,
             ).fetchone()
             snapshot["held"] = int(held["n"])
             snapshot["oldest_held_at"] = held["oldest"]

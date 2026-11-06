@@ -578,6 +578,15 @@ def _needs_you_since(now: datetime | None = None) -> str:
     return _iso((now or _now()) - timedelta(days=NEEDS_YOU_DAYS))
 
 
+def needs_you_run_ids_sql(now: datetime | None = None) -> tuple[str, list[Any]]:
+    """A subquery of the run ids Needs you lists, and its argument, for other screens to count the same runs
+    (the hosted dashboards): ``... WHERE r.run_id IN (<sql>)``."""
+    return (
+        f"SELECT run_id FROM application_runs WHERE {_NEEDS_YOU_SQL}",
+        [_needs_you_since(now)],
+    )
+
+
 def run_view(row: sqlite3.Row | Mapping[str, Any]) -> dict[str, Any]:
     run = dict(row)
     for name, default in _JSON_RUN_FIELDS.items():

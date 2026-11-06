@@ -15,6 +15,7 @@ import sqlite3
 from pathlib import Path
 from typing import TYPE_CHECKING, Any
 
+from aira import autopilot
 from monosage_cloud.config import DAY
 from monosage_cloud.db import loads, many, one
 from monosage_cloud.errors import Forbidden
@@ -561,10 +562,13 @@ class Dashboard:
                 connection.row_factory = sqlite3.Row
             except sqlite3.Error:
                 continue
+            # the runs the candidate's Needs you lists: questions, a filled form, an interrupted run, a job to apply to
+            needs_you, needs_args = autopilot.needs_you_run_ids_sql()
             try:
                 for row in connection.execute(
-                    """SELECT r.run_id, r.status, r.unanswered, r.finished_at, r.created_at, r.error, j.title, j.company, j.job_id
-                    FROM application_runs r LEFT JOIN jobs j ON j.job_id = r.job_id WHERE r.status IN ('needs_review', 'ready') ORDER BY r.created_at LIMIT 100"""
+                    f"""SELECT r.run_id, r.status, r.unanswered, r.finished_at, r.created_at, r.error, j.title, j.company, j.job_id
+                    FROM application_runs r LEFT JOIN jobs j ON j.job_id = r.job_id WHERE r.run_id IN ({needs_you}) ORDER BY r.created_at LIMIT 100""",  # noqa: S608 - fixed SQL from aira.autopilot
+                    needs_args,
                 ):
                     unanswered = loads(row["unanswered"], [])
                     items.append(

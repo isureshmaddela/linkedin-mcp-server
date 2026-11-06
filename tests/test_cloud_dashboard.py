@@ -59,3 +59,28 @@ def test_a_billing_contact_sees_usage_and_no_candidate_data(cloud):
     view = cloud.dashboard.for_principal(org.billing)
     assert view["kind"] == "usage"
     assert "pipeline" not in view and "coach_workload" not in view
+
+
+def test_interrupted_runs_count_as_held_like_needs_you(cloud):
+    """A run whose result is unknown waits for the person (Needs you); the organization's queue and the candidate's
+    snapshot count it too, not only runs held for answers."""
+    from cloud_support import local_module
+
+    org = build_org(cloud)
+    seeded = seed_held_run(cloud, org.org_id, org.candidate.member_id)
+    local = local_module()
+    with cloud.workspaces.bind(
+        org.org_id, org.candidate.member_id, kind="system", source="test"
+    ):
+        with local._connect() as connection:
+            connection.execute(
+                "UPDATE application_runs SET status = 'interrupted' WHERE run_id = ?",
+                (seeded["run_id"],),
+            )
+    cloud.workspaces.invalidate_snapshot(org.org_id, org.candidate.member_id)
+
+    queue = cloud.dashboard.held_queue(org.owner)
+    assert [item["run_id"] for item in queue] == [seeded["run_id"]]
+    assert queue[0]["status"] == "interrupted"
+    snapshot = cloud.workspaces.compute_snapshot(org.org_id, org.candidate.member_id)
+    assert snapshot["held"] == 1 and snapshot["ready"] == 0
