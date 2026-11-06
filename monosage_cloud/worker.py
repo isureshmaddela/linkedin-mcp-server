@@ -281,6 +281,19 @@ def handle_rotate_keys(app: CloudApp, job: dict[str, Any]) -> dict[str, Any]:
     return app.lifecycle.rotate_org_keys(job["org_id"])
 
 
+def handle_mail_deliver(app: CloudApp, job: dict[str, Any]) -> dict[str, Any]:
+    """One delivery attempt of a platform email (monosage_cloud/mail.py); a failure is retried with backoff."""
+    return app.mail.deliver_queued(
+        str((job.get("payload") or {}).get("mail_id") or ""),
+        last_attempt=int(job.get("attempts") or 0) >= int(job.get("max_attempts") or 1),
+    )
+
+
+def handle_backup_org(app: CloudApp, job: dict[str, Any]) -> dict[str, Any]:
+    """A scheduled backup of one organization (monosage_cloud/backup.py, AIRA_CLOUD_BACKUP_HOURS)."""
+    return app.backup.scheduled_backup(job["org_id"])
+
+
 HANDLERS: dict[str, Callable[[Any, dict[str, Any]], Any]] = {
     "keys.rotate": handle_rotate_keys,
     "autopilot.due": handle_autopilot_due,
@@ -290,6 +303,8 @@ HANDLERS: dict[str, Callable[[Any, dict[str, Any]], Any]] = {
     "monitors.org": handle_org_monitors_due,
     "suite.tick": handle_suite_tick,
     "webhook.deliver": handle_webhook_deliver,
+    "mail.deliver": handle_mail_deliver,
+    "backup.org": handle_backup_org,
 }
 
 

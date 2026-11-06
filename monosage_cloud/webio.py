@@ -189,6 +189,10 @@ class CloudRoute:
     verified: bool = True  # False: usable before the email is verified
     mfa: bool = True  # False: usable before the second factor is given (sign-in itself, MFA setup)
     csrf: bool = True  # False for provider webhooks and token-authenticated callers
+    # A signed or credentialed machine caller (a billing provider's webhook, SCIM, the OAuth token endpoint, the
+    # signed internal callbacks): exempt from the sign-in limiter, limited per provider, client or token instead
+    # (gateway.Gateway._machine_check). The value names the bucket: "webhook", "oauth", "scim" or "signed".
+    machine: str = ""
 
 
 CLOUD_ROUTES: list[CloudRoute] = []
@@ -203,6 +207,7 @@ def cloud_route(
     verified: bool = True,
     mfa: bool = True,
     csrf: bool = True,
+    machine: str = "",
 ) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
     def wrap(function: Callable[..., Any]) -> Callable[..., Any]:
         CLOUD_ROUTES.append(
@@ -216,6 +221,7 @@ def cloud_route(
                 verified,
                 mfa,
                 csrf,
+                machine,
             )
         )
         return function

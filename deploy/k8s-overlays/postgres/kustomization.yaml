@@ -1,0 +1,27 @@
+# The control plane on PostgreSQL (docs/multitenant-operations.md, "PostgreSQL control plane"):
+#
+#   kubectl apply -k deploy/k8s-overlays/postgres
+#
+# What changes from deploy/k8s: organizations, members, sessions, billing, audit and the job queue live in a
+# managed PostgreSQL (backups, point-in-time recovery, a standby) instead of control.sqlite3; the network policy
+# lets the pod reach it on 5432. What does not change: the candidates' and organizations' workspaces are still one
+# SQLite file each on the data volume, so there is still exactly one writer for that volume: the same single
+# `serve --worker` pod on a ReadWriteOnce claim, `strategy: Recreate`. Running more pods needs the workspaces split
+# across volumes with each organization routed to the pod that owns its volume, which the gateway does not do yet.
+#
+# Add these keys to the aira-secrets Secret (see deploy/k8s/secret.example.yaml):
+#   AIRA_CLOUD_DATABASE_URL           the application role (row-level security applies)
+#   AIRA_CLOUD_DATABASE_PLATFORM_URL  the platform role (BYPASSRLS; operator console, scheduler, billing)
+#   AIRA_CLOUD_DATABASE_ADMIN_URL     the owner role; migrations run at start-up with it (remove it afterwards to
+#                                     make the pod only verify the schema)
+# and copy an existing SQLite control plane once with `python -m monosage_cloud migrate-to-postgres`.
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+resources:
+  - ../../k8s
+  - networkpolicy-postgres.yaml
+patches:
+  - target: { kind: ConfigMap, name: aira-config }
+    patch: |-
+      - { op: add, path: /data/AIRA_CLOUD_DB, value: postgres }
+      - { op: add, path: /data/AIRA_CLOUD_DATABASE_POOL_SIZE, value: "24" }

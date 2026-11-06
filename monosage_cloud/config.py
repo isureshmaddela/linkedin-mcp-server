@@ -305,6 +305,63 @@ class CloudConfig:
     lease_seconds: int = 900
     browser_time_cap_seconds: int = 600
 
+    # -- hosted security and operations (docs/multitenant-operations.md, "Limits, draining and budgets") --------
+    # signed machine callers: per provider, OAuth client or SCIM token, never the sign-in limiter
+    machine_requests_per_minute: int = 3000
+    machine_failures_per_window: int = 60  # rejected credentials per address in 5 minutes
+    # the HTTP tier (gateway.make_server)
+    http_max_connections: int = field(
+        default_factory=lambda: _int("AIRA_CLOUD_HTTP_MAX_CONNECTIONS", 512)
+    )
+    http_socket_timeout: int = field(
+        default_factory=lambda: _int("AIRA_CLOUD_HTTP_TIMEOUT", 75)
+    )
+    http_backlog: int = 128
+    http_max_body_bytes: int = 25_000_000
+    http_large_body_bytes: int = 1_000_000  # bodies above this share a few slots
+    http_large_body_slots: int = 8
+    http_drain_seconds: int = field(
+        default_factory=lambda: _int("AIRA_CLOUD_DRAIN_SECONDS", 25)
+    )
+    scrypt_concurrency: int = 4  # each password check holds about 32 MB
+    # sessions end after this long without a request (0: only the absolute lifetime applies)
+    session_idle_seconds: int = field(
+        default_factory=lambda: _int("AIRA_CLOUD_SESSION_IDLE_HOURS", 24) * 3600
+    )
+    operator_session_idle_seconds: int = 3600
+    # sign-up abuse checks (identity.Identity.check_signup)
+    signups_per_ip_hour: int = 5
+    signups_per_domain_hour: int = 20
+    # operator-assisted recovery of a sole owner's second factor waits this long (the owner can cancel)
+    recovery_delay_seconds: int = 72 * 3600
+    # operations
+    metrics_token: str = field(default_factory=lambda: _env("AIRA_CLOUD_METRICS_TOKEN"))
+    backup_interval_hours: int = field(
+        default_factory=lambda: _int("AIRA_CLOUD_BACKUP_HOURS", 0)
+    )
+    backup_dir: str = field(default_factory=lambda: _env("AIRA_CLOUD_BACKUP_DIR"))
+    backup_keep: int = field(default_factory=lambda: _int("AIRA_CLOUD_BACKUP_KEEP", 7))
+    mail_outbox_days: int = 30
+    scheduler_idle_recheck_seconds: int = 3600
+    # per-organization caps for each job kind (default: per_org_concurrency), and all kinds together
+    kind_concurrency: dict[str, int] = field(default_factory=dict)
+    per_org_total_concurrency: int = 6
+    allow_shared_sqlite: bool = field(
+        default_factory=lambda: _bool("AIRA_CLOUD_ALLOW_SHARED_SQLITE")
+    )
+    # model calls a month answered with the platform's own key, by plan (None: no limit); an organization's own
+    # Anthropic key or endpoint is not counted. A plan's ``model_calls_per_month`` limit, when set, wins.
+    model_calls_per_month: dict[str, int | None] = field(
+        default_factory=lambda: {
+            "trial": 300,
+            "all_access": 300,
+            "starter": 5_000,
+            "team": 50_000,
+            "enterprise": None,
+        }
+    )
+    model_calls_default: int | None = 1_000  # plans not listed above
+
     @property
     def db_path(self) -> Path:
         return self.data_root / "control.sqlite3"

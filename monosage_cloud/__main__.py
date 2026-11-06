@@ -54,6 +54,7 @@ def cmd_serve(args: argparse.Namespace) -> int:
     from monosage_cloud.worker import Worker
 
     app = _app(args)
+    app.host_guard.claim()  # one machine per data directory (SQLite): see app.HostGuard
     gateway = Gateway(app)
     server = make_server(gateway)
     worker = None
@@ -73,10 +74,20 @@ def cmd_serve(args: argparse.Namespace) -> int:
         app.config.region,
     )
     stop = threading.Event()
+    drain_seconds = max(0, int(app.config.http_drain_seconds))
 
     def shutdown(*_args: object) -> None:
+        # SIGTERM: readiness answers 503, in-flight requests finish (up to AIRA_CLOUD_DRAIN_SECONDS), then the
+        # worker pool stops; a job still running returns to the queue when its lease ends.
+        if stop.is_set():
+            return
         stop.set()
-        threading.Thread(target=server.shutdown, daemon=True).start()
+        threading.Thread(
+            target=server.drain,
+            args=(drain_seconds,),
+            kwargs={"grace": min(5.0, drain_seconds / 5)},
+            daemon=True,
+        ).start()
 
     signal.signal(signal.SIGINT, shutdown)
     try:
@@ -86,11 +97,14 @@ def cmd_serve(args: argparse.Namespace) -> int:
     try:
         server.serve_forever()
     finally:
+        if stop.is_set():
+            server.drained.wait(drain_seconds + 10)
         if worker:
             worker.stop()
         if agent:
             agent.stop()
         server.server_close()
+        app.host_guard.release()
         app.close()
     return 0
 
@@ -117,6 +131,7 @@ def cmd_worker(args: argparse.Namespace) -> int:
     from monosage_cloud.worker import Worker
 
     app = _app(args)
+    app.host_guard.claim()
     agent = _start_agent(app, Gateway(app), args)
     worker = Worker(app, threads=args.threads, agent=agent)
     worker.start()
@@ -130,12 +145,14 @@ def cmd_worker(args: argparse.Namespace) -> int:
     worker.stop()
     if agent:
         agent.stop()
+    app.host_guard.release()
     app.close()
     return 0
 
 
 def cmd_tick(args: argparse.Namespace) -> int:
     app = _app(args)
+    app.host_guard.claim()
     print(json.dumps(app.lifecycle.tick(), indent=2, default=str))
     return 0
 

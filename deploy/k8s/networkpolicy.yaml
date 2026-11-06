@@ -1,7 +1,8 @@
 # Default deny in the namespace, then allow only what the service needs.
 # The web pods accept traffic from the ingress controller's namespace (adjust the label to your controller).
 # Every pod may reach DNS and the public internet on the ports it uses (HTTPS for the billing provider, model
-# provider, object storage, job boards and employer sites; SMTP submission), but not other private ranges.
+# provider, object storage, job boards and employer sites; SMTP submission), but not other private ranges. The
+# PostgreSQL overlay (deploy/k8s-overlays/postgres) adds egress to the database on 5432.
 apiVersion: networking.k8s.io/v1
 kind: NetworkPolicy
 metadata:

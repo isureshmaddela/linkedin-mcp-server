@@ -272,7 +272,9 @@ def _scim(handler: Callable[..., Any]) -> Callable[[Req], Reply]:
 
 def _scim_route(method: str, pattern: str):  # noqa: ANN202
     def decorator(handler: Callable[..., Any]):  # noqa: ANN202
-        return cloud_route(method, pattern, auth="public", csrf=False)(_scim(handler))
+        return cloud_route(method, pattern, auth="public", csrf=False, machine="scim")(
+            _scim(handler)
+        )
 
     return decorator
 

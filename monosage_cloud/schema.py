@@ -815,6 +815,40 @@ ALTER TABLE invoices ADD COLUMN item_id TEXT NOT NULL DEFAULT '';
 ALTER TABLE invoices ADD COLUMN payment_id TEXT NOT NULL DEFAULT '';
 """
 
+# Hosted operations (docs/multitenant-operations.md, "Limits, draining and budgets"):
+# - the scheduler's own record of when to read a workspace again and what its file looked like then
+#   (scheduler.Scheduler), for candidates' workspaces and for an organization's own monitors;
+# - the platform mail queue (mail.Mailer): delivery attempts, and when a message's link stops working, after which
+#   the outbox keeps the message with the link masked;
+# - operator-assisted recovery of a sole owner who lost both their second factor and their recovery codes
+#   (identity.Identity.request_recovery): a waiting period the owner can cancel from their email, then an audit.
+# (Version 11 is another change's.)
+_V12 = """
+ALTER TABLE workspaces ADD COLUMN due_check_at INTEGER;
+ALTER TABLE workspaces ADD COLUMN due_check_sig TEXT NOT NULL DEFAULT '';
+ALTER TABLE organizations ADD COLUMN monitors_check_at INTEGER;
+ALTER TABLE organizations ADD COLUMN monitors_check_sig TEXT NOT NULL DEFAULT '';
+ALTER TABLE mail_outbox ADD COLUMN expires_at INTEGER;
+ALTER TABLE mail_outbox ADD COLUMN attempts INTEGER NOT NULL DEFAULT 0;
+CREATE INDEX mail_outbox_expiry ON mail_outbox (expires_at);
+CREATE TABLE account_recoveries (
+    org_id TEXT NOT NULL,
+    recovery_id TEXT PRIMARY KEY,
+    member_id TEXT NOT NULL,
+    requested_by TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT '',
+    cancel_token_hash TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'pending',
+    created_at INTEGER NOT NULL,
+    available_at INTEGER NOT NULL,
+    completed_at INTEGER,
+    completed_by TEXT NOT NULL DEFAULT '',
+    cancelled_at INTEGER,
+    cancelled_by TEXT NOT NULL DEFAULT ''
+);
+CREATE INDEX account_recoveries_member ON account_recoveries (org_id, member_id);
+"""
+
 # (version, name, SQL script)
 MIGRATIONS: list[tuple[int, str, str]] = [
     (1, "initial", _V1),
@@ -828,4 +862,5 @@ MIGRATIONS: list[tuple[int, str, str]] = [
     (9, "public_link_members", _V9),
     (10, "custom_plans", _V10),
     (11, "billing_correctness", _V11),
+    (12, "hosted_operations", _V12),
 ]

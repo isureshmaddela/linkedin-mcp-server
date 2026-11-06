@@ -24,6 +24,7 @@ def test_a_person_on_their_own_signs_up_without_a_business_name(cloud):
             "name": "Asha Rao",
             "email": "asha@solo.test",
             "password": PASSWORD,
+            "adult": True,
         },
     )
     assert status in (200, 201), made
@@ -90,6 +91,7 @@ def test_a_platform_admin_confirms_an_email_the_server_could_not_send(cloud):
             "name": "Mina",
             "email": "mina@stuck.test",
             "password": PASSWORD,
+            "adult": True,
         },
     )
     assert status in (200, 201), made
@@ -122,6 +124,7 @@ def test_a_platform_admin_confirms_an_email_the_server_could_not_send(cloud):
             "name": "Oz",
             "email": "oz@other.test",
             "password": PASSWORD,
+            "adult": True,
         },
     )[1]
     status, _ = admin.call(

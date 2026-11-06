@@ -33,6 +33,7 @@ from monosage_cloud.db import (
     defer_foreign_keys,
     many,
     one,
+    platform_scope,
     sync_sequences,
     table_columns,
     table_names,
@@ -74,6 +75,8 @@ ALWAYS_INCLUDE = (
     "audit_stubs",
 )
 FORMAT_VERSION = 1
+# cloud_kv rows recording the backup window each organization was last queued in (BackupService.enqueue_due)
+BACKUP_WINDOW_KEY = "backup_window:"
 
 
 def _encode(value: Any) -> Any:
@@ -327,6 +330,83 @@ class BackupService:
                     code="bad_backup",
                 )
         return manifest
+
+    # ------------------------------------------------------------------ scheduled backups
+
+    def backup_root(self) -> Path:
+        configured = str(self.app.config.backup_dir or "").strip()
+        return Path(configured) if configured else self.app.config.data_root / "backups"
+
+    def enqueue_due(self) -> int:
+        """Queue one ``backup.org`` job per organization per ``backup_interval_hours`` (off when it is 0)."""
+        hours = int(self.app.config.backup_interval_hours or 0)
+        if hours <= 0:
+            return 0
+        now = self.app.clock.now()
+        window = str(now // (hours * 3600))
+        with platform_scope(), self.db.read() as connection:
+            orgs = [
+                row["org_id"]
+                for row in many(
+                    connection,
+                    "SELECT org_id FROM organizations WHERE deleted_at IS NULL",
+                )
+            ]
+            done = {
+                str(row["key"])[len(BACKUP_WINDOW_KEY) :]: str(row["value"])
+                for row in many(
+                    connection,
+                    "SELECT key, value FROM cloud_kv WHERE key LIKE ?",
+                    (f"{BACKUP_WINDOW_KEY}%",),
+                )
+            }
+        queued = 0
+        for org_id in orgs:
+            if done.get(org_id) == window:
+                continue
+            job = self.app.queue.enqueue(
+                org_id,
+                "backup.org",
+                dedupe_key=f"backup.org:{org_id}",
+                priority=8,
+                max_attempts=2,
+            )
+            with platform_scope(), self.db.write() as connection:
+                connection.execute(
+                    "INSERT INTO cloud_kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    (f"{BACKUP_WINDOW_KEY}{org_id}", window),
+                )
+            queued += 1 if job else 0
+        return queued
+
+    def scheduled_backup(self, org_id: str) -> dict[str, Any]:
+        """Write one organization's backup archive under the backup directory and keep the newest ``backup_keep``."""
+        import time as _time
+
+        with platform_scope():
+            data = self.backup_org(org_id)
+        directory = self.backup_root() / org_id
+        directory.mkdir(parents=True, exist_ok=True)
+        stamp = _time.strftime("%Y%m%dT%H%M%SZ", _time.gmtime(self.app.clock.now()))
+        target = directory / f"{org_id}-{stamp}.zip"
+        partial = target.with_name(target.name + ".part")
+        partial.write_bytes(data)
+        partial.replace(target)
+        keep = max(1, int(self.app.config.backup_keep or 1))
+        archives = sorted(directory.glob(f"{org_id}-*.zip"))
+        for old in archives[:-keep]:
+            try:
+                old.unlink()
+            except OSError:
+                pass
+        self.app.platform_audit.record(
+            "tenant.backup_scheduled",
+            operator_label="scheduler",
+            org_id=org_id,
+            source="system",
+            detail={"file": target.name, "size": len(data), "kept": min(keep, len(archives))},
+        )
+        return {"file": str(target), "size": len(data)}
 
     def restore_org(
         self,

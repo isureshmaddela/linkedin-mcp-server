@@ -55,6 +55,36 @@ RETAINED_TABLES = frozenset(
     }
 )
 AUDIT_STUB_RETENTION_DAYS = 7 * 365
+TICK_LEASE = 60  # seconds a scheduler pass holds its lease between renewals
+TICK_INTERVAL = 20  # seconds from the end of one pass to the earliest start of the next
+
+
+def _lease_until(value: Any) -> int:
+    """A lease row's end ("<epoch>:<holder>", or a bare epoch from before holders were recorded)."""
+    try:
+        return int(str(value).partition(":")[0])
+    except ValueError:
+        return 0
+
+
+class _Renewer:
+    """Renews the tick's lease at most every few seconds however often the pass calls it."""
+
+    def __init__(self, lifecycle: Lifecycle, name: str, holder: str) -> None:
+        self.lifecycle, self.name, self.holder = lifecycle, name, holder
+        self._last = time.monotonic()
+        self.held = True
+
+    def __call__(self, *, force: bool = False) -> bool:
+        if not self.held:
+            return False
+        if not force and time.monotonic() - self._last < 5:
+            return True
+        self._last = time.monotonic()
+        self.held = self.lifecycle._renew(self.name, self.holder, TICK_LEASE)
+        if not self.held:
+            logger.warning("The scheduler pass lost its lease; stopping early")
+        return self.held
 
 
 def _holds_unmasked_data(row: dict[str, Any]) -> bool:
@@ -324,6 +354,21 @@ class Lifecycle:
                     for row in self.app.audit.export_lines(org_id)
                 ),
             )
+            # The company's own business: the organization's apps (_org/api.sqlite3): customers, orders, invoices,
+            # bookings, revenue, pages. Stored secrets and caches are left out (secrets are encrypted under the
+            # organization's key and useless outside it).
+            try:
+                business = self._business_tables(org_id)
+            except Exception:  # noqa: BLE001 - a broken database must not fail the whole export
+                logger.warning(
+                    "Could not export the business data of %s", org_id, exc_info=True
+                )
+                business = None
+            if business is not None:
+                archive.writestr(
+                    "business/organization.json",
+                    json.dumps(business, ensure_ascii=False, indent=2, default=str),
+                )
             for candidate in candidates:
                 try:
                     blob = self.app.workspaces.export_zip(
@@ -357,6 +402,43 @@ class Lifecycle:
                         json.dumps(space, ensure_ascii=False, indent=2, default=str),
                     )
         return buffer.getvalue()
+
+    def _business_tables(self, org_id: str) -> dict[str, Any] | None:
+        """The organization's apps database as JSON tables, or None when it never opened one."""
+        import base64
+        import sqlite3
+
+        from monosage_cloud.workspace import MEMBER_APPS_EXPORT_SKIP
+
+        path = self.app.workspaces.org_api_path(org_id)
+        if not path.exists():
+            return None
+        source = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True, timeout=15)
+        source.row_factory = sqlite3.Row
+        try:
+            names = [
+                row[0]
+                for row in source.execute(
+                    "SELECT name FROM sqlite_master WHERE type = 'table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+                )
+                if row[0] not in MEMBER_APPS_EXPORT_SKIP and "cache" not in row[0]
+            ]
+            tables: dict[str, list[dict[str, Any]]] = {}
+            for name in names:
+                tables[name] = [
+                    {
+                        key: (
+                            {"base64": base64.b64encode(bytes(value)).decode("ascii")}
+                            if isinstance(value, (bytes, memoryview))
+                            else value
+                        )
+                        for key, value in dict(row).items()
+                    }
+                    for row in source.execute(f'SELECT * FROM "{name}"')  # noqa: S608 - names from sqlite_master
+                ]
+        finally:
+            source.close()
+        return {"org_id": org_id, "exported_at": self.now, "tables": tables}
 
     def _removed_members(self, org_id: str) -> list[dict[str, Any]]:
         with self.db.read() as connection:
@@ -1048,36 +1130,67 @@ class Lifecycle:
     # ------------------------------------------------------------------ the scheduler tick
 
     def tick(self) -> dict[str, Any]:
-        """One pass of everything that depends on time. Safe to run from several replicas (it takes a lease)."""
-        if not self._lease("tick", 20):
+        """One pass of everything that depends on time. Safe to run from several replicas (it takes a lease).
+
+        The lease is renewed while the pass runs (a pass over many organizations can outlast it), and when the pass
+        ends it is set to end ``TICK_INTERVAL`` seconds later, so passes start at most that often. A pass whose lease
+        was taken over stops early instead of running beside the new holder.
+        """
+        holder = self._lease("tick", TICK_LEASE)
+        if holder is None:
             return {"skipped": True}
+        self.app.host_guard.beat()
+        renew = _Renewer(self, "tick", holder)
         summary: dict[str, Any] = {}
-        summary["billing"] = self.app.billing.process_due()
-        summary["plan_migrations"] = self.app.catalog.apply_due_migrations()
-        summary["support"] = self.app.platform.expire_support_access()
-        summary["housekeeping"] = self._housekeeping()
-        summary["queue"] = self.app.scheduler.enqueue_due()
+        try:
+            summary["billing"] = self.app.billing.process_due()
+            renew(force=True)
+            summary["plan_migrations"] = self.app.catalog.apply_due_migrations()
+            summary["support"] = self.app.platform.expire_support_access()
+            renew(force=True)
+            summary["housekeeping"] = self._housekeeping(renew)
+            summary["queue"] = self.app.scheduler.enqueue_due(renew=renew)
+            summary["backups"] = self.app.backup.enqueue_due()
+        finally:
+            self._renew("tick", holder, TICK_INTERVAL)  # the next pass starts no sooner than this
         return summary
 
-    def _lease(self, name: str, seconds: int) -> bool:
+    def _lease(self, name: str, seconds: int) -> str | None:
+        """Take the named lease for ``seconds``; the holder token to renew it with, or None when someone holds it."""
+        key = f"lease:{name}"
+        holder = new_id()[:16]
+        with self.db.write() as connection:
+            row = one(connection, "SELECT value FROM cloud_kv WHERE key = ?", (key,))
+            if row and _lease_until(row["value"]) > self.now:
+                return None
+            connection.execute(
+                "INSERT INTO cloud_kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                (key, f"{self.now + seconds}:{holder}"),
+            )
+        return holder
+
+    def _renew(self, name: str, holder: str, seconds: int) -> bool:
+        """Extend a lease this pass still holds (False: it expired and another pass holds it now)."""
         key = f"lease:{name}"
         with self.db.write() as connection:
             row = one(connection, "SELECT value FROM cloud_kv WHERE key = ?", (key,))
-            if row and int(row["value"]) > self.now:
+            if row is None or str(row["value"]).partition(":")[2] != holder:
                 return False
             connection.execute(
-                "INSERT INTO cloud_kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-                (key, str(self.now + seconds)),
+                "UPDATE cloud_kv SET value = ? WHERE key = ?",
+                (f"{self.now + seconds}:{holder}", key),
             )
         return True
 
-    def _housekeeping(self) -> dict[str, int]:
+    def _housekeeping(self, renew: Any = None) -> dict[str, int]:
         done = {
             "sessions": 0,
             "audit_pruned": 0,
             "documents_purged": 0,
             "exports_removed": 0,
+            "mail": 0,
         }
+        done["mail"] = self.app.mail.housekeeping()
         with self.db.write() as connection:
             done["sessions"] = connection.execute(
                 "DELETE FROM sessions WHERE expires_at < ? OR (revoked_at IS NOT NULL AND revoked_at < ?)",
@@ -1118,6 +1231,8 @@ class Lifecycle:
                 "SELECT o.org_id FROM organizations o WHERE o.deleted_at IS NULL",
             )
         for org in orgs:
+            if renew is not None and renew() is False:
+                break
             org_id = org["org_id"]
             try:
                 if self.on_legal_hold(org_id):

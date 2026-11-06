@@ -15,6 +15,7 @@ from __future__ import annotations
 import json
 import logging
 import re
+import socket
 import threading
 import time
 from collections import defaultdict
@@ -24,7 +25,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import TYPE_CHECKING, Any
 from urllib.parse import unquote, urlsplit
 
-from aira.observability import metrics, new_correlation_id
+from aira.observability import metrics, new_correlation_id, redact_path
 from aira.security import (
     SECURITY_HEADERS,
     RateLimiter,
@@ -89,6 +90,53 @@ def _local() -> Any:
     return auto_apply_assistant
 
 
+def member_bucket(principal: Principal) -> str:
+    """The per-caller rate-limit bucket: the member, or for an app acting for its organization (a
+    client-credentials token, no member) that organization and app, never one bucket every organization's apps share."""
+    if principal.extra.get("service") or not principal.actor_id:
+        client = str((principal.extra.get("oauth") or {}).get("client_id") or "")
+        return f"app:{principal.org_id}:{client}"
+    return f"member:{principal.actor_id}"
+
+
+def machine_key(
+    kind: str, request: HttpRequest, match: re.Match[str], route_name: str
+) -> str:
+    """The bucket a machine caller is limited in: the provider, the OAuth client or the SCIM token, not the address."""
+    import base64
+    import hashlib
+
+    if kind == "webhook":
+        provider = match.group(1) if match.re.groups else route_name
+        return f"webhook:{provider}"
+    authorization = request.headers.get("authorization", "")
+    if kind == "oauth":
+        client = ""
+        if authorization[:6].lower() == "basic ":
+            try:
+                client = (
+                    base64.b64decode(authorization[6:].strip())
+                    .decode("utf-8")
+                    .partition(":")[0]
+                )
+            except (ValueError, UnicodeDecodeError):
+                client = ""
+        if not client:
+            try:
+                client = str(request.json().get("client_id") or "")
+            except ValueError:
+                client = ""
+        return (
+            f"oauth:{client[:80]}" if client else f"oauth-anonymous:{request.client_ip}"
+        )
+    if kind == "scim":
+        token = authorization[7:].strip() if authorization[:7].lower() == "bearer " else ""
+        if token:
+            return f"scim:{hashlib.sha256(token.encode('utf-8', 'ignore')).hexdigest()[:24]}"
+        return f"scim-anonymous:{request.client_ip}"
+    return f"{kind}:{route_name}"
+
+
 @dataclass
 class Ctx:
     """Everything the per-kind hooks of a local route need."""
@@ -129,6 +177,18 @@ class Gateway:
         self.auth_limiter = RateLimiter(
             limit=30, window_seconds=300, lockout_seconds=300
         )
+        # Signed and credentialed machine callers (``cloud_route(machine=...)``: billing webhooks, SCIM, the OAuth
+        # token endpoint, the signed internal callbacks) never share the sign-in limiter: a renewal burst from the
+        # billing provider must not lock it out, and a person's failed sign-ins must not stop SCIM. They are limited
+        # per provider, client or token, and rejected credentials count per address on a limiter of their own.
+        self.machine_limiter = RateLimiter(
+            limit=app.config.machine_requests_per_minute, window_seconds=60
+        )
+        self.machine_failure_limiter = RateLimiter(
+            limit=app.config.machine_failures_per_window,
+            window_seconds=300,
+            lockout_seconds=300,
+        )
         self.org_limiter = RateLimiter(
             limit=app.config.org_requests_per_minute, window_seconds=60
         )
@@ -140,6 +200,7 @@ class Gateway:
         self.public_view_limiter = RateLimiter(limit=300, window_seconds=60)
         self.public_action_limiter = RateLimiter(limit=60, window_seconds=60)
         self.agents = app.agents
+        self.server: HostedServer | None = None  # set by make_server
         self.stats: dict[str, dict[str, int]] = defaultdict(
             lambda: {"requests": 0, "errors": 0, "limited": 0}
         )
@@ -206,7 +267,7 @@ class Gateway:
         logger.info(
             "%s %s -> %s",
             request.method,
-            request.path,
+            redact_path(request.path),  # capability links (exports, invitations, public pages) never reach a log
             response.status,
             extra={
                 "correlation_id": correlation,
@@ -241,11 +302,25 @@ class Gateway:
         probe = request.method == "GET" and request.path in {
             "/api/health",
             "/api/ready",
+            "/metrics",  # a scraper addresses the pod by IP too; the endpoint needs its bearer token
         }
         if not probe and not config.host_allowed(host):
             raise Forbidden(
                 "This host is not served by this deployment.", code="bad_host"
             )
+        if (
+            probe
+            and request.path == "/api/ready"
+            and self.server is not None
+            and self.server.draining.is_set()
+        ):
+            # SIGTERM: the orchestrator stops sending traffic while in-flight requests finish
+            return (
+                self._error(503, {"status": "draining", "code": "draining"}),
+                "ready",
+                "",
+            )
+        self.app.host_guard.beat()  # this node still uses the data directory (app.HostGuard)
         limiter = (
             self.static_limiter
             if request.method == "GET" and request.path.startswith("/static/")
@@ -401,7 +476,7 @@ class Gateway:
             )
         self.org_limiter.hit(f"org:{org_id}")
         if principal is not None:
-            key = f"member:{principal.actor_id}"
+            key = member_bucket(principal)
             allowed, retry = self.member_limiter.check(key)
             if not allowed:
                 raise TooManyRequests(
@@ -449,6 +524,8 @@ class Gateway:
                         "candidate" if principal.role == CANDIDATE else "staff",
                         principal,
                     )
+        elif route.machine:
+            self._machine_check(request, route, match)
         elif route.auth == "public" and route.method in MUTATING:
             allowed, retry = self.auth_limiter.check(f"auth:{request.client_ip}")
             if not allowed:
@@ -460,13 +537,41 @@ class Gateway:
         if request.method in {"POST", "PATCH", "PUT"} and request.body:
             payload = request.json()
         req = Req(self.app, request, match, principal, correlation, payload)
-        result = route.handler(req)
+        try:
+            result = route.handler(req)
+        except (CloudError, PermissionError) as error:
+            if route.machine and getattr(error, "status", 403) in {401, 403}:
+                self.machine_failure_limiter.hit(f"machine-fail:{request.client_ip}")
+            raise
         if isinstance(result, Reply):
-            return result.to_response(), route.name, org_id
-        if isinstance(result, HttpResponse):
-            return result, route.name, org_id
-        status, body = result
-        return Reply(status, body).to_response(), route.name, org_id
+            response = result.to_response()
+        elif isinstance(result, HttpResponse):
+            response = result
+        else:
+            status, body = result
+            response = Reply(status, body).to_response()
+        if route.machine and response.status in {401, 403}:
+            # a rejected signature, client secret or SCIM token: guessing is limited per address
+            self.machine_failure_limiter.hit(f"machine-fail:{request.client_ip}")
+        return response, route.name, org_id
+
+    def _machine_check(self, request: HttpRequest, route, match: re.Match[str]) -> None:  # noqa: ANN001
+        """The limits of a signed machine route: per caller (not per address), and per address for rejections."""
+        allowed, retry = self.machine_failure_limiter.check(
+            f"machine-fail:{request.client_ip}"
+        )
+        if not allowed:
+            raise TooManyRequests(
+                f"Too many rejected credentials. Try again in {retry} seconds.",
+                retry_after=retry,
+            )
+        key = machine_key(route.machine, request, match, route.name)
+        allowed, retry = self.machine_limiter.check(key)
+        if not allowed:
+            raise TooManyRequests(
+                f"Too many requests. Try again in {retry} seconds.", retry_after=retry
+            )
+        self.machine_limiter.hit(key)
 
     # ------------------------------------------------------------------ the local build's routes
 
@@ -646,6 +751,11 @@ class Gateway:
         status = response.status if response else 500
         for header in ctx.headers:
             response.headers.append(header)
+        if rule.write and status < 400:
+            # a plan, schedule or monitor may have changed: the scheduler reads this workspace on its next tick
+            self.app.scheduler.touch(
+                org_id, candidate_id if rule.scope == "candidate" else ""
+            )
         if rule.audit or (rule.audit is None and rule.write):
             self.app.audit.record(
                 org_id,
@@ -855,45 +965,226 @@ def client_address(peer: str, forwarded_for: str, config: Any) -> str:
     return hops[max(0, len(hops) - max(1, int(config.trusted_proxy_hops)))]
 
 
+class HostedServer(ThreadingHTTPServer):
+    """The standard-library threaded server with the limits a public tier needs.
+
+    * at most ``max_connections`` connections at once (one thread each): past that a connection gets ``503`` at
+      once instead of a thread, and near the cap answers close their connection so idle keep-alives free up;
+    * a socket timeout on every connection (``HostedHandler.timeout``), so a slow or silent client cannot hold one;
+    * a listen backlog of ``backlog`` (the standard library's default is 5);
+    * bodies over ``large_body_bytes`` share ``large_body_slots``, so a burst of uploads cannot hold gigabytes;
+    * :meth:`drain` for SIGTERM: readiness answers 503, answers close their connections, then the server stops
+      accepting and waits for what is in flight.
+    """
+
+    daemon_threads = True
+    allow_reuse_address = True
+
+    def __init__(
+        self,
+        address: tuple[str, int],
+        handler: type[BaseHTTPRequestHandler],
+        *,
+        max_connections: int = 512,
+        backlog: int = 128,
+        large_body_slots: int = 8,
+    ) -> None:
+        self.request_queue_size = max(5, int(backlog))  # read by server_activate, inside __init__
+        self.max_connections = max(1, int(max_connections))
+        self.connection_slots = threading.BoundedSemaphore(self.max_connections)
+        self.large_bodies = threading.BoundedSemaphore(max(1, int(large_body_slots)))
+        self.draining = threading.Event()
+        self.drained = threading.Event()
+        self.refused = 0
+        self._active = 0
+        self._active_lock = threading.Condition()
+        self._connections: dict[Any, bool] = {}  # socket -> answering a request now
+        super().__init__(address, handler)
+
+    # -- accounting ----------------------------------------------------------------------------
+
+    @property
+    def active(self) -> int:
+        with self._active_lock:
+            return self._active
+
+    def near_capacity(self) -> bool:
+        return self.active >= max(1, int(self.max_connections * 0.8))
+
+    def process_request(self, request: Any, client_address: Any) -> None:
+        if self.draining.is_set() or not self.connection_slots.acquire(blocking=False):
+            self.refused += 1
+            self._refuse(request)
+            return
+        with self._active_lock:
+            self._active += 1
+            self._connections[request] = False
+        try:
+            super().process_request(request, client_address)
+        except Exception:
+            self._finished(request)
+            raise
+
+    def process_request_thread(self, request: Any, client_address: Any) -> None:
+        try:
+            super().process_request_thread(request, client_address)
+        finally:
+            self._finished(request)
+
+    def _finished(self, request: Any) -> None:
+        with self._active_lock:
+            if self._connections.pop(request, None) is None:
+                return
+            self._active -= 1
+            self._active_lock.notify_all()
+        self.connection_slots.release()
+
+    def mark(self, request: Any, busy: bool) -> None:
+        with self._active_lock:
+            if request in self._connections:
+                self._connections[request] = busy
+
+    def _refuse(self, request: Any) -> None:
+        import ssl
+
+        if not isinstance(request, ssl.SSLSocket):  # no handshake yet: just close a TLS connection
+            body = b'{"error":"The server is busy. Try again in a moment.","code":"busy"}'
+            try:
+                request.settimeout(2)
+                request.sendall(
+                    b"HTTP/1.1 503 Service Unavailable\r\nContent-Type: application/json\r\n"
+                    b"Retry-After: 2\r\nConnection: close\r\nContent-Length: "
+                    + str(len(body)).encode()
+                    + b"\r\n\r\n"
+                    + body
+                )
+            except OSError:
+                pass
+        self.shutdown_request(request)
+
+    def handle_error(self, request: Any, client_address: Any) -> None:
+        logger.debug("Connection error from %s", client_address[0], exc_info=True)
+
+    # -- SIGTERM ---------------------------------------------------------------------------------
+
+    def drain(self, timeout: float, *, grace: float = 0.0) -> bool:
+        """Stop gracefully: True when every in-flight request finished within ``timeout`` seconds.
+
+        For ``grace`` seconds the server keeps accepting (the orchestrator is still taking the pod out of the
+        service) while readiness answers 503 and every answer closes its connection; then it stops accepting,
+        closes idle keep-alive connections and waits for the requests still running.
+        """
+        self.draining.set()
+        if grace > 0:
+            time.sleep(grace)
+        self.shutdown()  # serve_forever returns; no new connections are taken
+        with self._active_lock:
+            idle = [sock for sock, busy in self._connections.items() if not busy]
+        for sock in idle:
+            try:
+                sock.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+        deadline = time.monotonic() + max(0.0, timeout)
+        with self._active_lock:
+            while self._active > 0:
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    break
+                self._active_lock.wait(remaining)
+            finished = self._active == 0
+        self.drained.set()
+        if not finished:
+            logger.warning(
+                "Stopped with %d requests still running after %ss", self.active, timeout
+            )
+        return finished
+
+
+def _plain(status: int, message: str, code: str) -> HttpResponse:
+    return HttpResponse(
+        status,
+        [("Content-Type", "application/json")],
+        json.dumps({"error": message, "code": code}).encode("utf-8"),
+    )
+
+
 class HostedHandler(BaseHTTPRequestHandler):
     server_version = "AiraCloud/1.0"
     protocol_version = "HTTP/1.1"
     gateway: Gateway
+    server: HostedServer  # type: ignore[assignment]
+    timeout = 75  # seconds a connection may sit without sending (make_server sets AIRA_CLOUD_HTTP_TIMEOUT)
 
     def log_message(self, format: str, *args: Any) -> None:  # noqa: A002 - the gateway logs structured lines itself
         return
 
-    def _serve(self) -> None:
-        length = int(self.headers.get("Content-Length", "0") or 0)
-        if length > 25_000_000:
-            self._write(
-                HttpResponse(
-                    413,
-                    [("Content-Type", "application/json")],
-                    b'{"error":"The request body is too large.","code":"too_large"}',
-                )
-            )
-            self.close_connection = True
-            return
-        body = self.rfile.read(length) if length else b""
-        headers = {k.lower(): v for k, v in self.headers.items()}
-        config = self.gateway.app.config
-        client = client_address(
-            self.client_address[0], headers.get("x-forwarded-for", ""), config
-        )
-        parts = urlsplit(self.path)
-        from urllib.parse import parse_qs
+    def setup(self) -> None:
+        super().setup()
+        import ssl
 
-        request = HttpRequest(
-            self.command,
-            parts.path,
-            parse_qs(parts.query),
-            headers,
-            body,
-            client,
-            headers.get("host", ""),
-        )
-        self._write(self.gateway.handle(request))
+        if isinstance(self.connection, ssl.SSLSocket):
+            self.connection.do_handshake()  # here, in this connection's thread, under its timeout
+
+    def _serve(self) -> None:
+        server = self.server
+        tracked = isinstance(server, HostedServer)
+        if tracked:
+            server.mark(self.request, True)
+        large = False
+        try:
+            config = self.gateway.app.config
+            refusal = None
+            if self.headers.get("Transfer-Encoding"):
+                refusal = _plain(
+                    411, "Send the body with a Content-Length.", "length_required"
+                )
+            raw_length = str(self.headers.get("Content-Length", "") or "0").strip()
+            length = int(raw_length) if raw_length.isdigit() else -1
+            if refusal is None and length < 0:
+                refusal = _plain(400, "The Content-Length is not valid.", "invalid")
+            if refusal is None and length > config.http_max_body_bytes:
+                refusal = _plain(413, "The request body is too large.", "too_large")
+            if refusal is None and tracked and length > config.http_large_body_bytes:
+                large = server.large_bodies.acquire(blocking=False)
+                if not large:
+                    refusal = _plain(
+                        503, "Too many uploads at once. Try again in a moment.", "busy"
+                    )
+            if refusal is not None:
+                # the body is never read: close the connection so its bytes are not taken for the next request
+                self.close_connection = True
+                self._write(refusal)
+                return
+            body = self.rfile.read(length) if length else b""
+            if len(body) < length:
+                self.close_connection = True  # the client went away mid-body
+                return
+            headers = {k.lower(): v for k, v in self.headers.items()}
+            client = client_address(
+                self.client_address[0], headers.get("x-forwarded-for", ""), config
+            )
+            parts = urlsplit(self.path)
+            from urllib.parse import parse_qs
+
+            request = HttpRequest(
+                self.command,
+                parts.path,
+                parse_qs(parts.query),
+                headers,
+                body,
+                client,
+                headers.get("host", ""),
+            )
+            response = self.gateway.handle(request)
+            if tracked and (server.draining.is_set() or server.near_capacity()):
+                self.close_connection = True
+            self._write(response)
+        finally:
+            if large:
+                server.large_bodies.release()
+            if tracked:
+                server.mark(self.request, False)
 
     def _write(self, response: HttpResponse) -> None:
         self.send_response(response.status)
@@ -902,6 +1193,8 @@ class HostedHandler(BaseHTTPRequestHandler):
             self.send_header(name, value)
         if "content-length" not in sent:
             self.send_header("Content-Length", str(len(response.body)))
+        if self.close_connection and "connection" not in sent:
+            self.send_header("Connection", "close")
         self.end_headers()
         if self.command != "HEAD":
             self.wfile.write(response.body)
@@ -911,30 +1204,38 @@ class HostedHandler(BaseHTTPRequestHandler):
 
 def make_server(
     gateway: Gateway, host: str | None = None, port: int | None = None
-) -> ThreadingHTTPServer:
+) -> HostedServer:
     config = gateway.app.config
 
     class Handler(HostedHandler):
         pass
 
     Handler.gateway = gateway
-    server = ThreadingHTTPServer(
-        (host or config.host, config.port if port is None else port), Handler
+    Handler.timeout = max(1, int(config.http_socket_timeout))
+    server = HostedServer(
+        (host or config.host, config.port if port is None else port),
+        Handler,
+        max_connections=config.http_max_connections,
+        backlog=config.http_backlog,
+        large_body_slots=config.http_large_body_slots,
     )
-    server.daemon_threads = True
+    gateway.server = server  # readiness answers 503 while it drains
     if config.tls_cert and config.tls_key:
         import ssl
 
         context_ = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
         context_.minimum_version = ssl.TLSVersion.TLSv1_2
         context_.load_cert_chain(config.tls_cert, config.tls_key)
-        server.socket = context_.wrap_socket(server.socket, server_side=True)
+        server.socket = context_.wrap_socket(
+            server.socket, server_side=True, do_handshake_on_connect=False
+        )
     return server
 
 
 __all__ = [
     "Gateway",
     "HostedHandler",
+    "HostedServer",
     "make_server",
     "Ctx",
     "LINKEDIN_NOTICE",

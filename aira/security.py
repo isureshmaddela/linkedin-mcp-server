@@ -27,7 +27,11 @@ SECURITY_HEADERS: tuple[tuple[str, str], ...] = (
 
 
 class RateLimiter:
-    """Sliding-window limiter keyed by an identifier (IP or account)."""
+    """Sliding-window limiter keyed by an identifier (IP or account).
+
+    Keys that have gone quiet (no event inside the window and no lockout running) are dropped by a sweep that runs
+    at most once a window, so a stream of one-off addresses cannot grow the tables without bound.
+    """
 
     def __init__(
         self, *, limit: int, window_seconds: int, lockout_seconds: int = 0
@@ -38,6 +42,28 @@ class RateLimiter:
         self._events: dict[str, deque[float]] = {}
         self._locked_until: dict[str, float] = {}
         self._lock = threading.Lock()
+        self._swept_at: float | None = None
+
+    def __len__(self) -> int:
+        with self._lock:
+            return len(self._events.keys() | self._locked_until.keys())
+
+    def _sweep(self, current: float) -> None:
+        """Forget idle keys (called with the lock held)."""
+        if self._swept_at is None:
+            self._swept_at = current
+            return
+        if current - self._swept_at < max(1.0, float(self.window)):
+            return
+        self._swept_at = current
+        horizon = current - self.window
+        for key in [k for k, until in self._locked_until.items() if until <= current]:
+            del self._locked_until[key]
+        for key in [
+            k for k, events in self._events.items() if not events or events[-1] <= horizon
+        ]:
+            if key not in self._locked_until:
+                del self._events[key]
 
     def check(
         self, key: str, *, now: float | None = None, limit: int | None = None
@@ -50,6 +76,7 @@ class RateLimiter:
         current = now if now is not None else time.monotonic()
         cap = self.limit if limit is None else limit
         with self._lock:
+            self._sweep(current)
             locked = self._locked_until.get(key, 0)
             if locked > current:
                 return False, int(locked - current) + 1
@@ -66,6 +93,7 @@ class RateLimiter:
     def hit(self, key: str, *, now: float | None = None) -> None:
         current = now if now is not None else time.monotonic()
         with self._lock:
+            self._sweep(current)
             self._events.setdefault(key, deque()).append(current)
 
     def reset(self, key: str) -> None:

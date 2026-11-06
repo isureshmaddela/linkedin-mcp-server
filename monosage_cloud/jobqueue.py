@@ -1,9 +1,10 @@
 """A tenant-fair job queue in the control-plane database.
 
-Every job carries ``org_id`` (and usually ``candidate_id``). Leasing picks the waiting job of the
-organization with the fewest jobs running, so one tenant with a long backlog cannot starve another,
-and a per-organization concurrency cap keeps a burst from occupying the whole pool. One candidate
-runs one automation job at a time (the same rule as the local single-account slot).
+Every job carries ``org_id`` (and usually ``candidate_id``). Leasing lists the organizations that have ready work
+and serves the one with the fewest jobs running first, reading only a few jobs of each, so one tenant with a long
+backlog cannot starve (or hide) another. Each job kind has its own per-organization cap, and all kinds together a
+ceiling, so a burst of one kind cannot occupy the whole pool or another kind's slots. One candidate runs one job at a
+time (the same rule as the local single-account slot).
 
 The SQL is portable; on PostgreSQL the lease uses ``FOR UPDATE SKIP LOCKED`` instead of the
 write lock SQLite takes.
@@ -29,6 +30,17 @@ AUTOMATION_KINDS = (
     "inbox.sync",
 )
 RETRY_BACKOFF = (30, 120, 600)
+# Ready jobs read per organization when leasing (the per-organization selection, see JobQueue.lease).
+ORG_SCAN = 25
+# Each job kind has its own cap per organization (CloudConfig.kind_concurrency overrides these; a kind not listed
+# gets per_org_concurrency), so a burst of exports or mail does not hold the slots automation needs, and the reverse.
+KIND_CAPS: dict[str, int] = {
+    "mail.deliver": 4,
+    "webhook.deliver": 4,
+    "backup.org": 1,
+    "keys.rotate": 1,
+    "suite.tick": 2,
+}
 
 
 class JobQueue:
@@ -113,8 +125,14 @@ class JobQueue:
         lease_seconds: int | None = None,
         agent_url: str = "",
     ) -> dict[str, Any] | None:
-        """Take the next job fairly: the organization with the fewest running jobs goes first, oldest wait breaking ties."""
-        per_org = per_org_limit or self.app.config.per_org_concurrency
+        """Take the next job fairly: the organization with the fewest running jobs goes first, oldest wait breaking ties.
+
+        Selection is per organization: the organizations with ready work are listed first (one row each), and only
+        then are a few of each one's jobs read, so one organization's backlog of thousands cannot hide another's
+        single job. Each job kind has its own per-organization cap (``kind_caps``; ``per_org_limit`` sets it for
+        every kind), and all kinds together stay under ``per_org_total_concurrency``.
+        """
+        per_kind_default = per_org_limit or self.app.config.per_org_concurrency
         seconds = lease_seconds or self.app.config.lease_seconds
         now = self.now
         with self.db.write(
@@ -125,11 +143,14 @@ class JobQueue:
             if kinds:
                 clauses.append(f"kind IN ({','.join('?' * len(kinds))})")
                 params.extend(kinds)
-            ready = many(
+            where = " AND ".join(clauses)
+            orgs = many(
                 connection,
-                f"SELECT job_id, org_id, candidate_id, kind, priority, run_at, host FROM queue_jobs WHERE {' AND '.join(clauses)} ORDER BY priority, run_at, created_at LIMIT 500",
+                f"SELECT org_id, MIN(priority) AS priority, MIN(run_at) AS run_at FROM queue_jobs WHERE {where} GROUP BY org_id",
                 params,
             )
+            if not orgs:
+                return None
             # A job pinned to the host that holds the candidate's LinkedIn session waits for that host,
             # unless the host stopped reporting (then any worker may take it and fail gracefully).
             live = {
@@ -140,22 +161,12 @@ class JobQueue:
                     (now - 60,),
                 )
             }
-            ready = [
-                job
-                for job in ready
-                if not job["host"]
-                or job["host"] == agent_url
-                or job["host"] not in live
-            ]
-            if not ready:
-                return None
-            running_by_org = {
-                r["org_id"]: int(r["n"])
-                for r in many(
-                    connection,
-                    "SELECT org_id, COUNT(*) AS n FROM queue_jobs WHERE status = 'leased' GROUP BY org_id",
-                )
-            }
+            running: dict[str, dict[str, int]] = {}
+            for r in many(
+                connection,
+                "SELECT org_id, kind, COUNT(*) AS n FROM queue_jobs WHERE status = 'leased' GROUP BY org_id, kind",
+            ):
+                running.setdefault(r["org_id"], {})[r["kind"]] = int(r["n"])
             busy_candidates = {
                 (r["org_id"], r["candidate_id"])
                 for r in many(
@@ -164,35 +175,41 @@ class JobQueue:
                 )
             }
             limits = self._org_limits(connection)
-            candidates: list[tuple[tuple[int, int, int], dict[str, Any]]] = []
-            seen_orgs: set[str] = set()
-            for job in ready:
-                org = job["org_id"]
-                if (
-                    job["candidate_id"]
-                    and (org, job["candidate_id"]) in busy_candidates
-                ):
-                    continue
-                if org in seen_orgs:
-                    continue
-                running = running_by_org.get(org, 0)
-                if running >= limits.get(org, per_org):
-                    seen_orgs.add(org)
-                    continue
-                seen_orgs.add(org)
-                candidates.append(((job["priority"], running, job["run_at"]), job))
-            candidates.sort(key=lambda item: item[0])
+            order = sorted(
+                orgs,
+                key=lambda o: (
+                    int(o["priority"]),
+                    sum(running.get(o["org_id"], {}).values()),
+                    int(o["run_at"]),
+                ),
+            )
             claimed = None
-            for _key, best in candidates:
-                if self._claim(
+            for org in order:
+                org_id = org["org_id"]
+                caps = self._caps(org_id, per_kind_default, limits)
+                by_kind = running.get(org_id, {})
+                if sum(by_kind.values()) >= caps["total"]:
+                    continue
+                ready = many(
                     connection,
-                    best,
-                    limits.get(best["org_id"], per_org),
-                    worker_id,
-                    now,
-                    seconds,
-                ):
-                    claimed = best
+                    f"SELECT job_id, org_id, candidate_id, kind, priority, run_at, host FROM queue_jobs WHERE org_id = ? AND {where} "
+                    "ORDER BY priority, run_at, created_at LIMIT ?",
+                    [org_id, *params, ORG_SCAN],
+                )
+                for job in ready:
+                    if job["host"] and job["host"] != agent_url and job["host"] in live:
+                        continue
+                    if (
+                        job["candidate_id"]
+                        and (org_id, job["candidate_id"]) in busy_candidates
+                    ):
+                        continue
+                    if by_kind.get(job["kind"], 0) >= caps["kind"](job["kind"]):
+                        continue
+                    if self._claim(connection, job, caps, worker_id, now, seconds):
+                        claimed = job
+                    break  # one try per organization; the next organization goes after it
+                if claimed is not None:
                     break
             if claimed is None:
                 return None
@@ -206,11 +223,28 @@ class JobQueue:
         job["payload"] = loads(job["payload"], {})
         return job
 
+    def _caps(
+        self, org_id: str, per_kind_default: int, limits: dict[str, int]
+    ) -> dict[str, Any]:
+        """The organization's caps: one per job kind and one for all kinds together."""
+        if org_id in limits:  # an operator rate-limited it: one job at a time, whatever the kind
+            return {"total": limits[org_id], "kind": lambda _kind: limits[org_id]}
+        configured = {**KIND_CAPS, **(self.app.config.kind_concurrency or {})}
+        explicit = per_kind_default != self.app.config.per_org_concurrency
+
+        def kind_cap(kind: str) -> int:
+            if explicit:
+                return per_kind_default
+            return int(configured.get(kind, per_kind_default))
+
+        total = max(int(self.app.config.per_org_total_concurrency), per_kind_default)
+        return {"total": total, "kind": kind_cap}
+
     def _claim(
         self,
         connection: Any,
         job: dict[str, Any],
-        org_limit: int,
+        caps: dict[str, Any],
         worker_id: str,
         now: int,
         seconds: int,
@@ -218,18 +252,21 @@ class JobQueue:
         """Take one job for this worker if it is still queued and its organization and candidate have room.
 
         The organization is locked (without waiting) for the rest of the transaction, so two workers leasing
-        for the same organization cannot both pass the concurrency cap or both take the same candidate, and a
+        for the same organization cannot both pass the concurrency caps or both take the same candidate, and a
         worker that loses the race moves on to another organization instead of waiting. On PostgreSQL the row itself is claimed with
         ``FOR UPDATE SKIP LOCKED``, so a job another worker is taking right now is skipped, not waited for.
         """
         if not try_lock(connection, f"queue:{job['org_id']}"):
             return False  # another worker is leasing for this organization right now
-        running = one(
+        rows = many(
             connection,
-            "SELECT COUNT(*) AS n FROM queue_jobs WHERE org_id = ? AND status = 'leased'",
+            "SELECT kind, COUNT(*) AS n FROM queue_jobs WHERE org_id = ? AND status = 'leased' GROUP BY kind",
             (job["org_id"],),
         )
-        if running and int(running["n"]) >= org_limit:
+        by_kind = {r["kind"]: int(r["n"]) for r in rows}
+        if sum(by_kind.values()) >= caps["total"]:
+            return False
+        if by_kind.get(job["kind"], 0) >= caps["kind"](job["kind"]):
             return False
         if job["candidate_id"]:
             busy = one(

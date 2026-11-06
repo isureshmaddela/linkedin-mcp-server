@@ -23,9 +23,7 @@ import socket
 import zlib
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
-from urllib.error import HTTPError, URLError
 from urllib.parse import quote, urlencode, urlsplit
-from urllib.request import Request, urlopen
 from xml.sax.saxutils import escape
 
 from monosage_cloud import crypto
@@ -200,30 +198,31 @@ def _check_public_url(url: str, *, what: str) -> None:
 def _fetch(
     url: str, *, data: dict[str, str] | None = None, timeout: int = 10
 ) -> dict[str, Any]:
+    """GET (or form-POST) JSON from the identity provider: the address is checked again now and the connection is
+    pinned to it, and a redirect is refused (monosage_cloud/outbound.py), so a provider whose DNS or answers change
+    after it was saved cannot lead the server to an internal address."""
+    from monosage_cloud import outbound
+
     body = urlencode(data).encode() if data is not None else None
-    request = Request(
-        url,
-        data=body,
-        method="POST" if data is not None else "GET",
-        headers={
-            "Accept": "application/json",
-            **(
-                {"Content-Type": "application/x-www-form-urlencoded"}
-                if data is not None
-                else {}
-            ),
-        },
-    )
+    headers = {"Accept": "application/json"}
+    if data is not None:
+        headers["Content-Type"] = "application/x-www-form-urlencoded"
     try:
-        with urlopen(request, timeout=timeout) as response:  # noqa: S310 - the URL passed _check_public_url
-            return json.loads(response.read(2_000_000).decode("utf-8"))
-    except HTTPError as error:
+        answer = outbound.request(
+            "POST" if data is not None else "GET",
+            url,
+            body=body,
+            headers=headers,
+            timeout=timeout,
+        )
+        return json.loads(answer.body.decode("utf-8"))
+    except outbound.OutboundHTTPError as error:
         raise Unavailable(
-            f"The identity provider answered {error.code}.", code="idp_error"
+            f"The identity provider answered {error.status}.", code="idp_error"
         ) from None
-    except (URLError, TimeoutError, OSError, ValueError) as error:
+    except (outbound.OutboundError, ValueError) as error:
         raise Unavailable(
-            f"The identity provider could not be reached: {type(error).__name__}.",
+            f"The identity provider could not be reached: {error}",
             code="idp_unreachable",
         ) from None
 

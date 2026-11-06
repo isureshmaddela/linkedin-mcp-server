@@ -191,14 +191,24 @@ def cloud_config(req: Req):  # noqa: ANN201
 @cloud_route("POST", r"/api/auth/signup-org", auth="public")
 def signup_org(req: Req):  # noqa: ANN201
     body = req.body()
+    if body.get("adult") is not True:
+        # The hosted product has no child accounts yet: whoever signs up confirms they are an adult.
+        raise ValidationFailed(
+            "Confirm that you are 18 or older to create an account.",
+            code="age_confirmation_required",
+        )
+    ip = req.request.client_ip
+    email = req.app.identity.check_signup(str(body.get("email", "")), ip)
     result = req.app.identity.signup_org(
         str(body.get("organization", "")),
-        str(body.get("email", "")),
+        email,
         str(body.get("password", "")),
         owner_name=str(body.get("name", "")),
-        ip=req.request.client_ip,
+        ip=ip,
         user_agent=req.request.headers.get("user-agent", ""),
+        age_attested=True,
     )
+    req.app.identity.record_signup(email, ip)
     return Reply(
         201,
         {"org": result["org"], "member": result["member"], "verification_sent": True},
@@ -518,7 +528,15 @@ def launch_local(req: Req):  # noqa: ANN201
     )
 
 
-@cloud_route("POST", r"/api/internal/launch/validate", auth="public", csrf=False)
+@cloud_route("POST", r"/api/auth/recovery/cancel", auth="public")
+def recovery_cancel(req: Req):  # noqa: ANN201
+    """The owner stops a recovery of their second factor with the link support's request emailed them."""
+    return 200, req.app.identity.cancel_recovery(
+        "", token=str(req.body().get("token", ""))
+    )
+
+
+@cloud_route("POST", r"/api/internal/launch/validate", auth="public", csrf=False, machine="signed")
 def launch_validate(req: Req):  # noqa: ANN201
     """The local installation asks who a launch token signs in (signed with the launch secret; once)."""
     try:

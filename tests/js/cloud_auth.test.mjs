@@ -25,6 +25,7 @@ test("anonymous routes are recognised and carry their token", () => {
   assert.deepEqual(auth.parseAnonymous(`#/invite/${token}`), { screen: "invite", token });
   assert.deepEqual(auth.parseAnonymous(`#/verify/${token}`), { screen: "verify", token });
   assert.deepEqual(auth.parseAnonymous(`#/reset/${token}`), { screen: "reset", token });
+  assert.deepEqual(auth.parseAnonymous(`#/recovery-cancel/${token}`), { screen: "recovery-cancel", token });
   assert.equal(auth.parseAnonymous("#/forgot").screen, "forgot");
   assert.equal(auth.parseAnonymous("#/signup").screen, "signup");
   assert.equal(auth.parseAnonymous("#/login").screen, "login");

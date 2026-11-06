@@ -321,6 +321,7 @@ def run(args: argparse.Namespace) -> None:
                 "email": owner_email,
                 "password": PASSWORD,
                 "name": "Olive Owner",
+                "adult": True,
             },
         )
         check("organization signs up", status == 201, str(body))

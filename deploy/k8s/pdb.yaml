@@ -1,19 +1,11 @@
+# One replica (web.yaml): a budget that demanded one available pod would block every node drain, so this one only
+# says a voluntary disruption may take the pod (the service is down until it is rescheduled; drain it in a window).
 apiVersion: policy/v1
 kind: PodDisruptionBudget
 metadata:
   name: aira-web
   namespace: aira
 spec:
-  minAvailable: 1
-  selector:
-    matchLabels: { app.kubernetes.io/name: aira-web }
----
-apiVersion: policy/v1
-kind: PodDisruptionBudget
-metadata:
-  name: aira-worker
-  namespace: aira
-spec:
   maxUnavailable: 1
   selector:
-    matchLabels: { app.kubernetes.io/name: aira-worker }
+    matchLabels: { app.kubernetes.io/name: aira-web }

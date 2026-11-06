@@ -1,3 +1,13 @@
+# One pod is the whole service: the gateway, the worker pool and the scheduler tick in one process
+# (`serve --worker`). The control plane (control.sqlite3, WAL) and every workspace are SQLite files on the data
+# volume, and SQLite's WAL index is shared memory that only processes on one machine can share: two pods on two
+# nodes writing them over a ReadWriteMany volume risk corrupting them. So this layout runs exactly one replica on a
+# ReadWriteOnce volume, and `strategy: Recreate` stops the old pod before the new one starts (a rollout has a short
+# outage; the process drains in-flight requests on SIGTERM first). The process also refuses to start when another
+# node has used the data directory in the last 90 seconds (monosage_cloud/app.py, HostGuard).
+#
+# Do not raise `replicas`. To move the control plane to PostgreSQL see deploy/k8s-overlays/postgres; the
+# workspaces stay on this volume with this one writer either way (docs/multitenant-operations.md, "Topology").
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -5,16 +15,18 @@ metadata:
   namespace: aira
   labels: { app.kubernetes.io/name: aira-web, app.kubernetes.io/part-of: monosage-cloud }
 spec:
-  replicas: 2
+  replicas: 1
   selector:
     matchLabels: { app.kubernetes.io/name: aira-web }
   strategy:
-    type: RollingUpdate
-    rollingUpdate: { maxUnavailable: 0, maxSurge: 1 }
+    type: Recreate
   template:
     metadata:
       labels: { app.kubernetes.io/name: aira-web, app.kubernetes.io/part-of: monosage-cloud }
     spec:
+      # SIGTERM: the server stops accepting, answers what is in flight (AIRA_CLOUD_DRAIN_SECONDS, 25 by default),
+      # then the worker pool stops; a running job's lease returns it to the queue for the next pod.
+      terminationGracePeriodSeconds: 120
       securityContext:
         runAsNonRoot: true
         runAsUser: 10001
@@ -23,12 +35,13 @@ spec:
         seccompProfile: { type: RuntimeDefault }
       containers:
         - name: web
-          image: registry.example.com/monosage-cloud-web:1.0.0   # build: docker build -f deploy/Dockerfile.cloud --target web
-          args: ["serve"]
+          # the worker image: the same application plus Chromium for the form engine and LinkedIn sessions
+          image: registry.example.com/monosage-cloud-worker:1.0.0   # build: docker build -f deploy/Dockerfile.cloud --target worker
+          args: ["serve", "--worker", "--threads", "4"]
           ports:
             - { name: http, containerPort: 8780 }
           env:
-            - { name: HOME, value: /tmp }   # the root filesystem is read-only; /tmp is an emptyDir
+            - { name: HOME, value: /tmp }
           envFrom:
             - configMapRef: { name: aira-config }
             - secretRef: { name: aira-secrets }
@@ -38,23 +51,26 @@ spec:
             failureThreshold: 3
           livenessProbe:
             httpGet: { path: /api/health, port: http }
-            initialDelaySeconds: 20
+            initialDelaySeconds: 30
             periodSeconds: 20
           resources:
-            requests: { cpu: 250m, memory: 384Mi }
-            limits: { memory: 1Gi }
+            # the web tier plus about 400 to 600 MB per concurrent browser (docs/multitenant-operations.md, "Worker sizing")
+            requests: { cpu: "1", memory: 2560Mi }
+            limits: { memory: 4Gi }
           securityContext:
             allowPrivilegeEscalation: false
-            readOnlyRootFilesystem: true
             capabilities: { drop: [ALL] }
           volumeMounts:
             - { name: data, mountPath: /data }
             - { name: tmp, mountPath: /tmp }
+            - { name: shm, mountPath: /dev/shm }
       volumes:
         - name: data
           persistentVolumeClaim: { claimName: aira-data }
         - name: tmp
           emptyDir: {}
+        - name: shm
+          emptyDir: { medium: Memory, sizeLimit: 1Gi }
 ---
 apiVersion: v1
 kind: Service

@@ -96,7 +96,7 @@ def authorize_redirect(req: Req):  # noqa: ANN201
     )
 
 
-@cloud_route("POST", r"/oauth/token", auth="public", csrf=False)
+@cloud_route("POST", r"/oauth/token", auth="public", csrf=False, machine="oauth")
 def token(req: Req):  # noqa: ANN201
     form = req.body() or {
         k: v[0]
@@ -109,7 +109,7 @@ def token(req: Req):  # noqa: ANN201
     return Reply(200, issued, headers=list(TOKEN_HEADERS))
 
 
-@cloud_route("POST", r"/oauth/revoke", auth="public", csrf=False)
+@cloud_route("POST", r"/oauth/revoke", auth="public", csrf=False, machine="oauth")
 def revoke(req: Req):  # noqa: ANN201
     form = req.body()
     try:
@@ -129,7 +129,7 @@ def revoke(req: Req):  # noqa: ANN201
     return Reply(200, {}, headers=list(TOKEN_HEADERS))
 
 
-@cloud_route("POST", r"/oauth/introspect", auth="public", csrf=False)
+@cloud_route("POST", r"/oauth/introspect", auth="public", csrf=False, machine="oauth")
 def introspect(req: Req):  # noqa: ANN201
     form = req.body()
     try:

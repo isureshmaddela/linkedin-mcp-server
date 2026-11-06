@@ -667,6 +667,142 @@ def platform_metrics(req: Req):  # noqa: ANN201
     return 200, {"process": metrics.snapshot(), "per_tenant": per_tenant}
 
 
+def _label(value: object) -> str:
+    return str(value).replace("\\", "\\\\").replace('"', '\\"').replace("\n", "\\n")
+
+
+def prometheus_text(app) -> str:  # noqa: ANN001
+    """This process's metrics and the queue's state in the Prometheus text format (no tenant names or ids)."""
+    snapshot = metrics.snapshot()
+    lines: list[str] = []
+
+    def family(name: str, kind: str, help_text: str) -> None:
+        lines.append(f"# HELP {name} {help_text}")
+        lines.append(f"# TYPE {name} {kind}")
+
+    family("aira_uptime_seconds", "gauge", "Seconds since this process started.")
+    lines.append(f"aira_uptime_seconds {snapshot['uptime_seconds']}")
+    family("aira_http_requests_total", "counter", "Requests answered, by route.")
+    for route, values in sorted(snapshot["routes"].items()):
+        lines.append(
+            f'aira_http_requests_total{{route="{_label(route)}"}} {values["count"]}'
+        )
+    family("aira_http_responses_total", "counter", "Responses, by status code.")
+    for status, count in snapshot["status_codes"].items():
+        lines.append(f'aira_http_responses_total{{status="{_label(status)}"}} {count}')
+    family(
+        "aira_http_request_duration_ms",
+        "gauge",
+        "Latency of the last 500 requests per route (average and 95th percentile).",
+    )
+    for route, values in sorted(snapshot["routes"].items()):
+        lines.append(
+            f'aira_http_request_duration_ms{{route="{_label(route)}",stat="avg"}} {values["avg_ms"]}'
+        )
+        lines.append(
+            f'aira_http_request_duration_ms{{route="{_label(route)}",stat="p95"}} {values["p95_ms"]}'
+        )
+    family("aira_events_total", "counter", "Named counters.")
+    for name, value in sorted(snapshot["counters"].items()):
+        lines.append(f'aira_events_total{{name="{_label(name)}"}} {value}')
+    family("aira_integration_up", "gauge", "Whether the last check of an integration passed.")
+    for name, state in sorted(snapshot["integrations"].items()):
+        lines.append(
+            f'aira_integration_up{{name="{_label(name)}"}} {1 if state.get("ok") else 0}'
+        )
+    server = getattr(app.gateway, "server", None)
+    if server is not None:
+        family("aira_http_connections", "gauge", "Open connections (one thread each).")
+        lines.append(f"aira_http_connections {server.active}")
+        family("aira_http_connections_max", "gauge", "The connection cap.")
+        lines.append(f"aira_http_connections_max {server.max_connections}")
+        family("aira_http_refused_total", "counter", "Connections answered 503 at the cap.")
+        lines.append(f"aira_http_refused_total {server.refused}")
+        family("aira_draining", "gauge", "1 while the process drains after SIGTERM.")
+        lines.append(f"aira_draining {1 if server.draining.is_set() else 0}")
+    queue = app.queue.stats()
+    family("aira_queue_jobs", "gauge", "Jobs in the queue, by status.")
+    for status, count in sorted(queue["by_status"].items()):
+        lines.append(f'aira_queue_jobs{{status="{_label(status)}"}} {count}')
+    family("aira_queue_ready_jobs", "gauge", "Waiting and running jobs, by kind.")
+    for row in queue["by_kind"]:
+        lines.append(
+            f'aira_queue_ready_jobs{{kind="{_label(row["kind"])}",status="{_label(row["status"])}"}} {row["n"]}'
+        )
+    family("aira_queue_oldest_wait_seconds", "gauge", "How long the oldest due job has waited.")
+    lines.append(f"aira_queue_oldest_wait_seconds {queue['oldest_wait_seconds']}")
+    family("aira_queue_organizations_waiting", "gauge", "Organizations with jobs waiting.")
+    lines.append(
+        f"aira_queue_organizations_waiting {sum(1 for row in queue['by_org'] if int(row['queued'] or 0))}"
+    )
+    family("aira_workers", "gauge", "Worker processes that reported in the last minute.")
+    lines.append(f"aira_workers {len(queue['workers'])}")
+    family("aira_worker_capacity", "gauge", "Job threads across workers.")
+    lines.append(f"aira_worker_capacity {queue['worker_capacity']}")
+    family("aira_worker_busy", "gauge", "Job threads running a job.")
+    lines.append(f"aira_worker_busy {queue['worker_busy']}")
+    return "\n".join(lines) + "\n"
+
+
+@cloud_route("GET", r"/metrics", auth="public", csrf=False, machine="metrics")
+def prometheus_metrics(req: Req):  # noqa: ANN201
+    """Prometheus scrape endpoint: ``Authorization: Bearer <AIRA_CLOUD_METRICS_TOKEN>``; off (404) without a token."""
+    import hmac
+
+    expected = str(req.app.config.metrics_token or "")
+    if not expected:
+        return 404, {"error": "Not found.", "code": "not_found"}
+    header = req.request.headers.get("authorization", "")
+    supplied = header[7:].strip() if header[:7].lower() == "bearer " else ""
+    if not hmac.compare_digest(supplied.encode(), expected.encode()):
+        return Reply(
+            401,
+            {"error": "A metrics token is required.", "code": "unauthorized"},
+            headers=[("WWW-Authenticate", 'Bearer realm="metrics"')],
+        )
+    return Reply(
+        200,
+        prometheus_text(req.app).encode("utf-8"),
+        content_type="text/plain; version=0.0.4; charset=utf-8",
+    )
+
+
+# ------------------------------------------------------------- recovery of a sole owner's second factor
+
+
+@cloud_route("GET", r"/api/platform/recoveries", auth="operator")
+def recoveries_list(req: Req):  # noqa: ANN201
+    return 200, {
+        "recoveries": req.app.identity.list_recoveries(
+            req.principal, status=req.q("status")
+        )
+    }
+
+
+@cloud_route(
+    "POST",
+    r"/api/platform/tenants/([0-9a-f]{32})/members/([0-9a-f]{32})/recovery",
+    auth="operator",
+)
+def recovery_request(req: Req):  # noqa: ANN201
+    return 201, req.app.identity.request_recovery(
+        req.principal,
+        req.group(1),
+        req.group(2),
+        str(req.body().get("reason", "")),
+    )
+
+
+@cloud_route("POST", r"/api/platform/recoveries/([0-9a-f]{32})/complete", auth="operator")
+def recovery_complete(req: Req):  # noqa: ANN201
+    return 200, req.app.identity.complete_recovery(req.principal, req.group())
+
+
+@cloud_route("POST", r"/api/platform/recoveries/([0-9a-f]{32})/cancel", auth="operator")
+def recovery_cancel_by_operator(req: Req):  # noqa: ANN201
+    return 200, req.app.identity.cancel_recovery(req.group(), operator=req.principal)
+
+
 @cloud_route("GET", r"/api/platform/queue", auth="operator")
 def platform_queue(req: Req):  # noqa: ANN201
     req.app.authz.require(req.principal, "platform.health.read")
