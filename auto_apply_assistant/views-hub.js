@@ -35,11 +35,15 @@
     if (!data.profile_complete) {
       parts.push(h("div", { class: "cloud-banner info", role: "status" }, h("strong", { text: "Add your business details" }), h("span", { class: "muted", text: "Customers see your name, contact and how to pay on every booking page, invoice and storefront." }), h("a", { class: "btn secondary sm", href: "#/hub?tab=business", text: "Add details" })));
     }
+    const banner = reachabilityBanner(data.public_links);
+    if (banner) parts.push(banner);
+    if (data.payments_attention) parts.push(h("div", { class: "cloud-banner warn", role: "status" }, h("strong", { text: `${data.payments_attention} payment${data.payments_attention === 1 ? "" : "s"} to check` }), h("span", { class: "muted", text: "A different amount arrived, or something was cancelled before it was paid." }), h("a", { class: "btn secondary sm", href: "#/hub?tab=business", text: "Check payments" })));
     parts.push(S.kpis([
       { label: "Revenue this month", value: S.money(revenue.this_month_cents, revenue.currency), hint: change === null ? "First month" : `${change >= 0 ? "+" : ""}${change}% vs last month`, tone: change !== null && change < 0 ? "warn" : "good" },
       { label: "Last month", value: S.money(revenue.last_month_cents, revenue.currency) },
       { label: "All time", value: S.money(revenue.total_cents, revenue.currency), hint: `${revenue.payments} payments` },
       { label: "Waiting to send", value: data.outbox.pending || 0, hint: data.email_ready ? "Messages for customers" : "Set up email to send", tone: data.outbox.pending ? "warn" : "" },
+      ...otherCurrencies(revenue),
     ]));
     parts.push(goalCard(data.goal, revenue));
     const started = data.apps.some((app) => app.progress.done > 0);
@@ -58,6 +62,14 @@
       h("div", { class: "btn-row" }, ...(app.sections && app.sections.length > 1 ? app.sections.map((section) => h("a", { class: "btn secondary sm", href: `#/${section.id}`, text: `Open ${APP_NAMES[section.id] || section.id}` })) : [h("a", { class: "btn secondary sm", href: `#/${app.home || app.id}`, text: `Open ${app.name}` })])))))));
     parts.push(S.section("Recent activity", S.activity(data.activity)));
     body.append(...parts);
+  }
+
+  // Money in other currencies is never added to the business's own: one card each (this month, and all time).
+  function otherCurrencies(revenue) {
+    return (revenue.currencies || []).filter((code) => code !== revenue.currency).map((code) => {
+      const totals = (revenue.by_currency || {})[code] || {};
+      return { label: `Revenue in ${code}`, value: S.money(totals.this_month_cents || 0, code), hint: `All time ${S.money(totals.total_cents || 0, code)}` };
+    });
   }
 
   // A monthly revenue goal keeps the number that matters in front of the business.
@@ -88,7 +100,9 @@
         { label: "This month", value: S.money(summary.this_month_cents, summary.currency) },
         { label: "All time", value: S.money(summary.total_cents, summary.currency) },
         { label: "Payments", value: summary.payments },
-      ]),
+        summary.refunded_cents ? { label: "Refunded", value: S.money(summary.refunded_cents, summary.currency), hint: "Counted in the month of each refund", tone: "warn" } : null,
+        ...otherCurrencies(summary),
+      ].filter(Boolean)),
       S.section("Payments", h("div", { class: "btn-row" }, S.button("Download CSV", () => Aira.download("/api/suite/revenue?format=csv", "revenue.csv"), { kind: "secondary sm" })),
         S.table({
           columns: [
@@ -97,6 +111,7 @@
             { key: "label", label: "For" },
             { key: "customer", label: "Customer" },
             { key: "amount_cents", label: "Amount", num: true, render: (r) => (r.voided_at ? h("s", { text: S.money(r.amount_cents, r.currency) }) : S.money(r.amount_cents, r.currency)) },
+            { key: "currency", label: "Currency" },
           ],
           rows: data.lines,
           empty: "No payments recorded yet",
@@ -153,8 +168,69 @@
     } });
   }
 
+  // Where customers' links point: the hub warns while they point to this computer (127.0.0.1), which nobody else can open.
+  function reachabilityBanner(links) {
+    if (Aira.cloud || !links || !links.loopback) return null;
+    return h("div", { class: "cloud-banner warn", role: "status" }, h("strong", { text: "Customers cannot open your links yet" }), h("span", { class: "muted", text: links.warning }), h("a", { class: "btn secondary sm", href: "#/hub?tab=business", text: "Set a public address" }));
+  }
+
+  // Business profile > Payments: none, your own payment link, or Razorpay (UPI, cards, netbanking) with a payment
+  // link for the exact amount of every order, invoice and booking. Secrets are typed here and never shown again.
+  async function paymentsSection() {
+    const data = await Aira.api("/api/suite/payments");
+    const holder = h("div");
+    const render = (view) => {
+      const s = view.settings;
+      const form = S.form([
+        { name: "provider", label: "How customers pay", type: "select", options: [["none", "No online payment (show my payment instructions)"], ["manual", "My own payment link (from the profile above)"], ["razorpay", "Razorpay: UPI, cards and netbanking for the exact amount"]] },
+        { type: "heading", label: "Razorpay" },
+        { name: "razorpay_key_id", label: "Key id", placeholder: "rzp_test_... or rzp_live_...", hint: "Razorpay dashboard > Account & Settings > API keys. rzp_test_ keys take test payments only." },
+        { name: "key_secret", label: view.has_key_secret ? "Key secret (saved; type to replace)" : "Key secret", type: "password", hint: "Stored encrypted on this computer and never shown again." },
+        { name: "webhook_secret", label: view.has_webhook_secret ? "Webhook secret (saved; type to replace)" : "Webhook secret", type: "password", hint: "The secret you type when you add the webhook in the Razorpay dashboard." },
+        { name: "notify_customer", label: "Razorpay also emails and texts the payment link to the customer", type: "checkbox" },
+        { name: "link_expiry_hours", label: "A payment link for an invoice or a booking stays open (hours)", type: "number", min: 1, max: 4320 },
+        { type: "heading", label: "UPI apps (optional)" },
+        { name: "upi_id", label: "Your UPI ID", placeholder: "yourshop@okaxis", hint: "Adds a 'Pay with a UPI app' button on phones. You confirm these payments by hand." },
+        { name: "upi_name", label: "Name shown in the UPI app", placeholder: "Your business name" },
+      ], s);
+      const status = view.ready ? S.pill(`ready · ${view.mode} mode`, { [`ready · ${view.mode} mode`]: view.mode === "live" ? "good" : "warn" }) : S.pill(s.provider === "razorpay" ? "not ready" : s.provider, { "not ready": "warn" });
+      const webhook = view.webhook_url ? h("div", { class: "suite-form" },
+        h("h3", { class: "suite-h3", text: "Webhook" }),
+        h("p", { class: "muted", text: "In the Razorpay dashboard: Account & Settings > Webhooks > Add new webhook. Paste this address, type the same secret as above, and tick these events:" }),
+        h("div", { class: "btn-row" }, h("code", { class: "suite-pre", text: view.webhook_url }), S.button("Copy", async () => { try { await navigator.clipboard.writeText(view.webhook_url); Aira.toast("Copied.", "success"); } catch { /* the address stays visible */ } }, { kind: "ghost sm" })),
+        h("p", { class: "muted small", text: view.webhook_events.join(", ") }),
+        view.webhook_reachable ? null : h("p", { class: "form-error", text: "Razorpay cannot reach this address: it is this computer. Set a public address above (your tunnel) first." })) : null;
+      const attention = view.attention && view.attention.length ? S.section("Payments to check", S.table({
+        columns: [
+          { key: "created_at", label: "When", render: (r) => S.day(r.created_at) },
+          { key: "app", label: "App", render: (r) => APP_NAMES[r.app] || r.app },
+          { key: "description", label: "For" },
+          { key: "amount_cents", label: "Asked", num: true, render: (r) => S.money(r.amount_cents, r.currency) },
+          { key: "problem", label: "What happened" },
+        ],
+        rows: view.attention,
+      })) : null;
+      holder.replaceChildren(S.section("Payments", h("p", { class: "muted", text: "Take payments online for orders, invoices, bookings and courses. Each payment link carries the exact amount and its reference, and Razorpay tells Monosage when it is paid: the order, booking or enrolment is marked paid for you." }), status, form.node,
+        h("div", { class: "btn-row" },
+          S.button("Save payments", async () => {
+            form.setError("");
+            const values = form.read();
+            if (!values.key_secret) delete values.key_secret;
+            if (!values.webhook_secret) delete values.webhook_secret;
+            try { render(await Aira.api("/api/suite/payments", { method: "POST", body: values })); Aira.toast("Saved.", "success"); } catch (error) { form.setError(error.message); }
+          }),
+          s.provider === "razorpay" ? S.button("Test connection", async () => {
+            try { const result = await Aira.api("/api/suite/payments/test", { method: "POST", body: {} }); Aira.toast(`Razorpay answered: the keys work (${result.mode} mode).`, "success"); } catch (error) { form.setError(error.message); }
+          }, { kind: "secondary" }) : null),
+        webhook), attention || "");
+    };
+    render(data);
+    return holder;
+  }
+
   async function businessTab(body) {
     const data = await Aira.api("/api/suite/business");
+    const states = [["", "Not set"], ...(data.gst_states || []).map((s) => [s.code, `${s.name} (${s.code})`])];
     const form = S.form([
       { type: "heading", label: "Who you are" },
       { name: "name", label: "Business name", required: true },
@@ -171,11 +247,19 @@
       { name: "tax_label", label: "Tax name", placeholder: "GST, VAT, Sales tax" },
       { name: "tax_rate_bp", label: "Tax rate (hundredths of a percent)", type: "number", min: 0, max: 5000, hint: "750 = 7.5%. Added to invoices and orders. 0 for none." },
       { name: "tax_id", label: "Your tax or registration number", placeholder: "VAT, GSTIN, EIN", hint: "Printed on invoices to businesses." },
-      { name: "payment_link", label: "Payment link", type: "url", hint: "Your own Stripe, PayPal, Razorpay or UPI payment page. Customers see it on invoices, orders and bookings." },
+      { name: "prices_include_tax", label: "My prices already include tax", type: "checkbox", hint: "The tax is shown inside the price instead of added on top." },
+      { name: "tax_mode", label: "Tax", type: "select", options: [["flat", "One rate on every invoice and order"], ["gst", "GST (India): CGST + SGST in my state, IGST to other states"]], hint: "GST needs your GSTIN as your tax number and prices in INR." },
+      { name: "state_code", label: "Your state (GST)", type: "select", options: states, hint: "Read from your GSTIN when left empty." },
+      { name: "payment_link", label: "Payment link", type: "url", hint: "Your own Stripe, PayPal, Razorpay or UPI payment page. Customers see it on invoices, orders and bookings when Payments below is set to 'My own payment link'." },
       { name: "payment_instructions", label: "Other ways to pay", type: "textarea", rows: 3, placeholder: "Bank transfer: ... or pay at the venue" },
-    ], data.business);
-    body.append(S.section("Business profile", h("p", { class: "muted", text: "Shown on every page you share with customers." }), form.node,
-      h("div", { class: "btn-row" }, S.button("Save", async () => { form.setError(""); try { S._business = (await Aira.api("/api/suite/business", { method: "POST", body: form.read() })).business; Aira.toast("Saved.", "success"); } catch (error) { form.setError(error.message); } }))));
+      ...(Aira.cloud ? [] : [
+        { type: "heading", label: "Public address" },
+        { name: "public_address", label: "Public address", type: "url", placeholder: "https://shop.example.com", hint: "Monosage runs on this computer, so customers reach your pages through a tunnel: run Cloudflare Tunnel (cloudflared tunnel --url http://127.0.0.1:8765) or ngrok (ngrok http 8765) and enter the https address it gives you. Only your customer pages and the payment webhook answer there." },
+      ]),
+    ], { ...data.business, public_address: data.public_address || "" });
+    body.append(...[reachabilityBanner(data.public_links), S.section("Business profile", h("p", { class: "muted", text: "Shown on every page you share with customers." }), form.node,
+      h("div", { class: "btn-row" }, S.button("Save", async () => { form.setError(""); try { S._business = (await Aira.api("/api/suite/business", { method: "POST", body: form.read() })).business; Aira.toast("Saved.", "success"); } catch (error) { form.setError(error.message); } })))].filter(Boolean));
+    body.append(await paymentsSection());
   }
 
   async function emailTab(body) {

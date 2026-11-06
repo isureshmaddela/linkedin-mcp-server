@@ -7,7 +7,8 @@
  *   AiraPublic.register("bookings", "booking_page", (root, data, ctx) => { ... });
  *
  * ctx: { h, token, business, money(cents), date(iso), time(iso), datetime(iso), action(name, payload) -> data,
- *        reload(), notice(message, tone), field(label, input, hint), button(label, onClick, kind), copy(text) }
+ *        reload(), notice(message, tone), field(label, input, hint), button(label, onClick, kind), copy(text),
+ *        paymentBox(cents, reference, payUrl) (how to pay: online with Razorpay, the business's link, UPI, transfer) }
  * Every action posts JSON to /api/public/<token>/<name>; ctx.query(name, params) GETs a read-only query (polling);
  * errors come back as thrown Error with .status.
  * DOM is built with textContent only: nothing the server sends is parsed as HTML.
@@ -114,14 +115,50 @@
     $("pubFooter").hidden = false;
   }
 
-  // The business's own ways to be paid, for renderers that show an amount due.
-  function paymentBox(amountCents, reference) {
+  // The business's own ways to be paid, for renderers that show an amount due. With Razorpay the customer pays the
+  // exact amount online (UPI, cards, netbanking): the page asks for a payment link (pay_online) and goes there, or
+  // goes to payUrl when the checkout already made one. A UPI ID adds a button for UPI apps on a phone, which the
+  // business confirms by hand.
+  let pageActions = [];
+  const httpsLink = (url) => typeof url === "string" && /^https:\/\/[^\s]+$/i.test(url);
+  function goPay(url) {
+    if (!httpsLink(url)) throw new Error("The payment page could not be opened. Try again in a moment.");
+    location.assign(url);
+  }
+  function upiLink(amountCents, reference) {
+    if (!business.upi_id || business.currency !== "INR" || !amountCents) return "";
+    const params = new URLSearchParams({ pa: business.upi_id, pn: business.upi_name || business.name || "", am: (Number(amountCents) / 100).toFixed(2), tn: String(reference || "").slice(0, 50), cu: "INR" });
+    return `upi://pay?${params.toString().replace(/\+/g, "%20")}`;
+  }
+  function paymentBox(amountCents, reference, payUrl) {
     const parts = [];
-    if (business.payment_link && /^https?:\/\//i.test(business.payment_link)) parts.push(h("a", { class: "pub-btn", href: business.payment_link, target: "_blank", rel: "noopener noreferrer", text: amountCents ? `Pay ${money(amountCents)}` : "Pay now" }));
+    const online = business.online_payments && (httpsLink(payUrl) || pageActions.includes("pay_online"));
+    if (online) {
+      parts.push(button(amountCents ? `Pay ${money(amountCents)} online` : "Pay online", async () => {
+        if (httpsLink(payUrl)) return goPay(payUrl);
+        const made = await request("POST", `/api/public/${token}/pay_online`, { reference: reference || "" });
+        goPay(made.url);
+      }));
+      parts.push(h("p", { class: "pub-muted pub-hint", text: "UPI, cards and netbanking, on Razorpay's secure page. You come back here when it is done." }));
+    }
+    if (business.payment_link && /^https?:\/\//i.test(business.payment_link)) parts.push(h("a", { class: online ? "pub-btn secondary" : "pub-btn", href: business.payment_link, target: "_blank", rel: "noopener noreferrer", text: amountCents ? `Pay ${money(amountCents)}` : "Pay now" }));
+    const upi = upiLink(amountCents, reference);
+    if (upi) parts.push(h("a", { class: online ? "pub-btn secondary" : "pub-btn", href: upi, text: "Pay with a UPI app" }), h("p", { class: "pub-muted pub-hint", text: `On your phone: pays ${business.upi_id}. The business confirms a UPI payment by hand, so let them know once you have paid.` }));
     if (business.payment_instructions) parts.push(h("p", { class: "pub-pre", text: business.payment_instructions }));
     if (reference) parts.push(h("p", { class: "pub-muted", text: `Use reference ${reference} with your payment.` }));
     if (!parts.length) return null;
     return h("section", { class: "pub-card pub-pay" }, h("h2", { text: "How to pay" }), ...parts);
+  }
+
+  // Back from Razorpay's payment page: its signed parameters are checked by the server (pay_return), which shows
+  // "Paid" at once; the business's record follows Razorpay's webhook. The parameters leave the address bar.
+  const RETURN_FIELDS = ["razorpay_payment_id", "razorpay_payment_link_id", "razorpay_payment_link_reference_id", "razorpay_payment_link_status", "razorpay_signature"];
+  async function paymentReturn() {
+    const search = new URLSearchParams(location.search);
+    if (!search.get("razorpay_payment_link_id")) return null;
+    const params = Object.fromEntries(RETURN_FIELDS.map((name) => [name, search.get(name) || ""]));
+    history.replaceState(null, "", location.pathname);
+    try { return await request("POST", `/api/public/${token}/pay_return`, params); } catch { return { verified: false }; }
   }
 
   // A read-only question the page asks often (GET /api/public/<token>/<name>); a "secret" travels in a header.
@@ -136,6 +173,7 @@
   async function load() {
     const main = $("pubMain");
     if (!token) { main.replaceChildren(h("h1", { text: "Page not found" }), h("p", { class: "pub-muted", text: "Check the link you were sent." })); return; }
+    const returned = await paymentReturn();
     let data;
     try { data = await request("GET", `/api/public/${token}`); } catch (error) {
       document.title = "Not available";
@@ -143,11 +181,15 @@
       return;
     }
     brand(data);
+    pageActions = Array.isArray(data.actions) ? data.actions : [];
     const render = RENDERERS[`${data.app}/${data.kind}`];
     const ctx = { h, token, business, money, date, time, datetime, notice, field, button, copy, paymentBox, reload: load, action: (name, payload) => request("POST", `/api/public/${token}/${name}`, payload || {}), query };
     main.replaceChildren();
     if (!render) { main.append(h("h1", { text: data.title || "Welcome" }), h("p", { class: "pub-muted", text: "This page cannot be shown here yet." })); return; }
     try { await render(main, data, ctx); } catch (error) { main.append(h("p", { class: "pub-notice bad", text: error.message })); }
+    if (returned && returned.verified && returned.paid) notice(returned.status === "paid" ? "Payment received. Thank you!" : "Payment received. Thank you! It shows here as paid in a moment.", "good");
+    else if (returned && returned.verified) notice("The payment was not completed. You can try again.", "bad");
+    else if (returned) notice("We could not confirm that payment yet. If you paid, the business will see it shortly.", "");
   }
 
   window.AiraPublic = {

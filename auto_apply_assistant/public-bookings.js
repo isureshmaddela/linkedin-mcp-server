@@ -185,7 +185,7 @@
           b.price_cents ? h("p", { text: `Price ${ctx.money(b.price_cents)}${b.deposit_cents ? ` · deposit ${ctx.money(b.deposit_cents)} to secure your time` : ""}` }) : null,
           h("div", { class: "pub-btn-row" }, h("a", { class: "pub-btn secondary", href: manage, text: "Manage your booking" }), ctx.button("Copy link", () => ctx.copy(manage), "ghost")),
           h("p", { class: "pub-muted pub-hint", text: "Keep this link: it is how you cancel or change your booking." })),
-        due ? ctx.paymentBox(due, b.reference) : null,
+        due ? ctx.paymentBox(due, b.reference, made.pay_url) : null,
       ].filter(Boolean));
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
