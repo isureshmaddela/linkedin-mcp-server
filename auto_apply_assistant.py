@@ -12174,6 +12174,7 @@ class _PublicHosts:
                     "DELETE FROM suite_public_hosts WHERE user_id = ?", (user_id,)
                 )
         self._cache = (0.0, frozenset())
+        _address_cache.clear()  # links use the new address at once
 
     def hosts(self) -> frozenset[str]:
         loaded_at, hosts = self._cache
@@ -12203,6 +12204,7 @@ class _PublicHosts:
 
     def forget(self) -> None:
         self._cache = (0.0, frozenset())
+        _address_cache.clear()
 
 
 _public_hosts = _PublicHosts()
@@ -12222,18 +12224,27 @@ def _customer_route(name: str, path: str) -> bool:
     return name == "ui_static" and bool(_CUSTOMER_STATIC.fullmatch(path))
 
 
+_address_cache: dict[str, tuple[float, str]] = {}
+
+
 def _bound_public_address() -> str:
-    """kit.public_url's address for the bound account: its public address, '' when it set none."""
-    if not getattr(_request_context, "user_id", None) and not getattr(
-        _request_context, "data_path", None
-    ):
+    """kit.public_url's address for the bound account: its public address, '' when it set none (read at most every
+    few seconds: a newsletter builds one link per reader)."""
+    data_path = str(getattr(_request_context, "data_path", "") or "")
+    if not data_path and not getattr(_request_context, "user_id", None):
         return ""
+    cached = _address_cache.get(data_path)
+    if cached and time.monotonic() - cached[0] < 5:
+        return cached[1]
     with _connect() as connection:
         if not connection.execute(
             "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'suite_settings'"
         ).fetchone():
-            return ""
-        return suite_kit.public_address(connection)
+            address = ""
+        else:
+            address = suite_kit.public_address(connection)
+    _address_cache[data_path] = (time.monotonic(), address)
+    return address
 
 
 def _bind_public_link(handler: RequestHandler, token: str) -> dict[str, Any]:
