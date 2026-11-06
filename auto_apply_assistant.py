@@ -365,10 +365,49 @@ class _ManagedConnection(sqlite3.Connection):
         return False
 
 
+# The accounts database is read on every signed-in request, so its schema is brought up to date once per file per
+# process (keyed by the file's identity, so a file that is replaced is migrated again), not on every connection.
+_auth_schema_ready: dict[str, tuple[int, int]] = {}
+_auth_schema_lock = threading.Lock()
+# Expired sessions are deleted at most once a minute per accounts file; lookups ignore them until then.
+SESSION_PURGE_INTERVAL_SECONDS = 60
+_sessions_purged_at: dict[str, float] = {}
+_session_purge_lock = threading.Lock()
+
+
+def _file_identity(path: Path) -> tuple[int, int] | None:
+    try:
+        stat = os.stat(path)
+    except OSError:
+        return None
+    return (stat.st_dev, stat.st_ino)
+
+
 def _auth_connect() -> sqlite3.Connection:
-    AUTH_DB_PATH.parent.mkdir(parents=True, exist_ok=True)
-    connection = sqlite3.connect(AUTH_DB_PATH, timeout=10, factory=_ManagedConnection)
+    path = AUTH_DB_PATH
+    key = str(path)
+    identity = _file_identity(path)
+    ready = identity is not None and _auth_schema_ready.get(key) == identity
+    if not ready:
+        path.parent.mkdir(parents=True, exist_ok=True)
+    connection = sqlite3.connect(path, timeout=10, factory=_ManagedConnection)
     connection.row_factory = sqlite3.Row
+    if not ready:
+        try:
+            with _auth_schema_lock:
+                _migrate_auth_schema(connection)
+                identity = _file_identity(path)
+                if identity is not None:
+                    _auth_schema_ready[key] = identity
+        except BaseException:
+            connection.close()
+            raise
+    return connection
+
+
+def _migrate_auth_schema(connection: sqlite3.Connection) -> None:
+    """Create or upgrade the accounts tables; WAL lets requests read while a sign-in or a worker writes."""
+    connection.execute("PRAGMA journal_mode = WAL")
     connection.execute(
         """CREATE TABLE IF NOT EXISTS users (
             user_id TEXT PRIMARY KEY, email TEXT UNIQUE NOT NULL,
@@ -403,7 +442,6 @@ def _auth_connect() -> sqlite3.Connection:
         if column not in present:
             connection.execute(f"ALTER TABLE users ADD COLUMN {column} {definition}")
     connection.commit()
-    return connection
 
 
 def _password_hash(password: str, salt: bytes | None = None) -> str:
@@ -981,14 +1019,30 @@ def _link_account(claims: dict[str, Any]) -> tuple[dict[str, Any], str]:
 def _user_for_session(token: str) -> dict[str, Any] | None:
     token_hash = hashlib.sha256(token.encode("ascii", errors="ignore")).hexdigest()
     now = int(time.time())
-    with _auth_connect() as connection:
-        connection.execute("DELETE FROM sessions WHERE expires_at <= ?", (now,))
+    _purge_expired_sessions(now)
+    with _auth_connect() as connection:  # read only: the lookup itself never writes
         row = connection.execute(
             """SELECT users.* FROM sessions JOIN users USING (user_id)
             WHERE sessions.token_hash = ? AND sessions.expires_at > ?""",
             (token_hash, now),
         ).fetchone()
     return dict(row) if row else None
+
+
+def _purge_expired_sessions(now: float) -> bool:
+    """Delete expired sessions, at most once every SESSION_PURGE_INTERVAL_SECONDS per accounts file.
+
+    Returns whether it ran.
+    """
+    key = str(AUTH_DB_PATH)
+    with _session_purge_lock:
+        last = _sessions_purged_at.get(key, float("-inf"))
+        if now - last < SESSION_PURGE_INTERVAL_SECONDS:
+            return False
+        _sessions_purged_at[key] = now
+    with _auth_connect() as connection:
+        connection.execute("DELETE FROM sessions WHERE expires_at <= ?", (int(now),))
+    return True
 
 
 def _linkedin_profile_dir(user_id: str) -> Path:
