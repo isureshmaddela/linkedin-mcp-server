@@ -264,11 +264,13 @@ def test_the_live_stream_needs_a_session_resumes_and_is_capped(env, api):
     assert realtime.HUB.stats()["streams"] == 0
     open_streams = [Stream(env, api) for _ in range(realtime.PER_CHANNEL)]
     assert all(s.status == 200 for s in open_streams)
-    extra = Stream(env, api)
-    assert (
-        extra.status == 429 and json.loads(extra.response.read())["code"] == "live_busy"
-    )
-    for s in open_streams:
+    extra = Stream(env, api)  # one more page: it takes the oldest page's slot instead of being refused
+    assert extra.status == 200
+    deadline = time.monotonic() + 5
+    while realtime.HUB.stats()["streams"] > realtime.PER_CHANNEL and time.monotonic() < deadline:
+        time.sleep(0.05)
+    assert realtime.HUB.stats()["streams"] == realtime.PER_CHANNEL
+    for s in [*open_streams, extra]:
         s.close()
 
 

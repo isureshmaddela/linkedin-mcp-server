@@ -9,7 +9,9 @@ Each channel keeps its last :data:`BUFFER` hints for a few minutes, so a page th
 ``Last-Event-ID`` gets what it missed; an id from before a restart, or older than the buffer, gets ``resync``
 (fetch everything once). Event ids are ``<epoch>-<sequence>``: the epoch changes with every process.
 
-Streams are capped per channel and in total: a page past the cap gets 429 and keeps polling.
+Streams are capped per channel and in total. A new stream on a full channel ends that channel's oldest one (a
+page that navigated away holds its slot until a write fails, up to a heartbeat or two later), so moving between
+pages never locks the account out; past the total cap a page gets 429 and keeps polling.
 """
 
 from __future__ import annotations
@@ -57,6 +59,8 @@ class _Channel:
         self.streams = 0
         self.touched = time.monotonic()
         self.dropped = 0  # the newest sequence number this channel no longer holds
+        self.tickets: deque[int] = deque()  # the open streams, oldest first
+        self.evicted: set[int] = set()  # streams told to end because newer ones needed their slot
 
 
 class Hub:
@@ -66,6 +70,7 @@ class Hub:
         self._seq = 0
         self.epoch = secrets.token_hex(4)
         self._streams = 0
+        self._tickets = 0
         self._closed = False
         self.enabled = True
 
@@ -116,20 +121,51 @@ class Hub:
 
     def open(self, channel: str) -> int:
         """Count one stream on ``channel``; returns the newest sequence number. Raises :class:`Busy`."""
+        return self.open_stream(channel)[0]
+
+    def open_stream(self, channel: str) -> tuple[int, int]:
+        """Open a stream on ``channel``: ``(newest sequence number, ticket)``. On a full channel the oldest stream
+        is told to end (:meth:`ended`) and this one takes its slot. Raises :class:`Busy` past the total cap."""
         with self._lock:
             target = self._channel(channel)
+            if target.streams >= PER_CHANNEL and target.tickets:
+                oldest = target.tickets.popleft()
+                target.evicted.add(oldest)
+                target.streams -= 1
+                self._streams -= 1
+                target.cv.notify_all()
             if self._closed or target.streams >= PER_CHANNEL or self._streams >= TOTAL:
                 raise Busy(
                     "Too many live connections. The page keeps checking for changes instead."
                 )
+            self._tickets += 1
+            target.tickets.append(self._tickets)
             target.streams += 1
             self._streams += 1
-            return self._seq
+            return self._seq, self._tickets
 
-    def close(self, channel: str) -> None:
+    def ended(self, channel: str, ticket: int) -> bool:
+        """Whether stream ``ticket`` was told to end (a newer stream took its slot)."""
         with self._lock:
             target = self._channels.get(channel)
-            if target is not None and target.streams:
+            return bool(target is not None and ticket in target.evicted)
+
+    def close(self, channel: str, ticket: int = 0) -> None:
+        with self._lock:
+            target = self._channels.get(channel)
+            if target is None:
+                return
+            if ticket:
+                if ticket in target.evicted:  # its slot was already given to a newer stream
+                    target.evicted.discard(ticket)
+                    return
+                try:
+                    target.tickets.remove(ticket)
+                except ValueError:
+                    return
+            elif target.tickets:
+                target.tickets.popleft()
+            if target.streams:
                 target.streams -= 1
                 self._streams -= 1
 
@@ -157,12 +193,15 @@ class Hub:
             ]
             return newer, seq < dropped
 
-    def wait(self, channel: str, after: int, timeout: float) -> list[Event]:
-        """Block until ``channel`` has events after sequence ``after`` (or the timeout, or :meth:`shutdown`)."""
+    def wait(
+        self, channel: str, after: int, timeout: float, ticket: int = 0
+    ) -> list[Event]:
+        """Block until ``channel`` has events after sequence ``after`` (or the timeout, :meth:`shutdown`, or stream
+        ``ticket`` being told to end)."""
         with self._lock:
             target = self._channel(channel)
             end = time.monotonic() + timeout
-            while not self._closed:
+            while not self._closed and not (ticket and ticket in target.evicted):
                 newer = [event for event in target.events if event.seq > after]
                 if newer:
                     return newer
@@ -216,7 +255,13 @@ def publish(
 
 
 def serve(
-    channel: str, last: str, after: int, write: Any, *, stop: Any = None
+    channel: str,
+    last: str,
+    after: int,
+    write: Any,
+    *,
+    stop: Any = None,
+    ticket: int = 0,
 ) -> None:
     """Write one channel's stream until it times out, the hub closes or ``stop()`` is true (a draining server).
 
@@ -235,10 +280,12 @@ def serve(
         seq = max(seq, event.seq)
     deadline = time.monotonic() + STREAM_SECONDS
     while not hub.closed and not (stop is not None and stop()):
+        if ticket and hub.ended(channel, ticket):
+            break  # a newer page of this account took the slot
         left = deadline - time.monotonic()
         if left <= 0:
             break
-        events = hub.wait(channel, seq, min(HEARTBEAT_SECONDS, left))
+        events = hub.wait(channel, seq, min(HEARTBEAT_SECONDS, left), ticket)
         if events:
             for event in events:
                 write(event.wire())

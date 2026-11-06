@@ -9910,16 +9910,16 @@ class RequestHandler(BaseHTTPRequestHandler):
         last = str(self.headers.get("Last-Event-ID") or _query_str(query, "last") or "")[:64]
         hub = notify_realtime.HUB
         try:
-            after = hub.open(channel)
+            after, ticket = hub.open_stream(channel)
         except notify_realtime.Busy as error:
             self._send_json(429, {"error": str(error), "code": "live_busy"})
             return
         try:
-            self._stream_events(channel, last, after)
+            self._stream_events(channel, last, after, ticket)
         finally:
-            hub.close(channel)
+            hub.close(channel, ticket)
 
-    def _stream_events(self, channel: str, last: str, after: int) -> None:
+    def _stream_events(self, channel: str, last: str, after: int, ticket: int = 0) -> None:
         self.close_connection = True
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
@@ -9939,7 +9939,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.wfile.flush()
 
         try:
-            notify_realtime.serve(channel, last, after, write)
+            notify_realtime.serve(channel, last, after, write, ticket=ticket)
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
             # The page went away: nothing more can be written, so the server's final flush must not try.
             import io

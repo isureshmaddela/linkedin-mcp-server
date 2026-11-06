@@ -27,15 +27,15 @@ def notify_stream(req: Req) -> Any:
         return 403, {"error": "Live updates need a member of an organization.", "code": "forbidden"}
     last = str(req.request.headers.get("last-event-id") or req.q("last") or "")[:64]
     try:
-        after = realtime.HUB.open(channel)
+        after, ticket = realtime.HUB.open_stream(channel)
     except realtime.Busy as error:
         return 429, {"error": str(error), "code": "live_busy"}
 
     def stream(write: Any, stop: Any) -> None:
         try:
-            realtime.serve(channel, last, after, write, stop=stop)
+            realtime.serve(channel, last, after, write, stop=stop, ticket=ticket)
         finally:
-            realtime.HUB.close(channel)
+            realtime.HUB.close(channel, ticket)
 
     return HttpResponse(
         200,

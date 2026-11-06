@@ -514,11 +514,26 @@ def test_the_hub_resumes_after_an_id_and_asks_for_a_resync_otherwise(monkeypatch
 
 def test_the_hub_caps_streams_and_wakes_waiters():
     hub = realtime.Hub()
-    after = [hub.open("local:a") for _ in range(realtime.PER_CHANNEL)]
-    with pytest.raises(realtime.Busy):
-        hub.open("local:a")
-    hub.close("local:a")
-    hub.open("local:a")
+    opened = [hub.open_stream("local:a") for _ in range(realtime.PER_CHANNEL)]
+    after = [seq for seq, _ in opened]
+    # a fifth page of the same account takes the oldest page's slot (it navigated away and has not noticed yet)
+    _, newest = hub.open_stream("local:a")
+    oldest = opened[0][1]
+    assert hub.ended("local:a", oldest) and not hub.ended("local:a", newest)
+    assert hub.wait("local:a", after[0], 5, oldest) == []  # the told-to-end stream stops waiting at once
+    assert hub.stats()["streams"] == realtime.PER_CHANNEL
+    hub.close("local:a", oldest)  # its own close does not free a second slot
+    assert hub.stats()["streams"] == realtime.PER_CHANNEL
+    hub.close("local:a", newest)
+    assert hub.stats()["streams"] == realtime.PER_CHANNEL - 1
+    # past the total cap a page is refused and keeps polling
+    monkey = realtime.TOTAL
+    try:
+        realtime.TOTAL = hub.stats()["streams"]
+        with pytest.raises(realtime.Busy):
+            hub.open_stream("local:b")
+    finally:
+        realtime.TOTAL = monkey
     assert hub.wait("local:a", after[0], 0.01) == []
     import threading
 
