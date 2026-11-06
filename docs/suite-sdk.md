@@ -108,7 +108,11 @@ def services_list(request: Request):
   sent automatically until the business chooses otherwise. A time-bound message (a reminder) gets `expires_at` (or
   a default from `kit.EXPIRE_AFTER`) and is dropped if still unsent then. Bulk mail passes `unsubscribe_url` (the
   RFC 8058 one-click address) and is checked against unsubscribes again when it is sent; an app adds its own
-  send-time check with `@kit.suppression("<id>")`. Sending retries passing failures (`kit.RETRY_MINUTES`); an
+  send-time check with `@kit.suppression("<id>")`. A message may carry files (`attachments=[{"filename",
+  "content_type", "data"}]`, at most `kit.MAX_ATTACHMENTS` and `kit.MAX_ATTACHMENT_BYTES` together: a booking's
+  `.ics` invite), kept in `suite_outbox_files` until it is sent or withdrawn. To read a file from an address a
+  business pasted (a calendar feed), use `aira.suite.webfetch.fetch` (https, public hosts only, every redirect
+  checked, size and time caps). Sending retries passing failures (`kit.RETRY_MINUTES`); an
   address refused for good, or bounced, goes on the do-not-contact list. Public forms send back the page's
   `kit.form_ticket(connection)` as `started`; check it with `kit.check_form(connection, payload)`.
 * **Email in.** `aira/inbound_mail.py` reads the business's mailbox (Business hub > Email > Incoming mail) and

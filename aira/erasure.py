@@ -859,6 +859,17 @@ def scrub_ledger(
                 changed += 1
         if changed:
             out[table] = changed
+    if columns(connection, "suite_outbox_files"):
+        # a file a waiting message carries (a calendar invite) names the customer too: it goes
+        dropped = 0
+        for start in range(0, len(refs), 500):
+            chunk = refs[start : start + 500]
+            dropped += connection.execute(
+                f"DELETE FROM suite_outbox_files WHERE message_id IN (SELECT id FROM suite_outbox WHERE ref_id IN ({placeholders(chunk)}))",  # noqa: S608
+                tuple(chunk),
+            ).rowcount
+        if dropped:
+            out["suite_outbox_files"] = dropped
     return out
 
 
