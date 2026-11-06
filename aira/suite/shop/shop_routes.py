@@ -1,5 +1,8 @@
 """Shop routes (``/api/shop/*``), its public pages (``storefront``, ``order``) and its hub entries.
 
+Business buyers (B2B) have their own routes: ``/api/shop/trade-accounts`` (apply, approve, terms, codes) and
+``/api/shop/receivables`` (what businesses owe); on the storefront they apply and sign in with a trade code.
+
 Loaded by :func:`aira.suite.load_apps`. Every handler opens the account's database (the person's own locally, the
 organization's hosted); the hosted rules come from :func:`monosage_cloud.policy.suite_rules` (GET = ``suite.read``,
 others = ``suite.manage``; ``HOSTED_RULES`` marks the price check as a read).
@@ -11,7 +14,7 @@ from typing import Any
 
 from aira.airaapi.http import Raw, Request, aira_route
 from aira.suite import kit, public
-from aira.suite.shop import access, service, store
+from aira.suite.shop import access, service, store, trade
 from aira.suite.shop.store import APP
 
 BASE = "/api/shop"
@@ -30,6 +33,9 @@ PRODUCT_COLUMNS = (
     "track_stock",
     "stock",
     "low_stock",
+    "audience",
+    "wholesale_cents",
+    "min_quantity",
     "created_at",
 )
 ORDER_COLUMNS = (
@@ -52,6 +58,40 @@ ORDER_COLUMNS = (
     "items_summary",
     "address",
     "note",
+    "buyer_type",
+    "company",
+    "tax_id",
+    "po_number",
+    "terms",
+    "due_on",
+)
+TRADE_COLUMNS = (
+    "company",
+    "contact_name",
+    "email",
+    "phone",
+    "tax_id",
+    "status",
+    "terms",
+    "discount_percent",
+    "credit_limit_cents",
+    "tax_exempt",
+    "orders",
+    "paid_cents",
+    "open_cents",
+    "last_order_at",
+    "created_at",
+)
+RECEIVABLE_COLUMNS = (
+    "number",
+    "company",
+    "po_number",
+    "terms",
+    "due_on",
+    "days_late",
+    "total_cents",
+    "currency",
+    "created_at",
 )
 REFERRER_COLUMNS = (
     "name",
@@ -73,6 +113,8 @@ CUSTOMER_COLUMNS = (
     "spend_cents",
     "first_order_at",
     "last_order_at",
+    "buyer_type",
+    "company",
 )
 
 
@@ -245,6 +287,9 @@ def orders_list(request: Request) -> tuple[int, dict[str, Any]] | Raw:
     with _open(request) as connection:
         fulfilment = request.q("fulfilment")
         payment = request.q("payment")
+        buyer = request.q("buyer")
+        if buyer:
+            kit.choice(buyer, "the buyer", store.BUYER_TYPES)
         if fulfilment:
             kit.choice(fulfilment, "the status", store.FULFILMENT_STATUSES)
         if payment:
@@ -255,6 +300,7 @@ def orders_list(request: Request) -> tuple[int, dict[str, Any]] | Raw:
             payment=payment,
             q=request.q("q"),
             open_only=request.q("open") == "1",
+            buyer=buyer,
         )
         if request.q("format") == "csv":
             for row in rows:
@@ -264,6 +310,17 @@ def orders_list(request: Request) -> tuple[int, dict[str, Any]] | Raw:
                 )
             return _csv(rows, ORDER_COLUMNS, "orders.csv")
         return 200, {"orders": rows}
+
+
+def _account_for(connection: Any, payload: dict[str, Any]) -> dict[str, Any] | None:
+    """The approved trade account an order the shop enters is for (``trade_account_id``), or None."""
+    account_id = str(payload.get("trade_account_id") or "")
+    if not account_id:
+        return None
+    account = trade.get(connection, account_id)
+    if account["status"] != "approved":
+        raise ValueError(f"{account['company']}'s trade account is not approved.")
+    return account
 
 
 @aira_route("POST", f"{BASE}/quote")
@@ -276,6 +333,7 @@ def quote(request: Request) -> tuple[int, dict[str, Any]]:
             code=str(payload.get("discount_code") or ""),
             delivery_method=str(payload.get("delivery_method") or "pickup"),
             include_drafts=True,
+            account=_account_for(connection, payload),
         )
 
 
@@ -291,6 +349,7 @@ def orders_create(request: Request) -> tuple[int, dict[str, Any]]:
             allow_closed=True,
             include_drafts=True,
             origin=request.base_url(),
+            account=_account_for(connection, payload),
         )
         if kit.flag(payload.get("mark_paid")):
             order = {
@@ -399,6 +458,146 @@ def orders_unlink(request: Request) -> tuple[int, dict[str, Any]]:
         }
 
 
+@aira_route("POST", f"{BASE}/orders/{ID}/remind")
+def orders_remind(request: Request) -> tuple[int, dict[str, Any]]:
+    """Email the customer a reminder to pay an unpaid order (a business invoice, usually)."""
+    order_id = request.match.group(1)
+    with _open(request) as connection:
+        order = store.get_order(connection, order_id)
+        if order["payment_status"] != "unpaid" or order["fulfilment_status"] == "cancelled":
+            raise ValueError("Only an unpaid order needs a reminder.")
+        if not order["customer_email"]:
+            raise ValueError("This order has no email address to remind.")
+        link = public.link_for(connection, APP, "order", order_id) or service.order_link(
+            connection, order
+        )
+        queued = service.queue_message(
+            connection,
+            order,
+            "payment_reminder",
+            link_path=link["path"],
+            origin=request.base_url(),
+        )
+        connection.commit()
+    request.audit("shop.order_remind", "order", order_id)
+    return 200, {"queued": queued is not None}
+
+
+# ---------------------------------------------------------------------------
+# business buyers: trade accounts and what they owe
+# ---------------------------------------------------------------------------
+
+
+@aira_route("GET", f"{BASE}/trade-accounts")
+def trade_list(request: Request) -> tuple[int, dict[str, Any]] | Raw:
+    with _open(request) as connection:
+        rows = trade.list_accounts(
+            connection, status=request.q("status"), q=request.q("q")[:100]
+        )
+        if request.q("format") == "csv":
+            return _csv(rows, TRADE_COLUMNS, "trade-accounts.csv")
+        return 200, {
+            "accounts": rows,
+            "settings": store.settings(connection),
+            "sell_to": kit.business(connection)["sell_to"],
+            "terms": [
+                {"id": terms, "label": trade.terms_label(terms)}
+                for terms in store.TRADE_TERMS
+            ],
+        }
+
+
+@aira_route("POST", f"{BASE}/trade-accounts")
+def trade_create(request: Request) -> tuple[int, dict[str, Any]]:
+    """The shop adds a business it knows: approved at once; the code comes back once to pass on."""
+    with _open(request) as connection:
+        made = trade.create(connection, request.payload, origin=request.base_url())
+    request.audit("shop.trade_create", "trade_account", made["account"]["id"])
+    return 201, made
+
+
+@aira_route("GET", f"{BASE}/trade-accounts/{ID}")
+def trade_get(request: Request) -> tuple[int, dict[str, Any]]:
+    account_id = request.match.group(1)
+    with _open(request) as connection:
+        account = trade.get(connection, account_id)
+        orders = kit.fetch_all(
+            connection,
+            "SELECT * FROM sh_orders WHERE trade_account_id = ? ORDER BY number DESC LIMIT 100",
+            (account_id,),
+        )
+        return 200, {
+            "account": account,
+            "credit": trade.credit(connection, account),
+            "orders": [store.decode_order(row) for row in orders],
+        }
+
+
+@aira_route("PATCH", f"{BASE}/trade-accounts/{ID}")
+def trade_update(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as connection:
+        account = trade.update(connection, request.match.group(1), request.payload)
+    request.audit("shop.trade_update", "trade_account", account["id"])
+    return 200, {"account": account}
+
+
+@aira_route("POST", f"{BASE}/trade-accounts/{ID}/approve")
+def trade_approve(request: Request) -> tuple[int, dict[str, Any]]:
+    """Approve with terms (sent along), make the trade code and email it; the code comes back once."""
+    account_id = request.match.group(1)
+    payload = dict(request.payload)
+    payload.pop("status", None)
+    with _open(request) as connection:
+        if payload:
+            trade.update(connection, account_id, payload)
+        approved = trade.approve(
+            connection,
+            account_id,
+            origin=request.base_url(),
+            send=payload.get("send", True) is not False,
+        )
+    request.audit("shop.trade_approve", "trade_account", account_id)
+    return 200, approved
+
+
+@aira_route("POST", f"{BASE}/trade-accounts/{ID}/decline")
+def trade_decline(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as connection:
+        account = trade.decline(connection, request.match.group(1))
+    request.audit("shop.trade_decline", "trade_account", account["id"])
+    return 200, {"account": account}
+
+
+@aira_route("POST", f"{BASE}/trade-accounts/{ID}/code")
+def trade_new_code(request: Request) -> tuple[int, dict[str, Any]]:
+    """A new trade code (the old one stops working), emailed and shown once."""
+    with _open(request) as connection:
+        made = trade.new_code(
+            connection, request.match.group(1), origin=request.base_url()
+        )
+    request.audit("shop.trade_code", "trade_account", made["account"]["id"])
+    return 200, made
+
+
+@aira_route("DELETE", f"{BASE}/trade-accounts/{ID}")
+def trade_delete(request: Request) -> tuple[int, dict[str, Any]]:
+    account_id = request.match.group(1)
+    with _open(request) as connection:
+        result = trade.delete(connection, account_id)
+    request.audit("shop.trade_delete", "trade_account", account_id)
+    return 200, result
+
+
+@aira_route("GET", f"{BASE}/receivables")
+def receivables(request: Request) -> tuple[int, dict[str, Any]] | Raw:
+    """Unpaid business orders, oldest due first, how late each is, and the totals per business."""
+    with _open(request) as connection:
+        report = trade.receivables(connection)
+        if request.q("format") == "csv":
+            return _csv(report["orders"], RECEIVABLE_COLUMNS, "receivables.csv")
+        return 200, report
+
+
 # ---------------------------------------------------------------------------
 # discounts, customers
 # ---------------------------------------------------------------------------
@@ -504,6 +703,45 @@ def storefront_page(connection: Any, link: dict[str, Any]) -> dict[str, Any]:
     return service.storefront(connection)
 
 
+@public.action(APP, "storefront", "trade_sign_in")
+def storefront_trade_sign_in(
+    connection: Any,
+    link: dict[str, Any],
+    payload: dict[str, Any],
+    visitor: dict[str, Any],
+) -> tuple[int, dict[str, Any]]:
+    """A business signs in with its email and trade code: the storefront again, at its trade prices."""
+    store.ensure(connection)
+    account = service.storefront_buyer(
+        connection,
+        {
+            "trade_email": payload.get("email") or "-",
+            "trade_code": payload.get("code"),
+        },
+    )
+    return 200, {"page": service.storefront(connection, account)}
+
+
+@public.action(APP, "storefront", "trade_apply")
+def storefront_trade_apply(
+    connection: Any,
+    link: dict[str, Any],
+    payload: dict[str, Any],
+    visitor: dict[str, Any],
+) -> tuple[int, dict[str, Any]]:
+    """A business asks for a trade account (the shop approves it, or it is approved at once)."""
+    store.ensure(connection)
+    if kit.business(connection)["sell_to"] == "consumers":
+        raise PermissionError("This shop does not sell to businesses.")
+    allowed = {"company", "contact_name", "email", "phone", "tax_id", "address", "note"}
+    result = trade.apply(
+        connection,
+        {k: v for k, v in payload.items() if k in allowed},
+        origin=str(visitor.get("base_url") or ""),
+    )
+    return 200, result
+
+
 def _quote_view(quote: dict[str, Any]) -> dict[str, Any]:
     return {
         key: value
@@ -525,6 +763,7 @@ def storefront_quote(
         payload.get("items"),
         code=str(payload.get("discount_code") or "")[:30],
         delivery_method=str(payload.get("delivery_method") or "pickup"),
+        account=service.storefront_buyer(connection, payload),
     )
     return 200, {"quote": _quote_view(quote_data)}
 
@@ -546,12 +785,14 @@ def storefront_order(
         "phone",
         "address",
         "note",
+        "po_number",
     }
     order = service.place_order(
         connection,
         {k: v for k, v in payload.items() if k in allowed},
         source="storefront",
         origin=str(visitor.get("base_url") or ""),
+        account=service.storefront_buyer(connection, payload),
     )
     return 201, {"order": service.public_order(order), "link": order["link"]["path"]}
 
@@ -667,6 +908,22 @@ def _summary(connection: Any) -> dict[str, Any]:
             },
         ]
     }
+    if data["trade"]["open_cents"]:
+        summary["cards"].append(
+            {
+                "label": "Owed by businesses",
+                "value": kit.fmt_money(data["trade"]["open_cents"], code),
+                "tone": "bad" if data["trade"]["overdue_cents"] else "warn",
+            }
+        )
+    if data["trade"]["pending"]:
+        summary["cards"].append(
+            {
+                "label": "Trade accounts to approve",
+                "value": data["trade"]["pending"],
+                "tone": "warn",
+            }
+        )
     waiting = sum(item["waiting"] for item in data["wanted"])
     if waiting:
         summary["cards"].append(

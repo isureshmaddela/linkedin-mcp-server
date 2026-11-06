@@ -165,10 +165,12 @@
       { name: "address", label: "Address", type: "textarea", rows: 2 },
       { name: "logo_url", label: "Logo link", type: "url", placeholder: "https://.../logo.png" },
       { name: "accent", label: "Brand colour", type: "color" },
+      { name: "sell_to", label: "Who you sell to", type: "select", options: [["consumers", "Consumers (B2C)"], ["businesses", "Businesses (B2B)"], ["both", "Businesses and consumers (B2B and B2C)"]], hint: "Selling to businesses adds trade accounts, trade prices, minimum quantities and payment terms to your shop." },
       { type: "heading", label: "Money" },
       { name: "currency", label: "Currency", type: "select", options: data.currencies },
       { name: "tax_label", label: "Tax name", placeholder: "GST, VAT, Sales tax" },
       { name: "tax_rate_bp", label: "Tax rate (hundredths of a percent)", type: "number", min: 0, max: 5000, hint: "750 = 7.5%. Added to invoices and orders. 0 for none." },
+      { name: "tax_id", label: "Your tax or registration number", placeholder: "VAT, GSTIN, EIN", hint: "Printed on invoices to businesses." },
       { name: "payment_link", label: "Payment link", type: "url", hint: "Your own Stripe, PayPal, Razorpay or UPI payment page. Customers see it on invoices, orders and bookings." },
       { name: "payment_instructions", label: "Other ways to pay", type: "textarea", rows: 3, placeholder: "Bank transfer: ... or pay at the venue" },
     ], data.business);

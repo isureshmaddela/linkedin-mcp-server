@@ -6,7 +6,8 @@ makers, salons, clinics, studios, tutors and consultants.
 
 Open it from the app switcher or with `g` then `4`. It has two sections in the left menu:
 
-* **Shop** (`#/shop`): Overview, Orders, Products, Discounts, Customers, Share and earn, Settings. Details in
+* **Shop** (`#/shop`): Overview, Orders, Products, Discounts, Customers, Business buyers (B2B), Share and earn,
+  Settings. It sells to consumers (B2C), businesses (B2B) or both. Details in
   [shop.md](shop.md).
 * **Bookings** (`#/bookings`): Overview, Calendar, Appointments, Waiting list, Services, Staff, Customers, Packages,
   Team pay, Settings. Details in [bookings.md](bookings.md).
@@ -29,11 +30,11 @@ things (set up in `views-shop.js`, for both sections):
   customer in theirs, the service in its form. **Enter** opens a results page (`#/shop?tab=search&q=`) with every
   match by kind (up to 20 each, with a link to the full filtered list). On **Home** the same search shows
   Commerce's records next to the other apps'.
-* **Folders**: the Shop tabs (Overview, Orders, Products, Discounts, Customers, Share and earn, Settings) and the
+* **Folders**: the Shop tabs (Overview, Orders, Products, Discounts, Customers, Business buyers, Share and earn, Settings) and the
   Bookings tabs (Overview, Calendar, Appointments, Waiting list, Services, Staff, Customers, Packages, Team pay,
   Settings) are in the left menu with their own icons, from the moment Commerce opens.
 
-A link can open a form or a record once: `#/shop?tab=orders&new=order` (also `new=product`, `new=discount`),
+A link can open a form or a record once: `#/shop?tab=orders&new=order` (also `new=product`, `new=discount`, `new=business`),
 `#/shop?tab=orders&order=<id>`, `#/shop?tab=products&product=<id>`, `#/bookings?tab=appointments&new=booking`,
 `#/bookings?tab=services&new=service`, `#/bookings?tab=appointments&booking=<id>`,
 `#/bookings?tab=customers&customer=<id>` and `#/bookings?tab=services&service=<id>`. The page takes the request

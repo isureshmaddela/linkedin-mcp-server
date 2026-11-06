@@ -79,16 +79,51 @@ Your customers earn by bringing you new ones (Shop > Share and earn):
 The tab shows everyone with a code: the friends they brought, what those friends paid, rewards earned and used,
 with a CSV. Discount codes and share codes never clash.
 
+## Selling to businesses and consumers (B2B and B2C)
+
+**Who you sell to** is set once for every app (Business hub > Business profile, or Shop > Business buyers):
+consumers (B2C, the default: nothing changes), businesses (B2B) or both.
+
+When you sell to businesses:
+
+* **Trade accounts.** A business applies on your storefront ("Buying for a business?": business name, contact,
+  email, phone, tax number, address), or you add one yourself (Business buyers > Add a business). You approve it
+  with **payment terms** (pay when ordering, or net 7, 15, 30 or 60 days), a **percent off** your trade prices, an
+  optional **credit limit** and, for a reseller with a certificate, **no tax**. Approval makes a **trade code**
+  (like `ABCD-EFGH-JKLM`), shown to you once and emailed to the business (`trade_approved`). The code is stored only
+  as a hash: you can make a new one (the old one stops working) but never read it again. Pause an account to stop
+  it ordering; one with orders is paused rather than deleted. Settings > "New trade accounts" can approve every
+  application at once on the default terms.
+* **Trade prices.** Each product can have a **trade price** (what businesses pay; empty = the price), a
+  **minimum quantity** for businesses and **price breaks** (`10 | 9.00` = from 10, 9.00 each; the quantity counts
+  every option of the product). An option keeps its difference from the product's price. **Who can buy it**:
+  everyone, consumers only or businesses only. A business may order up to 100,000 of a product (consumers 99).
+* **On the storefront** a business signs in with its email and trade code (for that browser session). It sees its
+  trade prices, minimums and price breaks, what it saves, its terms and its credit, and checks out with a **PO
+  number** (Settings can require one) on its account: the order uses the account's contact details and address.
+  A shop for businesses only shows its products without prices until a business signs in, and takes no consumer
+  orders.
+* **Orders** from businesses carry the business, its tax number, the PO number, the terms and a **due date**; the
+  order page is the **invoice** (your and their tax numbers, Print or save as PDF). An order on terms that would
+  take a business over its credit limit is refused. You can enter an order for a business yourself (New order >
+  Buyer).
+* **What businesses owe** (Business buyers): unpaid business orders with their due dates and how late they are,
+  per business, with **Remind** (`payment_reminder`) and a CSV. The overview shows business (B2B) and consumer
+  (B2C) sales this month, what is owed and overdue, and accounts waiting for approval.
+
+Sites also writes for the buyer you chose: a B2B site leads with trade terms and "Request a quote".
+
 ## Customers
 
 Everyone who ordered, merged by email (or phone): number of orders, what they paid, first and last order, and
-whether they came back. Click one to see their orders; download a CSV.
+whether they came back; a business shows under its name. Click one to see their orders; download a CSV.
 
 ## Messages
 
 Order confirmations (`order_confirmation`), payment receipts (`payment_receipt`, with the customer's share code
 when share and earn is on), shipping notices (`order_shipped`, with the tracking link), back-in-stock emails
-(`back_in_stock`) and rewards (`referral_reward`) go to the shared outbox (Business hub > Outbox). They wait for your
+(`back_in_stock`), rewards (`referral_reward`), trade codes (`trade_approved`) and payment reminders
+(`payment_reminder`) go to the shared outbox (Business hub > Outbox). They wait for your
 approval unless you list the kind under automatic sending in Business hub > Email.
 
 ## In the Business hub
@@ -100,7 +135,10 @@ first paid order.
 ## API
 
 All under `/api/shop/`: `overview`, `settings`, `storefront` (+ `/link`), `products` (+ `/draft`, `/{id}`),
-`orders` (+ `/{id}`, `/paid`, `/unpaid`, `/refund`, `/cancel`, `/fulfil`, `/link`), `quote`, `discounts`
-(+ `/{id}`), `customers`, `alerts` (+ `/{id}`), `referrals`. Lists accept `?format=csv` (the orders CSV lists the
-items, the address and the note). Money is integer cents. Public pages: `storefront` (actions `quote`,
-`place_order`, `notify_me`) and `order` (action `notify_paid`; it shows the customer's share code once paid).
+`orders` (+ `/{id}`, `/paid`, `/unpaid`, `/refund`, `/cancel`, `/fulfil`, `/link`, `/remind`; `?buyer=business` or
+`consumer`), `quote`, `discounts` (+ `/{id}`), `customers`, `alerts` (+ `/{id}`), `referrals`, `trade-accounts`
+(+ `/{id}`, `/approve`, `/decline`, `/code`), `receivables`. `quote` and `orders` take `trade_account_id` for a
+business. Lists accept `?format=csv` (the orders CSV lists the items, the address, the note and the business
+fields). Money is integer cents. Public pages: `storefront` (actions `quote`, `place_order` and, with
+`trade_email` and `trade_code`, the same for a business; `notify_me`, `trade_apply`, `trade_sign_in`) and `order`
+(action `notify_paid`; it shows the customer's share code once paid, and a business order's invoice).

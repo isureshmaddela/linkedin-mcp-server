@@ -934,6 +934,7 @@ def start_run(
         "history": store.messages(connection, project_id, limit=12)[:-1],
         "assets": store.assets(connection, project_id),
         "spec": kit.loads(row["spec_json"], {}),
+        "sell_to": kit.business(connection)["sell_to"],
     }
     return row, config, context
 
@@ -1014,6 +1015,7 @@ def run_build(
                     history=context["history"],
                     assets=context["assets"],
                     project_name=row["name"],
+                    sell_to=context.get("sell_to", ""),
                 ),
                 progress.feed,
                 progress.should_stop,
