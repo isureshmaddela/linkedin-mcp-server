@@ -125,6 +125,7 @@ def home_of(request: Any) -> str:
 
 def identity(request: Any, connection: sqlite3.Connection) -> dict[str, Any]:
     profile = life.current(request, connection)
+    life.require_app(connection, profile, "videos")  # a guardian may turn Videos off for a child or a teen
     user = getattr(request, "user", None) or {}
     hosted = bool(profile.get("member_ref"))
     owner = bool(profile.get("owner")) and not hosted
@@ -424,9 +425,60 @@ def can_watch(
         return True
     if blocked_reason(sc, video):
         return False
-    if video["visibility"] == "private" or scheduled(video):
+    if scheduled(video):
+        return False
+    if video["visibility"] == "private" and not _asked_of(sc, me_, video):
         return False
     return video["rating"] in me_["ratings"]
+
+
+def _asked_of(sc: sqlite3.Connection, me_: dict[str, Any], video: dict[str, Any]) -> bool:
+    """A grown-up of the household may watch a teen's private video that waits for their yes."""
+    if not adult(me_) or not me_.get("home"):
+        return False
+    return bool(
+        row(
+            sc,
+            "SELECT 1 AS x FROM vi_public_requests WHERE video_id = ? AND home = ?",
+            (video["id"], me_["home"]),
+        )
+    )
+
+
+def may_serve(sc: sqlite3.Connection, file_id: str, viewer_id: str = "") -> bool:
+    """Whether a signed media address still plays now: the file's videos are re-checked against takedowns,
+    hiding, deletion, privacy, scheduling and members-only rules for the person the address was made for. A file
+    no video uses (a new upload, an ad's picture) follows its own address."""
+    videos = rows(
+        sc,
+        "SELECT * FROM vi_videos WHERE file_id = ? OR thumb_file_id = ? OR captions_file_id = ?",
+        (file_id, file_id, file_id),
+    )
+    if not videos:
+        return True
+    viewer = None
+    if viewer_id:
+        found = row(sc, "SELECT * FROM vi_channels WHERE id = ?", (viewer_id,))
+        viewer = viewer_of(_channel(found)) if found else None
+        if viewer is None or viewer.get("suspended_at"):
+            return False
+    for video in videos:
+        if viewer is not None:
+            if not can_watch(sc, viewer, video):
+                continue
+            if video["file_id"] == file_id and locked(sc, viewer, video):
+                continue
+            return True
+        # an address made without a person (before this check): only what anyone may watch
+        if (
+            not video.get("deleted_at")
+            and not blocked_reason(sc, video)
+            and video["visibility"] != "private"
+            and not scheduled(video)
+            and not video.get("members_only")
+        ):
+            return True
+    return False
 
 
 def is_member(sc: sqlite3.Connection, channel_id: str, viewer_id: str) -> bool:
@@ -495,6 +547,7 @@ def video_view(
         "avatar": "🙂",
     }
     mine = bool(me_ and video["channel_id"] == me_["id"])
+    watcher = str(me_["id"]) if me_ and me_.get("id") else ""  # signed into its media addresses
     out: dict[str, Any] = {
         "id": video["id"],
         "kind": video["kind"],
@@ -513,7 +566,7 @@ def video_view(
         "comments": video["comments"],
         "created_at": video["created_at"],
         "channel": mini(owner),
-        "thumb_url": media.signed_url(sc, video["thumb_file_id"]),
+        "thumb_url": media.signed_url(sc, video["thumb_file_id"], viewer=watcher),
         "mine": mine,
         "members_only": bool(video.get("members_only")),
         "paid_promotion": bool(video.get("paid_promotion")),
@@ -530,10 +583,10 @@ def video_view(
                 "description": video["description"],
                 "tags": store.loads(video["tags"], []),
                 "credits": store.loads(video["credits"], []),
-                "stream_url": "" if shut else media.signed_url(sc, video["file_id"]),
+                "stream_url": "" if shut else media.signed_url(sc, video["file_id"], viewer=watcher),
                 "captions_url": ""
                 if shut
-                else media.signed_url(sc, video["captions_file_id"]),
+                else media.signed_url(sc, video["captions_file_id"], viewer=watcher),
                 "mime": file_row.get("mime", ""),
                 "playback": media.PLAYBACK.get(file_row.get("mime", ""), ""),
                 "ads_enabled": bool(video["ads_enabled"]),
@@ -723,11 +776,122 @@ def _precheck(
             "Your channel has three copyright strikes, so it cannot upload until one of them ends."
         )
     kind = kit.choice(raw.get("kind"), "the kind of video", KINDS, default="video")
-    values = _fields(raw)
+    values = _fields(
+        {"visibility": "private", **raw} if ch.get("age_group") == "teen" else raw
+    )
     if ch.get("age_group") == "child":
         values["visibility"] = "private"  # children's videos stay with them
+    values = _teen_rules(sc, ch, values)
     _check_extras(sc, ch, kind, values)
     return kind, values, _publish_at(raw.get("publish_at"))
+
+
+TEEN_FLOOR_DEFAULT = "teen"
+
+
+def teen_floor(sc: sqlite3.Connection) -> str:
+    """The lowest rating a teen's own upload may have (the platform's setting; "teen" unless changed)."""
+    floor = str(store.setting(sc, "teen_rating_floor", TEEN_FLOOR_DEFAULT) or "")
+    return floor if floor in RATINGS else TEEN_FLOOR_DEFAULT
+
+
+def _teen_rules(
+    sc: sqlite3.Connection,
+    ch: dict[str, Any],
+    values: dict[str, Any],
+    current: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    """A teen's video: rated at least the platform's teen floor (never below it, so never "made for kids"), and
+    public only once a guardian said yes. Asking for public keeps it private and asks the household's adults
+    (``values["_asks_public"]``)."""
+    if ch.get("age_group") != "teen":
+        return values
+    floor = teen_floor(sc)
+    if RATINGS.index(values["rating"]) < RATINGS.index(floor):
+        values["rating"] = floor
+    values["for_kids"] = 0
+    already_public = bool(current and current.get("visibility") == "public")
+    if values["visibility"] == "public" and not already_public:
+        values["visibility"] = (current or {}).get("visibility") or "private"
+        values["_asks_public"] = True
+    return values
+
+
+def ask_public(sc: sqlite3.Connection, ch: dict[str, Any], video_id: str) -> bool:
+    """A teen asked for this video to be public: the household's adults are asked (True when someone can say yes)."""
+    grown_ups = rows(
+        sc,
+        "SELECT id FROM vi_channels WHERE home = ? AND id != ? AND age_group IN ('adult', 'senior') AND suspended_at IS NULL",
+        (ch["home"], ch["id"]),
+    )
+    sc.execute(
+        """INSERT INTO vi_public_requests (video_id, channel_id, home, asked_at) VALUES (?, ?, ?, ?)
+        ON CONFLICT(video_id) DO UPDATE SET asked_at = excluded.asked_at""",
+        (video_id, ch["id"], ch["home"], stamp()),
+    )
+    video = _video_row(sc, video_id)
+    for grown_up in grown_ups:
+        notify(
+            sc,
+            grown_up["id"],
+            "public_request",
+            f"{ch['name']} would like to make “{video['title']}” public. Say yes or no under Studio > Family.",
+            ref_type="video",
+            ref_id=video_id,
+        )
+    return bool(grown_ups)
+
+
+def public_requests(sc: sqlite3.Connection, me_: dict[str, Any]) -> list[dict[str, Any]]:
+    """The household's teens' videos waiting for a grown-up's yes before they go public (empty for anyone else)."""
+    if not adult(me_) or not me_.get("home"):
+        return []
+    out = []
+    for item in rows(
+        sc,
+        """SELECT r.* FROM vi_public_requests r JOIN vi_videos v ON v.id = r.video_id
+        WHERE r.home = ? AND v.deleted_at IS NULL ORDER BY r.asked_at""",
+        (me_["home"],),
+    ):
+        video = _video_row(sc, item["video_id"])
+        out.append(
+            {
+                "video": video_view(sc, viewer_of(me_), video, full=True),
+                "asked_at": item["asked_at"],
+            }
+        )
+    return out
+
+
+def answer_public(
+    sc: sqlite3.Connection, me_: dict[str, Any], video_id: str, approve: bool
+) -> dict[str, Any]:
+    """A guardian (an adult of the teen's household) says yes (the video becomes public) or no (it stays as it is)."""
+    found = row(
+        sc,
+        "SELECT * FROM vi_public_requests WHERE video_id = ?",
+        (store.check_id(video_id, "video"),),
+    )
+    if not found or not adult(me_) or found["home"] != me_.get("home"):
+        raise LookupError("That request was not found.")
+    sc.execute("DELETE FROM vi_public_requests WHERE video_id = ?", (found["video_id"],))
+    video = _video_row(sc, found["video_id"])
+    if approve:
+        store.update(
+            sc, "vi_videos", video["id"], {"visibility": "public", "updated_at": stamp()}
+        )
+    notify(
+        sc,
+        found["channel_id"],
+        "public_answer",
+        f"{me_['name']} said yes: “{video['title']}” is public now."
+        if approve
+        else f"{me_['name']} said not this time: “{video['title']}” stays as it was.",
+        ref_type="video",
+        ref_id=video["id"],
+    )
+    sc.commit()
+    return {"approved": approve, "visibility": "public" if approve else video["visibility"]}
 
 
 def _check_shape(kind: str, duration: float, width: int, height: int) -> None:
@@ -831,7 +995,11 @@ def create_video(
         },
     )
     sc.commit()
-    return video_view(sc, viewer_of(ch), _video_row(sc, video_id), full=True)
+    if values.get("_asks_public"):
+        ask_public(sc, ch, video_id)
+        sc.commit()
+    view = video_view(sc, viewer_of(ch), _video_row(sc, video_id), full=True)
+    return {**view, "public_pending": _public_pending(sc, video_id)}
 
 
 def viewer_of(ch: dict[str, Any]) -> dict[str, Any]:
@@ -868,6 +1036,8 @@ def edit_video(
     values = _fields(raw, current)
     if ch.get("age_group") == "child":
         values["visibility"] = "private"
+    values = _teen_rules(sc, ch, values, found)
+    asks_public = bool(values.pop("_asks_public", False))
     _check_extras(
         sc,
         ch,
@@ -907,8 +1077,17 @@ def edit_video(
         if "credits" in raw:
             values["credits"] = store.dumps(_credits(raw.get("credits")))
     store.update(sc, "vi_videos", found["id"], {**values, "updated_at": stamp()})
+    if asks_public:
+        ask_public(sc, ch, found["id"])
     sc.commit()
-    return video_view(sc, viewer_of(ch), _video_row(sc, found["id"]), full=True)
+    view = video_view(sc, viewer_of(ch), _video_row(sc, found["id"]), full=True)
+    return {**view, "public_pending": _public_pending(sc, found["id"])}
+
+
+def _public_pending(sc: sqlite3.Connection, video_id: str) -> bool:
+    return bool(
+        row(sc, "SELECT 1 AS x FROM vi_public_requests WHERE video_id = ?", (video_id,))
+    )
 
 
 def delete_video(sc: sqlite3.Connection, ch: dict[str, Any], video_id: str) -> None:

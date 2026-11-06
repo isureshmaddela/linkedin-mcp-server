@@ -34,7 +34,7 @@
       return h("div", { style: { overflowX: "auto" } }, h("table", { class: "pub-table" },
         h("thead", {}, h("tr", {}, ...["Idea", "Entry", "Target / stop", closed ? "Result" : "Time left", "Return"].map((label) => h("th", { scope: "col", text: label })))),
         h("tbody", {}, ...ideas.map((i) => h("tr", {},
-          h("td", {}, h("strong", { text: `${i.side === "buy" ? "Buy" : "Sell"} ${i.symbol}` }), h("div", { class: "pub-muted pub-hint", text: `${i.name} · ${ctx.date(i.opened_on)}${i.access === "paid" ? " · paid idea" : ""}` }), i.reasoning && !closed ? h("div", { class: "pub-hint", text: i.reasoning }) : null),
+          h("td", {}, h("strong", { text: `${i.side === "buy" ? "Buy" : "Sell"} ${i.symbol}` }), h("div", { class: "pub-muted pub-hint", text: `${i.name} · ${ctx.date(i.opened_on)}${i.access === "paid" ? " · paid idea" : ""}` }), i.reasoning && !closed ? h("div", { class: "pub-hint", text: i.reasoning }) : null, i.disclosure ? h("div", { class: "pub-muted pub-hint", text: `${i.disclosure.registration}. ${i.disclosure.holding_text}${i.disclosure.note ? ` ${i.disclosure.note}` : ""}` }) : null),
           h("td", { text: money(i.entry_cents, i.currency) }),
           h("td", { text: `${money(i.target_cents, i.currency)} / ${money(i.stop_cents, i.currency)}` }),
           h("td", { text: closed ? `${STATES[i.status] || i.status} · ${ctx.date(i.closed_on)}` : `${i.days_left} days` }),
@@ -44,6 +44,7 @@
     root.append(
       h("section", { class: "pub-card" },
         h("h1", { text: `${a.display_name}: stock ideas` }),
+        a.registration ? h("p", { class: "pub-muted", text: a.registration }) : null,
         a.bio ? h("p", { text: a.bio }) : null,
         h("div", { class: "pub-grid" },
           h("div", { class: "pub-item" }, h("span", { class: "pub-muted", text: "Ideas published" }), h("strong", { class: "pub-price", text: String(r.ideas) }), h("span", { class: "pub-muted pub-hint", text: `${r.open} open, ${r.closed} closed` })),

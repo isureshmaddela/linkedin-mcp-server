@@ -23,7 +23,7 @@ from datetime import timedelta
 from typing import Any
 
 from aira.suite import kit, life
-from aira.suite.social import photos, store
+from aira.suite.social import moderation, photos, store
 from aira.suite.social.store import new_id, row, rows, stamp
 
 REACTIONS = ("❤️", "👍", "😂", "😮", "😢", "🎉")
@@ -70,7 +70,8 @@ LIMITS = {
     "photo": 120,
     "story_reply": 120,
 }
-DEFAULT_BLOCKLIST = ("fuck", "shit", "bitch", "bastard", "cunt", "motherfucker")
+# The moderators' own word list starts as the swear words; moderation.py keeps the categorised term lists.
+DEFAULT_BLOCKLIST = moderation.PROFANITY
 HANDLE = re.compile(r"^[a-z][a-z0-9_.]{2,29}$")
 MENTION = re.compile(r"(?<![\w@])@([a-z][a-z0-9_.]{2,29})")
 TAG = re.compile(r"(?<![\w#])#(\w{2,40})")
@@ -97,6 +98,7 @@ def person_key(profile: dict[str, Any]) -> str:
 
 def identity(request: Any, connection: sqlite3.Connection) -> dict[str, Any]:
     profile = life.current(request, connection)
+    life.require_app(connection, profile, "social")  # a guardian may turn Social off for a child or a teen
     user = getattr(request, "user", None) or {}
     hosted = bool(profile.get("member_ref"))
     return {
@@ -189,32 +191,36 @@ def _clean_handle(value: Any) -> str:
     return handle
 
 
+UPLOADS_ONLY = (
+    "Upload the photo from your device. Links to pictures on other websites are not used: they could tell that "
+    "website who looks at them."
+)
+
+
 def _avatar(
     value: Any, fallback: str, *, sc: sqlite3.Connection | None = None, owner: str = ""
 ) -> str:
+    """An emoji, or a photo this person uploaded (``media:<id>``); never a link to a picture elsewhere."""
     text = str(value or "").strip()
     if not text:
         return fallback
     if photos.is_ref(text) and sc is not None and owner:
         return photos.owned(sc, text, owner)
-    if text.lower().startswith("https://"):
-        return kit.url(text, "the picture link")
+    if photos.external(text) or photos.is_ref(text):
+        raise ValueError(UPLOADS_ONLY)
     if len(text) > 8:
-        raise ValueError("Use an emoji, a photo from your device or an https:// picture link.")
+        raise ValueError("Use an emoji or a photo from your device.")
     return text
 
 
 def _picture(value: Any, sc: sqlite3.Connection, owner: str, label: str) -> str:
-    """A cover, group or page picture: empty, an uploaded photo of this person, or an https link."""
+    """A cover, group or page picture: empty, or a photo this person uploaded (``media:<id>``)."""
     text = str(value or "").strip()
     if not text:
         return ""
     if photos.is_ref(text):
         return photos.owned(sc, text, owner)
-    link = kit.url(text, label)
-    if not link.lower().startswith("https://"):
-        raise ValueError(f"{label[:1].upper()}{label[1:]} must start with https://.")
-    return link
+    raise ValueError(UPLOADS_ONLY)
 
 
 def _links(value: Any) -> str:
@@ -442,9 +448,11 @@ def can_see_account(
     if target.get("suspended_at") or blocked(sc, viewer["id"], target["id"]):
         return False
     if minor(target):
-        # a friend, a request between them, or someone from the child's own household
-        return bool(friendship(sc, viewer["id"], target["id"])) or _same_household(
-            viewer, target
+        # a friend, a request between them, someone from the child's own household or an approved contact
+        return (
+            bool(friendship(sc, viewer["id"], target["id"]))
+            or _same_household(viewer, target)
+            or _approved(sc, target["id"], viewer["id"])
         )
     return True
 
@@ -606,7 +614,12 @@ def request_friend(
     moment = stamp()
     if found and found["status"] == "accepted":
         return {"relation": "friends"}
-    if minor(me_) and not approved and not _same_household(me_, other):
+    # A child's new friend from outside the household, and a teen's new adult friend who is not on their approved
+    # contacts, wait for a guardian's yes.
+    needs_yes = (minor(me_) and not _same_household(me_, other)) or (
+        me_["age_group"] == "teen" and not young(other) and not contact_ok(sc, me_, other)
+    )
+    if needs_yes and not approved:
         if found and found["requested_by"] == me_["id"]:
             return {"relation": "request_sent"}
         return _ask_guardian(sc, me_, other, "accept" if found else "request")
@@ -629,10 +642,14 @@ def request_friend(
         return {"relation": "friends"}
     if found:
         return {"relation": "request_sent"}
-    if minor(other) and not minor(me_):
-        # a stranger adult cannot send a child a request: only someone in the child's household can
-        if not _same_household(me_, other):
-            raise PermissionError("Only family can send a friend request to a child.")
+    if minor(other) and not minor(me_) and not contact_ok(sc, other, me_):
+        # a stranger cannot send a child a request: only their household, or someone a guardian approved
+        raise PermissionError("Only family can send a friend request to a child.")
+    if other["age_group"] == "teen" and not young(me_) and not contact_ok(sc, other, me_):
+        # nor can an adult stranger send one to a teen
+        raise PermissionError(
+            "Only family, and people their parent approved, can send a friend request to a teen."
+        )
     rate(sc, me_, "friend_request")
     x, y = _pair(me_["id"], other["id"])
     sc.execute(
@@ -654,6 +671,79 @@ def request_friend(
 
 def _same_household(a: dict[str, Any], b: dict[str, Any]) -> bool:
     return bool(a.get("home")) and a.get("home") == b.get("home")
+
+
+def contact_ok(
+    sc: sqlite3.Connection, young_acct: dict[str, Any], other: dict[str, Any]
+) -> bool:
+    """Whether ``other`` may befriend or message this child or teen: someone of their household, another child or
+    teen, or an account on the approved contacts a guardian keeps for them. Anyone may contact a grown-up."""
+    if not young(young_acct):
+        return True
+    if _same_household(young_acct, other) or young(other):
+        return True
+    return _approved(sc, young_acct["id"], other["id"])
+
+
+def _approved(sc: sqlite3.Connection, young_id: str, other_id: str) -> bool:
+    return bool(
+        row(
+            sc,
+            "SELECT 1 AS x FROM so_approved_contacts WHERE young_id = ? AND contact_id = ?",
+            (young_id, other_id),
+        )
+    )
+
+
+def approved_contacts(
+    sc: sqlite3.Connection, me_: dict[str, Any], young_id: str
+) -> dict[str, Any]:
+    """The approved contacts of a child or teen, for them and their guardians."""
+    person = account(sc, young_id)
+    if not young(person) or not (person["id"] == me_["id"] or is_guardian(sc, me_, person)):
+        raise LookupError("That person was not found.")
+    out = []
+    for item in rows(
+        sc,
+        "SELECT * FROM so_approved_contacts WHERE young_id = ? ORDER BY created_at",
+        (person["id"],),
+    ):
+        try:
+            out.append({**mini(account(sc, item["contact_id"])), "since": item["created_at"]})
+        except LookupError:
+            continue
+    return {"person": mini(person), "contacts": out, "can_change": is_guardian(sc, me_, person)}
+
+
+def set_approved_contact(
+    sc: sqlite3.Connection, me_: dict[str, Any], young_id: str, raw: dict[str, Any], on: bool
+) -> dict[str, Any]:
+    """A guardian adds (by @name or id) or removes an approved contact of their child or teen."""
+    person = account(sc, young_id)
+    if not young(person) or not is_guardian(sc, me_, person):
+        raise PermissionError("Only a parent or guardian can change who may contact them.")
+    wanted = str(raw.get("contact_id") or raw.get("handle") or "").strip().lstrip("@").lower()
+    found = (
+        row(sc, "SELECT * FROM so_accounts WHERE id = ?", (wanted,))
+        if store.HEX.fullmatch(wanted)
+        else row(sc, "SELECT * FROM so_accounts WHERE handle = ?", (wanted,))
+    )
+    if not found or found["id"] == person["id"]:
+        raise LookupError("That person was not found.")
+    if on:
+        if blocked(sc, person["id"], found["id"]) or found.get("suspended_at"):
+            raise PermissionError("This person cannot be an approved contact.")
+        sc.execute(
+            "INSERT OR IGNORE INTO so_approved_contacts (young_id, contact_id, approved_by, created_at) VALUES (?, ?, ?, ?)",
+            (person["id"], found["id"], me_["id"], stamp()),
+        )
+    else:
+        sc.execute(
+            "DELETE FROM so_approved_contacts WHERE young_id = ? AND contact_id = ?",
+            (person["id"], found["id"]),
+        )
+    sc.commit()
+    return approved_contacts(sc, me_, person["id"])
 
 
 # ---------------------------------------------------------------------------
@@ -690,7 +780,7 @@ def is_guardian(
     sc: sqlite3.Connection, me_: dict[str, Any], child: dict[str, Any]
 ) -> bool:
     return (
-        minor(child)
+        young(child)
         and me_["age_group"] in ("adult", "senior")
         and not me_.get("suspended_at")
         and _same_household(me_, child)
@@ -736,7 +826,7 @@ def guardian_requests(
     for item in rows(
         sc,
         """SELECT g.* FROM so_guardian g JOIN so_accounts c ON c.id = g.child_id
-        WHERE c.home = ? AND c.age_group = 'child' ORDER BY g.created_at""",
+        WHERE c.home = ? AND c.age_group IN ('child', 'teen') ORDER BY g.created_at""",
         (me_["home"],),
     ):
         try:
@@ -782,6 +872,12 @@ def answer_guardian(
     )
     other = account(sc, other_id)
     if approve:
+        if not young(other) and not _same_household(child, other):
+            # a grown-up the guardian said yes to is one of the child's approved contacts from now on
+            sc.execute(
+                "INSERT OR IGNORE INTO so_approved_contacts (young_id, contact_id, approved_by, created_at) VALUES (?, ?, ?, ?)",
+                (child["id"], other["id"], me_["id"], stamp()),
+            )
         result = request_friend(sc, child, other_id, approved=True)
         text = (
             f"{me_['display_name']} said yes: you and {other['display_name']} are friends now."
@@ -870,6 +966,17 @@ def friends_overview(sc: sqlite3.Connection, me_: dict[str, Any]) -> dict[str, A
         "outgoing": outgoing,
         "awaiting_parent": waiting,
         "children_asking": guardian_requests(sc, me_),
+        # the household's children and teens whose approved contacts this grown-up keeps
+        "young_in_household": [
+            mini(_account(r) or {})
+            for r in rows(
+                sc,
+                "SELECT * FROM so_accounts WHERE home = ? AND id != ? AND age_group IN ('child', 'teen') ORDER BY display_name",
+                (me_.get("home") or "", me_["id"]),
+            )
+        ]
+        if me_["age_group"] in ("adult", "senior") and me_.get("home")
+        else [],
         "suggestions": suggestions(sc, me_),
     }
 
@@ -1131,6 +1238,7 @@ def rate(sc: sqlite3.Connection, me_: dict[str, Any], kind: str) -> None:
 
 
 def blocklist(sc: sqlite3.Connection) -> list[str]:
+    """The moderators' own words, starred out like swearing (the term lists themselves are in moderation.py)."""
     return list(store.setting(sc, "blocklist", list(DEFAULT_BLOCKLIST)))
 
 
@@ -1146,10 +1254,83 @@ def save_blocklist(sc: sqlite3.Connection, words: Iterable[Any]) -> list[str]:
 
 
 def filtered(sc: sqlite3.Connection, text: str) -> str:
-    out = text
-    for word in blocklist(sc):
-        out = re.sub(rf"(?i)\b{re.escape(word)}\b", "*" * len(word), out)
-    return out
+    """Swear words and the moderators' own words starred out (moderation.mask)."""
+    return moderation.mask(text, extra_words=blocklist(sc))
+
+
+def young(acct: dict[str, Any] | None) -> bool:
+    return bool(acct) and acct.get("age_group") in ("child", "teen")
+
+
+def screen(
+    sc: sqlite3.Connection, text: str, *, involves_young: bool
+) -> moderation.Verdict:
+    """The automatic check of one piece of writing: masked, or held for review when a child or a teen is
+    involved and it has a flagged term, contact details or a move to another app (moderation.check)."""
+    return moderation.check(text, young=involves_young, extra_words=blocklist(sc))
+
+
+def _hold(
+    sc: sqlite3.Connection,
+    target_type: str,
+    target_id: str,
+    author: dict[str, Any],
+    verdict: moderation.Verdict,
+    *,
+    young_ids: Iterable[str] = (),
+) -> None:
+    """Keep this (already hidden) writing back for a moderator: it is in the report queue as an automatic report,
+    its author sees it waiting, nobody else sees it. The young people's guardians are told."""
+    report_id = new_id()
+    moment = stamp()
+    people = []
+    for young_id in dict.fromkeys(young_ids):
+        try:
+            people.append(account(sc, young_id))
+        except LookupError:
+            continue
+    # the households that moderate it: the author's and each young person's
+    homes = sorted({h for h in [author.get("home"), *[p.get("home") for p in people]] if h})
+    sc.execute(
+        "INSERT INTO so_reports (id, reporter_id, target_type, target_id, reason, created_at) VALUES (?, '', ?, ?, ?, ?)",
+        (report_id, target_type, target_id, verdict.reason, moment),
+    )
+    sc.execute(
+        """INSERT OR REPLACE INTO so_held (target_type, target_id, author_id, report_id, reasons, homes, created_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?)""",
+        (
+            target_type,
+            target_id,
+            author["id"],
+            report_id,
+            ",".join(verdict.categories),
+            "\n".join(homes),
+            moment,
+        ),
+    )
+    told: set[str] = set()
+    for person in people:
+        for grown_up in guardians(sc, person):
+            if grown_up["id"] in told or grown_up["id"] == author["id"]:
+                continue
+            told.add(grown_up["id"])
+            notify(
+                sc,
+                grown_up["id"],
+                "safety_hold",
+                "",
+                "account",
+                person["id"],
+                f"Something written to or by {person['display_name']} was held for a safety check.",
+            )
+
+
+def held(sc: sqlite3.Connection, target_type: str, target_id: str) -> dict[str, Any] | None:
+    return row(
+        sc,
+        "SELECT * FROM so_held WHERE target_type = ? AND target_id = ?",
+        (target_type, target_id),
+    )
 
 
 def _photos(
@@ -1159,7 +1340,7 @@ def _photos(
     sc: sqlite3.Connection | None = None,
     owner: str = "",
 ) -> list[str]:
-    """https photo links, and (with ``sc`` and ``owner``) photos this person uploaded (``media:<id>``)."""
+    """Photos this person uploaded (``media:<id>``). A link to a picture elsewhere is refused (UPLOADS_ONLY)."""
     items = (
         value if isinstance(value, list) else [p for p in str(value or "").split() if p]
     )
@@ -1167,15 +1348,9 @@ def _photos(
         raise ValueError(f"At most {limit} photos.")
     out = []
     for item in items:
-        if photos.is_ref(item):
-            if sc is None or not owner:
-                raise ValueError("Photo links must start with https://.")
-            out.append(photos.owned(sc, item, owner))
-            continue
-        link = kit.url(item, "a photo link")
-        if not link.lower().startswith("https://"):
-            raise ValueError("Photo links must start with https://.")
-        out.append(link)
+        if not photos.is_ref(item) or sc is None or not owner:
+            raise ValueError(UPLOADS_ONLY)
+        out.append(photos.owned(sc, item, owner))
     return out
 
 
@@ -1433,6 +1608,8 @@ def create_post(
     rate(sc, me_, "post")
     post_id = new_id()
     moment = stamp()
+    # a child's or a teen's post with a flagged term or contact details waits for a moderator
+    verdict = screen(sc, f"{text}\n{place}", involves_young=young(me_))
     clean = filtered(sc, text)
     tags = sorted({t.lower() for t in TAG.findall(clean)})
     sc.execute(
@@ -1470,6 +1647,15 @@ def create_post(
             "INSERT OR IGNORE INTO so_post_tags (tag, post_id, created_at) VALUES (?, ?, ?)",
             (tag, post_id, moment),
         )
+    if verdict.action == "hold":
+        sc.execute("UPDATE so_posts SET hidden_at = ? WHERE id = ?", (moment, post_id))
+        _hold(sc, "post", post_id, me_, verdict, young_ids=[me_["id"]])
+        sc.commit()
+        return {
+            **post_view(sc, me_, _post_row(sc, post_id)),
+            "held": True,
+            "notice": "Your post is waiting for a safety check before others can see it.",
+        }
     post = _post_row(sc, post_id)
     _mention(sc, me_, post, clean, "post")
     if shared:
@@ -1778,12 +1964,13 @@ def comment(
 ) -> dict[str, Any]:
     _active(me_)
     post = visible_post(sc, me_, post_id)
-    text = filtered(
-        sc,
-        kit.text(
-            raw.get("text"), "a comment", max_len=1000, required=True, multiline=True
-        ),
+    written = kit.text(
+        raw.get("text"), "a comment", max_len=1000, required=True, multiline=True
     )
+    post_author = row(sc, "SELECT * FROM so_accounts WHERE id = ?", (post["author_id"],))
+    young_ids = [a["id"] for a in (me_, post_author) if a and young(a)]
+    verdict = screen(sc, written, involves_young=bool(young_ids))
+    text = verdict.text
     parent_id = str(raw.get("parent_id") or "")
     parent = None
     if parent_id:
@@ -1803,6 +1990,25 @@ def comment(
         "INSERT INTO so_comments (id, post_id, author_id, text, created_at, parent_id) VALUES (?, ?, ?, ?, ?, ?)",
         (comment_id, post["id"], me_["id"], text, moment, parent_id),
     )
+    if verdict.action == "hold":
+        sc.execute("UPDATE so_comments SET hidden_at = ? WHERE id = ?", (moment, comment_id))
+        _hold(sc, "comment", comment_id, me_, verdict, young_ids=young_ids)
+        sc.commit()
+        return {
+            "comment": {
+                "id": comment_id,
+                "author": mini(me_),
+                "text": text,
+                "created_at": moment,
+                "mine": True,
+                "parent_id": parent_id,
+                "likes": 0,
+                "liked": False,
+                "held": True,
+            },
+            "held": True,
+            "notice": "Your comment is waiting for a safety check before others can see it.",
+        }
     sc.execute("UPDATE so_posts SET updated_at = ? WHERE id = ?", (moment, post["id"]))
     if parent:
         notify(
@@ -2861,6 +3067,10 @@ def can_message(
         return False
     if blocked(sc, me_["id"], other["id"]):
         return False
+    # An adult outside the household writes to a child or a teen only from their approved contacts, even when the
+    # two became friends earlier; teens write to each other.
+    if not (contact_ok(sc, other, me_) and contact_ok(sc, me_, other)):
+        return False
     if are_friends(sc, me_["id"], other["id"]):
         return True
     if other["age_group"] in ("child", "teen") or me_["age_group"] == "child":
@@ -3153,7 +3363,12 @@ def messages(
     names: dict[str, dict[str, Any]] = {}
     out = []
     for item in found:
-        if item["author_id"] in hidden or item["hidden_at"]:
+        waiting = bool(
+            item["hidden_at"]
+            and item["author_id"] == me_["id"]
+            and held(sc, "message", item["id"])
+        )  # held for a safety check: its author sees it waiting, nobody else sees it
+        if item["author_id"] in hidden or (item["hidden_at"] and not waiting):
             if since:
                 out.append({"id": item["id"], "removed": True})
             continue
@@ -3184,6 +3399,7 @@ def messages(
                 "created_at": item["created_at"],
                 "mine": mine,
                 "seen": bool(seen_by) if mine else None,
+                "held": waiting,
                 "can_delete": mine
                 and not item["deleted_at"]
                 and store.parse(item["created_at"])
@@ -3235,19 +3451,31 @@ def send(
                 raise PermissionError(
                     "You can message friends, and people who accept messages from everyone."
                 )
-    text = filtered(
-        sc, kit.text(raw.get("text"), "a message", max_len=4000, multiline=True)
-    )
+    written = kit.text(raw.get("text"), "a message", max_len=4000, multiline=True)
     pictures = _photos(
         [raw["photo"]] if raw.get("photo") else [], limit=1, sc=sc, owner=me_["id"]
     )
-    if not text and not pictures:
+    if not written and not pictures:
         raise ValueError("Write a message.")
+    # A chat with a child or a teen in it: flagged words, contact details or a move to another app wait for a
+    # moderator instead of being delivered.
+    young_ids = [
+        m["account_id"]
+        for m in rows(
+            sc,
+            """SELECT c.account_id FROM so_chat_members c JOIN so_accounts a ON a.id = c.account_id
+            WHERE c.chat_id = ? AND a.age_group IN ('child', 'teen')""",
+            (chat["id"],),
+        )
+    ]
+    verdict = screen(sc, written, involves_young=bool(young_ids) or young(me_))
+    text = verdict.text
     rate(sc, me_, "message")
     message_id = new_id()
     moment = stamp()
+    on_hold = verdict.action == "hold"
     sc.execute(
-        "INSERT INTO so_messages (id, chat_id, author_id, text, photo, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO so_messages (id, chat_id, author_id, text, photo, created_at, updated_at, hidden_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
         (
             message_id,
             chat["id"],
@@ -3256,8 +3484,34 @@ def send(
             pictures[0] if pictures else "",
             moment,
             moment,
+            moment if on_hold else None,
         ),
     )
+    if on_hold:
+        _hold(sc, "message", message_id, me_, verdict, young_ids=young_ids)
+        sc.execute(
+            "UPDATE so_chat_members SET last_read_at = ? WHERE chat_id = ? AND account_id = ?",
+            (moment, chat["id"], me_["id"]),
+        )
+        sc.commit()
+        support = (
+            moderation.crisis_reply(young(me_))
+            if "self_harm" in verdict.categories
+            else ""
+        )
+        return {
+            "message": {
+                "id": message_id,
+                "text": text,
+                "photo": photos.display(pictures[0], sc=sc) if pictures else "",
+                "created_at": moment,
+                "mine": True,
+                "held": True,
+            },
+            "held": True,
+            "notice": "This message is waiting for a safety check before it is delivered.",
+            "support": support,
+        }
     sc.execute("UPDATE so_chats SET updated_at = ? WHERE id = ?", (moment, chat["id"]))
     sc.execute(
         "UPDATE so_chat_members SET last_read_at = ? WHERE chat_id = ? AND account_id = ?",
@@ -3844,7 +4098,11 @@ def pages(sc: sqlite3.Connection, me_: dict[str, Any], q: str = "") -> dict[str,
 
 
 def report(
-    sc: sqlite3.Connection, me_: dict[str, Any], raw: dict[str, Any]
+    sc: sqlite3.Connection,
+    me_: dict[str, Any],
+    raw: dict[str, Any],
+    *,
+    dating_profiles: bool = False,
 ) -> dict[str, Any]:
     target_type = kit.choice(
         raw.get("target_type"), "what you are reporting", REPORT_TARGETS
@@ -3875,19 +4133,95 @@ def report(
         market.visible(sc, me_, target_id)
     else:
         visible_account(sc, me_, target_id)
-    if row(
+    existing = row(
         sc,
-        "SELECT 1 AS x FROM so_reports WHERE reporter_id = ? AND target_type = ? AND target_id = ? AND status = 'open'",
+        "SELECT id FROM so_reports WHERE reporter_id = ? AND target_type = ? AND target_id = ? AND status = 'open'",
         (me_["id"], target_type, target_id),
-    ):
-        return {"reported": True}
+    )
+    if existing:
+        return {"reported": True, "report_id": existing["id"]}
     rate(sc, me_, "report")
+    report_id = new_id()
     sc.execute(
         "INSERT INTO so_reports (id, reporter_id, target_type, target_id, reason, created_at) VALUES (?, ?, ?, ?, ?, ?)",
-        (new_id(), me_["id"], target_type, target_id, reason, stamp()),
+        (report_id, me_["id"], target_type, target_id, reason, stamp()),
     )
+    # The evidence is copied now: the chat may be deleted or a match ended later (moderators only read it).
+    if target_type == "message":
+        found = row(sc, "SELECT chat_id FROM so_messages WHERE id = ?", (target_id,))
+        if found:
+            from aira.suite.social import dating
+
+            add_evidence(
+                sc,
+                report_id,
+                "chat",
+                {"chat_id": found["chat_id"], "transcript": dating.transcript(sc, found["chat_id"])[-200:]},
+            )
+    elif target_type == "account":
+        from aira.suite.social import dating
+
+        between = dating.evidence_between(
+            sc, me_["id"], target_id, profiles=dating_profiles
+        )
+        if between:
+            add_evidence(sc, report_id, "dating", between)
     sc.commit()
-    return {"reported": True}
+    return {"reported": True, "report_id": report_id}
+
+
+def add_evidence(
+    sc: sqlite3.Connection, report_id: str, kind: str, data: dict[str, Any]
+) -> None:
+    sc.execute(
+        "INSERT INTO so_evidence (id, report_id, kind, data, created_at, purge_after) VALUES (?, ?, ?, ?, ?, ?)",
+        (
+            new_id(),
+            report_id,
+            kind,
+            store.dumps(data),
+            stamp(),
+            store.later(24 * store.RETENTION_DAYS),
+        ),
+    )
+
+
+def evidence(
+    sc: sqlite3.Connection, report_id: str, *, dating_too: bool = True
+) -> list[dict[str, Any]]:
+    """What was copied with a report (for a moderator). Dating evidence is left out unless ``dating_too``."""
+    out = []
+    for item in rows(
+        sc,
+        "SELECT * FROM so_evidence WHERE report_id = ? ORDER BY created_at",
+        (report_id,),
+    ):
+        if item["kind"] == "dating" and not dating_too:
+            out.append({"kind": "dating", "withheld": True, "created_at": item["created_at"]})
+            continue
+        out.append(
+            {
+                "kind": item["kind"],
+                "data": store.loads(item["data"], {}),
+                "created_at": item["created_at"],
+            }
+        )
+    return out
+
+
+def purge_kept(sc: sqlite3.Connection) -> dict[str, int]:
+    """Social's background task: ended Dating chats past their retention, and evidence of closed reports past it."""
+    moment = stamp()
+    ended = sc.execute(
+        "DELETE FROM so_dating_ended WHERE purge_after < ?", (moment,)
+    ).rowcount
+    kept = sc.execute(
+        """DELETE FROM so_evidence WHERE purge_after < ? AND report_id NOT IN
+        (SELECT id FROM so_reports WHERE status = 'open')""",
+        (moment,),
+    ).rowcount
+    sc.commit()
+    return {"ended_chats": max(ended, 0), "evidence": max(kept, 0)}
 
 
 def _target(
@@ -3925,6 +4259,10 @@ def _in_scope(
     a platform moderator (``home`` None) moderates every report."""
     if home is None:
         return True
+    if not report_row["reporter_id"]:
+        kept = held(sc, report_row["target_type"], report_row["target_id"])
+        if kept and home in str(kept["homes"] or "").split("\n"):
+            return True  # held by the automatic check: the young person's household moderates it too
     target = _target(sc, report_row["target_type"], report_row["target_id"]) or {}
     return home in (
         _home_of(sc, report_row["reporter_id"]),
@@ -3933,9 +4271,16 @@ def _in_scope(
 
 
 def reports(
-    sc: sqlite3.Connection, *, status: str = "open", home: str | None = None
+    sc: sqlite3.Connection,
+    *,
+    status: str = "open",
+    home: str | None = None,
+    viewer_id: str = "",
 ) -> list[dict[str, Any]]:
-    """The moderation queue, with a preview of each reported thing (for a moderator only)."""
+    """The moderation queue, with a preview of each reported thing and the evidence copied when it was filed (for
+    a moderator only). Writing the automatic check held back is here too (``held``, no reporter). A household
+    owner (``home``) sees Dating evidence only of reports they filed themselves (``viewer_id``): the rest stays
+    with the platform's moderators."""
     out = []
     for item in rows(
         sc,
@@ -3970,6 +4315,14 @@ def reports(
                 )[:300],
                 "hidden": bool(target.get("hidden_at") or target.get("suspended_at")),
                 "can_suspend": home is None or _home_of(sc, author_id) == home,
+                "automatic": not item["reporter_id"],
+                "held": bool(held(sc, item["target_type"], item["target_id"])),
+                "evidence": evidence(
+                    sc,
+                    item["id"],
+                    dating_too=home is None
+                    or bool(viewer_id and item["reporter_id"] == viewer_id),
+                ),
             }
         )
         if len(out) >= 200:
@@ -3994,9 +4347,31 @@ def moderate(
     )
     if not found or not _in_scope(sc, found, home):
         raise LookupError("That report was not found.")
+    if action == "release":
+        action = "dismiss"  # writing held by the automatic check: deliver it after all
     action = kit.choice(action, "the action", ("hide", "suspend", "dismiss"))
     moment = stamp()
     target = _target(sc, found["target_type"], found["target_id"]) or {}
+    kept = held(sc, found["target_type"], found["target_id"])
+    if kept:
+        sc.execute(
+            "DELETE FROM so_held WHERE target_type = ? AND target_id = ?",
+            (found["target_type"], found["target_id"]),
+        )
+        if action == "dismiss":
+            table = {"message": "so_messages", "post": "so_posts", "comment": "so_comments"}.get(
+                found["target_type"]
+            )
+            if table:
+                sc.execute(
+                    f"UPDATE {table} SET hidden_at = NULL WHERE id = ?",  # noqa: S608 - fixed names
+                    (found["target_id"],),
+                )
+                if found["target_type"] in ("message", "post"):
+                    sc.execute(
+                        f"UPDATE {table} SET updated_at = ? WHERE id = ?",  # noqa: S608 - fixed names
+                        (moment, found["target_id"]),
+                    )
     if (
         (action == "suspend" or found["target_type"] == "account")
         and action != "dismiss"
@@ -4215,9 +4590,13 @@ def erase_accounts(sc: sqlite3.Connection, account_ids: Iterable[str]) -> int:
             "DELETE FROM so_listing_saves WHERE account_id = ? OR listing_id IN (SELECT id FROM so_listings WHERE seller_id = ?)",
             "DELETE FROM so_listings WHERE seller_id = ?",
             "DELETE FROM so_guardian WHERE child_id = ? OR other_id = ?",
+            "DELETE FROM so_approved_contacts WHERE young_id = ? OR contact_id = ?",
+            "DELETE FROM so_held WHERE author_id = ?",
+            "DELETE FROM so_dating_ended WHERE a_id = ? OR b_id = ?",
             "DELETE FROM so_accounts WHERE id = ?",
         ):
             sc.execute(statement, (account_id,) * statement.count("?"))
+    sc.execute("DELETE FROM so_evidence WHERE report_id NOT IN (SELECT id FROM so_reports)")
     sc.commit()
     return len(ids)
 

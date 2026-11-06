@@ -9,8 +9,12 @@ from collections import deque
 SECURITY_HEADERS: tuple[tuple[str, str], ...] = (
     (
         "Content-Security-Policy",
+        # img-src keeps https: for now: Careers job thumbnails, business logos, News, Shop, Sites, Ads and Events
+        # show pictures from other sites in the same single page. Social and Dating take only uploaded photos and
+        # never show a picture link (aira/suite/social/photos.py), so a profile cannot log who views it.
         "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; "
-        "font-src 'self'; media-src 'self' blob:; connect-src 'self'; frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'",
+        "font-src 'self'; media-src 'self' blob:; connect-src 'self'; worker-src 'self'; manifest-src 'self'; "
+        "frame-ancestors 'none'; base-uri 'none'; form-action 'self'; object-src 'none'",
     ),
     ("X-Content-Type-Options", "nosniff"),
     ("X-Frame-Options", "DENY"),

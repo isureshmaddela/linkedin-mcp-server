@@ -82,10 +82,30 @@
   // ---------------------------------------------------------------------------
   // Who is using Aira (shared devices)
   // ---------------------------------------------------------------------------
-  function setHeader(value) {
+  function setHeader(value, lock = null) {
     Aira.state.lifeProfile = value || "";
     Aira.remember(accountKey(), value || "");
+    // A PIN opens a profile for a while (the server decides how long, shorter for children and teens) and it
+    // locks after a while without use: the browser locks too, so nobody finds it open on a shared device.
+    L.lock = value && lock && lock.idle_seconds ? { expiresAt: Number(lock.expires_at || 0) * 1000, idleMs: Number(lock.idle_seconds) * 1000 } : null;
+    Aira.remember(`${accountKey()}.lock`, L.lock || null);
+    L.lastActive = Date.now();
   }
+  L.lock = Aira.recall(`${accountKey()}.lock`, null);
+  L.lastActive = Date.now();
+  for (const kind of ["pointerdown", "keydown", "wheel", "touchstart"]) document.addEventListener(kind, () => { L.lastActive = Date.now(); }, { passive: true, capture: true });
+  // Lock when the unlock ran out or nobody used the device for a while (checked every 15 seconds).
+  L.checkLock = (now = Date.now()) => {
+    if (hosted() || !L.lock || !Aira.state.lifeProfile || picking) return false;
+    if (now - L.lastActive < L.lock.idleMs && now < L.lock.expiresAt) return false;
+    // the request takes this browser's header with it before it is cleared: the server forgets the unlock too
+    Aira.api("/api/life/lock", { method: "POST", body: {}, silent: true }).catch(() => {});
+    setHeader("");
+    L.me = null;
+    L.pickProfile("profile_locked").then((ok) => { if (ok) { loadMe(); Aira.router.render(); } });
+    return true;
+  };
+  setInterval(() => L.checkLock(), 15000);
 
   let picking = null;
   L.pickProfile = (reason = "") => {
@@ -96,13 +116,13 @@
       const close = (ok) => { overlay.remove(); picking = null; resolve(ok); };
       const grid = h("div", { class: "life-faces" });
       const title = h("h1", { id: "lifePickerTitle", text: "Who's using Monosage?" });
-      const note = h("p", { class: "muted", text: reason === "profile_locked" ? "This person has a PIN. Choose them and type it." : "Tap your name." });
+      const note = h("p", { class: "muted", text: reason === "profile_locked" ? "This person has a PIN. Choose them and type it. A profile locks after a while without use." : "Tap your name." });
       overlay.append(h("div", { class: "life-picker-box" }, title, note, grid));
       document.body.append(overlay);
       const choose = async (person, pin) => {
         try {
           const data = await Aira.api("/api/life/unlock", { method: "POST", body: { profile_id: person.id, pin: pin || "" } });
-          setHeader(data.header);
+          setHeader(data.header, data);
           L.me = data.profile;
           close(true);
         } catch (error) { return error.message; }
@@ -147,6 +167,7 @@
   };
 
   L.switchPerson = async () => {
+    if (String(Aira.state.lifeProfile || "").includes(".")) Aira.api("/api/life/lock", { method: "POST", body: {}, silent: true }).catch(() => {});
     setHeader("");
     if (await L.pickProfile("switch")) { await loadMe(); Aira.router.render(); }
   };
@@ -161,6 +182,9 @@
       L.profiles = me.profiles;
       L.canManage = me.can_manage;
       L.apps = me.apps;
+      // Apps a parent or guardian turned off for this child or teen (and Dating, always off for them).
+      L.off = (me.controls && me.controls.off) || [];
+      L.pinRuleText = me.pin_rule_text || "";
       L.prefs = { ...DEFAULT_PREFS, ...me.profile.prefs };
       Aira.remember("lifePrefs", L.prefs);
       applyPrefs(L.prefs);
@@ -178,6 +202,16 @@
     }
   }
   L.reload = loadMe;
+
+  // Parental controls in the app switcher and on the app's own pages (the server refuses them too).
+  L.off = [];
+  const OFF_REASON = "A parent or guardian turned this off";
+  if (!hosted()) {
+    const decorated = Aira.apps.decorate;
+    Aira.apps.decorate = (entries) => (decorated ? decorated(entries) : entries).map((entry) => (entry.kind === "product" && L.off.includes(entry.id) ? { ...entry, enabled: false, reason: OFF_REASON } : entry));
+    const roleBlock = Aira.apps.roleBlock;
+    Aira.apps.roleBlock = (section, id) => (L.off.includes(id) ? { app: id, kind: "denied", reason: `${OFF_REASON} for you. Ask them if you need it.` } : roleBlock ? roleBlock(section, id) : null);
+  }
 
   Aira.onApiError = (status, data, path) => {
     if (status !== 403 || !data || !["profile_required", "profile_locked"].includes(data.code)) return;
@@ -402,20 +436,46 @@
 
   function peopleSection(rerender) {
     const people = L.profiles || [];
-    const fields = (withPin) => [
+    const ageFields = [
+      { name: "age_group", label: "Age group", type: "select", hint: "With a birthday, the age group follows it: under 13 a child, 13 to 17 a teen.", options: [["adult", "Adult"], ["senior", "Senior (starts with bigger text)"], ["teen", "Teen"], ["child", "Child (starts in easy mode)"]] },
+      { name: "birthday", label: "Birthday", type: "date", hint: "Shown on Today when it is near. Only a parent or the household owner can change it." },
+    ];
+    // An age or a birthday is changed by the household owner or a parent, never by the person themselves.
+    const fields = (withPin, person = null) => [
       { name: "name", label: "Name", required: true },
       { name: "emoji", label: "Picture", type: "select", options: [["", "Choose one for me"], "🙂", "😀", "🧑", "👩", "👨", "👵", "👴", "👧", "👦", "🧒", "🐱", "🐶", "🌻", "⭐", "🚀", "🎵"] },
-      { name: "age_group", label: "Age group", type: "select", options: [["adult", "Adult"], ["senior", "Senior (starts with bigger text)"], ["teen", "Teen"], ["child", "Child (starts in easy mode)"]] },
-      { name: "birthday", label: "Birthday", type: "date", hint: "Shown on Today when it is near." },
+      ...(!person || person.can_change_age ? ageFields : []),
       ...(withPin ? [{ name: "pin", label: "PIN (optional)", type: "password", hint: "4 to 8 digits. Without one, anyone on this device can open this person." }] : []),
     ];
     const refresh = async () => { await loadMe(); rerender(); };
+    // Whose PIN confirms a change: your own for yours; a parent's own for a child's or a teen's; the owner's for anyone else's.
+    const pinFields = (person) => {
+      const rule = person.pin_rule || {};
+      return [
+        ...(rule.needed ? [{ name: "confirm", label: rule.label || "PIN to confirm", type: "password", required: true }] : []),
+        { name: "pin", label: "New PIN (4 to 8 digits; empty removes it)", type: "password", hint: L.pinRuleText || "" },
+      ];
+    };
+    const controlsDialog = async (person) => {
+      const { controls } = await Aira.api(`/api/life/profiles/${person.id}/controls`);
+      const apps = Object.keys(controls.apps);
+      await S.edit({
+        title: `Apps ${person.name} can open`,
+        fields: [
+          ...apps.map((app) => ({ name: app, label: controls.labels[app] || app, type: "checkbox" })),
+          { type: "heading", label: `Always off for under-18s: ${controls.always_off.map((app) => controls.labels[app] || app).join(", ")}.` },
+        ],
+        values: controls.apps,
+        onSave: async (values) => { await Aira.api(`/api/life/profiles/${person.id}/controls`, { method: "POST", body: { apps: Object.fromEntries(apps.map((app) => [app, !!values[app]])) } }); Aira.toast("Saved.", "success"); },
+      });
+    };
     const rows = people.map((person) => h("li", { class: "life-person" },
       h("span", { class: "life-face-small", style: { background: person.color }, "aria-hidden": "true", text: person.emoji }),
       h("div", {}, h("strong", { text: person.name }), h("span", { class: "muted small", text: ` ${person.age_group}${person.owner ? " · owner" : ""}${person.has_pin ? " · PIN" : ""}` })),
       L.canManage || (L.me && person.id === L.me.id) ? h("div", { class: "btn-row" },
-        S.button("Edit", () => S.edit({ title: `Edit ${person.name}`, fields: fields(false), values: person, onSave: async (values) => { await Aira.api(`/api/life/profiles/${person.id}`, { method: "PATCH", body: values }); await refresh(); } }), { kind: "ghost sm" }),
-        S.button(person.has_pin ? "Change PIN" : "Set PIN", () => S.edit({ title: `PIN for ${person.name}`, fields: [{ name: "pin", label: "New PIN (4 to 8 digits; empty removes it)", type: "password" }], onSave: async (values) => { const data = await Aira.api(`/api/life/profiles/${person.id}/pin`, { method: "POST", body: { pin: values.pin } }); if (data.header) setHeader(data.header); await refresh(); } }), { kind: "ghost sm" }),
+        S.button("Edit", () => S.edit({ title: `Edit ${person.name}`, fields: fields(false, person), values: person, onSave: async (values) => { await Aira.api(`/api/life/profiles/${person.id}`, { method: "PATCH", body: values }); await refresh(); } }), { kind: "ghost sm" }),
+        person.pin_rule && person.pin_rule.allowed ? S.button(person.has_pin ? "Change PIN" : "Set PIN", () => S.edit({ title: `PIN for ${person.name}`, fields: pinFields(person), onSave: async (values) => { const data = await Aira.api(`/api/life/profiles/${person.id}/pin`, { method: "POST", body: { pin: values.pin, confirm: values.confirm || "" } }); if (data.header) setHeader(data.header, data.lock); await refresh(); } }), { kind: "ghost sm" }) : null,
+        person.guardian ? S.button("Parental controls", () => controlsDialog(person).catch((error) => Aira.reportError(error)), { kind: "ghost sm" }) : null,
         L.canManage && !person.owner ? S.button("Remove", async () => { if (await S.confirmDelete(person.name)) { await Aira.api(`/api/life/profiles/${person.id}`, { method: "DELETE" }); await refresh(); } }, { kind: "ghost sm" }) : null) : null));
     return S.section("People on this device", h("p", { class: "muted", text: "Everyone in the household can have their own reminders, games and settings." }),
       h("ul", { class: "life-people" }, ...rows),

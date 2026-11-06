@@ -37,6 +37,19 @@ def _viewing(
     return service.subject(connection, me, request.q("person"))
 
 
+@contextmanager
+def _managed_session(request: Request) -> Iterator[tuple[Any, dict[str, Any]]]:
+    """Like _session, for a change: the person themselves, or (``?person=``) a young child their guardian manages
+    (service.manages). A caregiver's change is refused."""
+    with _session(request) as (connection, me):
+        if not request.q("person"):
+            yield connection, me
+            return
+        person, can_edit = _viewing(request, connection, me)
+        service.require_own(can_edit)
+        yield connection, person
+
+
 # ---------------------------------------------------------------------------
 # overview
 # ---------------------------------------------------------------------------
@@ -117,7 +130,7 @@ def medicines_list(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("POST", f"{BASE}/medicines/{ID}/refill")
 def medicines_refill(request: Request) -> tuple[int, dict[str, Any]]:
-    with _session(request) as (connection, me):
+    with _managed_session(request) as (connection, me):
         medicine = service.refill(
             connection, me, request.match.group(1), request.payload
         )
@@ -127,7 +140,7 @@ def medicines_refill(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("POST", f"{BASE}/medicines")
 def medicines_create(request: Request) -> tuple[int, dict[str, Any]]:
-    with _session(request) as (connection, me):
+    with _managed_session(request) as (connection, me):
         medicine = service.create_medicine(connection, me, request.payload)
     request.audit("care.medicine_create", "medicine", medicine["id"])
     return 201, {"medicine": medicine}
@@ -135,7 +148,7 @@ def medicines_create(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("PATCH", f"{BASE}/medicines/{ID}")
 def medicines_update(request: Request) -> tuple[int, dict[str, Any]]:
-    with _session(request) as (connection, me):
+    with _managed_session(request) as (connection, me):
         medicine = service.update_medicine(
             connection, me, request.match.group(1), request.payload
         )
@@ -144,7 +157,7 @@ def medicines_update(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("DELETE", f"{BASE}/medicines/{ID}")
 def medicines_delete(request: Request) -> tuple[int, dict[str, Any]]:
-    with _session(request) as (connection, me):
+    with _managed_session(request) as (connection, me):
         outcome = service.delete_medicine(connection, me, request.match.group(1))
     request.audit("care.medicine_delete", "medicine", request.match.group(1))
     return 200, {"outcome": outcome}
@@ -152,25 +165,25 @@ def medicines_delete(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("POST", f"{BASE}/doses/take")
 def doses_take(request: Request) -> tuple[int, dict[str, Any]]:
-    with _session(request) as (connection, me):
+    with _managed_session(request) as (connection, me):
         return 200, service.take(connection, me, request.payload)
 
 
 @aira_route("POST", f"{BASE}/doses/skip")
 def doses_skip(request: Request) -> tuple[int, dict[str, Any]]:
-    with _session(request) as (connection, me):
+    with _managed_session(request) as (connection, me):
         return 200, service.skip(connection, me, request.payload)
 
 
 @aira_route("POST", f"{BASE}/doses/snooze")
 def doses_snooze(request: Request) -> tuple[int, dict[str, Any]]:
-    with _session(request) as (connection, me):
+    with _managed_session(request) as (connection, me):
         return 200, service.snooze(connection, me, request.payload)
 
 
 @aira_route("POST", f"{BASE}/doses/as-needed")
 def doses_as_needed(request: Request) -> tuple[int, dict[str, Any]]:
-    with _session(request) as (connection, me):
+    with _managed_session(request) as (connection, me):
         return 201, service.take_as_needed(connection, me, request.payload)
 
 
@@ -267,7 +280,7 @@ def appointments_list(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("POST", f"{BASE}/appointments")
 def appointments_create(request: Request) -> tuple[int, dict[str, Any]]:
-    with _session(request) as (connection, me):
+    with _managed_session(request) as (connection, me):
         return 201, {
             "appointment": service.save_appointment(connection, me, request.payload)
         }
@@ -275,7 +288,7 @@ def appointments_create(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("PATCH", f"{BASE}/appointments/{ID}")
 def appointments_update(request: Request) -> tuple[int, dict[str, Any]]:
-    with _session(request) as (connection, me):
+    with _managed_session(request) as (connection, me):
         return 200, {
             "appointment": service.save_appointment(
                 connection, me, request.payload, request.match.group(1)
@@ -301,7 +314,7 @@ def appointments_calendar(request: Request) -> Raw:
 
 @aira_route("DELETE", f"{BASE}/appointments/{ID}")
 def appointments_delete(request: Request) -> tuple[int, dict[str, Any]]:
-    with _session(request) as (connection, me):
+    with _managed_session(request) as (connection, me):
         service.delete_appointment(connection, me, request.match.group(1))
     return 200, {"removed": True}
 

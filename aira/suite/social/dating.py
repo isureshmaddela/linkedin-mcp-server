@@ -156,6 +156,20 @@ SCHEMA = (
         stars INTEGER NOT NULL DEFAULT 0,
         PRIMARY KEY (account_id, day)
     )""",
+    # An ended match's chat and both profiles as they were, kept store.RETENTION_DAYS for moderators only (a report
+    # filed later still has its evidence), then purged by Social's background task.
+    """CREATE TABLE IF NOT EXISTS so_dating_ended (
+        id TEXT PRIMARY KEY,
+        match_id TEXT NOT NULL,
+        a_id TEXT NOT NULL,
+        b_id TEXT NOT NULL,
+        reason TEXT NOT NULL,
+        transcript TEXT NOT NULL DEFAULT '[]',
+        profiles TEXT NOT NULL DEFAULT '{}',
+        ended_at TEXT NOT NULL,
+        purge_after TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS so_dating_ended_pair ON so_dating_ended (a_id, b_id)",
 )
 
 
@@ -163,7 +177,7 @@ def ensure(sc: sqlite3.Connection) -> None:
     """Dating's tables live in Social's database; made on first use (the file may be new)."""
     if not row(
         sc,
-        "SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'so_dating_daily'",
+        "SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'so_dating_ended'",
     ):
         for statement in SCHEMA:
             sc.execute(statement)
@@ -464,7 +478,7 @@ def erase(sc: sqlite3.Connection, account_ids: Iterable[str]) -> None:
             "SELECT * FROM so_dating_matches WHERE a_id = ? OR b_id = ?",
             (account_id, account_id),
         ):
-            _end_match(sc, match)
+            _end_match(sc, match, "deleted")
         for statement in (
             "DELETE FROM so_dating_swipes WHERE actor_id = ? OR target_id = ?",
             "DELETE FROM so_dating_daily WHERE account_id = ?",
@@ -903,9 +917,135 @@ def _make_match(
     return row(sc, "SELECT * FROM so_dating_matches WHERE id = ?", (match_id,)) or {}
 
 
-def _end_match(sc: sqlite3.Connection, match: dict[str, Any]) -> None:
-    """The match and its chat are gone for both; neither is shown to the other again."""
+def transcript(sc: sqlite3.Connection, chat_id: str, a_id: str = "") -> list[dict[str, Any]]:
+    """A chat as a moderator reads it: who wrote each message (``a`` or ``b`` of the match), what, and when,
+    including messages its author deleted or a moderator hid."""
+    return [
+        {
+            "id": m["id"],
+            "by": ("a" if m["author_id"] == a_id else "b") if a_id else m["author_id"],
+            "author_id": m["author_id"],
+            "text": m["text"],
+            "photo": m["photo"],
+            "at": m["created_at"],
+            "deleted": bool(m["deleted_at"]),
+            "hidden": bool(m["hidden_at"]),
+        }
+        for m in rows(
+            sc,
+            "SELECT * FROM so_messages WHERE chat_id = ? ORDER BY created_at LIMIT 2000",
+            (chat_id,),
+        )
+    ]
+
+
+def profile_snapshot(sc: sqlite3.Connection, account_id: str) -> dict[str, Any]:
+    """A dating profile as it is now (for evidence): never the Social account's own details."""
+    found = profile_of(sc, account_id)
+    if not found:
+        return {"account_id": account_id, "dating_profile": None}
+    return {
+        "account_id": account_id,
+        "dating_profile": {
+            key: found.get(key)
+            for key in (
+                "id",
+                "first_name",
+                "birthday",
+                "gender",
+                "bio",
+                "prompts",
+                "interests",
+                "photos",
+                "city",
+                "status",
+                "created_at",
+                "updated_at",
+            )
+        },
+    }
+
+
+def evidence_between(
+    sc: sqlite3.Connection, reporter_id: str, other_id: str, *, profiles: bool = False
+) -> dict[str, Any] | None:
+    """What a report between these two copies from Dating: their match's chat if it still runs, the chats of
+    matches that ended within store.RETENTION_DAYS, and both dating profiles (always for a report made in Dating,
+    otherwise only when there was a match). None when Dating has nothing about the two."""
+    ensure(sc)
+    x, y = _pair(reporter_id, other_id)
+    match = _match_between(sc, x, y)
+    ended = rows(
+        sc,
+        "SELECT * FROM so_dating_ended WHERE a_id = ? AND b_id = ? AND purge_after >= ? ORDER BY ended_at",
+        (x, y, stamp()),
+    )
+    if not (match or ended or profiles):
+        return None
+    if not (profile_of(sc, reporter_id) or profile_of(sc, other_id) or ended):
+        return None
+    side = {x: "a", y: "b"}
+    return {
+        "reporter": side[reporter_id],
+        "profiles": {
+            side[reporter_id]: profile_snapshot(sc, reporter_id),
+            side[other_id]: profile_snapshot(sc, other_id),
+        },
+        "live_chat": transcript(sc, match["chat_id"], x) if match else None,
+        "ended_chats": [
+            {
+                "reason": item["reason"],
+                "ended_at": item["ended_at"],
+                "transcript": store.loads(item["transcript"], []),
+                "profiles": store.loads(item["profiles"], {}),
+            }
+            for item in ended
+        ],
+    }
+
+
+def ended_chats(sc: sqlite3.Connection) -> list[dict[str, Any]]:
+    """Every ended match's kept chat (for a platform moderator), newest first."""
+    ensure(sc)
+    return [
+        {
+            **{k: item[k] for k in ("id", "match_id", "a_id", "b_id", "reason", "ended_at", "purge_after")},
+            "transcript": store.loads(item["transcript"], []),
+            "profiles": store.loads(item["profiles"], {}),
+        }
+        for item in rows(
+            sc, "SELECT * FROM so_dating_ended ORDER BY ended_at DESC LIMIT 200"
+        )
+    ]
+
+
+def _end_match(
+    sc: sqlite3.Connection, match: dict[str, Any], reason: str = "unmatched"
+) -> None:
+    """The match and its chat are gone for both; neither is shown to the other again. The chat and both profiles
+    are copied first into ``so_dating_ended``, which only moderators read (a report needs its evidence), and are
+    purged after store.RETENTION_DAYS."""
     chat_id = match["chat_id"]
+    sc.execute(
+        """INSERT INTO so_dating_ended (id, match_id, a_id, b_id, reason, transcript, profiles, ended_at, purge_after)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+        (
+            new_id(),
+            match["id"],
+            match["a_id"],
+            match["b_id"],
+            reason,
+            store.dumps(transcript(sc, chat_id, match["a_id"])),
+            store.dumps(
+                {
+                    "a": profile_snapshot(sc, match["a_id"]),
+                    "b": profile_snapshot(sc, match["b_id"]),
+                }
+            ),
+            stamp(),
+            store.later(24 * store.RETENTION_DAYS),
+        ),
+    )
     sc.execute("DELETE FROM so_messages WHERE chat_id = ?", (chat_id,))
     sc.execute("DELETE FROM so_chat_members WHERE chat_id = ?", (chat_id,))
     sc.execute(
@@ -1056,7 +1196,7 @@ def unmatch(
 ) -> None:
     _require_profile(sc, ident, me_)
     match = match_for(sc, me_, match_id)
-    _end_match(sc, match)
+    _end_match(sc, match, "unmatched")
     sc.commit()
 
 
@@ -1158,7 +1298,7 @@ def block(
     other = profile_by_id(sc, profile_id)
     match = _match_between(sc, me_["id"], other["account_id"])
     if match:
-        _end_match(sc, match)
+        _end_match(sc, match, "blocked")
     service.block(sc, me_, other["account_id"])
     return {"blocked": True}
 
@@ -1189,6 +1329,7 @@ def report(
         kit.text(raw.get("reason"), "a reason", max_len=400, multiline=True)
         or "No reason given"
     )
+    # Both profiles and the chat are copied into the report before anything ends (block below ends the match).
     service.report(
         sc,
         me_,
@@ -1197,6 +1338,7 @@ def report(
             "target_id": other["account_id"],
             "reason": f"Dating profile: {reason}",
         },
+        dating_profiles=True,
     )
     sc.execute(
         "INSERT OR IGNORE INTO so_dating_swipes (actor_id, target_id, action, created_at) VALUES (?, ?, 'pass', ?)",

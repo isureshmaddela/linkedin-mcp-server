@@ -315,7 +315,8 @@ def test_only_the_person_and_their_caregivers_see_their_health(db, people):
         service.add_caregiver(db, rosa, {"profile_id": pat["id"]})  # already
     with pytest.raises(ValueError):
         service.add_caregiver(db, rosa, {"profile_id": rosa["id"]})
-    assert [p["name"] for p in service.caring_for(db, pat)] == ["Rosa"]
+    # a parent also looks after their young child's health (care.manages)
+    assert [p["name"] for p in service.caring_for(db, pat)] == ["Rosa", "Mia"]
 
 
 def test_caregivers_hear_about_a_missed_dose_once(db, people):

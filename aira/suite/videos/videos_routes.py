@@ -353,6 +353,24 @@ def video_create(request: Request) -> tuple[int, dict[str, Any]]:
     return 201, {"video": video}
 
 
+@aira_route("GET", f"{BASE}/family/approvals")
+def public_requests(request: Request) -> tuple[int, dict[str, Any]]:
+    """The household's teens' videos waiting for a grown-up's yes before they go public."""
+    with _open(request) as (sc, me):
+        return 200, {"requests": service.public_requests(sc, me)}
+
+
+@aira_route("POST", f"{BASE}/videos/{ID}/public")
+def public_answer(request: Request) -> tuple[int, dict[str, Any]]:
+    """``{"approve": true}`` makes a teen's video public; false keeps it as it is."""
+    with _open(request) as (sc, me):
+        result = service.answer_public(
+            sc, me, _id(request), kit.flag(request.payload.get("approve", True))
+        )
+    request.audit("videos.public_answer", "video", _id(request))
+    return 200, result
+
+
 @aira_route("PATCH", f"{BASE}/videos/{ID}")
 def video_edit(request: Request) -> tuple[int, dict[str, Any]]:
     with _open(request) as (sc, me):
@@ -449,9 +467,14 @@ def video_link_delete(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("GET", f"{BASE}/media/{ID}")
 def media_get(request: Request) -> Raw:
-    """A video, picture or captions file by its signed address, in HTTP ranges (seeking works)."""
+    """A video, picture or captions file by its signed address, in HTTP ranges (seeking works). The address only
+    proves who it was made for: each request checks again that the video is not taken down, deleted, made private
+    or shut to that person since (service.may_serve)."""
     with closing(db.connect()) as sc:
-        media.verify(sc, _id(request), request.q("e"), request.q("s"))
+        viewer = request.q("v") or ""
+        media.verify(sc, _id(request), request.q("e"), request.q("s"), viewer)
+        if not service.may_serve(sc, _id(request), viewer):
+            raise LookupError("That file was not found.")
         found = media.file_row(sc, _id(request))
     status, body, headers = media.read_range(found, request.header("Range"))
     return Raw(status, body, found["mime"], headers=headers)
@@ -1169,6 +1192,21 @@ def _today(connection: Any, profile: dict[str, Any]) -> list[dict[str, Any]]:
         if service.adult(me):
             lines[:0] = _money_lines(sc, me)
             lines.extend(_renew_lines(sc, me))
+            for asking in service.public_requests(sc, me)[:3]:
+                # a teen of the household asked for a video to be public: a grown-up says yes here
+                video = asking["video"]
+                lines.insert(
+                    0,
+                    {
+                        "text": f"{video['channel']['name']} would like “{video['title']}” to be public",
+                        "sub": "Open Videos to watch it first, or say yes here.",
+                        "action": life.action(
+                            "Say yes",
+                            f"/api/videos/videos/{video['id']}/public",
+                            body={"approve": True},
+                        ),
+                    },
+                )
         waiting = creator.waiting_count(sc, me["id"]) if service.adult(me) else 0
         if waiting:
             lines.insert(

@@ -728,6 +728,13 @@ def generate_deck(
         life.AGE_GROUPS,
         default="adult",
     )
+    from aira.suite.social import moderation
+
+    # A child or a teen (making the deck, or the deck's age group): the topic and every card are checked against
+    # the moderation lists, and the writing model is asked for age-appropriate cards only.
+    young = group in ("child", "teen") or life.is_young(profile)
+    if young and not moderation.safe_for_young(topic):
+        raise ValueError("Choose another topic: this one is not for young learners.")
     fallback = template_deck(topic, count)
     words = {
         "child": "a child of about 8: very simple words and short answers",
@@ -737,20 +744,39 @@ def generate_deck(
     }[group]
     prompt = (
         f"Write {count} flashcards about this topic: {topic}. They are for {words}. Each card has a short question "
-        "on the front and a short, accurate answer on the back, and an optional hint. Reply only with JSON: "
+        "on the front and a short, accurate answer on the back, and an optional hint. "
+        + (
+            "Keep every card suitable for a young learner: nothing sexual, violent, frightening, about self-harm, "
+            "drugs, alcohol or gambling, and never ask for personal details. "
+            if young
+            else ""
+        )
+        + "Reply only with JSON: "
         '{"title": "a short deck title", "cards": [{"front": "...", "back": "...", "hint": ""}]}'
     )
-    result = kit.draft(prompt, {"title": fallback["title"], "cards": fallback["cards"]})
+    use_model = life.app_allowed(connection, profile, "ai")  # a guardian may turn AI off
+    result = (
+        kit.draft(prompt, {"title": fallback["title"], "cards": fallback["cards"]})
+        if use_model
+        else {**fallback, "source": "template"}
+    )
     cards = []
     for item in result.get("cards") or []:
         if not isinstance(item, dict):
             continue
         try:
-            cards.append(store.clean_card(item))
+            card = store.clean_card(item)
         except ValueError:
             continue
+        if young and not moderation.safe_for_young(
+            " ".join(str(card.get(k) or "") for k in ("front", "back", "hint"))
+        ):
+            continue
+        cards.append(card)
         if len(cards) >= count:
             break
+    if young and not moderation.safe_for_young(str(result.get("title") or "")):
+        result = {**result, "title": fallback["title"]}
     source = "ai" if result.get("source") == "model" else "template"
     note = (
         "Written by the writing model: check the answers."

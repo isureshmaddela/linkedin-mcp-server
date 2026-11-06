@@ -4,7 +4,7 @@ A **provider** answers one question: "the daily bars of this symbol" (two years 
 plus its name, currency, exchange, the latest price and the previous close). Two providers exist:
 
 * :class:`YahooProvider` (the default): Yahoo Finance's public chart endpoint
-  (``https://query1.finance.yahoo.com/v8/finance/chart/<SYMBOL>``), no key, a normal browser User-Agent, short
+  (``https://query1.finance.yahoo.com/v8/finance/chart/<SYMBOL>``), no key, an honest User-Agent (never a browser's), short
   timeouts. A quick ``range=5d`` call refreshes the price; the full ``range=2y`` history is fetched once a day.
 * :class:`StubProvider` (``AIRA_MARKET_PROVIDER=stub``): seeded random-walk prices per symbol, the same on every
   computer for the same day, with no network. Every test uses it; it is also chosen automatically under pytest.
@@ -41,10 +41,10 @@ from aira.suite import kit
 QUOTE_TTL = 300  # seconds between price refreshes of one symbol
 WORKERS = 6  # concurrent requests when a market's universe is refreshed
 TIMEOUT = 8.0  # seconds per request
-USER_AGENT = (
-    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) "
-    "Chrome/126.0 Safari/537.36"
-)
+# An honest name: Monosage does not pretend to be a browser. Quotes from this endpoint are for the person's own use,
+# shown "delayed, for personal use" (QUOTE_NOTICE); showing them to others needs a data licence.
+USER_AGENT = "Monosage/1.0 (personal stock tracker; +https://github.com/isureshmaddela/linkedin-mcp-server)"
+QUOTE_NOTICE = "Prices are delayed, for personal use only."
 CHART_URL = "https://query1.finance.yahoo.com/v8/finance/chart/{symbol}?range={range}&interval=1d&includePrePost=false"
 SYMBOL = re.compile(r"^[A-Z0-9^][A-Z0-9.\-&=^]{0,19}$")
 
@@ -746,6 +746,8 @@ def quote_of(data: dict[str, Any]) -> dict[str, Any]:
         "low52_cents": to_cents(min(low52, price)),
         "market_time": data.get("market_time") or "",
         "stale": bool(data.get("stale")),
+        "delayed": True,  # never a live feed: shown "delayed, for personal use"
+        "notice": QUOTE_NOTICE,
     }
 
 

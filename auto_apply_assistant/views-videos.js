@@ -853,7 +853,7 @@
         if (captions.files && captions.files[0]) { setProgress(0.96, "Saving the captions"); captionsId = (await sendOnce(`captions:${fileKey(captions.files[0])}`, captions.files[0], "captions")).id; }
         const created = (await api("/videos", { method: "POST", body: { ...details, file_id: video.id, thumb_file_id: thumbId, captions_file_id: captionsId }, silent: true })).video;
         setProgress(1, "Done.");
-        Aira.toast(created.scheduled ? `Your video goes out ${outText(created.created_at)}.` : "Your video is up.", "success");
+        Aira.toast(created.public_pending ? "Your video is saved. A parent needs to say yes before everyone can see it." : created.scheduled ? `Your video goes out ${outText(created.created_at)}.` : "Your video is up.", "success");
         go({ watch: created.id });
       } catch (error) {
         form.setError(error && error.message ? error.message : String(error));
@@ -901,8 +901,8 @@
         if (video.scheduled && values.publish_at) { const wrong = checkSchedule(values.publish_at); if (wrong) throw new Error(wrong); }
         if (video.scheduled) values.publish_at = values.publish_at ? new Date(values.publish_at).toISOString() : "";
         else delete values.publish_at;
-        await api(`/videos/${video.id}`, { method: "PATCH", body: values });
-        Aira.toast("Saved.", "success");
+        const saved = (await api(`/videos/${video.id}`, { method: "PATCH", body: values })).video || {};
+        Aira.toast(saved.public_pending ? "Saved. A parent needs to say yes before everyone can see it." : "Saved.", "success");
         Aira.router.render();
       },
     });
@@ -914,6 +914,13 @@
     const filter = `${q ? `q=${encodeURIComponent(q)}&` : ""}${show ? `show=${show}` : ""}`;
     const [studio, notes] = await Promise.all([api(`/studio?${filter}`), api("/notifications")]);
     const channel = info.channel;
+    // A teen of the household asked for a video to be public: a grown-up watches it and says yes or no.
+    const asking = ["adult", "senior"].includes(channel.age_group) ? ((await api("/family/approvals")).requests || []) : [];
+    if (asking.length) panel.append(S.section(`Your teens' videos waiting for you (${asking.length})`, h("p", { class: "muted", text: "A teen's video stays private until a grown-up of the family says yes." }),
+      h("ul", { class: "life-lines" }, ...asking.map(({ video }) => h("li", { class: "life-line" },
+        h("div", { style: { flex: "1" } }, h("a", { class: "life-line-text", href: `#/videos?watch=${video.id}`, text: video.title }), h("span", { class: "life-line-sub", text: `by ${video.channel.name}` })),
+        S.button("Make it public", async () => { await api(`/videos/${video.id}/public`, { method: "POST", body: { approve: true } }); Aira.router.render(); }, { kind: "sm" }),
+        S.button("Not now", async () => { await api(`/videos/${video.id}/public`, { method: "POST", body: { approve: false } }); Aira.router.render(); }, { kind: "ghost sm" }))))));
     const channelForm = S.form([
       { name: "name", label: "Channel name", required: true },
       { name: "avatar", label: "Picture (an emoji)" },

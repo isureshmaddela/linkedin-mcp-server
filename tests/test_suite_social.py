@@ -229,9 +229,18 @@ def test_messaging_rules_receipts_unread_and_since(sc, people):
     assert service.open_direct(sc, pat, sam["id"])["id"] == chat["id"]
     first = service.messages(sc, sam, chat["id"])
     sent = service.send(sc, pat, chat["id"], {"text": "Hello Sam"})["message"]
-    service.send(sc, pat, chat["id"], {"photo": "https://img.example/a.jpg"})
-    with pytest.raises(ValueError):
-        service.send(sc, pat, chat["id"], {"photo": "http://img.example/a.jpg"})
+    import base64
+
+    from test_suite_social_plus import png
+
+    from aira.suite.social import photos
+
+    picture = photos.save(sc, pat, base64.b64encode(png()).decode())
+    service.send(sc, pat, chat["id"], {"photo": picture["ref"]})
+    # a link to a picture elsewhere would tell that website who looks at it: only uploads
+    for link in ("https://img.example/a.jpg", "http://img.example/a.jpg"):
+        with pytest.raises(ValueError):
+            service.send(sc, pat, chat["id"], {"photo": link})
     assert service.unread_messages(sc, sam) == 2
     fresh = service.messages(sc, sam, chat["id"], since=first["now"])
     assert [m["text"] for m in fresh["messages"]] == ["Hello Sam", ""]
@@ -402,9 +411,12 @@ def test_reports_moderation_and_suspension(sc, people):
     service.report(
         sc, pat, {"target_type": "post", "target_id": post["id"], "reason": "Unkind"}
     )
-    assert service.report(
-        sc, pat, {"target_type": "post", "target_id": post["id"]}
-    ) == {"reported": True}
+    assert (
+        service.report(sc, pat, {"target_type": "post", "target_id": post["id"]})[
+            "reported"
+        ]
+        is True
+    )
     queue = service.reports(sc, home="home-1")
     assert (
         len(queue) == 1
@@ -566,9 +578,14 @@ def test_a_household_and_a_second_account_on_this_computer(env, api):
     ana.post(f"/api/social/friends/{pat_account['id']}", {})
     post = pat.post(
         "/api/social/posts",
-        {"text": "Garden day #garden", "photos": ["https://img.example/g.jpg"]},
+        {"text": "Garden day #garden"},
         expect=201,
     )["post"]
+    # a picture link from another website is refused: only photos uploaded from the device
+    status, refused = pat.call(
+        "POST", "/api/social/posts", {"text": "x", "photos": ["https://img.example/g.jpg"]}
+    )
+    assert status == 400 and "Upload the photo" in refused["error"]
     feed = ana.get("/api/social/feed")
     assert feed["posts"][0]["id"] == post["id"]
     ana.post(

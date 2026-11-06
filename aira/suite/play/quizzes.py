@@ -278,19 +278,35 @@ def draft(
         minimum=1,
         maximum=DRAFT_MAX,
     )
-    young = me.get("age_group") == "child"
+    from aira.suite import life
+    from aira.suite.social import moderation
+
+    child = me.get("age_group") == "child"
+    young = me.get("age_group") in ("child", "teen")
+    if young and not moderation.safe_for_young(topic):
+        raise ValueError("Choose another topic: this one is not for young players.")
     prompt = (
         f"Write {count} multiple-choice quiz questions about: {topic}.\n"
-        f"{'They are for a child: short, simple words, nothing scary. ' if young else ''}"
+        f"{'They are for a child: short, simple words, nothing scary. ' if child else ''}"
+        f"{'Keep them suitable for a young player: nothing sexual, violent, about self-harm, drugs, alcohol or gambling. ' if young else ''}"
         "Each question has one right answer and three wrong but believable answers. Facts must be correct.\n"
         'Answer only with JSON: {"questions": [{"question": "...", "answer": "...", "wrong": ["...", "...", "..."]}]}'
     )
-    reply = kit.draft(prompt, {"questions": []})
+    # a guardian may turn AI off for a child or a teen: the quiz book still works
+    use_model = not me.get("id") or life.app_allowed(connection, me, "ai")
+    reply = kit.draft(prompt, {"questions": []}) if use_model else {"questions": []}
     questions = (
         _model_questions(reply.get("questions"), count)
         if reply.get("source") == "model"
         else []
     )
+    if young:
+        # every question and answer through the moderation lists before a young player sees it
+        questions = [
+            q
+            for q in questions
+            if moderation.safe_for_young(" ".join([q["text"], *q["choices"]]))
+        ]
     if questions:
         return {"questions": questions, "source": "model"}
     return {"questions": games.template_questions(topic, count), "source": "template"}

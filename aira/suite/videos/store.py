@@ -303,6 +303,14 @@ SCHEMA = (
         updated_at TEXT NOT NULL
     )""",
     "CREATE INDEX IF NOT EXISTS vi_deals_channel ON vi_deals (channel_id, updated_at)",
+    # A teen asked for their video to be public: it stays private until an adult of their household says yes.
+    """CREATE TABLE IF NOT EXISTS vi_public_requests (
+        video_id TEXT PRIMARY KEY,
+        channel_id TEXT NOT NULL,
+        home TEXT NOT NULL,
+        asked_at TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS vi_public_requests_home ON vi_public_requests (home, asked_at)",
 )
 
 # Columns added after the first release: (table, column, declaration). ``migrate`` adds the missing ones to a

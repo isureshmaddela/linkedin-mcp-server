@@ -179,7 +179,25 @@ SCHEMA = (
 )
 
 
+# What a paid stock idea must tell its subscribers: the analyst's SEBI research analyst registration (or that there
+# is none), and, for each idea, whether the analyst holds the stock. Kept apart so older databases need no change.
+SCHEMA_V3 = (
+    """CREATE TABLE IF NOT EXISTS stk_disclosures (
+        owner_id TEXT PRIMARY KEY,
+        sebi_number TEXT NOT NULL DEFAULT '',
+        updated_at TEXT NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS stk_idea_disclosures (
+        idea_id TEXT PRIMARY KEY,
+        sebi_number TEXT NOT NULL DEFAULT '',
+        holding TEXT NOT NULL DEFAULT '',
+        note TEXT NOT NULL DEFAULT ''
+    )""",
+)
+
+
 def ensure(connection: sqlite3.Connection) -> None:
     kit.ensure_core(connection)
     life.ensure(connection)
     kit.ensure(connection, "stocks.v2", SCHEMA)
+    kit.ensure(connection, "stocks.v3", SCHEMA_V3)

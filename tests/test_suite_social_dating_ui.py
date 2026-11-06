@@ -192,9 +192,19 @@ def onboard(
             timeout=15,
             what="the uploaded photo",
         )
-    for link in photo:
-        page.fill("input[aria-label='Photo link']", link)
-        page.click(".sd-add-photo button:has-text('Add')")
+    # Dating takes only photos from the device (a link could tell its website who looks): one upload each
+    for index, _name in enumerate(photo, start=1 + (1 if upload else 0)):
+        with page.expect_file_chooser() as chooser:
+            page.click(".sd-add-photo button:has-text('Upload photos')")
+        chooser.value.set_files(
+            {"name": f"photo{index}.png", "mimeType": "image/png", "buffer": png()}
+        )
+        until(
+            page,
+            lambda index=index: page.locator(".sd-thumb img").count() == index,
+            timeout=15,
+            what="the uploaded photo",
+        )
     page.fill(
         ".sd-wizard textarea",
         f"{name} here: early riser, terrible at chess, great at pancakes.",
@@ -277,7 +287,6 @@ def test_dating_onboarding_discover_match_and_chat_on_a_wide_screen_and_a_phone(
             "gender": "man",
             "show_me": "women",
             "city": "Hillside",
-            "photos": ["https://img.example/leo1.svg"],
             "interests": ["coffee", "football"],
             "looking_for": "casual",
             "prompts": [

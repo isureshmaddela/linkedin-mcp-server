@@ -20,6 +20,7 @@ import hashlib
 import hmac
 import math
 import secrets
+import re
 import sqlite3
 from collections.abc import Iterable
 from datetime import date, timedelta
@@ -33,7 +34,8 @@ from aira.suite.stocks import market, predict, store
 APP = store.APP
 DISCLAIMER = (
     "This is not financial advice. Forecasts are estimates from past prices and are often wrong; "
-    "the track record shows how often. Monosage never buys or sells real shares."
+    "the track record shows how often. Monosage never buys or sells real shares. Prices are delayed, for personal "
+    "use only."
 )
 RANGES = {"1m": 21, "3m": 63, "6m": 126, "1y": 252, "2y": 520}
 PRACTICE_DEFAULTS = {"USD": 100_000_00, "INR": 10_00_000_00}
@@ -2054,6 +2056,12 @@ def create_idea(
             raise ValueError(
                 "Set a monthly price on your analyst page before publishing paid ideas."
             )
+    holding = str(raw.get("holding") or "").strip().lower()
+    if access == "paid" and not holding:
+        raise ValueError("Say whether you hold this stock: paid ideas must tell subscribers.")
+    if holding:
+        holding = kit.choice(holding, "what you hold", tuple(HOLDINGS))
+    holding_note = kit.text(raw.get("holding_note"), "a note about what you hold", max_len=200)
     if (
         kit.count(
             connection,
@@ -2091,6 +2099,13 @@ def create_idea(
             kit.now(),
         ),
     )
+    disclosed = kit.fetch_one(
+        connection, "SELECT sebi_number FROM stk_disclosures WHERE owner_id = ?", (me["id"],)
+    )
+    connection.execute(
+        "INSERT INTO stk_idea_disclosures (idea_id, sebi_number, holding, note) VALUES (?, ?, ?, ?)",
+        (idea_id, disclosed["sebi_number"] if disclosed else "", holding, holding_note),
+    )
     kit.log(
         connection,
         APP,
@@ -2101,7 +2116,10 @@ def create_idea(
         actor=me["name"],
     )
     connection.commit()
-    return _idea_view(kit.require_row(connection, "stk_ideas", idea_id, "idea"))
+    return _disclose(
+        connection,
+        _idea_view(kit.require_row(connection, "stk_ideas", idea_id, "idea")),
+    )
 
 
 def _own_idea(
@@ -2149,7 +2167,7 @@ def update_idea(
             },
         )
     connection.commit()
-    return _idea_view(_own_idea(connection, me, idea_id))
+    return _disclose(connection, _idea_view(_own_idea(connection, me, idea_id)))
 
 
 def delete_idea(
@@ -2171,7 +2189,7 @@ def my_ideas(
 ) -> list[dict[str, Any]]:
     track_ideas(connection, me["id"])
     return [
-        _idea_view(r)
+        _disclose(connection, _idea_view(r))
         for r in kit.fetch_all(
             connection,
             "SELECT * FROM stk_ideas WHERE owner_id = ? ORDER BY status = 'open' DESC, opened_on DESC, created_at DESC",
@@ -2226,13 +2244,54 @@ def ideas_csv(connection: sqlite3.Connection, me: dict[str, Any]) -> bytes:
 # ---------------------------------------------------------------------------
 
 
+SEBI_RA = re.compile(r"^INH\d{9}$")  # a SEBI research analyst's registration number, e.g. INH000012345
+NOT_REGISTERED = "Not SEBI-registered"
+HOLDINGS = {
+    "none": "The analyst does not hold this stock.",
+    "self": "The analyst holds this stock.",
+    "family": "The analyst's family holds this stock.",
+    "short": "The analyst has a position against this stock.",
+}
+
+
+def registration_text(sebi_number: str) -> str:
+    return f"SEBI research analyst {sebi_number}" if sebi_number else NOT_REGISTERED
+
+
 def analyst(connection: sqlite3.Connection, owner_id: str) -> dict[str, Any] | None:
     found = kit.fetch_one(
         connection, "SELECT * FROM stk_analysts WHERE owner_id = ?", (owner_id,)
     )
     if found:
         found["accepting"] = bool(found["accepting"])
+        disclosed = kit.fetch_one(
+            connection,
+            "SELECT sebi_number FROM stk_disclosures WHERE owner_id = ?",
+            (owner_id,),
+        )
+        found["sebi_number"] = disclosed["sebi_number"] if disclosed else ""
+        found["registration"] = registration_text(found["sebi_number"])
     return found
+
+
+def _disclose(connection: sqlite3.Connection, view: dict[str, Any]) -> dict[str, Any]:
+    """An idea with what it must tell readers: the analyst's registration (or "Not SEBI-registered") and what
+    they hold, as published with the idea."""
+    found = kit.fetch_one(
+        connection,
+        "SELECT * FROM stk_idea_disclosures WHERE idea_id = ?",
+        (view["id"],),
+    )
+    sebi = found["sebi_number"] if found else ""
+    holding = found["holding"] if found else ""
+    view["disclosure"] = {
+        "sebi_number": sebi,
+        "registration": registration_text(sebi),
+        "holding": holding,
+        "holding_text": HOLDINGS.get(holding, "Not disclosed."),
+        "note": found["note"] if found else "",
+    }
+    return view
 
 
 def save_analyst(
@@ -2268,6 +2327,17 @@ def save_analyst(
     ):
         raise ValueError(
             "Add a payment link or payment instructions so subscribers can pay you."
+        )
+    if "sebi_number" in raw:
+        sebi = re.sub(r"\s+", "", str(raw.get("sebi_number") or "")).upper()
+        if sebi and not SEBI_RA.fullmatch(sebi):
+            raise ValueError(
+                "A SEBI research analyst number looks like INH000012345. Leave it empty if you are not registered."
+            )
+        connection.execute(
+            """INSERT INTO stk_disclosures (owner_id, sebi_number, updated_at) VALUES (?, ?, ?)
+            ON CONFLICT(owner_id) DO UPDATE SET sebi_number = excluded.sebi_number, updated_at = excluded.updated_at""",
+            (me["id"], sebi, kit.now()),
         )
     if current:
         connection.execute(
@@ -2691,12 +2761,14 @@ def analyst_page(connection: sqlite3.Connection, owner_id: str) -> dict[str, Any
                 "payment_link",
                 "payment_instructions",
                 "accepting",
+                "sebi_number",
+                "registration",  # "SEBI research analyst INH..." or "Not SEBI-registered"
             )
         },
         "record": track_record(rows),
-        "free": [_public_idea(r) for r in open_rows if r["access"] == "free"],
+        "free": [_disclose(connection, _public_idea(r)) for r in open_rows if r["access"] == "free"],
         "paid_open": sum(1 for r in open_rows if r["access"] == "paid"),
-        "closed": [_public_idea(r) for r in rows if r["status"] != "open"][:60],
+        "closed": [_disclose(connection, _public_idea(r)) for r in rows if r["status"] != "open"][:60],
         "subscribers": kit.count(
             connection,
             "SELECT COUNT(*) FROM stk_subscribers WHERE analyst_id = ? AND status = 'active' AND paid_until >= ?",
@@ -2811,7 +2883,7 @@ def paid_ideas(
         (owner_id,),
     )
     return 200, {
-        "ideas": [_public_idea(r) for r in rows],
+        "ideas": [_disclose(connection, _public_idea(r)) for r in rows],
         "paid_until": sub["paid_until"],
         "name": sub["name"],
     }

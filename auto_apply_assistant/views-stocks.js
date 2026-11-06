@@ -72,7 +72,7 @@
   const change = (value, label) => h("span", { class: `st-chg ${toneOf(value)}` }, h("span", { class: "st-arrow", "aria-hidden": "true", text: arrow(value) }), h("span", { text: label }));
   const quoteChange = (q) => change(q.change_pct, `${q.index ? `${q.change_cents > 0 ? "+" : ""}${num(q.change_cents / 100)}` : signedMoney(q.change_cents, q.currency)} (${signedPct(q.change_pct)})`);
   const pill = (text, tone = "") => h("span", { class: `suite-pill as-written ${tone}`, text });
-  const DISCLAIMER = "Not financial advice. Forecasts are estimates and are often wrong. Monosage never buys or sells real shares.";
+  const DISCLAIMER = "Not financial advice. Forecasts are estimates and are often wrong. Monosage never buys or sells real shares. Prices are delayed, for personal use only.";
   const disclaimer = (text) => h("p", { class: "st-disclaimer", role: "note" }, h("strong", { text: "Please note: " }), h("span", { text: text || DISCLAIMER }));
   const stockLink = (symbol, label) => h("a", { href: `#/stocks?symbol=${enc(symbol)}`, class: "st-link", text: label || symbol });
 
@@ -764,6 +764,7 @@
         { name: "payment_link", label: "Your payment link", placeholder: "https://...", hint: "Your own Stripe, PayPal, Razorpay or UPI page. Monosage does not take payments." },
         { name: "payment_instructions", label: "Or payment instructions", type: "textarea", rows: 2, placeholder: "UPI id, bank details" },
         { name: "accepting", label: "Take new subscribers", type: "checkbox" },
+        { name: "sebi_number", label: "SEBI research analyst number (optional)", placeholder: "INH000012345", hint: "Shown on every paid idea. Without one, your ideas say: Not SEBI-registered." },
       ],
       values: a || { display_name: "", currency: "USD", accepting: true },
       onSave: async (form) => { await api("/analyst", { method: "POST", body: form }); Aira.toast("Saved.", "success"); rerender(); },
@@ -780,8 +781,10 @@
         { name: "horizon_days", label: "Time frame in days", type: "number", min: 1, max: 365, value: 30 },
         { name: "access", label: "Who can see it", type: "select", options: [["free", "Everyone (free)"], ["paid", "Paying subscribers only"]] },
         { name: "reasoning", label: "Why", type: "textarea", rows: 4 },
+        { name: "holding", label: "Do you hold this stock?", type: "select", hint: "Paid ideas must say. Subscribers see it with the idea.", options: [["", "Choose"], ["none", "I do not hold it"], ["self", "I hold it"], ["family", "My family holds it"], ["short", "I have a position against it"]] },
+        { name: "holding_note", label: "About what you hold (optional)" },
       ],
-      values: { side: "buy", access: "free", horizon_days: 30 },
+      values: { side: "buy", access: "free", horizon_days: 30, holding: "" },
       submitLabel: "Publish",
       onSave: async (form) => { await api("/ideas", { method: "POST", body: form }); Aira.toast("Published. Monosage tracks it every day.", "success"); rerender(); },
     });
@@ -846,7 +849,7 @@
         S.table({
           caption: "Your ideas",
           columns: [
-            { label: "Idea", render: (i) => h("span", {}, h("strong", { text: `${i.side === "buy" ? "Buy" : "Sell"} ` }), stockLink(i.symbol), h("span", { class: "muted small st-sub", text: `${S.day(i.opened_on)} · ${i.access === "paid" ? "Paid" : "Free"}` })) },
+            { label: "Idea", render: (i) => h("span", {}, h("strong", { text: `${i.side === "buy" ? "Buy" : "Sell"} ` }), stockLink(i.symbol), h("span", { class: "muted small st-sub", text: `${S.day(i.opened_on)} · ${i.access === "paid" ? "Paid" : "Free"}${i.disclosure ? ` · ${i.disclosure.registration}` : ""}` })) },
             { label: "Entry", render: (i) => money(i.entry_cents, i.currency), num: true },
             { label: "Target / stop", render: (i) => `${money(i.target_cents, i.currency)} / ${money(i.stop_cents, i.currency)}`, num: true },
             { label: "Status", render: (i) => h("span", {}, ideaState(i.status), i.status === "open" ? h("span", { class: "muted small st-sub", text: `${i.days_left} days left` }) : null) },

@@ -25,8 +25,13 @@ CSV = "text/csv; charset=utf-8"
 
 def _open(request: Request) -> tuple[Any, dict[str, Any]]:
     connection = request.connect()
-    store.ensure(connection)
-    me = life.current(request, connection)
+    try:
+        store.ensure(connection)
+        me = life.current(request, connection)
+        life.require_app(connection, me, "stocks")  # a guardian may turn Stocks off for a child or a teen
+    except Exception:
+        connection.close()
+        raise
     return connection, me
 
 

@@ -135,7 +135,8 @@ def is_caregiver(
 def subject(
     connection: sqlite3.Connection, me: dict[str, Any], person_id: str = ""
 ) -> tuple[dict[str, Any], bool]:
-    """Whose health this request is about, and whether ``me`` may change it (only their own)."""
+    """Whose health this request is about, and whether ``me`` may change it: their own, or a young child's they are
+    a guardian of (a parent manages a child's medicines and doses). A caregiver may look, not change."""
     if not person_id or person_id == me["id"]:
         return me, True
     try:
@@ -144,11 +145,25 @@ def subject(
         raise PermissionError(
             "You can see someone's health only if they made you their caregiver."
         ) from None
+    if manages(me, person):
+        return person, True
     if is_caregiver(connection, person["id"], me["id"]):
         return person, False
     raise PermissionError(
         "You can see someone's health only if they made you their caregiver."
     )
+
+
+def manages(me: dict[str, Any], person: dict[str, Any]) -> bool:
+    """A guardian (an adult of the household) manages a child's health: medicines, doses, appointments."""
+    return person.get("age_group") == "child" and life.is_guardian(me, person)
+
+
+def managed_children(
+    connection: sqlite3.Connection, me: dict[str, Any]
+) -> list[dict[str, Any]]:
+    """The household's children whose health ``me`` manages (for the person switcher in Health)."""
+    return [life.public(p) for p in life.profiles(connection) if manages(me, p)]
 
 
 def require_own(can_edit: bool) -> None:
@@ -161,22 +176,26 @@ def require_own(can_edit: bool) -> None:
 def caring_for(
     connection: sqlite3.Connection, me: dict[str, Any], now: datetime | None = None
 ) -> list[dict[str, Any]]:
-    """The people who made ``me`` their caregiver, with how their day is going."""
+    """The people who made ``me`` their caregiver, and the young children whose health ``me`` manages as their
+    guardian (``manages``), with how their day is going."""
     rows = kit.fetch_all(
         connection,
         "SELECT DISTINCT owner_id FROM cr_caregivers WHERE caregiver_id = ?",
         (me["id"],),
     )
+    ids = [row["owner_id"] for row in rows]
+    ids += [p["id"] for p in managed_children(connection, me) if p["id"] not in ids]
     out = []
-    for row in rows:
+    for owner_id in ids:
         try:
-            person = life.get(connection, row["owner_id"])
+            person = life.get(connection, owner_id)
         except LookupError:
             continue
         slots = day_slots(connection, person["id"], local_today(connection, now), now)
         out.append(
             {
                 **life.public(person),
+                "manages": manages(me, person),
                 "missed_today": sum(1 for slot in slots if slot["status"] == "missed"),
                 "taken_today": sum(1 for slot in slots if slot["status"] == "taken"),
                 "due_today": len(slots),
@@ -1163,6 +1182,8 @@ def notify_missed(
                 address = caregiver["email"]
                 if not address:
                     continue
+                # An email can be read by anyone near the inbox: it never names the medicine or the dose
+                # (they are in Monosage, for the caregiver who opens it).
                 kit.queue_email(
                     connection,
                     APP,
@@ -1173,7 +1194,7 @@ def notify_missed(
                         f"Hello {caregiver['name'] or ''},\n\n"
                         f"{person['name']} has not marked a scheduled medicine as taken. It was due at "
                         f"{slot['time']} on {slot['date']}.\n\nYou may want to check in with them.\n\n"
-                        f"Open Monosage: {kit.public_url('/#/care', origin)}\n\n"
+                        f"Open Monosage to see which one: {kit.public_url('/#/care', origin)}\n\n"
                         f"You receive this because {person['name']} made you their caregiver in Monosage Health."
                     ),
                     ref_type="medicine",

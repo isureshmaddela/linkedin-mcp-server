@@ -1454,9 +1454,53 @@ def visitor_key(visitor: dict[str, Any]) -> str:
     )
 
 
+BOARD_LINK_DAYS = 30  # a board link stops working after this; a grown-up makes a new one (rotate)
+
+
+def initials(name: str) -> str:
+    """"Mia Rao" -> "M. R." (the board names children and teens this way)."""
+    parts = [p for p in str(name or "").replace(".", " ").split() if p]
+    return " ".join(f"{p[0].upper()}." for p in parts[:2]) or "?"
+
+
+def _board_names(names: dict[str, dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """The household as the public board shows it: children and teens by their initials only."""
+    return {
+        pid: (
+            {**p, "name": initials(p["name"])}
+            if p.get("age_group") in ("child", "teen")
+            else p
+        )
+        for pid, p in names.items()
+    }
+
+
+def board_link_state(connection: sqlite3.Connection) -> dict[str, Any]:
+    """When the board's link stops working (set when it is made or rotated)."""
+    stored = kit.get_setting(connection, APP, "board_link", {}) or {}
+    return {"expires_at": str(stored.get("expires_at") or ""), "days": BOARD_LINK_DAYS}
+
+
+def start_board_link(connection: sqlite3.Connection) -> dict[str, Any]:
+    """A new link lasts BOARD_LINK_DAYS from now."""
+    expires = kit.iso(kit.utcnow() + timedelta(days=BOARD_LINK_DAYS))
+    kit.set_setting(connection, APP, "board_link", {"expires_at": expires})
+    connection.commit()
+    return board_link_state(connection)
+
+
+def board_link_live(connection: sqlite3.Connection) -> bool:
+    """False once the link's time is up (a link made before links expired counts from today)."""
+    state = board_link_state(connection)
+    if not state["expires_at"]:
+        start_board_link(connection)
+        return True
+    return kit.parse_time(state["expires_at"]) > kit.utcnow()
+
+
 def board_page(connection: sqlite3.Connection) -> dict[str, Any]:
     settings = board_settings(connection)
-    names = store.people(connection)
+    names = _board_names(store.people(connection))
     rows = kit.fetch_all(
         connection,
         "SELECT * FROM fm_posts WHERE status = 'live' ORDER BY pinned DESC, created_at DESC LIMIT 50",

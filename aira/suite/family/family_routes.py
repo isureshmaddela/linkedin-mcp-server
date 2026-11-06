@@ -409,6 +409,7 @@ def board_get(request: Request) -> tuple[int, dict[str, Any]]:
         return 200, {
             "settings": service.board_settings(connection),
             "link": public.link_for(connection, APP, "board", service.BOARD_REF),
+            "link_expires": service.board_link_state(connection),
             "pending": service.pending_posts(connection, me),
         }
 
@@ -427,6 +428,10 @@ def board_link(request: Request) -> tuple[int, dict[str, Any]]:
     connection, me = _open(request)
     with connection:
         _adult(me)
+        fresh = public.link_for(connection, APP, "board", service.BOARD_REF) is None
+        if not fresh and not service.board_link_live(connection):
+            public.revoke(connection, APP, "board", service.BOARD_REF)  # the old one ran out: a new one
+            fresh = True
         link = public.create_link(
             connection,
             APP,
@@ -434,8 +439,30 @@ def board_link(request: Request) -> tuple[int, dict[str, Any]]:
             service.BOARD_REF,
             title=service.board_settings(connection)["title"],
         )
+        if fresh:
+            service.start_board_link(connection)
+        expires = service.board_link_state(connection)
     request.audit("family.board_link", "board", service.BOARD_REF)
-    return 200, {"link": link}
+    return 200, {"link": link, "link_expires": expires}
+
+
+@aira_route("POST", f"{BASE}/board/link/rotate")
+def board_link_rotate(request: Request) -> tuple[int, dict[str, Any]]:
+    """A new board link: the old one stops working at once (shared too widely, or about to run out)."""
+    connection, me = _open(request)
+    with connection:
+        _adult(me)
+        public.revoke(connection, APP, "board", service.BOARD_REF)
+        link = public.create_link(
+            connection,
+            APP,
+            "board",
+            service.BOARD_REF,
+            title=service.board_settings(connection)["title"],
+        )
+        expires = service.start_board_link(connection)
+    request.audit("family.board_link_rotate", "board", service.BOARD_REF)
+    return 200, {"link": link, "link_expires": expires}
 
 
 @aira_route("DELETE", f"{BASE}/board/link")
@@ -448,9 +475,16 @@ def board_unlink(request: Request) -> tuple[int, dict[str, Any]]:
     return 200, {"link": None}
 
 
+def _live_board(connection: Any) -> None:
+    """A board link whose time is up answers like a revoked one."""
+    if not service.board_link_live(connection):
+        raise LookupError("This link is no longer available.")
+
+
 @public.page(APP, "board")
 def board_page(connection: Any, link: dict[str, Any]) -> dict[str, Any]:
     store.ensure(connection)
+    _live_board(connection)
     return {
         **service.board_page(connection),
         "brand": False,
@@ -465,6 +499,7 @@ def board_post(
     visitor: dict[str, Any],
 ) -> tuple[int, dict[str, Any]]:
     store.ensure(connection)
+    _live_board(connection)
     return 201, service.board_post(connection, payload, visitor)
 
 
@@ -476,6 +511,7 @@ def board_claim(
     visitor: dict[str, Any],
 ) -> tuple[int, dict[str, Any]]:
     store.ensure(connection)
+    _live_board(connection)
     return 200, service.board_claim(connection, payload, visitor)
 
 

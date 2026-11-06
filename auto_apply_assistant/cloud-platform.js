@@ -927,7 +927,14 @@
       r.target_type === "account" ? null : h("button", { type: "button", class: "btn sm secondary", text: "Hide", onclick: () => act(r, "hide") }),
       r.author ? h("button", { type: "button", class: "btn sm danger secondary", text: "Suspend author", onclick: () => { if (confirm(`Suspend ${who(r.author)} on Social?`)) act(r, "suspend"); } }) : null,
       h("button", { type: "button", class: "btn sm secondary", text: "Dismiss", onclick: () => act(r, "dismiss") }));
-    const rows = reports.map((r) => h("tr", {}, td(ts(Date.parse(r.created_at) / 1000 || r.created_at)), td(chip(r.target_type)), td(h("strong", { text: r.reason || "reported" })), td(h("div", { class: "cp-preview", text: r.preview || "(nothing to preview)" })), td(who(r.author)), td(who(r.reporter)), td(buttons(r))));
+    // The evidence copied when the report was filed (a chat, or Dating's chats and both profiles), newest 40 lines.
+    const evidence = (r) => (r.evidence || []).map((item) => {
+      const data = item.data || {};
+      const chats = [data.transcript, data.live_chat, ...(data.ended_chats || []).map((chat) => chat.transcript)].filter(Boolean);
+      return h("details", {}, h("summary", { text: item.kind === "dating" ? "Dating evidence" : "Chat evidence" }),
+        h("pre", { class: "cp-preview", text: chats.flat().slice(-40).map((m) => `${m.at || ""} ${m.by || m.author_id || ""}: ${m.text || (m.photo ? "[photo]" : "")}`).join(String.fromCharCode(10)) || "(no messages)" }));
+    });
+    const rows = reports.map((r) => h("tr", {}, td(ts(Date.parse(r.created_at) / 1000 || r.created_at)), td(chip(r.target_type)), td(h("strong", { text: r.reason || "reported" })), td(h("div", {}, h("div", { class: "cp-preview", text: r.preview || "(nothing to preview)" }), ...evidence(r))), td(who(r.author)), td(who(r.reporter)), td(buttons(r))));
     const filter = h("div", { class: "btn-row" }, ...["open", "resolved", "dismissed"].map((name) => h("button", { type: "button", class: `btn sm ${name === status ? "" : "secondary"}`, text: titleCase(name), onclick: () => { P.modStatus = name; Aira.router.render(); } })));
     const editWords = () => formModal({ title: "Blocked words", intro: "These are masked with asterisks in posts, comments and messages. One word or phrase per line (up to 40 characters).", fields: [{ name: "words", label: "Words", type: "textarea", rows: 10, value: (blocklist || []).join(String.fromCharCode(10)) }], onSubmit: async (v) => {
       await api("/api/platform/social/blocklist", { method: "PUT", body: { words: String(v.words || "").split(/[\r\n]+/).map((w) => w.trim()).filter(Boolean) } });

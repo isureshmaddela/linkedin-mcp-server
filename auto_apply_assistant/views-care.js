@@ -19,7 +19,14 @@
   const Aira = window.Aira;
   const h = window.h;
   const S = Aira.suite;
-  const api = (path, opts) => S.api("care", path, opts);
+  // A parent looking after a young child's health changes the child's medicines, doses and appointments: every
+  // change then names the child (?person=), and the server checks that this person is their guardian.
+  let acting = "";
+  const api = (path, opts) => {
+    const method = String((opts && opts.method) || "GET").toUpperCase();
+    const named = acting && method !== "GET" && !/[?&]person=/.test(path) && /^\/(medicines|doses|appointments)\b/.test(path);
+    return S.api("care", named ? `${path}${path.includes("?") ? "&" : "?"}person=${encodeURIComponent(acting)}` : path, opts);
+  };
 
   // Glyphs for the left menu's folders, "+ New" and the search box (24x24 strokes, like app.js ICONS).
   const GLYPHS = {
@@ -756,6 +763,7 @@
       zoneChecked = true;
       const canEdit = overview.can_edit;
       const me = Aira.life && Aira.life.me ? Aira.life.me.id : "";
+      acting = canEdit && person && person !== me ? person : "";
       const visible = TABS.filter((t) => (canEdit || !OWN_ONLY.includes(t.id)) && (t.id !== "work" || overview.me_adult));
       const tab = requested === "search" || visible.some((t) => t.id === requested) ? requested : "today";
       const ctx = { overview, canEdit, person: overview.person, qs, me, rerender: render, filters: FILTERS, ask, query };
@@ -773,6 +781,7 @@
         body.append(h("div", { class: "care-whose" }, Aira.ui.field("Showing", choose)));
       }
       if (!canEdit) body.append(h("div", { class: "cloud-banner info", role: "status" }, h("strong", { text: `${overview.person.name}'s health` }), h("span", { text: "Read-only: only they can change it." }), S.button("Back to mine", () => nav(away, ""), { kind: "secondary sm" })));
+      if (acting) body.append(h("div", { class: "cloud-banner info", role: "status" }, h("strong", { text: `${overview.person.name}'s health` }), h("span", { text: "You look after this as their parent: you can add and change their medicines." }), S.button("Back to mine", () => nav(away, ""), { kind: "secondary sm" })));
       const strip = Aira.ui.tabs(visible, tab, (id) => nav(id, person));
       strip.classList.add("care-tabstrip"); // a phone's tabs; wider screens have them as the left menu's folders
       body.append(strip);
