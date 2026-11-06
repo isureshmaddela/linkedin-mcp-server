@@ -14,10 +14,14 @@ import json
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from pathlib import Path
 from typing import Any
 
 import pytest
 from test_careers import PASSWORD, env, stub  # noqa: F401
+
+# The checkout under test, on any system.
+REPO_ROOT = Path(__file__).resolve().parents[1]
 
 SECRET = "launch-secret-" + "x" * 30
 CLAIMS = {
@@ -348,7 +352,7 @@ def test_a_candidate_signed_in_to_the_account_opens_the_local_installation(
     hosted_env.pop("AIRA_TEST_DATABASE_URL", None)
     seeded = subprocess.run(
         [sys.executable, "-m", "monosage_cloud", "seed-demo"],
-        cwd="D:/linkedin",
+        cwd=REPO_ROOT,
         env=hosted_env,
         capture_output=True,
         text=True,
@@ -358,7 +362,7 @@ def test_a_candidate_signed_in_to_the_account_opens_the_local_installation(
     log = open(tmp_path / "hosted.log", "w", encoding="utf-8")
     server = subprocess.Popen(
         [sys.executable, "-m", "monosage_cloud", "serve"],
-        cwd="D:/linkedin",
+        cwd=REPO_ROOT,
         env=hosted_env,
         stdout=log,
         stderr=subprocess.STDOUT,

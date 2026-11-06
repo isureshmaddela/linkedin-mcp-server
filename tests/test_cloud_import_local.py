@@ -255,3 +255,45 @@ def test_the_command_line_prints_the_report(cloud, local, capsys):
     )
     assert code == 0
     assert '"copied": 1' in capsys.readouterr().out
+
+
+@pytest.mark.parametrize(
+    ("stored", "name"),
+    [
+        (f"D:\\linkedin\\data\\accounts\\{LOCAL_ID}.sqlite3", f"{LOCAL_ID}.sqlite3"),
+        (f"D:/linkedin/data/accounts/{LOCAL_ID}.sqlite3", f"{LOCAL_ID}.sqlite3"),
+        (
+            "C:\\Users\\sam\\.linkedin-mcp\\auto_apply\\applications.sqlite3",
+            "applications.sqlite3",
+        ),
+        (
+            f"/home/sam/.linkedin-mcp/auto_apply/accounts/{LOCAL_ID}.sqlite3",
+            f"{LOCAL_ID}.sqlite3",
+        ),
+        ("applications.sqlite3", "applications.sqlite3"),
+    ],
+)
+def test_a_saved_path_from_any_system_names_its_file(stored, name):
+    """The import runs where the installation was not made: a Windows path read on Linux, and the other way round."""
+    assert import_local.stored_file_name(stored) == name
+
+
+@pytest.mark.parametrize(
+    "stored",
+    [
+        "D:\\linkedin\\data\\applications.sqlite3",
+        "D:/linkedin/data/applications.sqlite3",
+        "/srv/monosage/applications.sqlite3",
+    ],
+)
+def test_the_first_account_is_found_whichever_system_saved_its_path(local, stored):
+    make_local(local, "cand@acme.test")
+    accounts = sqlite3.connect(local / "accounts.sqlite3")
+    accounts.execute("UPDATE users SET data_path = ?", (stored,))
+    accounts.commit()
+    accounts.close()
+    (local / "applications.sqlite3").write_bytes(
+        (local / "accounts" / f"{LOCAL_ID}.sqlite3").read_bytes()
+    )
+    local_id, path = import_local._local_account(local, "cand@acme.test")
+    assert (local_id, path) == (LOCAL_ID, local / "applications.sqlite3")
