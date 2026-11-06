@@ -34,16 +34,19 @@ classifiers = [
 ]
 dependencies = [
     "anthropic>=2.3.0",
-    "fastmcp>=3.0.0",
+    "cryptography>=50.0.0",  # aira/documents.py, aira/airaapi/store.py (Fernet); >=50 for the audited fixes
+    "fastmcp>=3.4.10",
     "inquirer>=3.4.0",
     "patchright>=1.40.0",
-    "pypdf>=6.21.2",
+    "pypdf>=6.21.4",  # parses uploaded resumes; >=6.21.4 for the audited fixes
     "python-dotenv>=1.1.1",
+    "tzdata>=2024.1; sys_platform == 'win32'",  # zoneinfo has no system database on Windows
 ]
 
 [project.optional-dependencies]
 cloud = [
     "psycopg[binary,pool]>=3.3.6",
+    "pyjwt[crypto]>=2.15.0",  # monosage_cloud/sso.py (OIDC ID tokens, JWKS keys)
     "signxml>=4",
     "websockets>=14",
 ]
