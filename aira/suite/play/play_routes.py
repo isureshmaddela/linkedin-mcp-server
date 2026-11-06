@@ -24,6 +24,25 @@ def _csv(rows: list[dict[str, Any]], columns: tuple[str, ...], name: str) -> Raw
     )
 
 
+def _live(route: Any) -> Any:
+    """A route that changes a trivia room: afterwards the household's open pages refresh it at once
+    (aira/notify/realtime.py)."""
+    import functools
+
+    @functools.wraps(route)
+    def wrapped(request: Request) -> Any:
+        outcome = route(request)
+        from aira import notify
+        from aira.notify import events
+
+        room = outcome[1].get("room") if isinstance(outcome, tuple) else None
+        if isinstance(room, dict) and room.get("id"):
+            events.trivia(notify.home_of(request.user), str(room["id"]))
+        return outcome
+
+    return wrapped
+
+
 def _open(request: Request) -> tuple[Any, dict[str, Any]]:
     connection = request.connect()
     store.ensure(connection)
@@ -228,6 +247,7 @@ def rooms_create(request: Request) -> tuple[int, dict[str, Any]]:
 
 
 @aira_route("POST", f"{BASE}/rooms/join")
+@_live
 def rooms_join_code(request: Request) -> tuple[int, dict[str, Any]]:
     connection, me = _open(request)
     with connection:
@@ -252,6 +272,7 @@ def rooms_get(request: Request) -> tuple[int, dict[str, Any]]:
 
 
 @aira_route("POST", f"{BASE}/rooms/{ID}/join")
+@_live
 def rooms_join(request: Request) -> tuple[int, dict[str, Any]]:
     connection, me = _open(request)
     with connection:
@@ -259,6 +280,7 @@ def rooms_join(request: Request) -> tuple[int, dict[str, Any]]:
 
 
 @aira_route("POST", f"{BASE}/rooms/{ID}/start")
+@_live
 def rooms_start(request: Request) -> tuple[int, dict[str, Any]]:
     connection, me = _open(request)
     with connection:
@@ -266,6 +288,7 @@ def rooms_start(request: Request) -> tuple[int, dict[str, Any]]:
 
 
 @aira_route("POST", f"{BASE}/rooms/{ID}/next")
+@_live
 def rooms_next(request: Request) -> tuple[int, dict[str, Any]]:
     connection, me = _open(request)
     with connection:
@@ -275,6 +298,7 @@ def rooms_next(request: Request) -> tuple[int, dict[str, Any]]:
 
 
 @aira_route("POST", f"{BASE}/rooms/{ID}/end")
+@_live
 def rooms_end(request: Request) -> tuple[int, dict[str, Any]]:
     connection, me = _open(request)
     with connection:
@@ -282,6 +306,7 @@ def rooms_end(request: Request) -> tuple[int, dict[str, Any]]:
 
 
 @aira_route("POST", f"{BASE}/rooms/{ID}/answer")
+@_live
 def rooms_answer(request: Request) -> tuple[int, dict[str, Any]]:
     connection, me = _open(request)
     with connection:

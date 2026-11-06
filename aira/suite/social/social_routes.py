@@ -16,6 +16,7 @@ import sqlite3
 import time
 
 from aira.airaapi.http import Raw, Request, aira_route
+from aira.notify import events as notify_events
 from aira.suite import kit, life, public
 from aira.suite.social import db, market, photos, service, store
 from aira.suite.social import dating_routes as _dating_routes  # noqa: F401 - registers Dating's routes (/api/social/dating/*)
@@ -471,13 +472,16 @@ def chat_messages(request: Request) -> tuple[int, dict[str, Any]]:
 @aira_route("POST", f"{BASE}/chats/{ID}/messages")
 def chat_send(request: Request) -> tuple[int, dict[str, Any]]:
     with _open(request) as (sc, me):
-        return 201, service.send(sc, me, _id(request), request.payload)
+        sent = service.send(sc, me, _id(request), request.payload)
+        notify_events.chat_message(sc, me, _id(request))  # live pages, and the others are told
+        return 201, sent
 
 
 @aira_route("POST", f"{BASE}/chats/{ID}/read")
 def chat_read(request: Request) -> tuple[int, dict[str, Any]]:
     with _open(request) as (sc, me):
         service.mark_read(sc, me, _id(request))
+        notify_events.chat_changed(sc, _id(request))  # read receipts on the others' open chat
     return 200, {"read": True}
 
 
