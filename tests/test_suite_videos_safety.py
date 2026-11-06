@@ -126,6 +126,9 @@ def test_a_teens_video_waits_for_a_grown_up_before_it_is_public(sc):
     assert asked["visibility"] == "private" and asked["public_pending"] is True
     [waiting] = service.public_requests(sc, mum)
     assert waiting["video"]["id"] == asked["id"]
+    # Mum may watch it first; nobody else may
+    row_ = service._video_row(sc, asked["id"])
+    assert service.can_watch(sc, mum, row_) and not service.can_watch(sc, sam, row_)
     assert service.public_requests(sc, sam) == []
     with pytest.raises(LookupError):
         service.answer_public(sc, sam, asked["id"], True)

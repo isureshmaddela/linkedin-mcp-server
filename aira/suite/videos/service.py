@@ -420,9 +420,24 @@ def can_watch(
         return True
     if blocked_reason(sc, video):
         return False
-    if video["visibility"] == "private" or scheduled(video):
+    if scheduled(video):
+        return False
+    if video["visibility"] == "private" and not _asked_of(sc, me_, video):
         return False
     return video["rating"] in me_["ratings"]
+
+
+def _asked_of(sc: sqlite3.Connection, me_: dict[str, Any], video: dict[str, Any]) -> bool:
+    """A grown-up of the household may watch a teen's private video that waits for their yes."""
+    if not adult(me_) or not me_.get("home"):
+        return False
+    return bool(
+        row(
+            sc,
+            "SELECT 1 AS x FROM vi_public_requests WHERE video_id = ? AND home = ?",
+            (video["id"], me_["home"]),
+        )
+    )
 
 
 def may_serve(sc: sqlite3.Connection, file_id: str, viewer_id: str = "") -> bool:
