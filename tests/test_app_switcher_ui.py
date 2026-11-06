@@ -46,7 +46,7 @@ CAREERS_HEADINGS = ["Home", "Find", "Apply", "Follow up", "Your materials", "Ins
 # The Account pages (Today, Display and reading, the Business hub, Settings) live in the profile menu at the top
 # right, like a Google account: the left menu shows only the open app.
 ACCOUNT_SECTIONS: list[str] = []
-ACCOUNT_MENU = ["today", "display", "hub"]
+ACCOUNT_MENU = ["today", "display", "hub", "notifications"]
 
 
 def shot(page, name: str) -> None:

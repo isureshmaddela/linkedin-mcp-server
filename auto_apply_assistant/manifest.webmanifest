@@ -1,0 +1,20 @@
+{
+  "name": "Monosage",
+  "short_name": "Monosage",
+  "description": "Your apps for work and everyday life: careers, business, health, learning, social and more.",
+  "id": "/",
+  "start_url": "/",
+  "scope": "/",
+  "display": "standalone",
+  "background_color": "#0c4932",
+  "theme_color": "#0c4932",
+  "icons": [
+    { "src": "/static/icon-192.png", "sizes": "192x192", "type": "image/png", "purpose": "any" },
+    { "src": "/static/icon-512.png", "sizes": "512x512", "type": "image/png", "purpose": "any" },
+    { "src": "/static/icon-maskable-512.png", "sizes": "512x512", "type": "image/png", "purpose": "maskable" }
+  ],
+  "shortcuts": [
+    { "name": "Today", "url": "/home#/today", "icons": [{ "src": "/static/icon-192.png", "sizes": "192x192" }] },
+    { "name": "Notifications", "url": "/#/notifications", "icons": [{ "src": "/static/icon-192.png", "sizes": "192x192" }] }
+  ]
+}
