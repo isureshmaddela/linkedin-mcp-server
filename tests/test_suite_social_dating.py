@@ -102,9 +102,17 @@ class Person:
                 {"id": "first_date", "answer": "A picnic in the park"},
             ],
             "interests": ["hiking", "baking", "reading"],
-            "photos": ["https://img.example/me.jpg"],
             **raw,
         }
+        if "photos" not in raw:
+            import base64
+
+            from test_suite_social_plus import png
+
+            from aira.suite.social import photos
+
+            upload = photos.save(self.sc, self.acct, base64.b64encode(png()).decode())
+            values["photos"] = [upload["ref"]]
         return dating.save(self.sc, self.ident, self.acct, values)
 
     def deck(self, **kw):
@@ -207,8 +215,10 @@ def test_dating_is_off_until_turned_on_and_pause_and_delete_work(sc):
         pat.date(prompts=[{"id": "slow_sunday", "answer": "x"}] * 3)
     with pytest.raises(ValueError, match="list"):
         pat.date(interests=["skydiving-off-roofs"])
-    with pytest.raises(ValueError, match="https"):
-        pat.date(photos=["http://img.example/me.jpg"])
+    # only photos uploaded from the device: a link elsewhere could log every viewer and change after review
+    for link in ("http://img.example/me.jpg", "https://img.example/me.jpg"):
+        with pytest.raises(ValueError, match="Upload the photo"):
+            pat.date(photos=[link])
     with pytest.raises(ValueError):
         pat.date(height_cm="tall")
     assert pat.date(height_cm="172")["height_cm"] == 172

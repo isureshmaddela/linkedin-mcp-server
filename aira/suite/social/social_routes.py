@@ -16,7 +16,7 @@ import sqlite3
 import time
 
 from aira.airaapi.http import Raw, Request, aira_route
-from aira.suite import kit, life, public
+from aira.suite import background, kit, life, public
 from aira.suite.social import db, market, photos, service, store
 from aira.suite.social import dating_routes as _dating_routes  # noqa: F401 - registers Dating's routes (/api/social/dating/*)
 from aira.suite.social.store import APP
@@ -321,6 +321,33 @@ def guardian_answer(request: Request) -> tuple[int, dict[str, Any]]:
             kit.flag(request.payload.get("approve", True)),
         )
     request.audit("social.guardian", "account", _id(request))
+    return 200, result
+
+
+@aira_route("GET", f"{BASE}/guardian/{ID}/contacts")
+def guardian_contacts(request: Request) -> tuple[int, dict[str, Any]]:
+    """The approved contacts of a child or a teen: the adults outside the household who may befriend and message
+    them (for them and their guardians)."""
+    with _open(request) as (sc, me):
+        return 200, service.approved_contacts(sc, me, _id(request))
+
+
+@aira_route("POST", f"{BASE}/guardian/{ID}/contacts")
+def guardian_contacts_add(request: Request) -> tuple[int, dict[str, Any]]:
+    """A guardian approves an adult (``{"handle": "@name"}`` or ``{"contact_id"}``)."""
+    with _open(request) as (sc, me):
+        result = service.set_approved_contact(sc, me, _id(request), request.payload, True)
+    request.audit("social.approved_contact_add", "account", _id(request))
+    return 200, result
+
+
+@aira_route("DELETE", f"{BASE}/guardian/{ID}/contacts/{ID}")
+def guardian_contacts_remove(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as (sc, me):
+        result = service.set_approved_contact(
+            sc, me, _id(request), {"contact_id": _id(request, 2)}, False
+        )
+    request.audit("social.approved_contact_remove", "account", _id(request))
     return 200, result
 
 
@@ -1119,8 +1146,11 @@ def moderation(request: Request) -> tuple[int, dict[str, Any]]:
     with _identity(request) as (sc, ident):
         home = _moderator(ident)
         status = request.q("status") or "open"
+        me = _account_or_none(sc, ident)
         return 200, {
-            "reports": service.reports(sc, status=status, home=home),
+            "reports": service.reports(
+                sc, status=status, home=home, viewer_id=me["id"] if me else ""
+            ),
             "words": service.blocklist(sc),
         }
 
@@ -1182,3 +1212,15 @@ def _today(connection: Any, me: dict[str, Any]) -> list[dict[str, Any]]:
 def _pulse(connection: Any, me: dict[str, Any], since: str) -> dict[str, Any]:
     with closing(db.connect()) as sc:
         return service.pulse(sc, me, since)
+
+
+# ---------------------------------------------------------------------------
+# background: what is kept for moderators is purged when its time is up
+# ---------------------------------------------------------------------------
+
+
+@background.task(APP)
+def _tick(connection: Any) -> dict[str, int]:
+    """Ended Dating chats and closed reports' evidence go after store.RETENTION_DAYS (platform-wide, idempotent)."""
+    with closing(db.connect()) as sc:
+        return service.purge_kept(sc)

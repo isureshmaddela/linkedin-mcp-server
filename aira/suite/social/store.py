@@ -331,7 +331,38 @@ SCHEMA = (
         created_at TEXT NOT NULL,
         PRIMARY KEY (story_id, account_id)
     )""",
+    # writing the automatic check (moderation.py) kept back: hidden until a moderator releases or removes it
+    """CREATE TABLE IF NOT EXISTS so_held (
+        target_type TEXT NOT NULL,
+        target_id TEXT NOT NULL,
+        author_id TEXT NOT NULL,
+        report_id TEXT NOT NULL DEFAULT '',
+        reasons TEXT NOT NULL DEFAULT '',
+        homes TEXT NOT NULL DEFAULT '',
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (target_type, target_id)
+    )""",
+    # what a moderator sees with a report: the chat and the profiles as they were when it was filed (only
+    # moderators read it; purged EVIDENCE_DAYS after the report is closed)
+    """CREATE TABLE IF NOT EXISTS so_evidence (
+        id TEXT PRIMARY KEY,
+        report_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        data TEXT NOT NULL DEFAULT '{}',
+        created_at TEXT NOT NULL,
+        purge_after TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS so_evidence_report ON so_evidence (report_id)",
+    # the people a guardian approved to befriend and message their child or teen
+    """CREATE TABLE IF NOT EXISTS so_approved_contacts (
+        young_id TEXT NOT NULL,
+        contact_id TEXT NOT NULL,
+        approved_by TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (young_id, contact_id)
+    )""",
 )
+RETENTION_DAYS = 90  # ended Dating chats and report evidence, for moderators only
 
 # Columns added after a table first shipped: (table, column, definition). db.connect adds the missing ones.
 COLUMNS = (
@@ -370,6 +401,54 @@ def migrate(connection: sqlite3.Connection) -> None:
     connection.execute(
         "INSERT OR IGNORE INTO so_settings (key, value) VALUES ('photo_key', ?)",
         (json.dumps(uuid.uuid4().hex + uuid.uuid4().hex),),
+    )
+    clear_external_pictures(connection)
+
+
+EXTERNAL = (
+    "lower({c}) LIKE 'http:%' OR lower({c}) LIKE 'https:%' OR {c} LIKE '//%' OR lower({c}) LIKE 'data:%'"
+)
+
+
+def clear_external_pictures(connection: sqlite3.Connection) -> None:
+    """Once per database: profile, cover, group and page pictures that link to another website are cleared (an
+    emoji takes the profile picture's place), and Dating photos keep only uploads. Such a link let its website see
+    every viewer; Social now takes only uploaded photos. Posts keep their old links, which are never shown
+    (photos.display)."""
+    done = connection.execute(
+        "SELECT 1 FROM so_settings WHERE key = 'external_pictures_cleared'"
+    ).fetchone()
+    if done:
+        return
+    for table, column, empty in (
+        ("so_accounts", "avatar", "🙂"),
+        ("so_accounts", "cover", ""),
+        ("so_groups", "photo", ""),
+        ("so_pages", "photo", ""),
+    ):
+        connection.execute(
+            f"UPDATE {table} SET {column} = ? WHERE {EXTERNAL.format(c=column)}",  # noqa: S608 - fixed names
+            (empty,),
+        )
+    has_dating = connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'so_dating_profiles'"
+    ).fetchone()
+    if has_dating:
+        for found in connection.execute(
+            "SELECT id, photos FROM so_dating_profiles WHERE photos LIKE '%:%'"
+        ).fetchall():
+            kept = [
+                p
+                for p in loads(found[1], [])
+                if isinstance(p, str) and p.startswith("media:")
+            ]
+            connection.execute(
+                "UPDATE so_dating_profiles SET photos = ? WHERE id = ?",
+                (dumps(kept), found[0]),
+            )
+    connection.execute(
+        "INSERT OR IGNORE INTO so_settings (key, value) VALUES ('external_pictures_cleared', ?)",
+        (json.dumps(stamp()),),
     )
 
 

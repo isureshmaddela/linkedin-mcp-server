@@ -211,6 +211,14 @@ def save(sc: sqlite3.Connection, me_: dict[str, Any], data: Any) -> dict[str, An
     if len(raw) > MAX_BYTES:
         raise ValueError("This photo is too large: the most Monosage keeps is 8 MB.")
     body, mime, width, height = clean(raw)
+    from aira.suite.social import moderation
+
+    # An outside image scanning service, when one is set up (moderation.ImageScanner): nothing scans pictures here.
+    scanned = moderation.scan_image(
+        body, mime, young=me_.get("age_group") in ("child", "teen")
+    )
+    if scanned.status == "block":
+        raise ValueError("This photo cannot be uploaded to Monosage.")
     media.check_space(len(body))
     sweep(sc)
     photo_id = new_id()
@@ -405,16 +413,24 @@ def verify(
 def display(
     value: Any, *, token: str = "", sc: sqlite3.Connection | None = None
 ) -> str:
-    """What a browser loads for a stored picture: an https link as it is, ``media:<id>`` as a signed address
-    (or, on a public link's page, the address that page answers for)."""
+    """What a browser loads for a stored picture: ``media:<id>`` as a signed address (or, on a public link's page,
+    the address that page answers for), an emoji as it is. A link to a picture elsewhere is never shown: loading
+    it would tell that server who is looking (an old one saved before Social took only uploads answers "")."""
     text = str(value or "")
     photo_id = ref_id(text) if text.startswith("media:") else ""
     if not photo_id:
-        return text
+        return "" if external(text) else text
     return public_url(token, photo_id) if token else url(photo_id, sc)
+
+
+def external(value: Any) -> bool:
+    """A link to a picture on another server (http, https, protocol-relative or a data address)."""
+    text = str(value or "").strip().lower()
+    return text.startswith(("http:", "https:", "//", "data:")) or "://" in text
 
 
 def display_list(
     values: Any, *, token: str = "", sc: sqlite3.Connection | None = None
 ) -> list[str]:
-    return [display(item, token=token, sc=sc) for item in (values or [])]
+    shown = (display(item, token=token, sc=sc) for item in (values or []))
+    return [item for item in shown if item]

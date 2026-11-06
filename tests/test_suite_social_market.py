@@ -112,6 +112,11 @@ def test_an_old_chat_cannot_be_used_to_keep_messaging_a_teen_after_unfriending(
     sc, people
 ):
     pat, mia, sam, teo = people
+    # an adult outside Teo's household needs a guardian's approval first (an approved contact)
+    sc.execute(
+        "INSERT INTO so_approved_contacts (young_id, contact_id, approved_by, created_at) VALUES (?, ?, 'x', '')",
+        (teo["id"], sam["id"]),
+    )
     _friends(sc, sam, teo)
     chat = service.open_direct(sc, sam, teo["id"])
     service.send(sc, sam, chat["id"], {"text": "hi"})
@@ -231,7 +236,12 @@ def test_a_child_accepting_an_outside_request_also_waits_and_no_means_no(sc, peo
     pat, mia, sam, teo = people
     # Sam asked while Mia's profile was still a teen's; now she is a child, accepting waits for a grown-up
     sc.execute("UPDATE so_accounts SET age_group = 'teen' WHERE id = ?", (mia["id"],))
-    service.request_friend(sc, sam, mia["id"])
+    # (an adult stranger can no longer ask a teen either: the request is from before that rule)
+    a, b = sorted((sam["id"], mia["id"]))
+    sc.execute(
+        "INSERT INTO so_friends (a_id, b_id, status, requested_by, created_at) VALUES (?, ?, 'pending', ?, ?)",
+        (a, b, sam["id"], store.stamp()),
+    )
     sc.execute("UPDATE so_accounts SET age_group = 'child' WHERE id = ?", (mia["id"],))
     sc.commit()
     mia = _fresh(sc, mia)
@@ -260,6 +270,17 @@ def test_a_child_accepting_an_outside_request_also_waits_and_no_means_no(sc, peo
 # ---------------------------------------------------------------------------
 
 
+def _upload(sc, owner):
+    """A photo uploaded from the device (Social takes no links to pictures elsewhere)."""
+    import base64
+
+    from test_suite_social_plus import png
+
+    from aira.suite.social import photos
+
+    return photos.save(sc, owner, base64.b64encode(png()).decode())["ref"]
+
+
 def _bike(sc, seller, **extra):
     return market.create(
         sc,
@@ -270,7 +291,7 @@ def _bike(sc, seller, **extra):
             "category": "kids",
             "condition": "good",
             "place": "Riverside",
-            "photos": ["https://img.example/bike.jpg"],
+            "photos": [_upload(sc, seller)],
             **extra,
         },
         currency="GBP",
