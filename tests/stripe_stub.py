@@ -47,6 +47,11 @@ class StripeStub:
         self.calls: list[dict[str, Any]] = []
         self.subscriptions: dict[str, dict[str, Any]] = {}
         self.fail_next: list[int] = []
+        # what POST /v1/invoices/<id>/pay answers: the status of a paid invoice, or an HTTP error for a declined card
+        self.pay_status = "paid"
+        self.pay_failure = 0
+        # what an update with payment_behavior=pending_if_incomplete answers as the subscription's latest invoice
+        self.latest_invoice = "in_upgrade_1"
         self._lock = threading.Lock()
         stub = self
 
@@ -67,6 +72,8 @@ class StripeStub:
                     "params": params,
                     "authorized": self.headers.get("Authorization")
                     == f"Bearer {SECRET}",
+                    "idempotency_key": self.headers.get("Idempotency-Key", ""),
+                    "stripe_version": self.headers.get("Stripe-Version", ""),
                 }
                 with stub._lock:
                     stub.calls.append(call)
@@ -109,6 +116,30 @@ class StripeStub:
                     )
                 if path == "/v1/invoiceitems":
                     return self._reply(200, {"id": "ii_" + uuid.uuid4().hex[:8]})
+                if self.command == "POST" and path == "/v1/prices":
+                    return self._reply(
+                        200,
+                        {
+                            "id": "price_" + uuid.uuid4().hex[:10],
+                            "product": params.get("product", ""),
+                            "metadata": params.get("metadata", {}),
+                        },
+                    )
+                if self.command == "POST" and path == "/v1/invoices":
+                    invoice = "in_" + uuid.uuid4().hex[:10]
+                    return self._reply(200, {"id": invoice, "status": "draft"})
+                paying = re.fullmatch(r"/v1/invoices/(in_\w+)/pay", path)
+                if paying:
+                    if stub.pay_failure:
+                        return self._reply(
+                            stub.pay_failure,
+                            {"error": {"message": "Your card was declined."}},
+                        )
+                    return self._reply(
+                        200, {"id": paying.group(1), "status": stub.pay_status}
+                    )
+                if re.fullmatch(r"/v1/checkout/sessions/(cs_\w+)/expire", path):
+                    return self._reply(200, {"status": "expired"})
                 match = re.fullmatch(r"/v1/subscriptions/([\w]+)", path)
                 if match:
                     sub = match.group(1)
@@ -125,6 +156,18 @@ class StripeStub:
                             record["last_update"] = params
                             if params.get("cancel_at_period_end") == "true":
                                 record["cancel_at_period_end"] = True
+                            if params.get("payment_behavior") == "pending_if_incomplete":
+                                return self._reply(
+                                    200,
+                                    {
+                                        **record,
+                                        "latest_invoice": {
+                                            "id": stub.latest_invoice,
+                                            "status": "open",
+                                        },
+                                        "pending_update": {"expires_at": 0},
+                                    },
+                                )
                         elif self.command == "DELETE":
                             record["status"] = "canceled"
                     return self._reply(200, record)

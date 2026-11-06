@@ -78,15 +78,16 @@ def create(operator, body=None):
 def test_a_new_sign_up_gets_every_app_and_every_feature_by_default(shipped):
     assert CloudConfig.signup_plan == plans.ALL_ACCESS
     result = signup(shipped, "Fresh Org", "owner@fresh.test")
+    # a time-boxed trial of All access (14 days), not All access with no end
     assert result["subscription"] == {
         "plan_id": "all_access",
-        "status": "active",
-        "trial_days": 0,
-        "trial_end": None,
+        "status": "trialing",
+        "trial_days": 14,
+        "trial_end": shipped.clock.now() + 14 * DAY,
     }
     org_id = result["org"]["org_id"]
     entitlements = shipped.entitlements.resolve(org_id, fresh=True)
-    assert entitlements.plan_id == "all_access" and entitlements.status == "active"
+    assert entitlements.plan_id == "all_access" and entitlements.status == "trialing"
     assert EVERY_FEATURE <= entitlements.features
     assert set(entitlements.apps) == EVERY_APP
     assert entitlements.automation_allowed and not entitlements.read_only
@@ -101,7 +102,14 @@ def test_a_new_sign_up_gets_every_app_and_every_feature_by_default(shipped):
     ), [a for a in catalog["apps"] if not (a["enabled"] and a["allowed"])]
     owner = sign_in(shipped, result["owner"])
     assert owner.call("GET", "/api/leads/overview")[0] == 200
-    # a free plan renews by itself and never invoices
+    # an organization that had All access with no end before trials were the default keeps it: a free plan renews
+    # by itself and never invoices
+    with shipped.db.write() as connection:
+        connection.execute(
+            "UPDATE subscriptions SET status = 'active', trial_end = NULL WHERE org_id = ?",
+            (org_id,),
+        )
+    shipped.entitlements.invalidate(org_id)
     shipped.clock.advance(days=31)
     done = shipped.billing.process_due()
     assert org_id in done["renewed"]
@@ -132,7 +140,7 @@ def test_the_superadmin_sets_the_default_and_existing_organizations_keep_their_p
     operator = operator_browser(shipped)
     status, body = operator.call("GET", "/api/platform/plans")
     assert status == 200 and body["signup"]["plan_id"] == "all_access"
-    assert body["signup"]["trial_days"] == 0 and "sources.linkedin" in body["features"]
+    assert body["signup"]["trial_days"] == 14 and "sources.linkedin" in body["features"]
     status, body = operator.call(
         "PUT",
         "/api/platform/plans/signup-default",

@@ -234,6 +234,7 @@ def test_stripe_checkout_sends_the_plan_seats_and_organization_and_activates_on_
         and item["quantity"] == "30"
         and item["price_data"]["recurring"]["interval"] == "month"
     )
+    assert params["metadata"].pop("checkout_id")  # one open checkout per organization
     assert params["metadata"] == {"org_id": org_id, "plan_id": "team", "seats": "30"}
     assert app.billing.subscription(org_id)["status"] == "trialing", (
         "paying happens at the provider, not at checkout creation"
@@ -276,7 +277,9 @@ def test_stripe_plan_changes_cancellation_portal_and_failures(stripe_cloud, stri
         )
     app.billing.change_plan(org.owner, "team", 25)
     [update] = stripe.find("POST", f"/v1/subscriptions/{sub_id}")
-    assert update["params"]["proration_behavior"] == "create_prorations"
+    # an upgrade applies only once its prorated invoice is paid (a Stripe pending update)
+    assert update["params"]["proration_behavior"] == "always_invoice"
+    assert update["params"]["payment_behavior"] == "pending_if_incomplete"
     assert (
         update["params"]["items"][0]["id"].startswith("si_")
         and update["params"]["items"][0]["quantity"] == "25"
