@@ -9,8 +9,8 @@ See [multitenant.md](multitenant.md) for what the system does and its known gaps
 | Topology | Use for | Notes |
 | --- | --- | --- |
 | **One process** `python -m monosage_cloud serve --worker` | development, demos, a pilot | web tier, worker pool and scheduler together. This is the only layout in which LinkedIn automation works end to end (see below) |
-| **Web and worker separate** `serve` plus `worker` on the same host or on hosts sharing the data volume | a small production | the worker needs Chromium; the web tier does not. Both must see the same `<data root>` and the same `control.sqlite3` |
-| **Several web replicas** behind a proxy | availability | stateless apart from in-memory rate-limit counters and the 60-second entitlement cache. All replicas need the same data volume and a file system whose locking SQLite can rely on. A managed database is the intended answer for more than this; it is not built |
+| **Web and worker separate** `serve` plus `worker` on the same machine | a small production | the worker needs Chromium; the web tier does not. Both must see the same `<data root>` on the same machine (two containers on one Docker host count as one machine) |
+| **Several machines over one data volume** | not supported | the control plane and every workspace are SQLite in WAL mode, whose shared index only one machine can share. A process refuses to start while another machine has used the data directory in the last 90 seconds (see "Topology: one writer" below). The control plane can move to PostgreSQL; the workspaces still have one writer |
 
 Constraints to plan around:
 
@@ -122,10 +122,10 @@ Everything that depends on time runs in `lifecycle.tick()` (billing transitions,
 ## 5. Worker sizing
 
 - A worker process runs `--threads` (default 8) job threads. Each apply job drives one Chromium for the duration of one application; budget about 400 to 600 MB of memory per concurrent browser and one CPU core per two or three.
-- Concurrency per organization is capped at 2 (`per_org_concurrency` in code) so one tenant cannot occupy the pool; an operator rate limit lowers it to 1. A candidate runs one automation job at a time.
+- Concurrency per organization is capped per job kind (2 by default, `per_org_concurrency`; mail and webhook deliveries 4, backups and key rotation 1, see `jobqueue.KIND_CAPS` and `kind_concurrency`) and at 6 for all kinds together (`per_org_total_concurrency`), so one tenant cannot occupy the pool and one kind cannot hold another's slots; an operator rate limit lowers it to 1. A candidate runs one job at a time. Leasing lists the organizations with ready work first and reads a few jobs of each, so a backlog of thousands in one organization does not hide another's.
 - Capacity needed ≈ (applications per hour across tenants) × (average minutes per application ÷ 60). Watch `/api/platform/health`: `workers.utilisation` and `queue.oldest_wait_seconds`. If the oldest wait grows while utilisation is near 1, add worker threads or processes.
 - The acceptance target in the scope is 50 candidates across 5 organizations running at once with no tenant waiting on another. The fair lease and per-organization cap are built for that; a load test at that size has not been run. Run one in staging before launch.
-- Scale on queue depth, not CPU alone: Kubernetes autoscaling on CPU lags a burst of due plans. See the note in `deploy/k8s/worker.yaml`.
+- The shipped Kubernetes layout is one `serve --worker` pod (see "Topology: one writer"): add threads (`--threads`) and memory to it, not replicas. `GET /metrics` exports `aira_queue_oldest_wait_seconds` and `aira_worker_busy` to alert on.
 
 ## 6. Backups and restore
 
@@ -135,7 +135,7 @@ What to back up together, at the same moment (or with the application stopped):
 2. The `tenants/` tree (or the object-store bucket with versioning).
 3. `secrets/master.key`, or wherever `AIRA_CLOUD_MASTER_KEY` is kept, stored separately from the data it protects.
 
-Backups contain personal data and encrypted documents; encrypt them at rest and restrict access. There is no built-in backup job.
+Backups contain personal data and encrypted documents; encrypt them at rest and restrict access. Per-organization archives can also be written on a schedule (`AIRA_CLOUD_BACKUP_HOURS`, see "Scheduled backups" below); they complement, not replace, a snapshot of the whole volume and of the control-plane database.
 
 ### Restoring one organization without touching others
 
@@ -182,7 +182,7 @@ The stand-in provider (`AIRA_CLOUD_BILLING=standin`) serves a checkout page at `
 
 ## 9. Mail
 
-Without `AIRA_CLOUD_SMTP_URL` nothing is sent: every message is stored in `mail_outbox` (status `captured`), so sign-up verification, invitations and reset links do not work for real people. Set it, send a test invitation, and watch `mail_outbox.status` (`sent` or `failed` with the error). Sender domain authentication (SPF, DKIM, DMARC) is yours to set up. Team and Enterprise messages carry the organization's name and logo.
+Without `AIRA_CLOUD_SMTP_URL` nothing is sent: every message is stored in `mail_outbox` (status `captured`), so sign-up verification, invitations and reset links do not work for real people. Set it, send a test invitation, and watch `mail_outbox.status` (`queued`, then `sent`, or `failed` with the error after five attempts). With SMTP, mail is delivered by the job queue (`mail.deliver`), so a worker must run (the shipped layouts run one); see "Platform mail queue and outbox retention" below. Sender domain authentication (SPF, DKIM, DMARC) is yours to set up. Team and Enterprise messages carry the organization's name and logo.
 
 ## 10. Routine operations
 
@@ -312,6 +312,63 @@ The copy keeps identity sequences ahead of the copied rows and compares counts p
 ### Concurrency
 
 SQLite serializes writers. On PostgreSQL `write()` takes one transaction-level advisory lock for the same effect, except in the places designed for concurrency: usage counters (atomic conditional `UPDATE`), the job lease (`FOR UPDATE SKIP LOCKED` plus a non-blocking per-organization lock, so workers never wait for or deadlock with each other), and audit-chain extension (a per-organization lock). Everything else on the write path is as serialized as it was on SQLite; a busy installation will want those paths widened one at a time, each with a test.
+
+## Topology: one writer
+
+The control plane (`control.sqlite3`) and every workspace (`tenants/<org>/...`) are SQLite in WAL mode. WAL keeps its index in a memory-mapped file that only processes on one machine can share, so two machines writing the same files over a network volume (an NFS or other ReadWriteMany claim) can corrupt them. The shipped layouts therefore have exactly one machine writing the data directory:
+
+- **Kubernetes** (`deploy/k8s`): one Deployment, `aira-web`, `replicas: 1`, `strategy: Recreate` (the old pod stops before the new one starts), running `serve --worker --threads 4` from the worker image (it has Chromium), on a **ReadWriteOnce** claim (`storage.yaml`). The tick CronJob and the separate worker Deployment are gone: the pod's worker heartbeat runs the tick. The PodDisruptionBudget allows the one pod to be evicted (drain a node in a window). A rollout or a node drain is a short outage; SIGTERM drains first (below).
+- **Docker Compose** (`deploy/docker-compose.cloud.yml`): `web` and `worker` are two containers on one Docker host sharing a local named volume: one machine, which is safe.
+- **PostgreSQL variant** (`deploy/k8s-overlays/postgres`): the control plane moves to PostgreSQL (backups, point-in-time recovery, a standby; set `AIRA_CLOUD_DB=postgres` and the three URLs in the Secret), and a NetworkPolicy allows egress to the database on 5432. The workspaces stay on the ReadWriteOnce volume with the same one writer. More than one pod needs the workspaces split across volumes and each organization routed to the pod that owns its volume; the gateway does not route that way yet, so this is not offered.
+
+**The guard.** Every `serve`, `worker` and `tick` process records its machine in `cloud_kv` (`sqlite_node:<boot id>`; containers on one host share the kernel's boot id) and refreshes it every 30 seconds while serving; a process that starts while another machine reported in the last 90 seconds stops with an error naming it. A clean stop removes the record, so a Recreate rollout onto another node starts at once; after a crash the next pod waits out the 90 seconds (it exits and the orchestrator restarts it). `AIRA_CLOUD_ALLOW_SHARED_SQLITE=1` turns the check into a warning, only for a file system known to be safe for SQLite across machines.
+
+## Limits, draining and budgets
+
+**HTTP tier** (`gateway.make_server`, `HostedServer`). The server is the standard library's threaded server with the limits a public tier needs; run it behind the ingress for TLS and slow-client buffering.
+
+| Setting | Default | What it does |
+| --- | --- | --- |
+| `AIRA_CLOUD_HTTP_MAX_CONNECTIONS` | 512 | connections at once, one thread each. Past it a new connection gets `503 busy` at once; above 80% every answer closes its connection so idle keep-alives free up. Keep the ingress's `upstream-keepalive-connections` below it |
+| `AIRA_CLOUD_HTTP_TIMEOUT` | 75 | seconds a connection may send nothing (also bounds a slow upload's pauses). Keep the ingress's `upstream-keepalive-timeout` (60 by default) below it |
+| `http_backlog` (code) | 128 | the listen backlog (the standard library's default is 5) |
+| `http_max_body_bytes` (code) | 25 MB | bodies over this are refused by their `Content-Length` before any byte is read (`413`); a missing or malformed length is `400`, chunked bodies `411` |
+| `http_large_body_bytes`, `http_large_body_slots` (code) | 1 MB, 8 | bodies over 1 MB share 8 slots, so a burst of uploads holds at most about 200 MB; the next gets `503 busy` |
+| `scrypt_concurrency` (code) | 4 | password checks at once (about 32 MB each); the rest wait up to 10 seconds, then `503 busy` |
+| `AIRA_CLOUD_DRAIN_SECONDS` | 25 | on SIGTERM: `/api/ready` answers `503 draining` and answers close their connections for a few seconds while the pod leaves the service, then the server stops accepting, closes idle connections and waits this long for in-flight requests; then the worker pool stops (a running job's lease returns it to the queue) |
+
+`/metrics` reports `aira_http_connections`, `aira_http_refused_total` and `aira_draining`.
+
+**Machine callers.** Billing webhooks (`/api/billing/webhook/<provider>`), SCIM, the OAuth token, revoke and introspect endpoints and the signed internal callbacks are marked `machine=` on their route and never share the sign-in limiter (30 attempts per 5 minutes per address, then a lockout), so a renewal burst or a person's failed sign-ins on a shared address cannot lock them out. They are limited per provider, OAuth client or SCIM token (`machine_requests_per_minute`, 3000), and rejected signatures, client secrets or tokens count per address (`machine_failures_per_window`, 60 in 5 minutes, then a 5-minute lockout). An app acting for its organization (client credentials) has its own per-minute bucket per organization and app, not one bucket for every organization's apps; a token's `last_used_at` is written at most once a minute.
+
+**Sessions and sign-up.** A session ends after `AIRA_CLOUD_SESSION_IDLE_HOURS` (24) without a request, an operator session after an hour (`operator_session_idle_seconds`), whatever is left of their lifetimes. A self-service sign-up must confirm the person is 18 or older (`adult: true`; the hosted product has no child accounts), is refused from a short list of throwaway mailbox domains, and is limited to `signups_per_ip_hour` (5) per address and `signups_per_domain_hour` (20; 25 times that for large mailbox providers) per email domain. The counters are in memory, which is exact for the one-process layout.
+
+**Model budget.** Calls answered by the platform's own model and key are counted per organization per calendar month (`usage_counters` metric `platform_model_calls`) against a budget: a plan limit named `model_calls_per_month` when the plan (or an operator's override) has one, otherwise `CloudConfig.model_calls_per_month` by plan (trial and All access 300, Starter 5,000, Team 50,000, Enterprise unlimited; 1,000 for a plan not listed). Past it the call is refused with `429 model_budget_spent` (with `used` and `limit`) until the 1st. Calls answered with the organization's own Anthropic key, its own endpoint or a member's own Claude are not counted, and a call that fails is given back. The shipped plans carry no `model_calls_per_month` limit yet, so the defaults apply.
+
+**Queue and scheduler.** Leasing is per organization with per-kind caps (section 5). The scheduler pass renews its lease while it runs and stops if another pass took it over; it starts at most every 20 seconds. It records for each workspace (and each organization's own monitors) when to look again: the next plan, schedule, monitor or retry, a minute while something is due, at most `scheduler_idle_recheck_seconds` (an hour) otherwise, with the file's size and modification time. Until then a tick only reads the file's metadata; a workspace whose file changed, or one changed through the gateway, is read on the next tick. The tick's summary counts the files it opened (`queue.opened`).
+
+## Platform mail queue and outbox retention
+
+With `AIRA_CLOUD_SMTP_URL` a message is stored `queued` and the job queue delivers it (`mail.deliver`, priority 2, five attempts with 30 s, 2 min, 10 min and 10 min between them; then `failed`). The request that caused it (a sign-up, an invitation, a reset) never waits for the mail server. A message whose link grants access records when the link stops working (email confirmation and password reset 24 hours, invitation 7 days, export 30 days, account recovery the waiting period); the daily housekeeping replaces the link with `[link expired and removed]` after that, and deletes every message older than `mail_outbox_days` (30).
+
+## Metrics endpoint
+
+`GET /metrics` answers the Prometheus text format with `Authorization: Bearer <AIRA_CLOUD_METRICS_TOKEN>` (`404` while the variable is empty, `401` with a wrong token; wrong tokens count towards the per-address lockout). It needs no operator session and no allowed host, so a scraper can address the pod by IP. It carries process counters (requests and latency per route, status codes, named counters, integration checks), the HTTP tier (connections, refusals, draining) and the queue (jobs by status and kind, oldest wait, organizations waiting, workers, capacity, busy threads). It never carries organization names or ids; per-tenant counters stay behind the console's `/api/platform/metrics`. Example scrape config:
+
+```yaml
+- job_name: monosage
+  metrics_path: /metrics
+  authorization: { type: Bearer, credentials_file: /etc/prometheus/monosage-token }
+  static_configs: [{ targets: ["aira-web.aira.svc:80"] }]
+```
+
+## Scheduled backups
+
+`AIRA_CLOUD_BACKUP_HOURS=24` queues one `backup.org` job per organization every 24 hours (0, the default, is off). Each writes the same signed archive as `backup-org` to `AIRA_CLOUD_BACKUP_DIR/<org id>/<org id>-<UTC time>.zip` (default `<data root>/backups`) and keeps the newest `AIRA_CLOUD_BACKUP_KEEP` (7); each is in the platform audit (`tenant.backup_scheduled`). The archives hold wrapped keys and encrypted documents but not the master key. On the shipped Kubernetes layout they land on the data volume: copy them off it (a sidecar, a CronJob with the volume on the same node, or volume snapshots), because a backup on the volume it protects does not survive losing it. Restore one with `restore-org` (section 6).
+
+## Account recovery for a sole owner
+
+When the only owner of an organization lost both their authenticator and their recovery codes (with another owner, that owner uses **Reset MFA**), an operator with `platform.tenants.manage`, after verifying the person outside the product, opens a recovery: `POST /api/platform/tenants/{org}/members/{member}/recovery` with `reason` (how they were verified). Nothing changes for `recovery_delay_seconds` (72 hours): the owner is emailed at once with a link that cancels it (`/#/recovery-cancel/<token>`, `POST /api/auth/recovery/cancel`), and support can cancel it too. After the wait, `POST /api/platform/recoveries/{id}/complete` removes the second factor and ends every session, personal access token and OAuth token of the owner; they sign in with their password and set up a new authenticator. Every step is in the organization's audit (`auth.recovery_requested`, `_cancelled`, `_completed`) and the platform audit (`member.recovery_*`). `GET /api/platform/recoveries` lists them.
 
 ## What was run, and how to rerun it
 
