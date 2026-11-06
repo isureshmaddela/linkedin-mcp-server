@@ -26,6 +26,7 @@ from datetime import date, datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 from typing import Any
 
+from aira import dbutil
 from aira import suite
 
 # ---------------------------------------------------------------------------
@@ -313,7 +314,7 @@ def ensure(connection: sqlite3.Connection, key: str, statements: Iterable[str]) 
     if marker in _ensured:
         return
     for statement in statements:
-        connection.execute(statement)
+        dbutil.execute_migration(connection, statement)
     connection.commit()
     _ensured.add(marker)
 
@@ -1290,20 +1291,16 @@ def _ensure_ledger(connection: sqlite3.Connection) -> None:
     marker = (_db_file(connection), "suite.ledger.v3")
     if marker in _ensured:
         return
-    columns = {row[1] for row in connection.execute("PRAGMA table_info(suite_revenue)")}
-    if "kind" not in columns:
-        connection.execute(
-            "ALTER TABLE suite_revenue ADD COLUMN kind TEXT NOT NULL DEFAULT 'payment'"
-        )
-    if "refund_of" not in columns:
-        connection.execute(
-            "ALTER TABLE suite_revenue ADD COLUMN refund_of TEXT NOT NULL DEFAULT ''"
-        )
+    dbutil.add_column(
+        connection, "suite_revenue", "kind", "TEXT NOT NULL DEFAULT 'payment'"
+    )
+    dbutil.add_column(
+        connection, "suite_revenue", "refund_of", "TEXT NOT NULL DEFAULT ''"
+    )
     for column in ("covers", "covered_by"):
-        if column not in columns:
-            connection.execute(
-                f"ALTER TABLE suite_revenue ADD COLUMN {column} TEXT NOT NULL DEFAULT ''"
-            )
+        dbutil.add_column(
+            connection, "suite_revenue", column, "TEXT NOT NULL DEFAULT ''"
+        )
     connection.execute(
         "CREATE INDEX IF NOT EXISTS suite_revenue_covers ON suite_revenue (covers)"
     )
@@ -1563,7 +1560,7 @@ def contact_columns(connection: sqlite3.Connection, *tables: str) -> None:
         if not columns:
             continue  # the app has not made the table yet
         if "contact_id" not in columns:
-            connection.execute(f"ALTER TABLE {table} ADD COLUMN contact_id TEXT")
+            dbutil.add_column(connection, table, "contact_id", "TEXT")
         connection.execute(
             f"CREATE INDEX IF NOT EXISTS {table}_contact ON {table} (contact_id)"
         )

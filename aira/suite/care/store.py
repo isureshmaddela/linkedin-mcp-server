@@ -6,6 +6,7 @@ import re
 import sqlite3
 from typing import Any
 
+from aira import dbutil
 from aira.suite import kit, life
 
 APP = "care"
@@ -235,7 +236,7 @@ def _add_columns(connection: sqlite3.Connection) -> None:
     for table, column, definition in ADDED_COLUMNS:
         present = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
         if column not in present:
-            connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+            dbutil.add_column(connection, table, column, definition)
     connection.commit()
     kit._ensured.add(marker)  # noqa: SLF001
 

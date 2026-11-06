@@ -40,6 +40,7 @@ from email.utils import formataddr, formatdate, make_msgid
 from pathlib import Path
 from typing import Any
 from urllib.parse import parse_qs, unquote, urlsplit
+from aira import dbutil
 
 TABLE = "email_applications"
 STATUSES = ("sending", "sent", "failed")
@@ -442,8 +443,8 @@ def ensure_schema(connection: sqlite3.Connection) -> None:
             row[1] for row in connection.execute("PRAGMA table_info(autopilot_plans)")
         }
         if "email_apply" not in columns:
-            connection.execute(
-                "ALTER TABLE autopilot_plans ADD COLUMN email_apply INTEGER NOT NULL DEFAULT 0"
+            dbutil.add_column(
+                connection, "autopilot_plans", "email_apply", "INTEGER NOT NULL DEFAULT 0"
             )
 
 

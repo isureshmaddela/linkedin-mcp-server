@@ -5,6 +5,7 @@ from __future__ import annotations
 import sqlite3
 from typing import Any
 
+from aira import dbutil
 from aira.suite import kit
 
 APP = "marketing"
@@ -188,7 +189,7 @@ def _add_columns(connection: sqlite3.Connection) -> None:
                 row[1] for row in connection.execute(f"PRAGMA table_info({table})")
             }
         if column not in tables[table]:
-            connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+            dbutil.add_column(connection, table, column, definition)
             tables[table].add(column)
     connection.execute(
         "CREATE INDEX IF NOT EXISTS mk_submissions_follow ON mk_submissions (follow_up_on)"

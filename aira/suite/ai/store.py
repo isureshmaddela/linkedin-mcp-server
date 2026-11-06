@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import sqlite3
 
+from aira import dbutil
 from aira.suite import kit, life
 
 APP = "ai"
@@ -125,7 +126,7 @@ def _add_columns(connection: sqlite3.Connection) -> None:
         have = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}  # noqa: S608 - fixed names
         for name, kind in columns:
             if name not in have:
-                connection.execute(f"ALTER TABLE {table} ADD COLUMN {name} {kind}")  # noqa: S608 - fixed names
+                dbutil.add_column(connection, table, name, kind)
                 if (table, name) in BACKFILL:
                     connection.execute(BACKFILL[(table, name)])
     connection.commit()

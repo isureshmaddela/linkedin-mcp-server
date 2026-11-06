@@ -8,6 +8,7 @@ import sqlite3
 import uuid
 from datetime import datetime, timedelta, timezone
 from typing import Any
+from aira import dbutil
 
 APP = "social"
 
@@ -401,7 +402,7 @@ def migrate(connection: sqlite3.Connection) -> None:
     for table, column, definition in COLUMNS:
         have = {r[1] for r in connection.execute(f"PRAGMA table_info({table})")}  # noqa: S608 - fixed names
         if have and column not in have:  # (a table made later, such as Dating's, gets it when it is made)
-            connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")  # noqa: S608
+            dbutil.add_column(connection, table, column, definition)
     # the key that signs photo addresses (photos.py), made here so a view never writes while it reads
     connection.execute(
         "INSERT OR IGNORE INTO so_settings (key, value) VALUES ('photo_key', ?)",

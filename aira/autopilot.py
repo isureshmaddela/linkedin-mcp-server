@@ -47,6 +47,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, timedelta, timezone
 from typing import Any
 
+from aira import dbutil
 from aira import answer_drafts
 from aira.hosting import HOOKS
 
@@ -236,9 +237,7 @@ def ensure_schema(connection: sqlite3.Connection) -> None:
     have = {row[1] for row in connection.execute("PRAGMA table_info(application_runs)")}
     for name, declaration in _RUN_COLUMNS.items():
         if name not in have:
-            connection.execute(
-                f"ALTER TABLE application_runs ADD COLUMN {name} {declaration}"
-            )
+            dbutil.add_column(connection, "application_runs", name, declaration)
     connection.execute(
         "CREATE INDEX IF NOT EXISTS idx_application_runs_retry ON application_runs(status, next_try_at)"
     )

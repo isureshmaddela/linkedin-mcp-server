@@ -16,6 +16,7 @@ from datetime import date
 from decimal import ROUND_HALF_UP, Decimal
 from typing import Any
 
+from aira import dbutil
 from aira.suite import kit
 from aira.suite.studio import store
 
@@ -97,7 +98,7 @@ def ensure(connection: sqlite3.Connection) -> None:
     present = {row[1] for row in connection.execute("PRAGMA table_info(st_deals)")}
     for table, column, definition in ADDED_COLUMNS:
         if column not in present:
-            connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+            dbutil.add_column(connection, table, column, definition)
     connection.execute(
         "CREATE INDEX IF NOT EXISTS st_deals_handoff ON st_deals (handoff_ref)"
     )

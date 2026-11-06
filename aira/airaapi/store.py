@@ -21,6 +21,7 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from cryptography.fernet import Fernet, InvalidToken
+from aira import dbutil
 
 SEARCH_COLUMNS = (
     "id",
@@ -307,9 +308,7 @@ def _table_exists(connection: sqlite3.Connection, table: str) -> bool:
 def _add_column(
     connection: sqlite3.Connection, table: str, column: str, definition: str
 ) -> None:
-    columns = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
-    if column not in columns:
-        connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+    dbutil.add_column(connection, table, column, definition)
 
 
 def ensure_key_index(connection: sqlite3.Connection) -> None:
