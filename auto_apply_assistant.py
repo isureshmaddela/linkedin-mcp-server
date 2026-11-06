@@ -12333,10 +12333,11 @@ def _careers_person_check(handler: Any, route_name: str) -> None:
     chosen = next((person for person in people if person["id"] == profile_id), None)
     if chosen is None:
         raise suite_life.ProfileRequired("Choose who is using Monosage.")
-    if chosen["pin_hash"] and not hmac.compare_digest(
-        token, suite_life.unlock_token(chosen)
-    ):
-        raise suite_life.ProfileLocked(f"Enter {chosen['name']}'s PIN.")
+    if chosen["pin_hash"]:
+        with _connect() as connection:  # unlocks expire and lock when idle (aira/suite/life.py)
+            opened = suite_life.unlocked(connection, chosen, token)
+        if not opened:
+            raise suite_life.ProfileLocked(f"Enter {chosen['name']}'s PIN.")
     if not chosen["owner"]:
         raise CareersOwnerOnly(
             f"Careers is {owner['name']}'s job search: their applications, offers and messages. "

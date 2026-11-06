@@ -30,15 +30,34 @@ def _open(request: Request) -> Any:
     return connection
 
 
-def _apps() -> list[str]:
+def _apps(off: list[str] | tuple[str, ...] = ()) -> list[str]:
     """The life app sections this account has (Social brings Family too), by package id: Today and pulse ask
-    each package; the hosted build asks the organization's subscriptions."""
+    each package; the hosted build asks the organization's subscriptions. ``off``: sections a guardian turned off
+    for this person (parental controls)."""
     return [
         section
         for app in app_catalog.LIFE_APPS
         if suite.app_enabled(app.id)
         for section in app.sections
+        if section not in off
     ]
+
+
+def _off(connection: Any, profile: dict[str, Any]) -> list[str]:
+    return life.controls(connection, profile)["off"]
+
+
+def _pin_tries(profile_id: str) -> list[float]:
+    """Recent wrong PINs for this profile; PermissionError once there were too many."""
+    now = time.monotonic()
+    tries = [t for t in _PIN_TRIES.get(profile_id, []) if now - t < PIN_WINDOW]
+    if len(tries) >= PIN_LIMIT:
+        raise PermissionError("Too many wrong PINs. Wait five minutes and try again.")
+    return tries
+
+
+def _wrong_pin(profile_id: str, tries: list[float]) -> None:
+    _PIN_TRIES[profile_id] = [*tries, time.monotonic()]
 
 
 def _local_now(connection: Any) -> datetime:
@@ -72,32 +91,51 @@ def unlock(request: Request) -> tuple[int, dict[str, Any]]:
     with _open(request) as connection:
         profile = life.get(connection, profile_id)
         if profile.get("pin_hash"):
-            now = time.monotonic()
-            tries = [t for t in _PIN_TRIES.get(profile_id, []) if now - t < PIN_WINDOW]
-            if len(tries) >= PIN_LIMIT:
-                raise PermissionError(
-                    "Too many wrong PINs. Wait five minutes and try again."
-                )
+            tries = _pin_tries(profile_id)
             if not life.check_pin(profile, str(request.payload.get("pin") or "")):
-                _PIN_TRIES[profile_id] = [*tries, now]
+                _wrong_pin(profile_id, tries)
                 raise PermissionError("That PIN is not right.")
             _PIN_TRIES.pop(profile_id, None)
-            header = f"{profile_id}.{life.unlock_token(profile)}"
-        else:
-            header = profile_id
-        return 200, {"header": header, "profile": life.mine(profile)}
+        # A PIN opens the profile for a while (shorter for children and teens), and it locks after a while unused.
+        opened = life.unlock(connection, profile)
+        return 200, {**opened, "profile": life.mine(profile)}
+
+
+@aira_route("POST", f"{BASE}/lock")
+def lock(request: Request) -> tuple[int, dict[str, Any]]:
+    """Lock the profile this browser has open (Switch person, or the browser's own idle lock)."""
+    header = str(request.header("X-Aira-Profile") or "").strip()
+    profile_id, _, token = header.partition(".")
+    with _open(request) as connection:
+        if profile_id and token:
+            life.lock(connection, profile_id, token)
+    return 200, {"locked": True}
 
 
 @aira_route("GET", f"{BASE}/me")
 def me(request: Request) -> tuple[int, dict[str, Any]]:
     with _open(request) as connection:
         profile = life.current(request, connection)
+        everyone = life.profiles(connection)
+        controls = life.controls(connection, profile)
         return 200, {
             "profile": life.mine(profile),
-            "profiles": [life.public(p) for p in life.profiles(connection)],
+            "profiles": [
+                {
+                    **life.public(p),
+                    # what this person may do to each profile: whose PIN confirms a PIN change, the age fields,
+                    # parental controls
+                    "pin_rule": life.pin_rule(connection, profile, p),
+                    "can_change_age": life.may_change_age(profile, p),
+                    "guardian": life.is_guardian(profile, p),
+                }
+                for p in everyone
+            ],
             "can_manage": life.can_manage_household(profile),
             "hosted": suite.actor() is not None,
-            "apps": _apps(),
+            "apps": _apps(controls["off"]),
+            "controls": controls,
+            "pin_rule_text": life.PIN_RULE_TEXT,
         }
 
 
@@ -146,23 +184,57 @@ def profiles_remove(request: Request) -> tuple[int, dict[str, Any]]:
 
 @aira_route("POST", f"{BASE}/profiles/{ID}/pin")
 def profiles_pin(request: Request) -> tuple[int, dict[str, Any]]:
+    """Change or remove a PIN, confirmed with the right person's PIN (``confirm``, see life.set_pin)."""
     with _open(request) as connection:
         actor = life.current(request, connection)
-        updated = life.set_pin(
-            connection,
-            actor,
-            request.match.group(1),
-            str(request.payload.get("pin") or ""),
-        )
-        header = None
-        if updated["id"] == actor["id"]:
-            header = (
-                f"{updated['id']}.{life.unlock_token(updated)}"
-                if updated.get("pin_hash")
-                else updated["id"]
+        target = life.get(connection, request.match.group(1))
+        confirmer = life.pin_confirmer(connection, actor, target)
+        tries = _pin_tries(confirmer["profile"]["id"]) if confirmer else []
+        try:
+            updated = life.set_pin(
+                connection,
+                actor,
+                target["id"],
+                str(request.payload.get("pin") or ""),
+                confirm=str(request.payload.get("confirm") or ""),
             )
+        except life.WrongPin as error:
+            _wrong_pin(error.profile_id, tries)
+            raise
+        opened = None
+        if updated["id"] == actor["id"]:
+            opened = life.unlock(connection, updated)  # this browser stays open with the new PIN
     request.audit("life.profile_pin", "profile", request.match.group(1))
-    return 200, {"profile": life.public(updated), "header": header}
+    return 200, {
+        "profile": life.public(updated),
+        "header": opened["header"] if opened else None,
+        "lock": opened,
+    }
+
+
+@aira_route("GET", f"{BASE}/profiles/{ID}/controls")
+def controls_get(request: Request) -> tuple[int, dict[str, Any]]:
+    """A child's or a teen's parental controls (their guardians, and the person themselves, may look)."""
+    with _open(request) as connection:
+        actor = life.current(request, connection)
+        target = life.get(connection, request.match.group(1))
+        if target["id"] != actor["id"] and not life.is_guardian(actor, target):
+            raise PermissionError("Only a parent or guardian can see these.")
+        return 200, {
+            "controls": life.controls(connection, target),
+            "can_change": life.is_guardian(actor, target),
+        }
+
+
+@aira_route("POST", f"{BASE}/profiles/{ID}/controls")
+def controls_save(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as connection:
+        actor = life.current(request, connection)
+        saved = life.set_controls(
+            connection, actor, request.match.group(1), request.payload
+        )
+    request.audit("life.controls", "profile", request.match.group(1))
+    return 200, {"controls": saved}
 
 
 @aira_route("GET", f"{BASE}/today")
@@ -172,7 +244,8 @@ def today(request: Request) -> tuple[int, dict[str, Any]]:
         profile = life.current(request, connection)
         moment = _local_now(connection)
         cards: list[dict[str, Any]] = []
-        for app_id in _apps():
+        available = _apps(_off(connection, profile))
+        for app_id in available:
             fn = life.TODAY.get(app_id)
             if fn is None:
                 continue
@@ -181,7 +254,7 @@ def today(request: Request) -> tuple[int, dict[str, Any]]:
             except Exception:  # noqa: BLE001 - one app's card must not break the day
                 suite.logger.exception("Today cards for %s failed", app_id)
         # Family shows the household's dates (with "Send wishes"); without it, Today lists the birthdays itself.
-        family_dates = "family" in _apps() and "family" in life.TODAY
+        family_dates = "family" in available and "family" in life.TODAY
         birthdays = [] if family_dates else _birthdays(connection, moment)
         return 200, {
             "profile": life.mine(profile),
@@ -193,7 +266,7 @@ def today(request: Request) -> tuple[int, dict[str, Any]]:
             "time": moment.strftime("%H:%M"),
             "cards": cards,
             "birthdays": birthdays,
-            "apps": _apps(),
+            "apps": available,
         }
 
 
@@ -237,10 +310,11 @@ def pulse(request: Request) -> tuple[int, dict[str, Any]]:
     """What changed since ``since`` (ISO time): badges per app and alerts to show now (live updates)."""
     since = kit.moment(request.q("since"), "since") if request.q("since") else ""
     with _open(request) as connection:
-        profile = life.current(request, connection)
+        # a background check: it does not keep an unlocked profile open (the idle lock still applies)
+        profile = life.current(request, connection, touch=False)
         apps: dict[str, Any] = {}
         alerts: list[dict[str, Any]] = []
-        for app_id in _apps():
+        for app_id in _apps(_off(connection, profile)):
             fn = life.PULSE.get(app_id)
             if fn is None:
                 continue

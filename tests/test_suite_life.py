@@ -55,10 +55,8 @@ def test_the_first_person_is_the_account_and_others_need_choosing(db):
         life.current(Req(kid["id"]), db)
     with pytest.raises(life.ProfileLocked):
         life.current(Req(f"{kid['id']}.{'0' * 32}"), db)
-    assert (
-        life.current(Req(f"{kid['id']}.{life.unlock_token(kid)}"), db)["id"]
-        == kid["id"]
-    )
+    opened = life.unlock(db, kid)
+    assert life.current(Req(opened["header"]), db)["id"] == kid["id"]
     assert life.check_pin(kid, "1234") and not life.check_pin(kid, "9999")
     # A child cannot manage the household; nobody removes the owner; PINs are digits.
     with pytest.raises(PermissionError):
@@ -71,9 +69,9 @@ def test_the_first_person_is_the_account_and_others_need_choosing(db):
         life.set_pin(db, owner, kid["id"], "12ab")
     assert "pin_hash" not in life.public(kid) and life.public(kid)["has_pin"] is True
     # Changing the PIN invalidates the old unlock.
-    old = life.unlock_token(kid)
-    changed = life.set_pin(db, owner, kid["id"], "5678")
-    assert life.unlock_token(changed) != old
+    life.set_pin(db, owner, kid["id"], "5678")
+    with pytest.raises(life.ProfileLocked):
+        life.current(Req(opened["header"]), db)
     life.remove(db, owner, gran["id"])
     assert [p["name"] for p in life.profiles(db)] == ["Pat", "Mia"]
 
