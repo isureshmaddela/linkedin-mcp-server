@@ -1187,6 +1187,11 @@ class HostedHandler(BaseHTTPRequestHandler):
                 server.mark(self.request, False)
 
     def _write(self, response: HttpResponse) -> None:
+        if response.stream is not None:
+            if self.command != "HEAD":
+                self._write_stream(response)
+                return
+            _end_stream(response)  # a HEAD request gets the headers only; the stream still releases what it holds
         self.send_response(response.status)
         sent = {name.lower() for name, _ in response.headers}
         for name, value in response.headers:
@@ -1199,7 +1204,46 @@ class HostedHandler(BaseHTTPRequestHandler):
         if self.command != "HEAD":
             self.wfile.write(response.body)
 
+    def _write_stream(self, response: HttpResponse) -> None:
+        """A Server-Sent Events response: headers now, then text as it happens, until the stream ends."""
+        self.close_connection = True
+        self.send_response(response.status)
+        for name, value in response.headers:
+            if name.lower() not in {"content-length", "connection"}:
+                self.send_header(name, value)
+        self.send_header("Connection", "close")
+        self.end_headers()
+        self.wfile.flush()
+        server = self.server
+        draining = getattr(server, "draining", None)
+
+        def write(text: str) -> None:
+            self.wfile.write(text.encode("utf-8"))
+            self.wfile.flush()
+
+        def stop() -> bool:
+            return bool(draining is not None and draining.is_set())
+
+        try:
+            assert response.stream is not None
+            response.stream(write, stop)
+        except OSError:
+            pass  # the page went away; nothing more can be written
+
     do_GET = do_POST = do_PATCH = do_PUT = do_DELETE = do_HEAD = _serve  # noqa: N815
+
+
+def _end_stream(response: HttpResponse) -> None:
+    """Run a stream that will not be sent, so it releases its slot at once (its first write fails)."""
+
+    def refuse(_text: str) -> None:
+        raise ConnectionAbortedError("not streamed")
+
+    try:
+        if response.stream is not None:
+            response.stream(refuse, lambda: True)
+    except OSError:
+        pass
 
 
 def make_server(

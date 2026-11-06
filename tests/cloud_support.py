@@ -326,6 +326,7 @@ class Browser:
                 else:
                     self.cookies[key] = val
         self.last_headers = response.headers
+        self.last_response = response  # a streamed response (Server-Sent Events) is run by the test itself
         if raw:
             return response.status, response.body
         try:

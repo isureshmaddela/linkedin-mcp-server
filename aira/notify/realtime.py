@@ -213,3 +213,35 @@ def publish(
     channel: str, topic: str, data: dict[str, Any] | None = None, *, person: str = ""
 ) -> str:
     return HUB.publish(channel, topic, data, person=person)
+
+
+def serve(
+    channel: str, last: str, after: int, write: Any, *, stop: Any = None
+) -> None:
+    """Write one channel's stream until it times out, the hub closes or ``stop()`` is true (a draining server).
+
+    ``write(text)`` sends text to the page and raises ``OSError`` once the page went away. The caller opened the
+    channel (:meth:`Hub.open`, which gave ``after``) and closes it afterwards. Both the local server and the hosted
+    gateway serve the same stream with this.
+    """
+    hub = HUB
+    write(f"retry: {RETRY_MS}\n\n")
+    backlog, resync = hub.since(channel, last)
+    seq = after
+    if resync:
+        write(resync_wire(after))
+    for event in backlog:
+        write(event.wire())
+        seq = max(seq, event.seq)
+    deadline = time.monotonic() + STREAM_SECONDS
+    while not hub.closed and not (stop is not None and stop()):
+        left = deadline - time.monotonic()
+        if left <= 0:
+            break
+        events = hub.wait(channel, seq, min(HEARTBEAT_SECONDS, left))
+        if events:
+            for event in events:
+                write(event.wire())
+                seq = event.seq
+        else:
+            write(": ping\n\n")

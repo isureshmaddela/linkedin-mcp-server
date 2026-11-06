@@ -1,6 +1,6 @@
 """Notifications in the hosted build: the route policy, the installable app's files through the gateway, the
 notification centre for a member, Web Push with the VAPID key in the platform's secrets, email through the
-platform mail, and no live stream (the gateway answers with whole responses, so pages poll)."""
+platform mail, and the live stream through the gateway's streamed responses."""
 
 from __future__ import annotations
 
@@ -65,10 +65,17 @@ def test_the_app_files_and_a_members_notifications_through_the_gateway(cloud, pu
     member = sign_in(cloud, org.candidate)
     status, settings = member.call("GET", "/api/notify/settings")
     assert status == 200, settings
-    assert settings["live"] is False  # hosted pages poll
+    assert settings["live"] is True  # hosted pages stream through the gateway
     assert (cloud.config.data_root / "secrets" / webpush.KEY_FILE).is_file()
-    status, refused = member.call("GET", "/api/notify/stream")
-    assert status == 403 and refused["code"] == "not_available"
+    status, _ = member.call("GET", "/api/notify/stream")
+    response = member.last_response
+    assert status == 200 and response.stream is not None
+    assert member.header("Content-Type").startswith("text/event-stream")
+    realtime.publish(org.org_id, "chat", {"chat": "c1"}, person="p:1")
+    sent: list[str] = []
+    response.stream(sent.append, lambda: any("c1" in text for text in sent))
+    assert sent[0].startswith("retry:") and any('"topic":"chat"' in text for text in sent)
+    assert realtime.HUB.stats()["streams"] == 0  # the stream gave its slot back
     browser = Browser.new(push)
     status, saved = member.call(
         "POST", "/api/notify/push/subscribe", browser.subscription()
@@ -111,3 +118,55 @@ def test_the_app_files_and_a_members_notifications_through_the_gateway(cloud, pu
     other = sign_in(cloud, org.other)
     status, theirs = other.call("GET", "/api/notify/items")
     assert status == 200 and theirs["items"] == []
+
+
+def test_the_hosted_server_streams_live_updates_over_a_socket(cloud):
+    """The real server (not the in-process gateway): headers first, then each hint as it happens."""
+    import socket
+    import threading
+    import time
+
+    from monosage_cloud.gateway import Gateway as CloudGateway
+    from monosage_cloud.gateway import make_server
+
+    org = build_org(cloud)
+    member = sign_in(cloud, org.candidate)
+    server = make_server(CloudGateway(cloud), host="127.0.0.1", port=0)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    thread.start()
+    try:
+        port = server.server_address[1]
+        cookie = "; ".join(f"{k}={v}" for k, v in member.cookies.items())
+        with socket.create_connection(("127.0.0.1", port), timeout=10) as sock:
+            sock.sendall(
+                (
+                    "GET /api/notify/stream HTTP/1.1\r\nHost: 127.0.0.1:8780\r\n"
+                    "Origin: http://127.0.0.1:8780\r\nX-Requested-With: aira\r\n"
+                    f"Cookie: {cookie}\r\n\r\n"
+                ).encode()
+            )
+            received = b""
+            while b"retry:" not in received:
+                received += sock.recv(4096)
+            head = received.split(b"\r\n\r\n", 1)[0].decode()
+            assert head.startswith("HTTP/1.0 200") or head.startswith("HTTP/1.1 200"), head
+            assert "text/event-stream" in head and "Content-Length" not in head
+            deadline = time.monotonic() + 5
+            while realtime.HUB.stats()["streams"] == 0 and time.monotonic() < deadline:
+                time.sleep(0.05)
+            realtime.publish(org.org_id, "dating", {"match": "m1"}, person="p:2")
+            while b'"match":"m1"' not in received:
+                chunk = sock.recv(4096)
+                assert chunk, "the stream closed before the hint arrived"
+                received += chunk
+        # A draining server ends its streams at the next hint or heartbeat, and each gives its slot back.
+        server.draining.set()
+        realtime.publish(org.org_id, "pulse", {})
+        deadline = time.monotonic() + 10
+        while realtime.HUB.stats()["streams"] and time.monotonic() < deadline:
+            time.sleep(0.05)
+        assert realtime.HUB.stats()["streams"] == 0
+    finally:
+        server.draining.set()
+        server.shutdown()
+        server.server_close()

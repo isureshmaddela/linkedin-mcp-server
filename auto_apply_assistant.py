@@ -9505,7 +9505,6 @@ class RequestHandler(BaseHTTPRequestHandler):
             hub.close(channel)
 
     def _stream_events(self, channel: str, last: str, after: int) -> None:
-        hub = notify_realtime.HUB
         self.close_connection = True
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
@@ -9525,26 +9524,7 @@ class RequestHandler(BaseHTTPRequestHandler):
             self.wfile.flush()
 
         try:
-            write(f"retry: {notify_realtime.RETRY_MS}\n\n")
-            backlog, resync = hub.since(channel, last)
-            seq = after
-            if resync:
-                write(notify_realtime.resync_wire(after))
-            for event in backlog:
-                write(event.wire())
-                seq = max(seq, event.seq)
-            deadline = time.monotonic() + notify_realtime.STREAM_SECONDS
-            while not hub.closed:
-                left = deadline - time.monotonic()
-                if left <= 0:
-                    break
-                events = hub.wait(channel, seq, min(notify_realtime.HEARTBEAT_SECONDS, left))
-                if events:
-                    for event in events:
-                        write(event.wire())
-                        seq = event.seq
-                else:
-                    write(": ping\n\n")
+            notify_realtime.serve(channel, last, after, write)
         except (BrokenPipeError, ConnectionResetError, ConnectionAbortedError, OSError):
             # The page went away: nothing more can be written, so the server's final flush must not try.
             import io

@@ -122,6 +122,12 @@ class HttpResponse:
     status: int = 200
     headers: list[tuple[str, str]] = field(default_factory=list)
     body: bytes = b""
+    # A long-lived response (Server-Sent Events): the server sends the headers, then calls ``stream(write, stop)``,
+    # where ``write(text)`` sends text at once (raising ``OSError`` once the client went away) and ``stop()`` is true
+    # when the server is draining. ``body`` is ignored and no Content-Length is sent.
+    stream: Callable[[Callable[[str], None], Callable[[], bool]], None] | None = field(
+        default=None, repr=False, compare=False
+    )
 
     def header(self, name: str) -> str:
         for key, value in self.headers:

@@ -403,8 +403,8 @@ def install(app: CloudApp) -> None:
 
 def _install_notify(app: CloudApp) -> None:
     """Notifications (aira/notify) in the hosted build: the VAPID key lives with the platform's secrets, email goes
-    through the platform mail (from the delivery thread, never inside a request), and pages poll instead of
-    streaming, because the gateway answers with whole responses."""
+    through the platform mail (from the delivery thread, never inside a request), and open pages get live updates
+    through the gateway's streamed responses (``monosage_cloud/routes/live.py``)."""
     from monosage_cloud import mail as platform_mail
 
     platform_mail.TEMPLATES.setdefault("notification", ("{subject}", "{body}"))
@@ -422,7 +422,7 @@ def _install_notify(app: CloudApp) -> None:
         if app.config.base_url.startswith("https://")
         else "",
         "mailer": mailer,
-        "live": False,
+        "live": True,
     }
 
 
