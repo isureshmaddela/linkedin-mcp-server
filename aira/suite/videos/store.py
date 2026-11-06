@@ -7,10 +7,13 @@ it also stands for that person as a viewer, so likes, comments, history and subs
 from __future__ import annotations
 
 import json
+import os
 import re
 import sqlite3
+import threading
 import uuid
 from datetime import datetime, timedelta, timezone
+from pathlib import Path
 from typing import Any
 
 APP = "videos"
@@ -324,6 +327,130 @@ def migrate(connection: sqlite3.Connection) -> None:
         except sqlite3.OperationalError as error:  # another process added it first
             if "duplicate column" not in str(error).lower():
                 raise
+    seal_plaintext_payouts(connection)
+
+
+# ---------------------------------------------------------------------------
+# creators' payout details (a bank account or a UPI id): encrypted at rest
+# ---------------------------------------------------------------------------
+# Stored as ``enc:v1:<Fernet token>#<mask>``: the mask (``•••• 6789``, ``ra•••@okhdfc``) is what screens show, so
+# showing a channel never decrypts anything. The key: the hosted build installs one wrapped by its KMS master key
+# (``set_payout_key``); otherwise ``AIRA_PAYOUT_KEY`` (Fernet keys, comma-separated, newest first, for rotation), or a
+# key file made next to the Videos database (``videos-payout.key``, owner-only), as the documents store does.
+
+PAYOUT_PREFIX = "enc:v1:"
+_payout_keys: dict[str, Any] = {}
+_payout_files: dict[str, Any] = {}
+_payout_lock = threading.Lock()
+
+
+def set_payout_key(db_path: Path | str, provider: Any) -> None:
+    """``provider()`` returns the Fernet (or MultiFernet) for the Videos database at ``db_path``."""
+    _payout_keys[str(Path(db_path).resolve())] = provider
+
+
+def _payout_cipher() -> Any:
+    from cryptography.fernet import Fernet, MultiFernet
+
+    from aira.suite.videos import db
+
+    target = Path(db.path()).resolve()
+    provider = _payout_keys.get(str(target))
+    if provider is not None:
+        return provider()
+    override = os.getenv("AIRA_PAYOUT_KEY", "").strip()
+    if override:
+        return MultiFernet([Fernet(k.strip().encode()) for k in override.split(",") if k.strip()])
+    with _payout_lock:
+        cipher = _payout_files.get(str(target))
+        if cipher is None:
+            from aira.documents import load_or_create_key
+
+            cipher = Fernet(load_or_create_key(target.parent / "videos-payout.key"))
+            _payout_files[str(target)] = cipher
+        return cipher
+
+
+def mask_payout(text: str) -> str:
+    """What a screen may show of payout details: a UPI id's first letters and bank, or a number's last four digits."""
+    value = " ".join(str(text or "").split())
+    if not value:
+        return ""
+    upi = re.fullmatch(r"([\w.\-]+)@([A-Za-z][\w.\-]*)", value)
+    if upi:
+        return f"{upi.group(1)[:2]}•••@{upi.group(2)}"
+    # an account number may be written in groups ("1234 5678 9012", an IBAN): one run, separators dropped
+    runs = [re.sub(r"\D", "", run) for run in re.findall(r"\d(?:[\d \-]*\d)?", value)]
+    longest = max(runs, key=len) if runs else ""
+    if len(longest) >= 4:
+        return f"•••• {longest[-4:]}"
+    return f"{value[:2]}•••"
+
+
+def is_sealed(value: str) -> bool:
+    return str(value or "").startswith(PAYOUT_PREFIX)
+
+
+def seal_payout(text: str) -> str:
+    """Payout details as they are stored: encrypted, with their mask."""
+    text = str(text or "")
+    if not text or is_sealed(text):
+        return text
+    token = _payout_cipher().encrypt(text.encode("utf-8")).decode("ascii")
+    return f"{PAYOUT_PREFIX}{token}#{mask_payout(text)}"
+
+
+def unseal_payout(value: str) -> str:
+    """The details in the clear (for the person who pays them out); a row from before encryption reads as it is."""
+    value = str(value or "")
+    if not is_sealed(value):
+        return value
+    from cryptography.fernet import InvalidToken
+
+    token = value[len(PAYOUT_PREFIX) :].split("#", 1)[0]
+    try:
+        return _payout_cipher().decrypt(token.encode("ascii")).decode("utf-8")
+    except (InvalidToken, ValueError):
+        return ""  # the key changed: the creator enters the details again
+
+
+def payout_mask(value: str) -> str:
+    value = str(value or "")
+    if is_sealed(value):
+        return value.split("#", 1)[1] if "#" in value else "••••"
+    return mask_payout(value)
+
+
+def payout_details(sc: sqlite3.Connection, channel_id: str) -> str:
+    """A channel's saved payout details in the clear; a plaintext row is encrypted on the way (migrated on read)."""
+    found = row(sc, "SELECT payout_details FROM vi_channels WHERE id = ?", (channel_id,))
+    stored = str((found or {}).get("payout_details") or "")
+    if stored and not is_sealed(stored):
+        sc.execute(
+            "UPDATE vi_channels SET payout_details = ? WHERE id = ?",
+            (seal_payout(stored), channel_id),
+        )
+        sc.commit()
+    return unseal_payout(stored)
+
+
+def seal_plaintext_payouts(connection: sqlite3.Connection) -> int:
+    """Encrypt payout details written before encryption (channels and payout requests). Runs on first connection."""
+    sealed = 0
+    for table, column in (("vi_channels", "payout_details"), ("ad_payouts", "details")):
+        try:
+            found = connection.execute(
+                f"SELECT id, {column} FROM {table} WHERE {column} != '' AND {column} NOT LIKE 'enc:v1:%'"
+            ).fetchall()
+        except sqlite3.OperationalError:  # the table is not there yet
+            continue
+        for item in found:
+            connection.execute(
+                f"UPDATE {table} SET {column} = ? WHERE id = ?",
+                (seal_payout(item[1]), item[0]),
+            )
+            sealed += 1
+    return sealed
 
 
 HEX = re.compile(r"[0-9a-f]{32}")

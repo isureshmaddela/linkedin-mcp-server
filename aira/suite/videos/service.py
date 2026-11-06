@@ -144,6 +144,9 @@ def _channel(found: dict[str, Any] | None) -> dict[str, Any] | None:
         return None
     found["monetized"] = bool(found.get("monetized"))
     found["restricted"] = bool(found.get("restricted"))
+    # payout details are encrypted at rest and only ever shown masked (store.payout_details reads them in the clear)
+    found["payout_details_saved"] = bool(found.get("payout_details"))
+    found["payout_details"] = store.payout_mask(found.get("payout_details", ""))
     return found
 
 
@@ -257,12 +260,14 @@ def update_channel(
     if "payout_details" in raw:
         if not adult(ch):
             raise PermissionError("Earning money is for adults.")
-        changes["payout_details"] = kit.text(
+        details = kit.text(
             raw["payout_details"],
             "where to send your money",
             max_len=500,
             multiline=True,
         )
+        if not (details and details == ch.get("payout_details")):  # the mask sent back unchanged keeps them
+            changes["payout_details"] = store.seal_payout(details)
     if changes:
         store.update(sc, "vi_channels", ch["id"], {**changes, "updated_at": stamp()})
         sc.commit()
@@ -2257,6 +2262,7 @@ def export_channel(sc: sqlite3.Connection, channel_id: str) -> dict[str, Any]:
     if not found:
         raise LookupError("That channel was not found.")
     found.pop("person_key", None)
+    found["payout_details"] = store.payout_mask(found.get("payout_details", ""))
     return {
         "channel": found,
         "videos": rows(
