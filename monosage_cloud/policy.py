@@ -557,6 +557,18 @@ POLICY: dict[str, Rule] = {
     "airaapi__leads_routes__item_signals": _org(
         "suite.manage", feature="leads", kind="leads_search"
     ),
+    # follow-up sequences: steps are written into the Leads outbox and sent through it (its own rules and caps)
+    "airaapi__leads_routes__sequences_list": _org("suite.read", feature="leads"),
+    "airaapi__leads_routes__sequences_get": _org("suite.read", feature="leads"),
+    "airaapi__leads_routes__sequences_create": _org("suite.manage", feature="leads"),
+    "airaapi__leads_routes__sequences_update": _org("suite.manage", feature="leads"),
+    "airaapi__leads_routes__sequences_delete": _org(
+        "suite.manage", feature="leads", audit=True
+    ),
+    "airaapi__leads_routes__sequences_enroll": _org(
+        "suite.manage", feature="leads", audit=True
+    ),
+    "airaapi__leads_routes__sequences_stop": _org("suite.manage", feature="leads"),
 }
 
 

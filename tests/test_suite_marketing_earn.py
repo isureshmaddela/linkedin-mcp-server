@@ -24,6 +24,7 @@ from cloud_support import Browser, build_org, sign_in
 import test_careers
 from aira.suite import background, kit
 from aira.suite.marketing import service, store
+from form_support import quick_forms, started  # noqa: F401 - public forms need the page's ticket
 from test_suite_marketing import (  # noqa: F401 - fixtures
     _anonymous,
     db,
@@ -349,7 +350,7 @@ def test_the_background_pass_runs_the_reminder(db):
         },
     )
     result = background.run(db, secret_store=None)
-    assert result["tasks"]["marketing"] == 1
+    assert result["tasks"]["marketing"]["reminders"] == 1
 
 
 def test_without_a_business_email_a_due_post_is_only_listed(db):
@@ -510,12 +511,16 @@ def test_a_creator_shares_a_media_kit_and_gets_paid(env, api, local_index, no_mo
             "name": "Jo",
             "email": "jo@acme.example",
             "package_id": reel["id"],
+            "started": started(page),
         },
     )
     assert status == 201 and sent["stored"]
     assert (
         _anonymous(
-            env, "POST", f"/api/public/{shared['token']}/request", {"company": "Acme"}
+            env,
+            "POST",
+            f"/api/public/{shared['token']}/request",
+            {"company": "Acme", "started": started(page)},
         )[0]
         == 400
     )
@@ -596,6 +601,7 @@ def test_hosted_media_kit_and_paid_leads_follow_roles_and_stay_in_the_organizati
             "name": "Jo",
             "email": "jo@acme.example",
             "package_id": made["package"]["id"],
+            "started": started(page),
         },
     )
     assert status == 201

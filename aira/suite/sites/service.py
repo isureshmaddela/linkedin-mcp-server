@@ -866,13 +866,67 @@ def default_provider(connection: sqlite3.Connection) -> str:
     return providers.TEMPLATE_ONLY
 
 
+# The business's own public pages a site links to: (app, kind, label). A Marketing contact form is made on first
+# use, so the site's contact section sends messages that arrive as leads instead of a thank-you that goes nowhere.
+BUSINESS_PAGES = (
+    ("marketing", "form", "Contact form (messages arrive as leads)"),
+    ("bookings", "booking_page", "Book an appointment"),
+    ("shop", "storefront", "Shop"),
+    ("events", "event", "Event tickets"),
+    ("academy", "catalog", "Courses"),
+    ("service", "help_center", "Help centre"),
+)
+MAX_EVENT_LINKS = 5
+
+
+def business_links(
+    connection: sqlite3.Connection, origin: Any = None
+) -> list[dict[str, str]]:
+    """The live public links of the business's other apps, as full addresses (kit.public_url builds them the way
+    emails do): the contact form first (made when Marketing is on and there is none), then booking, shop, events,
+    courses and the help centre."""
+    contact = None
+    if suite.app_enabled("marketing"):
+        try:
+            from aira.suite.marketing import service as marketing
+
+            contact = marketing.website_form(connection)
+        except Exception:  # noqa: BLE001 - a site still builds without a contact form
+            suite.logger.exception("The website contact form could not be made")
+    out: list[dict[str, str]] = []
+    for app, kind, label in BUSINESS_PAGES:
+        if not suite.app_enabled(app):
+            continue
+        rows = kit.fetch_all(
+            connection,
+            "SELECT token, title, ref_id FROM suite_public_links WHERE app = ? AND kind = ? AND revoked_at IS NULL ORDER BY created_at DESC LIMIT ?",
+            (app, kind, MAX_EVENT_LINKS if kind == "event" else 1),
+        )
+        if app == "marketing" and contact:
+            rows = [row for row in rows if row["ref_id"] == contact["id"]] or rows
+        for row in rows:
+            out.append(
+                {
+                    "kind": kind,
+                    "label": label,
+                    "title": "" if kind in ("form", "storefront", "help_center") else str(row["title"] or "")[:120],
+                    "url": kit.public_url(public.path_for(row["token"]), origin),
+                }
+            )
+    return out
+
+
 def start_run(
     connection: sqlite3.Connection,
     secret_store: Any,
     project_id: str,
     payload: dict[str, Any],
+    *,
+    origin: Any = None,
 ) -> tuple[dict[str, Any], providers.Config, dict[str, Any]]:
-    """Check the request, record the person's message and a running run; returns (project, config, context)."""
+    """Check the request, record the person's message and a running run; returns (project, config, context).
+
+    ``origin`` (the route's request) is the address the business's own links use in the site."""
     row = store.project(connection, project_id)
     prompt = kit.text(
         payload.get("prompt"),
@@ -935,6 +989,11 @@ def start_run(
         "assets": store.assets(connection, project_id),
         "spec": kit.loads(row["spec_json"], {}),
         "sell_to": kit.business(connection)["sell_to"],
+        "links": business_links(connection, origin),
+        "contact": {
+            key: str(kit.business(connection).get(key) or "")
+            for key in ("name", "email", "phone", "address")
+        },
     }
     return row, config, context
 
@@ -944,10 +1003,17 @@ def _designer_text(
 ) -> tuple[str, dict[str, Any] | None]:
     """The offline designer's answer (tagged like a model's) and the new spec, or (message, None) for no change."""
     files, spec, prompt = context["files"], context["spec"], context["prompt"]
+    # the contact section links to the business's Marketing contact form, so messages arrive as leads
+    contact_url = next(
+        (link["url"] for link in context.get("links") or [] if link["kind"] == "form"),
+        "",
+    )
     if not files:
         spec = designer.spec_from_prompt(prompt)
         if row["name"] and row["name"] != "Untitled site":
             spec["name"] = row["name"]
+        if contact_url:
+            spec["contact_url"] = contact_url
         rendered = designer.render(spec)
         labels = ", ".join(designer.SECTION_LABELS[s].lower() for s in spec["sections"])
         plan = f"Building a {spec['kind']} site for {spec['name']} with {labels}."
@@ -968,6 +1034,8 @@ def _designer_text(
             None,
         )
     updated, notes = designer.change(spec, prompt)
+    if contact_url:
+        updated["contact_url"] = contact_url
     if not notes:
         return (
             "I could not work out a change from that without a model. Offline I can change colors (“use teal”), "
@@ -1016,6 +1084,8 @@ def run_build(
                     assets=context["assets"],
                     project_name=row["name"],
                     sell_to=context.get("sell_to", ""),
+                    links=context.get("links"),
+                    contact=context.get("contact"),
                 ),
                 progress.feed,
                 progress.should_stop,

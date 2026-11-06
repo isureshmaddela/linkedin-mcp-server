@@ -17,6 +17,7 @@ from aira import suite  # noqa: E402
 from aira.suite import kit, public  # noqa: E402
 from test_careers import env, stub  # noqa: E402, F401
 from test_leads_ui import browser, go, signed_in_page, until  # noqa: E402, F401
+from form_support import quick_forms  # noqa: E402, F401 - a test fills a form faster than a person
 
 SHOTS = (
     Path(os.environ["MARKETING_SHOTS"]) if os.environ.get("MARKETING_SHOTS") else None

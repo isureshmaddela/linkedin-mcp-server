@@ -25,6 +25,7 @@ from life_support import Household
 import test_careers
 from aira.suite import kit, public
 from aira.suite.service import desk, store
+from form_support import quick_forms, started  # noqa: F401 - public forms need the page's ticket
 from test_suite_service import (  # noqa: F401 - fixtures
     S,
     _anonymous,
@@ -380,11 +381,17 @@ def test_merge_on_the_server_refuses_another_customers_case(env, api, local_inde
         f"{S}/offers", {"title": "Extra hour", "price_cents": 4500}, expect=201
     )["offer"]
     token = api.post(f"{S}/help/link")["link"]["token"]
+    _, page = _anonymous(env, "GET", f"/api/public/{token}")
     status, sent = _anonymous(
         env,
         "POST",
         f"/api/public/{token}/request",
-        {"offer_id": offer["id"], "name": "Ana", "email": "ana@example.com"},
+        {
+            "offer_id": offer["id"],
+            "name": "Ana",
+            "email": "ana@example.com",
+            "started": started(page),
+        },
     )
     assert status == 201
     ana_token = sent["path"].rsplit("/", 1)[1]

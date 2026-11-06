@@ -1408,12 +1408,106 @@ EMAIL_SETTINGS_DEFAULTS: dict[str, Any] = {
     "smtp_port": 587,
     "smtp_security": "starttls",
     "smtp_username": "",
-    "auto_send": [],  # kinds sent without approval, for example ["booking_confirmation", "ticket"]
+    # Kinds sent without approval. Until the business picks them itself (``auto_send_chosen``), the transactional
+    # kinds a customer is waiting for (AUTO_SEND_DEFAULT: an order confirmation, a ticket) are sent automatically too.
+    "auto_send": [],
+    "auto_send_chosen": False,
 }
 SMTP_PASSWORD_SECRET = "suite_smtp_password"
-# Safety notices a person set up for themselves (a caregiver told about a missed dose): sent without waiting for
-# approval, once the business has set up email.
-ALWAYS_SEND = frozenset({"missed_dose"})
+# Safety notices a person set up for themselves (a caregiver told about a missed dose) and notices to the business's
+# own team (a new case, an overdue one): sent without waiting for approval, once the business has set up email.
+ALWAYS_SEND = frozenset(
+    {"missed_dose", "staff_new_case", "staff_new_chat", "staff_sla_breach"}
+)
+MAX_BODY = 20000  # the longest message the outbox keeps, footer included
+# The kinds of message the apps prepare, as the Business hub names them (Email > Send without approval):
+# (label, group, sent automatically unless the business turns it off).
+MESSAGE_KINDS: dict[str, tuple[str, str, bool]] = {
+    "order_confirmation": ("Shop: order confirmations", "transactional", True),
+    "order_shipped": ("Shop: order shipped", "transactional", True),
+    "payment_receipt": ("Payment receipts", "transactional", True),
+    "ticket": ("Events: tickets", "transactional", True),
+    "booking_confirmation": ("Bookings: confirmations", "transactional", True),
+    "booking_rescheduled": ("Bookings: a booking moved", "transactional", True),
+    "booking_cancelled": ("Bookings: cancellations", "transactional", True),
+    "enrolment": ("Courses: enrolments", "transactional", True),
+    "case_received": ("Service: we received your request", "transactional", True),
+    "newsletter_confirm": (
+        "Marketing: confirm a newsletter sign-up",
+        "transactional",
+        True,
+    ),
+    "form_submission": ("Marketing: new enquiries (to you)", "transactional", True),
+    "case_reply": ("Service: your replies to customers", "replies", False),
+    "csat_request": ("Service: how did we do?", "replies", False),
+    "invoice": ("Studio: invoices", "replies", False),
+    "invoice_reminder": ("Studio: invoice reminders", "replies", False),
+    "proposal": ("Studio: proposals", "replies", False),
+    "payment_request": ("Payment requests", "replies", False),
+    "lead_reply": ("Marketing: replies to leads", "replies", False),
+    "booking_reminder": ("Bookings: reminders the day before", "reminders", False),
+    "event_reminder": ("Events: reminders the day before", "reminders", False),
+    "waitlist_offer": ("Events: tickets available again", "reminders", False),
+    "waitlist_opening": ("Bookings: a time opened up", "reminders", False),
+    "review_request": ("Bookings: review requests", "reminders", False),
+    "post_reminder": ("Marketing: a post is due", "reminders", False),
+    "newsletter": ("Marketing: newsletters", "marketing", False),
+    "announcement": ("Courses: announcements", "marketing", False),
+    "back_in_stock": ("Shop: back in stock", "marketing", False),
+}
+AUTO_SEND_DEFAULT = frozenset(
+    kind for kind, (_label, _group, on) in MESSAGE_KINDS.items() if on
+)
+MARKETING_KINDS = frozenset(
+    kind for kind, (_label, group, _on) in MESSAGE_KINDS.items() if group == "marketing"
+)
+# Messages that only make sense for a while: dropped when still unsent this long after they were due
+# (a reminder for a booking that has started, a waitlist offer for seats that are gone).
+EXPIRE_AFTER: dict[str, timedelta] = {
+    "booking_reminder": timedelta(hours=23),
+    "event_reminder": timedelta(hours=23),
+    "waitlist_offer": timedelta(days=2),
+    "waitlist_opening": timedelta(days=1),
+    "review_request": timedelta(days=7),
+    "post_reminder": timedelta(days=1),
+    "newsletter_confirm": timedelta(days=7),
+    "staff_new_chat": timedelta(hours=4),
+    "staff_sla_breach": timedelta(days=1),
+}
+# A send that failed for a passing reason (the mail server did not answer) is tried again after these minutes,
+# then marked failed.
+RETRY_MINUTES = (5, 15, 60, 240)
+MAX_ATTEMPTS = len(RETRY_MINUTES) + 1
+OUTBOX_COLUMNS = (
+    ("expires_at", "TEXT"),
+    ("attempts", "INTEGER NOT NULL DEFAULT 0"),
+    ("message_id", "TEXT NOT NULL DEFAULT ''"),  # the Message-ID it went out with (replies thread on it)
+    ("unsubscribe_url", "TEXT NOT NULL DEFAULT ''"),  # bulk mail: the one-click unsubscribe address
+)
+
+
+def ensure_outbox(connection: sqlite3.Connection) -> None:
+    """The shared tables plus the outbox columns added later (safe on any database, old or new)."""
+    ensure_core(connection)
+    marker = (_db_file(connection), "suite.outbox.v2")
+    if marker in _ensured:
+        return
+    have = {row[1] for row in connection.execute("PRAGMA table_info(suite_outbox)")}
+    for column, definition in OUTBOX_COLUMNS:
+        if column in have:
+            continue
+        try:
+            connection.execute(
+                f"ALTER TABLE suite_outbox ADD COLUMN {column} {definition}"
+            )
+        except sqlite3.OperationalError as error:  # another connection added it first
+            if "duplicate column" not in str(error).lower():
+                raise
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS suite_outbox_message ON suite_outbox (message_id)"
+    )
+    connection.commit()
+    _ensured.add(marker)
 
 
 def email_settings(connection: sqlite3.Connection) -> dict[str, Any]:
@@ -1422,6 +1516,27 @@ def email_settings(connection: sqlite3.Connection) -> dict[str, Any]:
         **EMAIL_SETTINGS_DEFAULTS,
         **{k: v for k, v in stored.items() if k in EMAIL_SETTINGS_DEFAULTS},
     }
+
+
+def auto_send_kinds(settings: Mapping[str, Any]) -> set[str]:
+    """The kinds that go out without approval: the business's own choice, or (until it chose) its list plus the
+    transactional defaults."""
+    chosen = {str(kind) for kind in (settings.get("auto_send") or [])}
+    return chosen if settings.get("auto_send_chosen") else chosen | AUTO_SEND_DEFAULT
+
+
+def message_kinds(settings: Mapping[str, Any]) -> list[dict[str, Any]]:
+    """Every kind the hub offers as a checkbox (with whether it is on now), plus any other kind already chosen."""
+    on = auto_send_kinds(settings)
+    rows = [
+        {"id": kind, "label": label, "group": group, "default": default, "on": kind in on}
+        for kind, (label, group, default) in MESSAGE_KINDS.items()
+    ]
+    rows.extend(
+        {"id": kind, "label": kind.replace("_", " ").capitalize(), "group": "other", "default": False, "on": True}
+        for kind in sorted(on - set(MESSAGE_KINDS))
+    )
+    return rows
 
 
 def _mail_ready(settings: Mapping[str, Any]) -> bool:
@@ -1459,14 +1574,23 @@ def outgoing_mail(
     return settings, "", False
 
 
-def save_email_settings(
+def clean_email_settings(
     connection: sqlite3.Connection, raw: Mapping[str, Any]
 ) -> dict[str, Any]:
+    """The settings as they would be saved (the stored ones with ``raw`` over them), checked; nothing is written."""
     merged = {
         **email_settings(connection),
         **{k: v for k, v in raw.items() if k in EMAIL_SETTINGS_DEFAULTS},
     }
-    clean = {
+    given = merged.get("auto_send") or []
+    if isinstance(given, str):
+        given = [part for part in given.split(",") if part.strip()]
+    kinds: list[str] = []
+    for kind in given if isinstance(given, list) else []:
+        cleaned = text(kind, "a message kind", max_len=40)
+        if cleaned and cleaned not in kinds:
+            kinds.append(cleaned)
+    return {
         "from_name": text(merged["from_name"], "the sender name", max_len=100),
         "from_email": email(merged["from_email"], "the sender address"),
         "reply_to": email(merged["reply_to"], "the reply-to address"),
@@ -1487,14 +1611,39 @@ def save_email_settings(
         "smtp_username": text(
             merged["smtp_username"], "the mail username", max_len=200
         ),
-        "auto_send": [
-            text(kind, "a message kind", max_len=40)
-            for kind in (merged.get("auto_send") or [])
-        ][:30],
+        "auto_send": kinds[:60],
+        # sending "auto_send" is the business choosing; until then the transactional defaults apply
+        "auto_send_chosen": bool(merged.get("auto_send_chosen")) or "auto_send" in raw,
     }
+
+
+def save_email_settings(
+    connection: sqlite3.Connection,
+    raw: Mapping[str, Any],
+    *,
+    check_host: Callable[[str, int], Any] | None = None,
+) -> dict[str, Any]:
+    """Check, then save. ``check_host(host, port)`` (the hosted build refuses internal mail servers) runs before
+    anything is written, so refused settings are never stored."""
+    clean = clean_email_settings(connection, raw)
+    if check_host is not None and clean["smtp_host"]:
+        check_host(clean["smtp_host"], int(clean["smtp_port"]))
     set_setting(connection, "core", "email", clean)
     connection.commit()
     return clean
+
+
+def expiry_of(message: Mapping[str, Any]) -> str | None:
+    """When a message is dropped if still unsent: its own ``expires_at``, else (a kind in :data:`EXPIRE_AFTER`) that
+    long after it is due. The default follows ``send_after``, so a reminder an app moves (an event rescheduled)
+    expires with its new time."""
+    if message.get("expires_at"):
+        return str(message["expires_at"])
+    lifetime = EXPIRE_AFTER.get(str(message.get("kind") or ""))
+    if lifetime is None:
+        return None
+    start = message.get("send_after") or message.get("created_at") or now()
+    return iso(parse_time(str(start)) + lifetime)
 
 
 def queue_email(
@@ -1508,15 +1657,21 @@ def queue_email(
     ref_type: str = "",
     ref_id: str = "",
     send_after: str = "",
+    expires_at: str = "",
+    unsubscribe_url: str = "",
 ) -> dict[str, Any] | None:
-    """Prepare a message to a customer. It waits in the outbox for approval unless the business turned on
-    automatic sending for this kind. Returns None when there is no address to send to."""
-    ensure_core(connection)
+    """Prepare a message to a customer. It waits in the outbox for approval unless the business sends this kind
+    automatically. Returns None when there is no address to send to.
+
+    ``expires_at``: a time-bound message (a reminder) is dropped if it is still unsent then; kinds in
+    :data:`EXPIRE_AFTER` get one by default. ``unsubscribe_url``: bulk mail (a newsletter) carries the RFC 8058
+    one-click unsubscribe headers, and is checked against unsubscribes again when it is sent."""
+    ensure_outbox(connection)
     recipient = email(to) if to else ""
     if not recipient:
         return None
-    automatic = kind in ALWAYS_SEND or kind in (
-        email_settings(connection).get("auto_send") or []
+    automatic = kind in ALWAYS_SEND or kind in auto_send_kinds(
+        email_settings(connection)
     )
     message = {
         "id": new_id(),
@@ -1524,26 +1679,181 @@ def queue_email(
         "kind": kind[:40],
         "recipient": recipient,
         "subject": text(subject, "a subject", max_len=200) or "Message",
-        "body": text(body, "a message", max_len=20000, multiline=True),
+        "body": text(body, "a message", max_len=MAX_BODY, multiline=True),
         "ref_type": ref_type[:40],
         "ref_id": ref_id[:64],
         "status": "approved" if automatic else "pending",
         "send_after": send_after or None,
+        "expires_at": moment(expires_at, "when it expires") or None,
+        "unsubscribe_url": str(unsubscribe_url or "")[:500],
         "created_at": now(),
         "approved_at": now() if automatic else None,
     }
     connection.execute(
-        """INSERT INTO suite_outbox (id, app, kind, recipient, subject, body, ref_type, ref_id, status, send_after, created_at, approved_at)
-        VALUES (:id, :app, :kind, :recipient, :subject, :body, :ref_type, :ref_id, :status, :send_after, :created_at, :approved_at)""",
+        """INSERT INTO suite_outbox (id, app, kind, recipient, subject, body, ref_type, ref_id, status, send_after,
+        expires_at, unsubscribe_url, created_at, approved_at)
+        VALUES (:id, :app, :kind, :recipient, :subject, :body, :ref_type, :ref_id, :status, :send_after,
+        :expires_at, :unsubscribe_url, :created_at, :approved_at)""",
         message,
     )
     return message
 
 
+def cancel_queued(
+    connection: sqlite3.Connection,
+    recipient: str,
+    *,
+    reason: str,
+    app: str = "",
+    kinds: Iterable[str] | None = None,
+    bulk_only: bool = False,
+) -> int:
+    """Withdraw unsent messages to ``recipient`` (an unsubscribe, a bounce): the kinds given, or bulk mail only, or
+    everything of ``app``. Returns how many were withdrawn."""
+    ensure_outbox(connection)
+    clauses = ["recipient = ?", "status IN ('pending', 'approved', 'failed')"]
+    params: list[Any] = [str(recipient or "").strip().lower()]
+    if app:
+        clauses.append("app = ?")
+        params.append(app)
+    wanted = list(kinds or [])
+    if wanted:
+        clauses.append(f"kind IN ({', '.join('?' for _ in wanted)})")
+        params.extend(wanted)
+    if bulk_only:
+        marks = ", ".join("?" for _ in MARKETING_KINDS)
+        clauses.append(f"(unsubscribe_url <> '' OR kind IN ({marks}))")
+        params.extend(sorted(MARKETING_KINDS))
+    changed = connection.execute(
+        f"UPDATE suite_outbox SET status = 'cancelled', error = ? WHERE {' AND '.join(clauses)}",  # noqa: S608
+        (str(reason)[:300], *params),
+    ).rowcount
+    return int(changed or 0)
+
+
+def expire_outbox(connection: sqlite3.Connection, at: str = "") -> int:
+    """Drop time-bound messages still unsent after their expiry. Returns how many were dropped."""
+    ensure_outbox(connection)
+    stamp = at or now()
+    drop = "UPDATE suite_outbox SET status = 'cancelled', error = 'Expired: it was not sent in time.' WHERE status IN ('pending', 'approved', 'failed') AND "
+    changed = connection.execute(
+        drop + "expires_at IS NOT NULL AND expires_at <= ?", (stamp,)
+    ).rowcount
+    for kind, lifetime in EXPIRE_AFTER.items():  # the defaults, counted from when each message is due
+        changed += connection.execute(
+            drop + "expires_at IS NULL AND kind = ? AND COALESCE(send_after, created_at) <= ?",
+            (kind, iso(parse_time(stamp) - lifetime)),
+        ).rowcount
+    if changed:
+        connection.commit()
+    return int(changed or 0)
+
+
+# Send-time checks an app adds (Marketing: the address unsubscribed): fn(connection, message) -> why it must not
+# go, or "" when it may.
+SuppressionFn = Callable[[sqlite3.Connection, Mapping[str, Any]], str]
+SUPPRESSIONS: dict[str, SuppressionFn] = {}
+
+
+def suppression(app: str) -> Callable[[SuppressionFn], SuppressionFn]:
+    def wrap(fn: SuppressionFn) -> SuppressionFn:
+        SUPPRESSIONS[app] = fn
+        return fn
+
+    return wrap
+
+
+def bulk_mail(message: Mapping[str, Any]) -> bool:
+    """Marketing mail (a newsletter), as opposed to a message a customer is waiting for."""
+    return bool(message.get("unsubscribe_url")) or message.get("kind") in MARKETING_KINDS
+
+
+def suppression_reason(connection: sqlite3.Connection, message: Mapping[str, Any]) -> str:
+    """Why this message must not go now ('' when it may): the address is on the do-not-contact list (any entry for
+    bulk mail; a bounce for any mail), or an app's own check (an unsubscribe) refuses it."""
+    from aira.leads import mail as transport
+
+    is_bulk = bulk_mail(message)
+    recipient = str(message.get("recipient") or "")
+    try:
+        why = transport.do_not_contact(connection, recipient, bounces_only=not is_bulk)
+    except sqlite3.Error:
+        suite.logger.exception("The do-not-contact list could not be read")
+        why = "The do-not-contact list could not be checked." if is_bulk else ""
+    if why:
+        return why
+    for app, check in SUPPRESSIONS.items():
+        try:
+            why = check(connection, message)
+        except Exception:  # noqa: BLE001 - bulk mail is held back when its check fails; a receipt still goes
+            suite.logger.exception("The send-time check of %s failed", app)
+            why = "The unsubscribe list could not be checked." if is_bulk else ""
+        if why:
+            return why
+    return ""
+
+
+# ---------------------------------------------------------------------------
+# public forms: a bot check (a hidden field and a minimum time to fill the form in)
+# ---------------------------------------------------------------------------
+
+FORM_MIN_SECONDS = 3
+FORM_TICKET_SECONDS = 24 * 3600
+
+
+def _form_secret(connection: sqlite3.Connection) -> bytes:
+    import secrets
+
+    secret = get_setting(connection, "core", "form_secret", "")
+    if not secret:
+        secret = secrets.token_hex(32)
+        set_setting(connection, "core", "form_secret", secret)
+        connection.commit()
+    return str(secret).encode()
+
+
+def form_ticket(connection: sqlite3.Connection, at: datetime | None = None) -> str:
+    """A signed stamp of when the page was shown, sent back with the form (``started``)."""
+    import hashlib
+    import hmac
+
+    issued = str(int((at or utcnow()).timestamp()))
+    signature = hmac.new(_form_secret(connection), issued.encode(), hashlib.sha256)
+    return f"{issued}.{signature.hexdigest()[:32]}"
+
+
+def check_form(
+    connection: sqlite3.Connection,
+    payload: Mapping[str, Any],
+    *,
+    at: datetime | None = None,
+) -> bool:
+    """Whether a public form was sent by a person. False for a bot (the hidden ``website`` field filled in, or no
+    ticket from the page): the caller thanks it and keeps nothing. A person who was faster than
+    :data:`FORM_MIN_SECONDS`, or whose page is a day old, gets a ValueError asking them to send again."""
+    import hashlib
+    import hmac
+
+    if str(payload.get("website") or "").strip():
+        return False
+    issued, _, signature = str(payload.get("started") or "").partition(".")
+    if not issued.isdigit() or not signature:
+        return False
+    expected = hmac.new(_form_secret(connection), issued.encode(), hashlib.sha256)
+    if not hmac.compare_digest(expected.hexdigest()[:32], signature):
+        return False
+    age = (at or utcnow()).timestamp() - int(issued)
+    if age > FORM_TICKET_SECONDS:
+        raise ValueError("This page has been open a long time. Reload it and send again.")
+    if age < FORM_MIN_SECONDS:
+        raise ValueError("That was quick. Check your details, then send again.")
+    return True
+
+
 def outbox(
     connection: sqlite3.Connection, *, status: str = "", app: str = "", limit: int = 200
 ) -> list[dict[str, Any]]:
-    ensure_core(connection)
+    ensure_outbox(connection)
     clauses, params = [], []
     if status:
         clauses.append("status = ?")
@@ -1560,7 +1870,7 @@ def outbox(
 
 
 def outbox_counts(connection: sqlite3.Connection) -> dict[str, int]:
-    ensure_core(connection)
+    ensure_outbox(connection)
     counts = {status: 0 for status in OUTBOX_STATUSES}
     for row in connection.execute(
         "SELECT status, COUNT(*) FROM suite_outbox GROUP BY status"
@@ -1572,14 +1882,16 @@ def outbox_counts(connection: sqlite3.Connection) -> dict[str, int]:
 def set_outbox_status(
     connection: sqlite3.Connection, ids: Sequence[str], status: str
 ) -> int:
-    ensure_core(connection)
+    ensure_outbox(connection)
     if status not in ("approved", "cancelled"):
         raise ValueError("A message can be approved or cancelled.")
+    expire_outbox(connection)  # an expired reminder is not approved any more
     changed = 0
     for message_id in ids[:500]:
         changed += connection.execute(
-            "UPDATE suite_outbox SET status = ?, approved_at = CASE WHEN ? = 'approved' THEN ? ELSE approved_at END WHERE id = ? AND status IN ('pending', 'failed', 'approved')",
-            (status, status, now(), str(message_id)),
+            "UPDATE suite_outbox SET status = ?, approved_at = CASE WHEN ? = 'approved' THEN ? ELSE approved_at END, "
+            "attempts = CASE WHEN ? = 'approved' THEN 0 ELSE attempts END WHERE id = ? AND status IN ('pending', 'failed', 'approved')",
+            (status, status, now(), status, str(message_id)),
         ).rowcount
     connection.commit()
     return changed
@@ -1588,7 +1900,7 @@ def set_outbox_status(
 def edit_outbox(
     connection: sqlite3.Connection, message_id: str, raw: Mapping[str, Any]
 ) -> dict[str, Any]:
-    ensure_core(connection)
+    ensure_outbox(connection)
     message = require_row(connection, "suite_outbox", message_id, "message")
     if message["status"] not in ("pending", "failed"):
         raise ValueError("Only a message that has not been sent can be edited.")
@@ -1599,7 +1911,7 @@ def edit_outbox(
         )
     if "body" in raw:
         values["body"] = text(
-            raw["body"], "a message", max_len=20000, required=True, multiline=True
+            raw["body"], "a message", max_len=MAX_BODY, required=True, multiline=True
         )
     if "recipient" in raw:
         values["recipient"] = email(raw["recipient"], required=True)
@@ -1615,16 +1927,28 @@ def _transactional(
     from email.utils import formataddr, formatdate, make_msgid
 
     sender = str(settings["from_email"])
+    reply_to = str(settings.get("reply_to") or sender)
     mail = EmailMessage()
     mail["From"] = formataddr(
         (str(settings.get("from_name") or profile.get("name") or ""), sender)
     )
     mail["To"] = str(message["recipient"])
     mail["Subject"] = str(message["subject"])
-    mail["Reply-To"] = str(settings.get("reply_to") or sender)
+    mail["Reply-To"] = reply_to
     mail["Date"] = formatdate(localtime=False)
     mail["Message-ID"] = make_msgid(domain=sender.split("@")[-1] or "localhost")
     mail["X-Mailer"] = "Monosage"
+    unsubscribe = str(message.get("unsubscribe_url") or "")
+    if unsubscribe:
+        # RFC 2369 and RFC 8058: a mail client offers "Unsubscribe", and with an https address it unsubscribes with
+        # one POST (List-Unsubscribe=One-Click), without opening a page. The mailto: also works when replies are
+        # read (Business hub > Email > Incoming mail).
+        mailto = f"<mailto:{reply_to}?subject=unsubscribe>"
+        if unsubscribe.lower().startswith("https://"):
+            mail["List-Unsubscribe"] = f"<{unsubscribe}>, {mailto}"
+            mail["List-Unsubscribe-Post"] = "List-Unsubscribe=One-Click"
+        else:  # a local address no mail provider can reach: the mailto only
+            mail["List-Unsubscribe"] = mailto
     footer_bits = [
         str(profile.get(k) or "")
         for k in ("name", "address", "phone")
@@ -1633,6 +1957,23 @@ def _transactional(
     footer = ("\n\n--\n" + "\n".join(footer_bits)) if footer_bits else ""
     mail.set_content(str(message["body"]).replace("\r\n", "\n").rstrip() + footer)
     return mail
+
+
+def _temporary(error: BaseException) -> bool:
+    """A failure worth trying again later (the mail server did not answer, or said "try later")."""
+    import smtplib
+
+    if getattr(error, "temporary", False):
+        return True
+    if isinstance(error, smtplib.SMTPResponseException):
+        return 400 <= int(error.smtp_code) < 500
+    return isinstance(error, (smtplib.SMTPServerDisconnected, ConnectionError, TimeoutError))
+
+
+def _stops_the_pass(error: BaseException) -> bool:
+    """The same failure would repeat for every message (a wrong password, a refused mail server)."""
+    words = str(error)
+    return "refused the username or password" in words or "cannot be used here" in words
 
 
 def send_outbox(
@@ -1646,11 +1987,15 @@ def send_outbox(
 ) -> dict[str, Any]:
     """Send approved messages whose time has come, through the business's own mail server.
 
+    Before each message: an expired one is dropped, and one whose address unsubscribed or is on the do-not-contact
+    list since it was queued is cancelled (``skipped``). A send that fails for a passing reason is tried again
+    later (``retrying``, after :data:`RETRY_MINUTES`), up to :data:`MAX_ATTEMPTS`; then it is ``failed``.
+
     ``ids`` limits the pass to those messages (an app sending what the person just approved). ``mail_settings``
     replaces this database's Business hub > Email (a hosted member sending through the organization's)."""
     from aira.leads import mail as transport
 
-    ensure_core(connection)
+    ensure_outbox(connection)
     settings = (
         dict(mail_settings) if mail_settings is not None else email_settings(connection)
     )
@@ -1668,6 +2013,7 @@ def send_outbox(
         )
     send = sender or transport.smtp_send
     profile = business(connection)
+    expired = expire_outbox(connection)
     due = fetch_all(
         connection,
         "SELECT * FROM suite_outbox WHERE status = 'approved' AND (send_after IS NULL OR send_after <= ?) ORDER BY approved_at LIMIT ?",
@@ -1678,28 +2024,89 @@ def send_outbox(
         due = [message for message in due if message["id"] in wanted][
             : max(1, min(limit, 100))
         ]
-    result = {"sent": 0, "failed": 0, "details": []}
+    result: dict[str, Any] = {
+        "sent": 0,
+        "failed": 0,
+        "retrying": 0,
+        "skipped": 0,
+        "expired": expired,
+        "details": [],
+    }
     for message in due:
-        try:
-            send(settings, password, _transactional(settings, profile, message))
-        except Exception as error:  # noqa: BLE001 - one failure must not stop the rest
+        why = suppression_reason(connection, message)
+        if why:
             connection.execute(
-                "UPDATE suite_outbox SET status = 'failed', error = ? WHERE id = ?",
-                (str(error)[:300], message["id"]),
+                "UPDATE suite_outbox SET status = 'cancelled', error = ? WHERE id = ?",
+                (why[:300], message["id"]),
             )
-            result["failed"] += 1
+            connection.commit()
+            result["skipped"] += 1
             result["details"].append(
-                {"id": message["id"], "status": "failed", "error": str(error)[:300]}
+                {"id": message["id"], "status": "cancelled", "error": why[:300]}
             )
+            continue
+        try:
+            built = _transactional(settings, profile, message)
+            send(settings, password, built)
+        except Exception as error:  # noqa: BLE001 - one failure must not stop the rest
+            attempts = int(message.get("attempts") or 0) + 1
+            reason = str(error)[:300]
+            if _temporary(error) and attempts < MAX_ATTEMPTS:
+                retry_at = iso(utcnow() + timedelta(minutes=RETRY_MINUTES[attempts - 1]))
+                connection.execute(
+                    "UPDATE suite_outbox SET attempts = ?, send_after = ?, error = ? WHERE id = ?",
+                    (attempts, retry_at, reason, message["id"]),
+                )
+                result["retrying"] += 1
+                result["details"].append(
+                    {"id": message["id"], "status": "retrying", "error": reason, "retry_at": retry_at}
+                )
+            else:
+                if getattr(error, "bounced", False):
+                    # refused for good: on the do-not-contact list, and the rest queued for it is withdrawn
+                    transport.record_bounce(connection, message["recipient"], reason)
+                connection.execute(
+                    "UPDATE suite_outbox SET status = 'failed', attempts = ?, error = ? WHERE id = ?",
+                    (attempts, reason, message["id"]),
+                )
+                result["failed"] += 1
+                result["details"].append(
+                    {"id": message["id"], "status": "failed", "error": reason}
+                )
+            connection.commit()
+            if _stops_the_pass(error):
+                break
         else:
             connection.execute(
-                "UPDATE suite_outbox SET status = 'sent', sent_at = ?, error = '' WHERE id = ?",
-                (now(), message["id"]),
+                "UPDATE suite_outbox SET status = 'sent', sent_at = ?, error = '', attempts = ?, message_id = ? WHERE id = ?",
+                (
+                    now(),
+                    int(message.get("attempts") or 0) + 1,
+                    str(built["Message-ID"] or "")[:300],
+                    message["id"],
+                ),
             )
             result["sent"] += 1
             result["details"].append({"id": message["id"], "status": "sent"})
-        connection.commit()
+            connection.commit()
     return result
+
+
+def sent_message(connection: sqlite3.Connection, message_ids: Iterable[str]) -> dict[str, Any] | None:
+    """The outbox message one of these Message-IDs belongs to (a reply's In-Reply-To or References), or None."""
+    ensure_outbox(connection)
+    for message_id in message_ids:
+        cleaned = str(message_id or "").strip()
+        if not cleaned:
+            continue
+        found = fetch_one(
+            connection,
+            "SELECT * FROM suite_outbox WHERE message_id = ? AND status = 'sent' ORDER BY sent_at DESC",
+            (cleaned,),
+        )
+        if found:
+            return found
+    return None
 
 
 # ---------------------------------------------------------------------------

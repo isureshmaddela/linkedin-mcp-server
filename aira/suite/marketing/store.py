@@ -168,6 +168,9 @@ ADDED_COLUMNS = (
     ("mk_submissions", "paid_at", "TEXT"),
     ("mk_submissions", "contacted_at", "TEXT"),
     ("mk_posts", "reminded_at", "TEXT"),
+    # double opt-in: when the person confirmed, and when the confirmation email was last sent
+    ("mk_subscribers", "confirmed_at", "TEXT"),
+    ("mk_subscribers", "confirm_sent_at", "TEXT"),
 )
 
 JSON_COLUMNS = {"channels", "tags", "fields"}
@@ -175,7 +178,7 @@ JSON_COLUMNS = {"channels", "tags", "fields"}
 
 def _add_columns(connection: sqlite3.Connection) -> None:
     """Add the newer columns to a database made by an older Marketing (safe to run any number of times)."""
-    marker = (kit._db_file(connection), "marketing.columns.v2")  # noqa: SLF001 - kit.ensure's own marker,
+    marker = (kit._db_file(connection), "marketing.columns.v3")  # noqa: SLF001 - kit.ensure's own marker,
     if marker in kit._ensured:  # noqa: SLF001 - so kit.forget_schema() resets it too
         return
     tables: dict[str, set[str]] = {}

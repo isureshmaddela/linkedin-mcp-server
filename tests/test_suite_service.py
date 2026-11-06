@@ -17,6 +17,7 @@ import test_careers
 from aira import suite
 from aira.suite import background, kit, public
 from aira.suite.service import desk, store
+from form_support import quick_forms, started  # noqa: F401 - public forms need the page's ticket
 
 env = test_careers.env
 api = test_careers.api
@@ -395,6 +396,7 @@ def test_a_customer_gets_help_from_the_help_centre_to_a_rating(env, api, local_i
             "email": "ana@example.com",
             "subject": "Booking",
             "message": "Can I come at 7?",
+            "started": started(page),
         },
     )
     assert (
@@ -548,7 +550,12 @@ def test_hosted_service_needs_the_app_and_the_right_role(cloud):
     status, created = visitor.call(
         "POST",
         f"/api/public/{token}/contact",
-        {"name": "Ana", "email": "ana@example.com", "message": "Hi"},
+        {
+            "name": "Ana",
+            "email": "ana@example.com",
+            "message": "Hi",
+            "started": started(page),
+        },
     )
     assert status == 201, created
     status, listing = owner.call("GET", f"{S}/cases?view=all")

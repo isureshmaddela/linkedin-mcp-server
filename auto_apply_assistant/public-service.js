@@ -48,7 +48,8 @@
 
   // A message to the business that becomes a case. ``suggest`` (help centre only) shows answers that might help
   // while the visitor writes; ``onOpen`` opens one of them.
-  function contactForm(ctx, { withSubject = true, intro = "", suggest = false, onOpen = null } = {}) {
+  // ``started`` is the page's ticket: the server turns away a form sent without it or within a few seconds.
+  function contactForm(ctx, { withSubject = true, intro = "", suggest = false, onOpen = null, started = "" } = {}) {
     const { h } = ctx;
     const name = h("input", { type: "text", autocomplete: "name", maxlength: "80" });
     const email = h("input", { type: "email", autocomplete: "email", required: true, maxlength: "200" });
@@ -87,7 +88,7 @@
       h("div", { class: "pub-btn-row" }, ctx.button("Send message", async () => {
         if (!email.value.trim()) throw new Error("Enter your email so we can reply.");
         if (!message.value.trim()) throw new Error("Enter your message.");
-        const sent = await ctx.action("contact", { name: name.value, email: email.value, subject: subject.value, message: message.value, website: trap.value });
+        const sent = await ctx.action("contact", { name: name.value, email: email.value, subject: subject.value, message: message.value, website: trap.value, started });
         thanks(ctx, box, sent);
       })),
     ));
@@ -95,7 +96,7 @@
   }
 
   // ---------------------------------------------------------------- paid help
-  function offersSection(ctx, offers) {
+  function offersSection(ctx, offers, started = "") {
     const { h } = ctx;
     if (!offers || !offers.length) return null;
     const section = h("section", { class: "pub-card" }, h("h2", { text: "Paid help" }), h("p", { class: "pub-muted", text: "Want us to do it for you, or need help fast? Ask for one of these and we will be in touch." }));
@@ -117,7 +118,7 @@
           h("div", { class: "pub-btn-row" },
             ctx.button(`Ask for it (${ctx.money(offer.price_cents)})`, async () => {
               if (!email.value.trim()) throw new Error("Enter your email so we can reply.");
-              const sent = await ctx.action("request", { offer_id: offer.id, name: name.value, email: email.value, phone: phone.value, message: message.value, website: trap.value });
+              const sent = await ctx.action("request", { offer_id: offer.id, name: name.value, email: email.value, phone: phone.value, message: message.value, website: trap.value, started });
               thanks(ctx, item, sent, " Your request page shows how to pay.");
             }),
             ctx.button("Cancel", () => { form.remove(); ask.hidden = false; }, "ghost")),
@@ -195,9 +196,9 @@
       h("div", { class: "pub-card pub-form", role: "search" }, ctx.field("Search our answers", search), h("div", { class: "pub-btn-row" }, ctx.button("Search", run))),
       reader,
       results,
-      offersSection(ctx, page.offers),
+      offersSection(ctx, page.offers, page.started),
       page.chat_path ? h("section", { class: "pub-card" }, h("h2", { text: "Talk to us now" }), h("p", { class: "pub-muted", text: "We are online. Start a live chat and get an answer straight away." }), h("a", { class: "pub-btn", href: page.chat_path, text: "Start a live chat" })) : null,
-      contactForm(ctx, { intro: "Could not find your answer? Send us a message and we will reply by email.", suggest: (data.queries || []).includes("answers"), onOpen: (id) => open(id).catch((error) => ctx.notice(error.message, "bad")) }),
+      contactForm(ctx, { intro: "Could not find your answer? Send us a message and we will reply by email.", suggest: (data.queries || []).includes("answers"), onOpen: (id) => open(id).catch((error) => ctx.notice(error.message, "bad")), started: page.started }),
     ));
     results.replaceChildren(...list(page.articles, ""));
     const wanted = location.hash.replace(/^#/, "");
@@ -215,7 +216,7 @@
     const area = h("div", {});
     root.append(area);
 
-    const offline = () => area.replaceChildren(h("p", { class: "pub-notice", text: page.offline_message || "We are away right now. Leave a message and we will reply by email." }), contactForm(ctx, { withSubject: false }));
+    const offline = () => area.replaceChildren(h("p", { class: "pub-notice", text: page.offline_message || "We are away right now. Leave a message and we will reply by email." }), contactForm(ctx, { withSubject: false, started: page.started }));
 
     function talk(session, first) {
       let cursor = 0;

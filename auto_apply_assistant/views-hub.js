@@ -3,7 +3,8 @@
  * Tabs (?tab=): overview (revenue this month, by month and by app; each app's setup progress and numbers; what
  * customers did on public pages), revenue (every payment recorded, CSV), outbox (messages the apps prepared for
  * customers: approve, edit, cancel, send through your own mail server), business (the profile every public page
- * shows: name, contact, currency, brand colour, tax, how customers pay) and email (the mail server).
+ * shows: name, contact, currency, brand colour, tax, how customers pay) and email (the mail server, which kinds of
+ * message go out without approval, and the incoming mailbox read for replies, new requests and bounces).
  * Everything runs through /api/suite/* (aira/suite/suite_routes.py).
  */
 "use strict";
@@ -262,8 +263,24 @@
     body.append(await paymentsSection());
   }
 
-  async function emailTab(body) {
-    const data = await Aira.api("/api/suite/email");
+  // "Send without approval": one labelled box per kind of message, grouped. The server says which are on (until the
+  // business picks, the transactional ones a customer is waiting for: confirmations, tickets, receipts).
+  const KIND_GROUPS = [
+    ["transactional", "Confirmations and receipts customers are waiting for"],
+    ["replies", "Replies, invoices and payment requests"],
+    ["reminders", "Reminders and follow-ups"],
+    ["marketing", "Marketing"],
+    ["other", "Other"],
+  ];
+  const kindField = (id) => `auto__${id}`;
+
+  async function emailTab(body, rerender) {
+    const [data, inbound] = await Promise.all([Aira.api("/api/suite/email"), Aira.api("/api/suite/inbound")]);
+    const kinds = data.kinds || [];
+    const kindFields = KIND_GROUPS.flatMap(([group, label]) => {
+      const items = kinds.filter((kind) => kind.group === group);
+      return items.length ? [{ type: "heading", label }, ...items.map((kind) => ({ name: kindField(kind.id), label: kind.label, type: "checkbox" }))] : [];
+    });
     const form = S.form([
       { name: "from_name", label: "Sender name" },
       { name: "from_email", label: "Sender address", type: "email", required: true },
@@ -273,17 +290,70 @@
       { name: "smtp_security", label: "Security", type: "select", options: [["starttls", "STARTTLS (587)"], ["ssl", "SSL (465)"], ["none", "None"]] },
       { name: "smtp_username", label: "Username" },
       { name: "smtp_password", label: data.has_password ? "Password (saved; type to replace)" : "Password", type: "password", hint: "For Gmail, use an app password. Stored encrypted and never shown again." },
-      { name: "auto_send_text", label: "Send these without approval", placeholder: "booking_confirmation, ticket, enrolment", hint: "Kinds of message that go out as soon as they are made. Leave empty to approve everything yourself." },
-    ], { ...data.settings, auto_send_text: (data.settings.auto_send || []).join(", ") });
+    ], data.settings);
+    const sending = S.form(kindFields, Object.fromEntries(kinds.map((kind) => [kindField(kind.id), kind.on])));
+    sending.node.classList.add("hub-auto-send");
     body.append(S.section("Email", h("p", { class: "muted", text: "Messages to your customers go out through your own mail server, from your own address." }), data.ready ? S.pill("ready", { ready: "good" }) : S.pill("not set up", { "not set up": "warn" }), form.node,
+      h("h3", { class: "suite-h3", text: "Send without approval" }),
+      h("p", { class: "muted", text: "Ticked messages go out as soon as an app makes them. Everything else waits in the Outbox for you to approve. Notices to your own team and caregivers always go out." }),
+      sending.node,
       h("div", { class: "btn-row" }, S.button("Save", async () => {
         form.setError("");
         const values = form.read();
-        values.auto_send = String(values.auto_send_text || "").split(",").map((v) => v.trim()).filter(Boolean);
-        delete values.auto_send_text;
+        const chosen = sending.read();
+        values.auto_send = kinds.filter((kind) => chosen[kindField(kind.id)]).map((kind) => kind.id);
         if (!values.smtp_password) delete values.smtp_password;
         try { await Aira.api("/api/suite/email", { method: "POST", body: values }); Aira.toast("Saved.", "success"); } catch (error) { form.setError(error.message); }
       }))));
+    body.append(inboundSection(inbound, rerender));
+  }
+
+  // Incoming mail: the business's own mailbox, read every few minutes for replies to cases and leads, new requests
+  // (they become Service cases), unsubscribes and bounces. The mailbox itself is never changed.
+  function inboundSection(data, rerender) {
+    const settings = data.settings;
+    const form = S.form([
+      { name: "enabled", label: "Read incoming mail", type: "checkbox", hint: "Replies to your emails join their case or lead; new emails become Service cases; bounced addresses are not written to again." },
+      { name: "imap_host", label: "Mail server (IMAP)", placeholder: "imap.gmail.com" },
+      { name: "imap_port", label: "Port", type: "number", min: 1, max: 65535 },
+      { name: "imap_security", label: "Security", type: "select", options: [["ssl", "SSL (993)"], ["starttls", "STARTTLS (143)"], ["none", "None (a mail bridge on this computer only)"]] },
+      { name: "imap_username", label: "Username" },
+      { name: "imap_password", label: data.has_password ? "Password (saved; type to replace)" : "Password", type: "password", hint: "For Gmail, use an app password. Stored encrypted and never shown again." },
+      { name: "folder", label: "Folder", placeholder: "INBOX" },
+    ], settings);
+    const status = data.last_error
+      ? h("p", { class: "form-error", role: "status", text: `Last check failed: ${data.last_error}` })
+      : h("p", { class: "muted", text: data.last_checked_at ? `Last checked ${Aira.fmt.ago(data.last_checked_at)}. ${data.handled || 0} messages read so far.` : "Not checked yet. The first check starts from your newest email: older mail is not imported." });
+    const recent = (data.recent || []).length ? S.table({
+      caption: "Recent incoming mail",
+      columns: [
+        { key: "received_at", label: "Read", render: (m) => Aira.fmt.ago(m.received_at) },
+        { key: "from_email", label: "From" },
+        { key: "subject", label: "Subject" },
+        { key: "detail", label: "What happened" },
+      ],
+      rows: data.recent,
+    }) : null;
+    const save = async () => {
+      form.setError("");
+      const values = form.read();
+      if (!values.imap_password) delete values.imap_password;
+      try { await Aira.api("/api/suite/inbound", { method: "POST", body: values }); Aira.toast("Saved.", "success"); rerender(); } catch (error) { form.setError(error.message); }
+    };
+    const check = async () => {
+      form.setError("");
+      try {
+        const result = await Aira.api("/api/suite/inbound/check", { method: "POST", body: {} });
+        if (result.result && result.result.error) form.setError(result.result.error);
+        else { Aira.toast(`${(result.result && result.result.read) || 0} new messages read.`, "success"); rerender(); }
+      } catch (error) { form.setError(error.message); }
+    };
+    const section = S.section("Incoming mail", h("p", { class: "muted", text: "Monosage reads your mailbox to follow up replies. Messages stay unread in your own mail program." }),
+      settings.enabled ? S.pill("on", { on: "good" }) : S.pill("off", { off: "" }), status, form.node,
+      h("div", { class: "btn-row" }, S.button("Save", save), settings.enabled ? S.button("Check now", check, { kind: "secondary" }) : null),
+      recent);
+    section.classList.add("hub-inbound");
+    return section;
   }
 
   Aira.views.hub = async (main, route) => {
@@ -298,7 +368,7 @@
         if (tab === "revenue") await revenueTab(holder);
         else if (tab === "outbox") await outboxTab(holder, render);
         else if (tab === "business") await businessTab(holder);
-        else if (tab === "email") await emailTab(holder);
+        else if (tab === "email") await emailTab(holder, render);
         else await overview(holder);
         panel.replaceChildren(holder);
       } catch (error) { panel.replaceChildren(Aira.ui.error(error, render)); }

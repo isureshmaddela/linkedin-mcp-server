@@ -453,6 +453,8 @@ def _email_view(request: Request, connection: Any) -> dict[str, Any]:
         "ready": bool(settings["smtp_host"] and settings["from_email"]),
         # hosted, a member's own space without its own mail server: how its email goes out instead (no secrets)
         "lent": _lent_view(),
+        # what "Send without approval" offers, by name, with whether each kind is on now
+        "kinds": kit.message_kinds(settings),
     }
 
 
@@ -474,14 +476,19 @@ def email_get(request: Request) -> tuple[int, dict[str, Any]]:
 @aira_route("POST", f"{BASE}/email")
 def email_save(request: Request) -> tuple[int, dict[str, Any]]:
     _grown_up(request)
-    payload = request.payload
-    with request.connect() as connection:
-        kit.save_email_settings(connection, payload)
-        if payload.get("smtp_host"):
-            from aira.leads import mail as transport
+    from aira.leads import mail as transport
 
-            settings = kit.email_settings(connection)
-            transport.check_smtp_host(settings["smtp_host"], int(settings["smtp_port"]))
+    payload = request.payload
+
+    def check_host(host: str, port: int) -> None:
+        try:
+            transport.check_smtp_host(host, port)
+        except transport.SendError as error:
+            raise ValueError(str(error)) from None
+
+    with request.connect() as connection:
+        # checked before anything is written: refused settings (an internal mail server, hosted) are never stored
+        kit.save_email_settings(connection, payload, check_host=check_host)
         password = payload.get("smtp_password")
         if isinstance(password, str) and password:
             from aira.airaapi import store as airastore
@@ -495,6 +502,65 @@ def email_save(request: Request) -> tuple[int, dict[str, Any]]:
         view = _email_view(request, connection)
     request.audit("suite.email_settings", "suite", "email")
     return 200, view
+
+
+@aira_route("GET", f"{BASE}/inbound")
+def inbound_get(request: Request) -> tuple[int, dict[str, Any]]:
+    """Incoming mail: the business's mailbox, read for replies, new requests and bounces (aira.inbound_mail)."""
+    from aira import inbound_mail
+
+    _grown_up(request)
+    with request.connect() as connection:
+        return 200, inbound_mail.view(connection, request.secret_store)
+
+
+@aira_route("POST", f"{BASE}/inbound")
+def inbound_save(request: Request) -> tuple[int, dict[str, Any]]:
+    from aira import inbound_mail
+
+    _grown_up(request)
+    payload = request.payload
+    with request.connect() as connection:
+        inbound_mail.ensure(connection)
+        saved = inbound_mail.save_settings(connection, payload)
+        password = payload.get("imap_password")
+        if isinstance(password, str) and password:
+            from aira.airaapi import store as airastore
+
+            request.secret_store.put(
+                connection,
+                inbound_mail.PASSWORD_SECRET,
+                password,
+                airastore.now_utc(),
+            )
+        elif payload.get("clear_password"):
+            request.secret_store.delete(connection, inbound_mail.PASSWORD_SECRET)
+        connection.commit()
+        view = inbound_mail.view(connection, request.secret_store)
+    request.audit(
+        "suite.inbound_settings",
+        "suite",
+        "inbound",
+        {"host": saved["imap_host"], "enabled": saved["enabled"]},
+    )
+    return 200, view
+
+
+@aira_route("POST", f"{BASE}/inbound/check")
+def inbound_check(request: Request) -> tuple[int, dict[str, Any]]:
+    """Read the mailbox now instead of waiting for the next background pass."""
+    from aira import inbound_mail
+
+    _grown_up(request)
+    with request.connect() as connection:
+        if not inbound_mail.settings(connection)["enabled"]:
+            raise ValueError("Turn on incoming mail first, then check.")
+        result = inbound_mail.poll(connection, request.secret_store)
+        view = inbound_mail.view(connection, request.secret_store)
+    request.audit(
+        "suite.inbound_check", "suite", "inbound", {"read": result.get("read", 0)}
+    )
+    return 200, {**view, "result": result}
 
 
 @aira_route("GET", f"{BASE}/outbox")

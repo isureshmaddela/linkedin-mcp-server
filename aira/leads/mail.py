@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import re
 import smtplib
+import socket
 import ssl
 import time
 from collections.abc import Callable, Mapping, Sequence
@@ -72,7 +73,17 @@ _REGULATED = re.compile(
 
 
 class SendError(Exception):
-    """A message could not be sent (the reason is shown to the person)."""
+    """A message could not be sent (the reason is shown to the person).
+
+    ``temporary``: the mail server did not answer or said "try later" (worth sending again). ``bounced``: the server
+    refused the address for good (it goes on the do-not-contact list)."""
+
+    def __init__(
+        self, message: str, *, temporary: bool = False, bounced: bool = False
+    ) -> None:
+        super().__init__(message)
+        self.temporary = temporary
+        self.bounced = bounced
 
 
 # ---------------------------------------------------------------------------
@@ -221,16 +232,56 @@ def _strict() -> bool:
         return False
 
 
-def check_smtp_host(host: str, port: int) -> None:
+def check_smtp_host(host: str, port: int) -> list[str] | None:
+    """In a hosted build, the public addresses ``host`` resolves to (refusing internal ones); None locally.
+
+    The caller connects to one of the returned addresses, so the name is resolved once: a DNS answer that changes
+    between the check and the connection (rebinding) cannot point the connection somewhere else."""
     if not _strict():
-        return
+        return None
     try:
         # a hosted build never relaxes this, whatever the environment says
-        enrich._check_addresses(host, port, allow_local=False)
+        return enrich._check_addresses(host, port, allow_local=False)
     except enrich.FetchError as error:
         raise SendError(
             f"The mail server {host} cannot be used here: {error}"
         ) from None
+
+
+class _PinnedSMTP(smtplib.SMTP):
+    """SMTP to an address that was already checked; STARTTLS still verifies the certificate for the server's name
+    (smtplib uses ``self._host``, the name it was given)."""
+
+    def __init__(self, host: str, port: int, address: str, *, timeout: float) -> None:
+        self._pinned = address
+        super().__init__(host, port, timeout=timeout)
+
+    def _get_socket(self, host: str, port: int, timeout: float) -> socket.socket:
+        return socket.create_connection(
+            (self._pinned, port), timeout, self.source_address
+        )
+
+
+class _PinnedSMTPSSL(smtplib.SMTP_SSL):
+    """SMTP over TLS to an address that was already checked, verifying the certificate for the server's name."""
+
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        address: str,
+        *,
+        timeout: float,
+        context: ssl.SSLContext,
+    ) -> None:
+        self._pinned = address
+        super().__init__(host, port, timeout=timeout, context=context)
+
+    def _get_socket(self, host: str, port: int, timeout: float) -> socket.socket:
+        raw = socket.create_connection(
+            (self._pinned, port), timeout, self.source_address
+        )
+        return self.context.wrap_socket(raw, server_hostname=host)  # the name, not the address
 
 
 def sender_domain(settings: Mapping[str, Any]) -> str:
@@ -271,13 +322,18 @@ def smtp_send(
 ) -> None:
     host = str(settings["smtp_host"])
     port = int(settings.get("smtp_port") or 587)
-    check_smtp_host(host, port)
+    pinned = check_smtp_host(host, port)
     security = str(settings.get("smtp_security") or "starttls")
     try:
         if security == "ssl":
-            server: smtplib.SMTP = smtplib.SMTP_SSL(
-                host, port, timeout=timeout, context=ssl.create_default_context()
+            context = ssl.create_default_context()
+            server: smtplib.SMTP = (
+                _PinnedSMTPSSL(host, port, pinned[0], timeout=timeout, context=context)
+                if pinned
+                else smtplib.SMTP_SSL(host, port, timeout=timeout, context=context)
             )
+        elif pinned:
+            server = _PinnedSMTP(host, port, pinned[0], timeout=timeout)
         else:
             server = smtplib.SMTP(host, port, timeout=timeout)
         with server:
@@ -291,12 +347,27 @@ def smtp_send(
     except smtplib.SMTPAuthenticationError:
         raise SendError("The mail server refused the username or password.") from None
     except smtplib.SMTPRecipientsRefused as error:
+        code, reply = next(iter(error.recipients.values()))
+        later = 400 <= int(code) < 500
         raise SendError(
-            f"The recipient was refused: {next(iter(error.recipients.values()))[1].decode('utf-8', 'replace')[:120]}"
+            f"The recipient was refused{' for now' if later else ''}: {reply.decode('utf-8', 'replace')[:120]}",
+            temporary=later,
+            bounced=not later,
         ) from None
-    except (smtplib.SMTPException, OSError, ssl.SSLError) as error:
+    except ssl.SSLError as error:
         raise SendError(
             f"The mail server could not send it ({type(error).__name__}: {str(error)[:120]})."
+        ) from None
+    except smtplib.SMTPResponseException as error:
+        raise SendError(
+            f"The mail server could not send it ({type(error).__name__}: {str(error)[:120]}).",
+            temporary=400 <= int(error.smtp_code) < 500,
+        ) from None
+    except (smtplib.SMTPException, OSError) as error:
+        # no answer, a dropped connection or a timeout: worth trying again
+        raise SendError(
+            f"The mail server could not send it ({type(error).__name__}: {str(error)[:120]}).",
+            temporary=isinstance(error, (smtplib.SMTPServerDisconnected, OSError)),
         ) from None
 
 
@@ -329,6 +400,7 @@ def _suppression_key(value: str) -> tuple[str, str, str]:
 
 def add_suppression(connection: Any, value: str, reason: str = "") -> dict[str, Any]:
     key, kind, normalized = _suppression_key(value)
+    connection.execute(_SUPPRESSIONS_DDL)  # an incoming "unsubscribe" may come before Leads was ever opened
     connection.execute(
         "INSERT OR REPLACE INTO lead_suppressions (key, kind, value, reason, created_at) VALUES (?, ?, ?, ?, ?)",
         (key, kind, normalized, store.clean(reason, 200), store.now()),
@@ -382,6 +454,68 @@ def suppressed_reason(connection: Any, lead: Mapping[str, Any]) -> str:
         if row is not None:
             return f"On your do-not-contact list ({key.split(':', 1)[0]}){': ' + row[0] if row[0] else ''}"
     return ""
+
+
+BOUNCE_REASON = "Bounced"
+_SUPPRESSIONS_DDL = """CREATE TABLE IF NOT EXISTS lead_suppressions (
+    key TEXT PRIMARY KEY, kind TEXT NOT NULL, value TEXT NOT NULL,
+    reason TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
+)"""
+
+
+def _has_suppressions(connection: Any) -> bool:
+    return (
+        connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'lead_suppressions'"
+        ).fetchone()
+        is not None
+    )
+
+
+def do_not_contact(connection: Any, address: str, *, bounces_only: bool = False) -> str:
+    """Why ``address`` must not be written to ('' when it may): it, or its company's domain, is on the
+    do-not-contact list. ``bounces_only``: only an address that bounced counts (a receipt to a customer still goes
+    to someone who asked not to get cold email)."""
+    text = str(address or "").strip().lower()
+    if "@" not in text or not _has_suppressions(connection):
+        return ""
+    if bounces_only:
+        row = connection.execute(
+            "SELECT reason FROM lead_suppressions WHERE key = ? AND reason LIKE ?",
+            (f"email:{text}", f"{BOUNCE_REASON}%"),
+        ).fetchone()
+        return f"This address bounced: {row[0]}"[:300] if row is not None else ""
+    return suppressed_reason(connection, {"email": text})
+
+
+def record_bounce(connection: Any, address: str, detail: str = "") -> bool:
+    """A mail server refused ``address`` for good: put it on the do-not-contact list (once), so nothing is sent to it
+    again, and withdraw what is still queued for it. Returns whether it was added now."""
+    text = str(address or "").strip().lower()
+    if not _EMAIL.match(text):
+        return False
+    connection.execute(_SUPPRESSIONS_DDL)
+    if connection.execute(
+        "SELECT 1 FROM lead_suppressions WHERE key = ?", (f"email:{text}",)
+    ).fetchone():
+        return False
+    reason = f"{BOUNCE_REASON}: {store.clean(detail, 160)}" if detail else BOUNCE_REASON
+    connection.execute(
+        "INSERT INTO lead_suppressions (key, kind, value, reason, created_at) VALUES (?, 'email', ?, ?, ?)",
+        (f"email:{text}", text, store.clean(reason, 200), store.now()),
+    )
+    if connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'lead_messages'"
+    ).fetchone():
+        connection.execute(
+            "UPDATE lead_messages SET status = 'skipped', error = ? WHERE lower(to_address) = ? AND status IN ('draft', 'approved')",
+            (store.clean(reason, 300), text),
+        )
+    from aira.suite import kit
+
+    kit.cancel_queued(connection, text, reason=reason)
+    connection.commit()
+    return True
 
 
 # ---------------------------------------------------------------------------
@@ -671,6 +805,8 @@ def send_approved(
             sender(settings, password, built)
         except SendError as error:
             _mark(connection, message["id"], "failed", str(error))
+            if error.bounced:
+                record_bounce(connection, message["to_address"], str(error))
             result["failed"] += 1
             result["details"].append(
                 {"id": message["id"], "status": "failed", "error": str(error)}

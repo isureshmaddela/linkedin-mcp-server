@@ -12,6 +12,7 @@ pytest.importorskip("patchright.sync_api")
 from test_careers import env, stub  # noqa: E402, F401
 from test_leads_ui import browser, go, signed_in_page, until  # noqa: E402, F401
 from test_suite_marketing_ui import call, local_index, shot  # noqa: E402, F401
+from form_support import quick_forms, started  # noqa: E402, F401 - public forms need the page's ticket
 
 
 def _business_with_a_paid_lead(context, env):
@@ -33,7 +34,8 @@ def _business_with_a_paid_lead(context, env):
         env,
         "POST",
         f"/api/public/{token}/submit",
-        {"name": "Kim Brightwater", "email": "kim.brightwater@example.com"},
+        {
+            "started": started(call(context, env, "GET", f"/api/public/{token}")),"name": "Kim Brightwater", "email": "kim.brightwater@example.com"},
     )
     lead = call(context, env, "GET", "/api/marketing/submissions")["submissions"][0]
     call(

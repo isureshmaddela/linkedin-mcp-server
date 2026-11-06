@@ -13,6 +13,7 @@ patchright = pytest.importorskip("patchright.sync_api")
 from aira.suite import kit, public  # noqa: E402
 from test_careers import env, stub  # noqa: E402, F401
 from test_leads_ui import browser, go, signed_in_page, until  # noqa: E402, F401
+from form_support import quick_forms  # noqa: E402, F401 - a test fills a form faster than a person
 
 import auto_apply_assistant as local  # noqa: E402
 

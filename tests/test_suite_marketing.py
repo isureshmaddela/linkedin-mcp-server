@@ -18,6 +18,7 @@ import test_careers
 from aira import suite
 from aira.suite import kit, public
 from aira.suite.marketing import service, store
+from form_support import quick_forms, started  # noqa: F401 - public forms need the page's ticket
 
 env = test_careers.env
 api = test_careers.api
@@ -316,13 +317,17 @@ def test_consent_adds_a_subscriber_and_the_owner_is_notified(db):
     )
     subscribers = service.list_subscribers(db)
     assert [s["email"] for s in subscribers] == ["bo@b.example"]
-    assert subscribers[0]["tags"] == ["consult"] and subscribers[0]["consent_at"]
+    # double opt-in: Bo waits for his confirmation email before any newsletter reaches him
+    assert subscribers[0]["tags"] == ["consult"] and subscribers[0]["status"] == "pending"
     notes = kit.outbox(db, app="marketing")
-    assert (
-        len(notes) == 2
-        and notes[0]["recipient"] == "owner@glow.example"
-        and notes[0]["kind"] == "form_submission"
-    )
+    assert sorted((m["kind"], m["recipient"]) for m in notes) == [
+        ("form_submission", "owner@glow.example"),
+        ("form_submission", "owner@glow.example"),
+        ("newsletter_confirm", "bo@b.example"),
+    ]
+    service.confirm_subscription(db, subscribers[0]["id"])
+    confirmed = service.list_subscribers(db)[0]
+    assert confirmed["status"] == "subscribed" and confirmed["consent_at"]
     assert service.get_form(db, form["id"])["submissions"] == 2
 
 
@@ -339,6 +344,10 @@ def test_unsubscribed_addresses_stay_unsubscribed(db):
     service.submit(
         db, form["id"], {"name": "Cy", "email": "c@b.example", "consent": "yes"}
     )
+    # opting in again on a form only sends a confirmation: Cy is subscribed once she confirms it herself
+    again = service.list_subscribers(db, query="c@b")[0]
+    assert again["status"] == "unsubscribed"
+    service.confirm_subscription(db, again["id"])
     assert service.list_subscribers(db, query="c@b")[0]["status"] == "subscribed"
 
 
@@ -473,14 +482,19 @@ def test_a_business_captures_leads_tracks_clicks_and_sends_a_newsletter(
         env,
         "POST",
         f"/api/public/{token}/submit",
-        {"name": "Ana", "email": "ana@example.com", "consent": True},
+        {
+            "name": "Ana",
+            "email": "ana@example.com",
+            "consent": True,
+            "started": started(page),
+        },
     )
     assert status == 201 and data["stored"] is True
     status, data = _anonymous(
         env,
         "POST",
         f"/api/public/{token}/submit",
-        {"name": "", "email": "x@example.com"},
+        {"name": "", "email": "x@example.com", "started": started(page)},
     )
     assert status == 400
 
@@ -524,6 +538,21 @@ def test_a_business_captures_leads_tracks_clicks_and_sends_a_newsletter(
     )
 
     api.post(f"{M}/subscribers", {"email": "bo@example.com"}, expect=201)
+    # Ana signed up on the form (double opt-in): she gets newsletters once she confirms from her email
+    confirmation = next(
+        m
+        for m in api.get("/api/suite/outbox?app=marketing")["messages"]
+        if m["kind"] == "newsletter_confirm"
+    )
+    assert confirmation["recipient"] == "ana@example.com"
+    confirm_token = re.search(
+        r"/p/([A-Za-z0-9_-]{40,64})", confirmation["body"]
+    ).group(1)
+    status, page = _anonymous(env, "GET", f"/api/public/{confirm_token}")
+    assert status == 200 and page["page"]["subscribed"] is False
+    assert _anonymous(env, "POST", f"/api/public/{confirm_token}/confirm", {})[1] == {
+        "subscribed": True
+    }
     letter = api.post(
         f"{M}/newsletters", {"subject": "News", "body": "Hello"}, expect=201
     )["newsletter"]
@@ -612,7 +641,12 @@ def test_hosted_marketing_needs_the_app_and_the_right_role(cloud):
     status, sent = visitor.call(
         "POST",
         f"/api/public/{token}/submit",
-        {"name": "Ana", "email": "ana@fans.example", "consent": True},
+        {
+            "name": "Ana",
+            "email": "ana@fans.example",
+            "consent": True,
+            "started": started(page),
+        },
     )
     assert status == 201, sent
     status, listing = owner.call("GET", f"{M}/subscribers")

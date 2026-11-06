@@ -12,6 +12,7 @@ pytest.importorskip("patchright.sync_api")
 from test_careers import env, stub  # noqa: E402, F401
 from test_leads_ui import browser, go, signed_in_page, until  # noqa: E402, F401
 from test_suite_marketing_ui import call, local_index, shot  # noqa: E402, F401
+from form_support import quick_forms, started  # noqa: E402, F401 - public forms need the page's ticket
 
 
 def _click(page, selector, label):
@@ -48,7 +49,8 @@ def test_drafts_without_a_date_and_a_paid_lead(browser, env):
         env,
         "POST",
         f"/api/public/{token}/submit",
-        {"name": "Ana", "email": "ana@example.com"},
+        {
+            "started": started(call(context, env, "GET", f"/api/public/{token}")),"name": "Ana", "email": "ana@example.com"},
     )
 
     go(page, env, "marketing?tab=calendar")

@@ -999,6 +999,16 @@ def _section(spec: dict[str, Any], section: str) -> str:
             '<input id="nl-email" type="email" name="email" placeholder="you@example.com" required><button class="btn primary" type="submit">Subscribe</button></form>'
             '<p class="form-note" role="status" aria-live="polite"></p></div></section>'
         )
+    if section == "contact" and str(spec.get("contact_url") or "").startswith(
+        ("https://", "http://")
+    ):
+        # the business's own contact form (Marketing): what is sent there arrives as a lead
+        return (
+            f'<section id="contact" class="section split"><div class="reveal"><p class="eyebrow">Contact</p><h2>Let’s talk</h2>'
+            f"<p>Questions, bookings or just hello: we would love to hear from you.</p></div>"
+            f'<div class="card contact-form reveal"><p>Send us a message and we will get back to you.</p>'
+            f'<a class="btn primary" href="{_e(spec["contact_url"])}" target="_blank" rel="noopener">{_e(spec["cta"])}</a></div></section>'
+        )
     if section == "contact":
         return (
             f'<section id="contact" class="section split"><div class="reveal"><p class="eyebrow">Contact</p><h2>Let’s talk</h2>'

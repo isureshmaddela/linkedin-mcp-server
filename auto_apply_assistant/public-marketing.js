@@ -4,8 +4,11 @@
  *   form         a lead-capture form (with an optional email opt-in and a hidden field that catches bots)
  *   bio          the link-in-bio page: each link click is counted, then the visitor goes to the link
  *   unsubscribe  one subscriber's unsubscribe page, linked from every newsletter
+ *   confirm      a newsletter sign-up's confirmation (double opt-in): nothing happens until the person presses Confirm
  *   media_kit    the media kit: audience, rate card and a sponsorship request form
  *
+ * Forms send back the page's ``started`` ticket with a hidden field: the server keeps nothing from a bot that
+ * fills the field, never loaded the page or answers within a few seconds.
  * DOM is built with ctx.h and text only; only http(s) addresses are ever followed.
  */
 "use strict";
@@ -54,7 +57,7 @@
       if (input) { input.setAttribute("aria-invalid", "true"); input.focus(); }
     };
     const send = ctx.button("Send", async () => {
-      const payload = { website: trap.value };
+      const payload = { website: trap.value, started: page.started || "" };
       for (const [name, input] of Object.entries(inputs)) payload[name] = input.value.trim();
       if (consent) payload.consent = consent.checked;
       for (const [name, input] of Object.entries(inputs)) if (input.required && !input.value.trim()) { show(`Enter ${LABELS[name].toLowerCase()}.`, input); return; }
@@ -143,7 +146,7 @@
       ctx.field(LABELS.company, inputs.company), ctx.field(LABELS.name, inputs.name), ctx.field(LABELS.email, inputs.email),
       pick ? ctx.field("Package", pick) : null, ctx.field(LABELS.budget, inputs.budget), ctx.field(LABELS.dates, inputs.dates), ctx.field(LABELS.message, inputs.message), trapWrap);
     const send = ctx.button("Send request", async () => {
-      const payload = { website: trap.value, package_id: pick ? pick.value : "" };
+      const payload = { website: trap.value, started: page.started || "", package_id: pick ? pick.value : "" };
       for (const [name, input] of Object.entries(inputs)) payload[name] = input.value.trim();
       for (const name of ["company", "name", "email"]) if (!payload[name]) { show(`Enter ${LABELS[name].replace(" *", "").toLowerCase()}.`, inputs[name]); return; }
       if (!/^[^@\s]+@[^@\s]+\.[^@\s]{2,}$/.test(payload.email)) { show("Enter an email address like name@example.com.", inputs.email); return; }
@@ -173,6 +176,25 @@
         h("h1", { text: "Unsubscribe" }),
         h("p", { text: `Stop newsletters from ${ctx.business.name || "us"} to ${data.page.email}?` }),
         h("div", { class: "pub-btn-row" }, ctx.button("Unsubscribe", async () => { const result = await ctx.action("unsubscribe", {}); render(result.subscribed); })),
+      );
+    };
+    render(data.page.subscribed);
+    root.append(card);
+  });
+
+  P.register("marketing", "confirm", (root, data, ctx) => {
+    const { h } = ctx;
+    const card = h("section", { class: "pub-card" });
+    const who = ctx.business.name || "us";
+    const render = (subscribed) => {
+      if (subscribed) {
+        card.replaceChildren(h("h1", { text: "You are subscribed" }), h("p", { class: "pub-muted", text: `${data.page.email} will receive news from ${who}. Every email has a link to unsubscribe.` }));
+        return;
+      }
+      card.replaceChildren(
+        h("h1", { text: "Confirm your subscription" }),
+        h("p", { text: `Send news from ${who} to ${data.page.email}?` }),
+        h("div", { class: "pub-btn-row" }, ctx.button("Confirm", async () => { const result = await ctx.action("confirm", {}); render(result.subscribed); })),
       );
     };
     render(data.page.subscribed);

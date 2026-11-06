@@ -27,7 +27,7 @@
     { id: "help", label: "Help centre", icon: "learn", title: "Help centre", intro: "Answers customers find themselves, on a page you share." },
     { id: "paid", label: "Paid help", icon: "shop", title: "Paid help", intro: "Sell the help that is worth paying for, and see what it earns." },
     { id: "replies", label: "Saved replies", icon: "documents", title: "Saved replies", intro: "Answers you send often. Insert one from the reply box of any case." },
-    { id: "settings", label: "Settings", icon: "settings", title: "Service settings", intro: "Due times, business hours, live chat and when solved cases close." },
+    { id: "settings", label: "Settings", icon: "settings", title: "Service settings", intro: "Due times, business hours, live chat, when solved cases close, team notices and email in." },
     { id: "reports", label: "Reports", icon: "analytics", title: "Reports", intro: "How fast you answer, what customers think and what paid help earns." },
   ];
   const VIEWS = [
@@ -668,6 +668,13 @@
       ...DAYS.map((label, index) => ({ name: `day_${index}`, label, type: "checkbox" })),
       { type: "heading", label: "Closing" },
       { name: "auto_close_days", label: "Close solved cases after (days without a reply)", type: "number", min: 1, max: 60 },
+      { type: "heading", label: "Tell the team by email" },
+      { name: "notify_new_case", label: "A new case comes in", type: "checkbox" },
+      { name: "notify_new_chat", label: "A visitor starts a live chat", type: "checkbox" },
+      { name: "notify_sla_breach", label: "A case goes past its due time", type: "checkbox" },
+      { name: "notify_email", label: "Team email address", type: "email", placeholder: "support@yourbusiness.com", hint: "Notices go to the person a case is assigned to when that is an email address, otherwise here (empty: your business email)." },
+      { type: "heading", label: "Email in" },
+      { name: "email_to_case", label: "Emails to your mailbox become cases", type: "checkbox", hint: "Turn on Incoming mail in Business hub > Email. Replies to a case join it; other emails open a new case." },
     ], { ...settings, ...Object.fromEntries(DAYS.map((_, index) => [`day_${index}`, settings.days.includes(index)])) });
     body.append(
       S.section("Due times", h("p", { class: "muted", text: "How fast you aim to answer and solve, by priority, in hours (0.5 is half an hour). Cases show when they are due and turn overdue after it." }),
@@ -685,7 +692,7 @@
         }
         const days = DAYS.map((_, index) => (values[`day_${index}`] ? index : null)).filter((d) => d !== null);
         try {
-          await API("/settings", { method: "POST", body: { sla, days, chat_enabled: values.chat_enabled, chat_in_hours_only: values.chat_in_hours_only, offline_message: values.offline_message, business_hours: values.business_hours, start: values.start, end: values.end, auto_close_days: values.auto_close_days } });
+          await API("/settings", { method: "POST", body: { sla, days, chat_enabled: values.chat_enabled, chat_in_hours_only: values.chat_in_hours_only, offline_message: values.offline_message, business_hours: values.business_hours, start: values.start, end: values.end, auto_close_days: values.auto_close_days, notify_new_case: values.notify_new_case, notify_new_chat: values.notify_new_chat, notify_sla_breach: values.notify_sla_breach, notify_email: values.notify_email, email_to_case: values.email_to_case } });
           Aira.toast("Saved.", "success");
         } catch (error) { form.setError(error.message); }
       }))),
