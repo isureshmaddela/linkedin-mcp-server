@@ -16,8 +16,8 @@ Constraints to plan around:
 
 - The control plane is one SQLite file in WAL mode: one writer at a time. Size workers and replicas for short write transactions; do not put `control.sqlite3` on a network file system whose locks are not reliable.
 - Workspaces are SQLite files under `tenants/`; workers and web replicas that serve the same organization must share that tree.
-- LinkedIn automation uses the candidate's browser profile on the host that runs the process which starts it. There is no remote sign-in streaming and no forwarding of LinkedIn requests to the worker holding a session. Keep LinkedIn off (the default), or run web and worker as one process or on one host and volume.
-- TLS: either terminate at a proxy (set `AIRA_CLOUD_TRUST_PROXY=1`, `AIRA_CLOUD_BASE_URL=https://...`) or set `AIRA_CLOUD_TLS_CERT` and `AIRA_CLOUD_TLS_KEY` (the server then speaks TLS 1.2 or later itself). The app sets no `Strict-Transport-Security` header; add it at the proxy.
+- LinkedIn automation uses the candidate's browser profile on the host that runs the process which starts it. Sign-in can be streamed to the candidate from the worker host that holds the profile ([the sign-in broker](#the-sign-in-broker), `python -m monosage_cloud broker`), but LinkedIn requests are not forwarded to the worker holding a session. Keep LinkedIn off (the default), or run web and worker as one process or on one host and volume.
+- TLS: either terminate at a proxy (set `AIRA_CLOUD_TRUST_PROXY=1`, `AIRA_CLOUD_BASE_URL=https://...`) or set `AIRA_CLOUD_TLS_CERT` and `AIRA_CLOUD_TLS_KEY` (the server then speaks TLS 1.2 or later itself). The app sends `Strict-Transport-Security: max-age=31536000; includeSubDomains` when cookies are secure (an https base URL) or when a trusted proxy reports `X-Forwarded-Proto: https` (`gateway.py`).
 
 ## 2. Configuration reference
 
@@ -329,4 +329,3 @@ Nothing here is a paper claim: each item below was executed (Windows 11, Docker 
 Bugs these runs found and fixed: subscription changes sent `product_data`, which Stripe rejects on an existing subscription (a product is now created first); the Stripe event normalizer assumed the older API shapes for an invoice's subscription and for a subscription's billing period; the health and readiness endpoints answered 403 to Kubernetes probes when an allowed-host list was set, because probes address pods by IP (those two endpoints no longer check the host); the compose file referenced MinIO images that are no longer published (it now uses SeaweedFS, and `python -m monosage_cloud init-storage` creates the bucket); Terraform lacked a KMS key policy and access logging (added); the Kubernetes NetworkPolicy blocked pods from reaching one another (added `same-namespace`) and the worker had no liveness probe (added).
 
 Not done: a Kubernetes cluster other than kind (managed ReadWriteMany storage, an ingress controller, autoscaling on real metrics), `terraform apply`, Stripe with live or test-mode keys, a real enterprise IdP.
-
