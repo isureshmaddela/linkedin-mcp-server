@@ -1429,6 +1429,10 @@ class UsageService:
                 "INSERT INTO usage_counters (org_id, period, metric, value) VALUES (?, ?, ?, ?) ON CONFLICT(org_id, period, metric) DO UPDATE SET value = usage_counters.value + excluded.value",
                 (org_id, month_key(now), metric, amount),
             )
+            if metric.endswith(":overage"):  # overage counted directly is billed in its period too
+                _count_overage(
+                    connection, org_id, metric.removesuffix(":overage"), now, amount
+                )
             if candidate_id:
                 connection.execute(
                     "INSERT INTO usage_daily (org_id, candidate_id, day, metric, value) VALUES (?, ?, ?, ?, ?) ON CONFLICT(org_id, candidate_id, day, metric) DO UPDATE SET value = usage_daily.value + excluded.value",
