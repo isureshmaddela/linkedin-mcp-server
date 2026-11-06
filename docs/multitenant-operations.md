@@ -69,6 +69,12 @@ Read once at start (`monosage_cloud/config.py`; a few more are read by `__main__
 | `STRIPE_SECRET_KEY` | API key used to create customers, checkout sessions, subscription changes and portal sessions |
 | `STRIPE_WEBHOOK_SECRET` | endpoint signing secret; webhooks are refused without it |
 | `STRIPE_API_BASE` | default `https://api.stripe.com`; point at a stub in tests |
+| `AIRA_CLOUD_RAZORPAY_KEY_ID` | Razorpay key id (`rzp_test_...` or `rzp_live_...`) when `AIRA_CLOUD_BILLING=razorpay` |
+| `AIRA_CLOUD_RAZORPAY_KEY_SECRET` | the key's secret, used for HTTP Basic auth to the Razorpay API |
+| `AIRA_CLOUD_RAZORPAY_WEBHOOK_SECRET` | the webhook's secret; webhooks to `/api/billing/webhook/razorpay` are refused without it |
+| `AIRA_CLOUD_RAZORPAY_API_BASE` | default `https://api.razorpay.com`; point at a stub in tests |
+| `AIRA_CLOUD_RAZORPAY_TOTAL_COUNT` | billing cycles a Razorpay subscription is created for (default `120`) |
+| `AIRA_CLOUD_RAZORPAY_INR_PER_USD` | rate for plans without an explicit INR price (default `85`); set INR prices in the plan for exact amounts |
 
 ### Mail
 
