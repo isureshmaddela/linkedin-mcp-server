@@ -5,6 +5,8 @@
  *               day (or none of its times suiting) offers the waiting list: an email when a time opens.
  * booking       one appointment: see it, move it to another free time or cancel it while the business's rules
  *               allow, and pay what is due.
+ * Both offer "Add to calendar" for a booking that stands: its .ics (GET /api/public/<token>/calendar.ics, the
+ * same event as the invite in the emails) and Google Calendar's add-an-event page.
  * Slots always come from the server (actions "slots"), and the server re-checks a time when it is booked.
  */
 "use strict";
@@ -21,6 +23,19 @@
   // works, or its times are over or too soon), "past" or "not_yet" (beyond how far ahead you can book).
   const stateOf = (d) => (d.slots.length ? "open" : d.state || (d.open === true ? "full" : "closed"));
   const SUFFIX = { full: " · full", not_yet: " · not open yet", closed: " · closed", past: " · closed" };
+
+  // "Add to calendar": the booking's .ics from its own page (Apple Calendar, Outlook and the rest; the same event as
+  // the emailed invite), and Google Calendar's own add-an-event page. Nothing is sent to Google until it is clicked.
+  const calStamp = (iso) => new Date(iso).toISOString().replace(/[-:]/g, "").replace(/\.\d{3}/, "");
+  function addToCalendar(ctx, b, token) {
+    const { h } = ctx;
+    if (!token || !(b.status === "booked" || b.status === "confirmed")) return null;
+    const google = new URL("https://calendar.google.com/calendar/render");
+    google.search = new URLSearchParams({ action: "TEMPLATE", text: `${b.service_name}${ctx.business.name ? ` at ${ctx.business.name}` : ""}`, dates: `${calStamp(b.start_at)}/${calStamp(b.end_at)}`, details: `${b.service_name} with ${b.staff_name}. Reference ${b.reference}.`, ...(ctx.business.address ? { location: ctx.business.address } : {}) }).toString();
+    return h("div", { class: "pub-btn-row", role: "group", "aria-label": "Add to calendar" },
+      h("a", { class: "pub-btn secondary", href: `/api/public/${token}/calendar.ics`, download: `${b.reference}.ics`, text: "Add to calendar" }),
+      h("a", { class: "pub-btn ghost", href: google.toString(), target: "_blank", rel: "noopener noreferrer", text: "Add to Google Calendar" }));
+  }
 
   // A week of days and their free times, fetched through an action, with a pick callback. With ``onFull`` a day that
   // is fully booked can be chosen, and shows what onFull(day) returns (the waiting list) instead of times.
@@ -184,6 +199,7 @@
           h("p", {}, "Reference ", h("span", { class: "pub-badge", text: b.reference })),
           b.price_cents ? h("p", { text: `Price ${ctx.money(b.price_cents)}${b.deposit_cents ? ` · deposit ${ctx.money(b.deposit_cents)} to secure your time` : ""}` }) : null,
           h("div", { class: "pub-btn-row" }, h("a", { class: "pub-btn secondary", href: manage, text: "Manage your booking" }), ctx.button("Copy link", () => ctx.copy(manage), "ghost")),
+          addToCalendar(ctx, b, (String(made.manage_path || "").match(/^\/p\/([A-Za-z0-9_-]{40,64})$/) || [])[1] || ""),
           h("p", { class: "pub-muted pub-hint", text: "Keep this link: it is how you cancel or change your booking." })),
         due ? ctx.paymentBox(due, b.reference, made.pay_url) : null,
       ].filter(Boolean));
@@ -205,6 +221,7 @@
           h("h1", { text: b.service_name }),
           h("p", {}, h("strong", { text: b.local_start }), h("span", { class: "pub-muted", text: ` (${page.timezone}) with ${b.staff_name}` })),
           h("p", {}, "Reference ", h("span", { class: "pub-badge", text: b.reference })),
+          addToCalendar(ctx, b, ctx.token),
           b.price_cents ? h("p", { text: b.paid_by_package ? "Paid with your package." : b.paid_cents ? `Paid ${ctx.money(b.paid_cents)} of ${ctx.money(b.price_cents)}` : `Price ${ctx.money(b.price_cents)}${b.deposit_cents ? ` · deposit ${ctx.money(b.deposit_cents)}` : ""}` }) : null,
           b.status === "cancelled" && b.cancel_reason ? h("p", { class: "pub-notice", text: `Reason: ${b.cancel_reason}` }) : null),
         active && due ? ctx.paymentBox(due, b.reference) : null,

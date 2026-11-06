@@ -15,7 +15,7 @@ from typing import Any
 from zoneinfo import ZoneInfo
 
 from aira.suite import kit, public
-from aira.suite.bookings import store
+from aira.suite.bookings import calendars, ical, store
 from aira.suite.bookings.store import ACTIVE_STATUSES, APP
 
 UTC = timezone.utc
@@ -117,7 +117,8 @@ def slots_for_day(
     ignore_bookings: bool = False,
 ) -> list[dict[str, Any]]:
     """Free start times for a service on a local day: inside someone's hours, not on their time off, clear of
-    their other bookings (including buffers). ``customer_rules`` adds the minimum notice and the horizon;
+    their other bookings (including buffers) and of the busy times in their own calendar
+    (:mod:`aira.suite.bookings.calendars`). ``customer_rules`` adds the minimum notice and the horizon;
     ``ignore_bookings`` gives the times the day would have if nothing were booked (is it full, or closed?)."""
     store.ensure(connection)
     service = store.get_service(connection, service_id)
@@ -163,6 +164,13 @@ def slots_for_day(
                 day_end + timedelta(days=1),
                 exclude_booking,
             )
+        )
+        # busy in their own calendar (Google, Outlook): not a booking, so a day it fills is closed, not full
+        busy += calendars.busy_between(
+            connection,
+            person["id"],
+            day_start - timedelta(days=1),
+            day_end + timedelta(days=1),
         )
         for hours in ranges:
             cursor = local_at(local_day, hours["start"], tz)
@@ -736,7 +744,7 @@ def cancel(
     text = kit.text(reason, "a reason", max_len=500)
     _release_package(connection, booking)
     connection.execute(
-        "UPDATE bk_bookings SET status = 'cancelled', cancelled_at = ?, cancel_reason = ?, payment_kind = CASE WHEN payment_kind = 'package' THEN '' ELSE payment_kind END, customer_package_id = CASE WHEN payment_kind = 'package' THEN '' ELSE customer_package_id END, updated_at = ? WHERE id = ?",
+        "UPDATE bk_bookings SET status = 'cancelled', cancelled_at = ?, cancel_reason = ?, payment_kind = CASE WHEN payment_kind = 'package' THEN '' ELSE payment_kind END, customer_package_id = CASE WHEN payment_kind = 'package' THEN '' ELSE customer_package_id END, ics_sequence = ics_sequence + 1, updated_at = ? WHERE id = ?",
         (kit.now(), text, kit.now(), booking_id),
     )
     _cancel_reminders(connection, booking_id)
@@ -764,8 +772,10 @@ def cancel(
                 ref_type="booking",
                 ref_id=booking_id,
             )
-    else:
-        _message(connection, updated, "booking_cancelled", None, None)
+    # the customer is told either way: their calendar app takes the event out (the invite's METHOD:CANCEL)
+    _message(
+        connection, updated, "booking_cancelled", None, None, by_customer=by == "customer"
+    )
     _offer_opening(connection, booking, origin, now=now)
     connection.commit()
     from aira.payments import service as payments
@@ -814,7 +824,7 @@ def reschedule(
         )
         person = kit.require_row(connection, "bk_staff", chosen, "person")
         connection.execute(
-            "UPDATE bk_bookings SET start_at = ?, end_at = ?, busy_until = ?, staff_id = ?, staff_name = ?, updated_at = ? WHERE id = ?",
+            "UPDATE bk_bookings SET start_at = ?, end_at = ?, busy_until = ?, staff_id = ?, staff_name = ?, ics_sequence = ics_sequence + 1, updated_at = ? WHERE id = ?",
             (
                 kit.iso(start_at),
                 kit.iso(start_at + duration),
@@ -1280,12 +1290,39 @@ def _money(connection: sqlite3.Connection, cents: int) -> str:
     return kit.fmt_money(int(cents), kit.business(connection)["currency"])
 
 
+def invite(
+    connection: sqlite3.Connection,
+    booking: Mapping[str, Any],
+    *,
+    manage_url: str = "",
+    download: bool = False,
+) -> bytes:
+    """The booking's ``.ics``: METHOD:REQUEST while it stands, METHOD:CANCEL once cancelled (``download``: the
+    "Add to calendar" file, METHOD:PUBLISH). The UID is the booking's own and the SEQUENCE goes up with each move
+    or cancellation, so a calendar app updates one event."""
+    business = kit.business(connection)
+    organizer = (
+        business.get("email") or kit.email_settings(connection).get("from_email") or ""
+    )
+    cancelled = booking["status"] == "cancelled"
+    return ical.booking_invite(
+        booking,
+        method="CANCEL" if cancelled else "PUBLISH" if download else "REQUEST",
+        business=business,
+        organizer_email=str(organizer),
+        manage_url=manage_url,
+        sequence=int(booking.get("ics_sequence") or 0),
+    )
+
+
 def _message(
     connection: sqlite3.Connection,
     booking: Mapping[str, Any],
     kind: str,
     link: Mapping[str, Any] | None,
     origin: Any,
+    *,
+    by_customer: bool = False,
 ) -> None:
     if not booking["customer_email"]:
         return
@@ -1323,9 +1360,10 @@ def _message(
         lines = [
             f"Hi {first},",
             "",
-            f"Your {booking['service_name']} on {booking['local_start']} ({booking['reference']}) is cancelled.",
+            f"Your {booking['service_name']} on {booking['local_start']} ({booking['reference']}) is cancelled"
+            + (", as you asked." if by_customer else "."),
         ]
-        if booking.get("cancel_reason"):
+        if booking.get("cancel_reason") and not by_customer:
             lines.append(f"Reason: {booking['cancel_reason']}")
         lines.append("Reply to this email if you would like a new time.")
         manage = ""
@@ -1333,7 +1371,15 @@ def _message(
         return
     if manage:
         lines += ["", f"To cancel or change it: {manage}"]
-    lines += ["", sign]
+    cancelling = kind == "booking_cancelled"
+    lines += [
+        "",
+        "The attached file takes it out of your calendar."
+        if cancelling
+        else "The attached invite adds it to your calendar.",
+        "",
+        sign,
+    ]
     kit.queue_email(
         connection,
         APP,
@@ -1343,6 +1389,15 @@ def _message(
         body="\n".join(lines),
         ref_type="booking",
         ref_id=booking["id"],
+        attachments=[
+            {
+                "filename": "cancel.ics" if cancelling else "invite.ics",
+                "content_type": "text/calendar; method="
+                + ("CANCEL" if cancelling else "REQUEST")
+                + "; charset=UTF-8",
+                "data": invite(connection, booking, manage_url=manage),
+            }
+        ],
     )
 
 

@@ -11,6 +11,12 @@ The main objects:
 * **Customers** (``bk_customers``): made from bookings (by email, else phone), with visits, spend and notes.
 * **Packages** (``bk_packages``) sold to customers (``bk_customer_packages``) and redeemed against bookings.
 
+* **Staff calendars** (``bk_calendar_feeds``, ``bk_calendar_busy``; calendars.py): each person's own Google or
+  Outlook calendar, read from its private iCal address every half hour, whose busy times are not offered.
+
+Confirmations, moves and cancellations carry an ``.ics`` invite (ical.py: one UID per booking, METHOD:REQUEST or
+METHOD:CANCEL); the customer's booking page offers the same event as "Add to calendar".
+
 Customers book themselves on the public booking page (kind ``booking_page``) and manage their appointment on
 its own page (kind ``booking``: cancel or reschedule within the business's rules). Slots are computed on the
 server and re-checked when a booking is made, so two customers can never take the same time.
