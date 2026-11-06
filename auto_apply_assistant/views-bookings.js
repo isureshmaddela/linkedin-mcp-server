@@ -183,6 +183,7 @@
         Aira.ui.kv([["With", booking.staff_name], ["Email", booking.customer_email], ["Phone", booking.customer_phone], ["Price", S.money(booking.price_cents)], ["Deposit", booking.deposit_cents ? S.money(booking.deposit_cents) : ""], ["Booked", `${S.when(booking.created_at)} (${booking.source === "public" ? "online" : "by you"})`], ["Cancelled", booking.cancelled_at ? `${S.when(booking.cancelled_at)}${booking.cancel_reason ? `: ${booking.cancel_reason}` : ""}` : ""]]),
         S.section("Status", statusRow),
         S.section("Payment", payRow),
+        S.payments({ app: "bookings", objectType: "booking", objectId: id, requests: booking.payments || [], payable: active && booking.payment_kind !== "package" && (booking.due_cents > 0 || (!booking.paid_cents && booking.price_cents > 0)), onChange: async () => { Aira.closeDrawer(); rerender(); await openBooking(id); } }),
         S.section("Notes", notes.node, h("div", { class: "btn-row" }, S.button("Save notes", async () => { await call(`/bookings/${id}`, { method: "PATCH", body: notes.read() }); Aira.toast("Saved.", "success"); }, { kind: "secondary" }))),
         linkCard),
     });

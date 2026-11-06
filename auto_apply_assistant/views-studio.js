@@ -718,7 +718,7 @@
   }
 
   async function openInvoice(id) {
-    const [{ invoice: inv, link }, business] = await Promise.all([API(`/invoices/${id}`), S.business()]);
+    const [{ invoice: inv, link, payments: online }, business] = await Promise.all([API(`/invoices/${id}`), S.business()]);
     const reopen = () => { rerender(); openInvoice(id); };
     const open = ["sent", "partially_paid", "overdue"].includes(inv.status);
     const recordPayment = () => S.edit({ title: `Record a payment for ${inv.number}`, fields: [
@@ -742,6 +742,8 @@
       business.payment_link || business.payment_instructions ? null : h("p", { class: "muted small" }, "Add a payment link or instructions in the ", h("a", { href: "#/hub?tab=business", text: "business profile" }), " so clients know how to pay."),
       h("div", { class: "btn-row" }, ...actions),
       S.section("Lines", linesTable(inv, business.tax_label)),
+      // Paid online (Razorpay): the payment is recorded below by itself; a refund goes back through Razorpay.
+      inv.status !== "void" && (open || (online || []).length) ? S.payments({ app: "studio", objectType: "invoice", objectId: id, requests: online || [], payable: open && inv.balance_cents > 0, onChange: async () => { Aira.closeDrawer(); reopen(); } }) : null,
       S.section("Payments", S.table({ columns: [
         { key: "day", label: "Date", render: (p) => day(p.day) },
         { key: "method", label: "Method", render: (p) => (METHODS.find((m) => m[0] === p.method) || [0, p.method])[1] },

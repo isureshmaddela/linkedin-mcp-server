@@ -109,10 +109,15 @@ Wired apps (`aira/payments/apps.py`):
 | News | A month of a paid newsletter |
 | Stocks | A month of an analyst's ideas |
 | Play | Guest entry fees |
+| Studio (Sales) | What is still due on a sent invoice; the payment is recorded on the invoice |
 
-Ads top-ups are platform billing (`monosage_cloud/billing*.py`) and are not here. Studio invoices are not wired
-yet. Pages that find the thing by a short reference (newsletter, deck, analyst, course) do not pre-fill the
-customer's details on Razorpay's page.
+Ads top-ups are platform billing (`monosage_cloud/billing*.py`) and are not here. Pages that find the thing by a
+short reference (newsletter, deck, analyst, course) do not pre-fill the customer's details on Razorpay's page.
+
+The Shop order, the Bookings booking and the Studio invoice each show an **Online payment** card for the business:
+**Create payment link** (made for the amount due and copied), **Copy link** for the open one, and **Refund** for a
+paid one, through the hub's `/api/suite/payments/requests` routes. A Studio invoice refunded online keeps its
+recorded payment; the ledger gets the negative line.
 
 ## Refunds
 
@@ -177,5 +182,4 @@ A Shop order paid by hand is refunded the same way, without calling Razorpay.
   Creators' payout details are still held by the platform (see P0-6 in the platform review).
 - **Razorpay Checkout.** The client can create orders (`POST /orders`) for a future embedded Checkout, but no
   screen uses them yet.
-- **Studio.** Studio invoices still use the business's own payment link.
 - **Stripe.** Stripe Connect for businesses outside India is not built.
