@@ -66,13 +66,29 @@ linkedin-scraper-mcp = "linkedin_mcp_server.cli_main:main"
 requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools]
+# The single-user app is a top-level module; Monosage Cloud imports it (monosage_cloud/gateway.py, worker.py, ...).
+py-modules = ["auto_apply_assistant"]
+
 [tool.setuptools.packages.find]
-include = ["linkedin_mcp_server*", "aira*", "monosage_cloud*"]
-exclude = ["assets*", "docs*", "tests*"]
+# auto_apply_assistant/ (the app's interface files) and docs/legal (the legal pages Monosage Cloud serves) are data
+# directories that the code finds next to itself, so they are shipped as namespace packages at the same place.
+include = [
+    "linkedin_mcp_server*",
+    "aira*",
+    "monosage_cloud*",
+    "auto_apply_assistant",
+    "auto_apply_assistant.i18n",
+    "docs.legal",
+]
+exclude = ["assets*", "tests*"]
 
 [tool.setuptools.package-data]
 linkedin_mcp_server = ["py.typed"]
 "aira.airaapi" = ["catalog/*.json"]
+auto_apply_assistant = ["*.html", "*.css", "*.js"]
+"auto_apply_assistant.i18n" = ["*.json"]
+"docs.legal" = ["*.md"]
 
 [dependency-groups]
 dev = [
