@@ -365,7 +365,7 @@ def test_a_public_address_reaches_only_customer_pages_and_the_webhook(
     # everything else stays loopback-only, signed in or not
     for method, path in (
         ("GET", "/"),
-        ("GET", "/hub"),
+        ("GET", "/stocks"),
         ("GET", "/static/app.js"),
         ("GET", "/static/views-hub.js"),
         ("GET", "/api/suite/home"),
