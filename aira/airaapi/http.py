@@ -236,6 +236,7 @@ ROUTE_MODULES = (
     "aira.model_provider",  # Settings > Integrations > Claude (the model provider and its key)
     "aira.ai_instructions_routes",  # Profile & resume > AI instructions (standing instructions and skills)
     "aira.workday_accounts",  # Settings > Integrations > Workday accounts
+    "aira.notify.notify_routes",  # Notifications: the notification centre, choices and Web Push devices
 )
 
 
