@@ -264,10 +264,12 @@
         else { Aira.toast(`${(result.result && result.result.read) || 0} new messages read.`, "success"); rerender(); }
       } catch (error) { form.setError(error.message); }
     };
-    return S.section("Incoming mail", h("p", { class: "muted", text: "Monosage reads your mailbox to follow up replies. Messages stay unread in your own mail program." }),
+    const section = S.section("Incoming mail", h("p", { class: "muted", text: "Monosage reads your mailbox to follow up replies. Messages stay unread in your own mail program." }),
       settings.enabled ? S.pill("on", { on: "good" }) : S.pill("off", { off: "" }), status, form.node,
       h("div", { class: "btn-row" }, S.button("Save", save), settings.enabled ? S.button("Check now", check, { kind: "secondary" }) : null),
       recent);
+    section.classList.add("hub-inbound");
+    return section;
   }
 
   Aira.views.hub = async (main, route) => {

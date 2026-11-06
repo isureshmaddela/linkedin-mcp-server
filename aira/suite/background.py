@@ -8,7 +8,8 @@ organization's database). An app registers a task::
     def _tick(connection):            # e.g. find missed doses and tell caregivers
         ...
 
-Then approved messages whose time has come (a booking reminder the day before, a caregiver's notice) go out
+First the business's incoming mailbox is read, if it set one up (:mod:`aira.inbound_mail`: replies to cases and
+leads, new requests, bounces). Then approved messages whose time has come (a booking reminder the day before, a caregiver's notice) go out
 through the business's own mail server, if it set one up (Business hub > Email). Nothing is sent that a person
 did not approve, except the kinds the business chose to send automatically and safety notices
 (``kit.ALWAYS_SEND``).
@@ -50,6 +51,19 @@ def run(connection: sqlite3.Connection, secret_store: Any) -> dict[str, Any]:
         return {"ran": "nothing"}
     suite.load_apps()
     result: dict[str, Any] = {"tasks": {}}
+    # Incoming mail first (Business hub > Email > Incoming mail), so a reply that came in stops a follow-up before
+    # the tasks write the next one.
+    try:
+        from aira import inbound_mail
+
+        polled = inbound_mail.poll(connection, secret_store)
+        if polled.get("ran"):
+            result["inbound"] = {
+                key: polled[key] for key in ("read", "handled", "error") if key in polled
+            }
+    except Exception:  # noqa: BLE001 - a mailbox problem must not stop the apps or the outbox
+        suite.logger.exception("Reading incoming mail failed")
+        result["inbound"] = "failed"
     for app_id, fn in TASKS.items():
         if not suite.app_enabled(app_id):
             continue
@@ -63,6 +77,7 @@ def run(connection: sqlite3.Connection, secret_store: Any) -> dict[str, Any]:
             suite.logger.exception("Background task for %s failed", app_id)
             result["tasks"][app_id] = "failed"
     settings = kit.email_settings(connection)
+    kit.expire_outbox(connection)  # reminders that can no longer be sent in time are dropped, set up or not
     # its own mail server, or (hosted, a member's own space) the organization's it is lent
     if (settings.get("smtp_host") and settings.get("from_email")) or kit.lent_mail():
         due = connection.execute(
