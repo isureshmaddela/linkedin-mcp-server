@@ -239,6 +239,47 @@ def sequence_detail(connection: sqlite3.Connection, sequence_id: str) -> dict[st
     }
 
 
+STOP_LABELS = {
+    "replied": "They replied",
+    "unsubscribed": "They unsubscribed",
+    "bounced": "The email bounced",
+    "stopped by you": "You stopped it",
+    "the sequence was deleted": "The sequence was deleted",
+    "the lead was deleted": "The lead was deleted",
+    "no email address": "The lead has no email address",
+    "on the do-not-contact list": "They are on the do-not-contact list",
+    "a step was not sent": "A step was rejected or skipped in the outbox",
+}
+
+
+def lead_enrollments(connection: sqlite3.Connection, lead_id: str) -> list[dict[str, Any]]:
+    """Every sequence this lead is (or was) in: where it is, when the next email is due, and when and why it
+    stopped. Shown in the lead's drawer."""
+    if not _has_leads(connection):
+        return []
+    ensure(connection)
+    out = []
+    for row in kit.fetch_all(
+        connection,
+        """SELECT e.*, s.name AS sequence_name, s.steps AS sequence_steps, s.status AS sequence_status
+        FROM lead_enrollments e LEFT JOIN lead_sequences s ON s.id = e.sequence_id
+        WHERE e.lead_id = ? ORDER BY e.created_at DESC""",
+        (lead_id,),
+    ):
+        steps = json.loads(row.pop("sequence_steps") or "[]")
+        reason = str(row.get("stop_reason") or "")
+        out.append(
+            {
+                **row,
+                "steps_total": len(steps),
+                "stop_label": STOP_LABELS.get(reason, reason[:1].upper() + reason[1:] if reason else ""),
+                "stopped_at": row["updated_at"] if row["status"] == "stopped" else "",
+                "finished_at": row["updated_at"] if row["status"] == "finished" else "",
+            }
+        )
+    return out
+
+
 # ---------------------------------------------------------------------------
 # enrolling and stopping
 # ---------------------------------------------------------------------------

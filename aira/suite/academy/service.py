@@ -845,6 +845,7 @@ def enrol(
                 VALUES (:id, :course_id, :cohort_id, :name, :email, :status, :reference, :price_cents, :source, :notes, :created_at, :activated_at, :last_activity_at)""",
                 enrolment,
             )
+            kit.link_row(connection, "ac_enrolments", enrolment["id"])  # the learner's one record
         connection.commit()
     except BaseException:
         connection.rollback()

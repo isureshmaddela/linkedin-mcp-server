@@ -161,6 +161,7 @@ def ensure(connection: sqlite3.Connection) -> None:
     kit.ensure(connection, "service.v1", SCHEMA)
     kit.ensure(connection, "service.v2", SCHEMA_V2)
     kit.ensure(connection, "service.v3", SCHEMA_V3)
+    kit.contact_columns(connection, "sv_cases")
 
 
 # ---------------------------------------------------------------------------

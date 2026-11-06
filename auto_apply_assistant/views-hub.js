@@ -1,7 +1,8 @@
 /* Aira — the Business hub (#/hub): every industry app at a glance.
  *
  * Tabs (?tab=): overview (revenue this month, by month and by app; each app's setup progress and numbers; what
- * customers did on public pages), revenue (every payment recorded, CSV), outbox (messages the apps prepared for
+ * customers did on public pages), customers (one record per person across the apps: search, the contact's page
+ * and timeline with ?contact=<id>, merging two records, Send to Sales), revenue (every payment recorded, CSV), outbox (messages the apps prepared for
  * customers: approve, edit, cancel, send through your own mail server), business (the profile every public page
  * shows: name, contact, currency, brand colour, tax, how customers pay) and email (the mail server, which kinds of
  * message go out without approval, and the incoming mailbox read for replies, new requests and bounces) and privacy
@@ -18,6 +19,7 @@
   const APP_NAMES = { ...Object.fromEntries(Aira.APPS.map((app) => [app.id, app.name])), ...Object.fromEntries(Aira.NAV.filter((item) => item.app !== "account").map((item) => [item.id, item.label])) };
   const TABS = [
     { id: "overview", label: "Overview" },
+    { id: "customers", label: "Customers" },
     { id: "revenue", label: "Revenue" },
     { id: "outbox", label: "Outbox" },
     { id: "business", label: "Business profile" },
@@ -95,6 +97,124 @@
         h("header", {}, h("span", { class: "app-tile-icon" }, Aira.icon(app.id)), h("div", {}, h("strong", { text: app.industry }), h("div", { class: "muted small" }, h("span", { text: app.name }), ": ", h("span", { text: app.tagline }))))))));
   }
 
+  // ------------------------------------------------------------------ customers
+  // One record per person across the apps (aira/suite/customers.py), matched by email or phone: search, the
+  // contact's page with its timeline (?contact=<id>), merging two records, and Send to Sales.
+  async function customersTab(body, route, rerender) {
+    const query = (route && route.query) || {};
+    if (query.contact) return contactPage(body, query.contact, rerender);
+    const params = new URLSearchParams(Object.entries({ q: query.q || "", app: query.app || "" }).filter(([, value]) => value));
+    const data = await Aira.api(`/api/suite/customers?${params}`);
+    const search = h("input", { type: "search", placeholder: "Search name, email, phone, company or tag", value: query.q || "", "aria-label": "Search customers" });
+    search.addEventListener("keydown", (event) => { if (event.key === "Enter") Aira.router.go(["hub"], { tab: "customers", q: search.value.trim(), app: query.app || "" }); });
+    const appFilter = Aira.ui.select([["", "Every app"], ...data.apps.map((app) => [app, APP_NAMES[app] || app])], query.app || "", { "aria-label": "Seen in" });
+    appFilter.addEventListener("change", () => Aira.router.go(["hub"], { tab: "customers", q: query.q || "", app: appFilter.value }));
+    body.append(
+      S.section("Customers",
+        h("p", { class: "muted", text: "Everyone who ordered, booked, filled in a form, opened a case, bought tickets or enrolled, once per person: the apps match them by email or phone." }),
+        h("div", { class: "btn-row cm-filters" }, search, appFilter),
+        h("p", { class: "muted small", text: `${data.total} ${data.total === 1 ? "customer" : "customers"}` }),
+        S.table({
+          columns: [
+            { key: "name", label: "Name", render: (c) => h("span", {}, h("strong", { text: c.name || c.email || c.phone }), c.company ? h("div", { class: "muted small", text: c.company }) : null) },
+            { key: "email", label: "Email or phone", render: (c) => [c.email, c.phone].filter(Boolean).join(" · ") },
+            { key: "apps", label: "Seen in", render: (c) => c.apps.map((app) => APP_NAMES[app] || app).join(", ") },
+            { key: "last_seen", label: "Last seen", render: (c) => Aira.fmt.ago(c.last_seen) },
+          ],
+          rows: data.contacts,
+          onRow: (c) => Aira.router.go(["hub"], { tab: "customers", contact: c.id }),
+          empty: params.toString() ? Aira.ui.empty("Nobody matches", "Try another name, email or phone.") : Aira.ui.empty("No customers yet", "People who order, book, fill in a form or write to you show up here, once each."),
+          caption: "Customers",
+        })),
+    );
+  }
+
+  function consentText(value) {
+    if (value === null || value === undefined) return "Not asked";
+    return value ? "Yes" : "No";
+  }
+
+  async function contactPage(body, id, rerender) {
+    const data = await Aira.api(`/api/suite/customers/${id}`);
+    const c = data.contact;
+    const label = c.name || c.email || c.phone;
+    const edit = () => S.edit({
+      title: `Edit ${label}`,
+      fields: [{ name: "name", label: "Name" }, { name: "company", label: "Company" }, { name: "tags", label: "Tags", placeholder: "vip, wholesale" }, { name: "notes", label: "Notes", type: "textarea", rows: 4, hint: "Only your team sees these." }],
+      values: { ...c, tags: c.tags.join(", ") },
+      onSave: async (values) => { await Aira.api(`/api/suite/customers/${id}`, { method: "PATCH", body: values }); rerender(); },
+    });
+    const toSales = async () => {
+      const result = await Aira.api(`/api/suite/customers/${id}/sales`, { method: "POST", body: {} });
+      Aira.toast(result.created ? "Sent to Sales: a new deal is in your pipeline." : "This customer is in Sales already.", "success");
+      Aira.router.go(["studio"], { tab: "deals", deal: result.deal.id });
+    };
+    const paid = (data.paid || []).map((entry) => ({ label: data.paid.length > 1 ? `Paid in ${entry.currency}` : "Paid", value: S.money(entry.cents, entry.currency), tone: entry.cents ? "good" : "" }));
+    body.append(
+      h("div", { class: "btn-row" }, h("a", { class: "btn ghost sm", href: "#/hub?tab=customers", text: "All customers" })),
+      S.section(label,
+        Aira.ui.kv([
+          ["Email", c.email ? h("a", { href: `mailto:${c.email}`, text: c.email }) : ""],
+          ["Phone", c.phone ? h("a", { href: `tel:${c.phone.replace(/[^0-9+]/g, "")}`, text: c.phone }) : ""],
+          ["Company", c.company],
+          ["Tags", c.tags.join(", ")],
+          ["Email news", consentText(c.email_consent)],
+          ["Seen in", c.apps.map((app) => APP_NAMES[app] || app).join(", ")],
+          ["First seen", S.when(c.first_seen)],
+          ["Last seen", S.when(c.last_seen)],
+          ["Notes", c.notes],
+        ]),
+        h("div", { class: "btn-row" },
+          S.button("Edit", edit, { kind: "secondary sm" }),
+          S.button("Merge with another record", () => mergeDialog(c, rerender), { kind: "secondary sm" }),
+          data.sales_available ? S.button("Send to Sales", toSales, { kind: "sm" }) : null)),
+      data.possible_duplicates ? h("div", { class: "cloud-banner warn", role: "status" }, h("strong", { text: "A payment may be counted twice" }), h("span", { class: "muted", text: "Two apps recorded the same amount within a week. If it is one payment, mark it not paid in one of them." })) : null,
+      S.kpis([...paid, { label: "Payments", value: data.payments }, { label: "Sales deals", value: (data.deals || []).length }]),
+      S.section("Timeline", timelineList(data.timeline)),
+    );
+  }
+
+  function timelineList(items) {
+    if (!items.length) return Aira.ui.empty("Nothing yet", "Orders, bookings, forms, cases, payments and emails show up here.");
+    return h("ul", { class: "suite-activity hub-timeline" }, ...items.map((item) => h("li", {},
+      h("span", { class: `suite-dot ${item.kind === "payment" ? "public" : ""}`, "aria-hidden": "true" }),
+      h("div", {},
+        item.href ? h("a", { href: item.href, text: item.title }) : h("strong", { text: item.title }),
+        item.detail ? h("span", { class: "muted", text: ` ${item.detail}` }) : null,
+        item.possible_duplicate ? h("span", { class: "suite-pill warn", text: "may be counted twice" }) : null,
+        h("div", { class: "muted small", text: `${APP_NAMES[item.app] || item.app} · ${S.when(item.at)}` })))));
+  }
+
+  // Merge: find the other record of the same person; it joins this one (its orders, bookings and forms move here).
+  function mergeDialog(keep, rerender) {
+    const keepLabel = keep.name || keep.email || keep.phone;
+    const input = h("input", { type: "search", placeholder: "Search name, email or phone", "aria-label": "Find the other record" });
+    const results = h("div", { class: "suite-body" }, h("p", { class: "muted", text: "Search for the other record of this person." }));
+    let dialog = null;
+    const find = async () => {
+      const text = input.value.trim();
+      if (!text) return;
+      const data = await Aira.api(`/api/suite/customers?${new URLSearchParams({ q: text, limit: "20" })}`);
+      const others = data.contacts.filter((other) => other.id !== keep.id);
+      results.replaceChildren(others.length ? h("ul", { class: "suite-activity" }, ...others.map((other) => h("li", {},
+        h("div", {}, h("strong", { text: other.name || other.email || other.phone }), h("span", { class: "muted", text: ` ${[other.email, other.phone, other.company].filter(Boolean).join(" · ")}` })),
+        S.button("Merge", async () => {
+          const otherLabel = other.name || other.email || other.phone;
+          if (!(await Aira.confirm({ title: "Merge two records", message: `Merge ${otherLabel} into ${keepLabel}? Their orders, bookings, forms and cases move to ${keepLabel}, and the other record is removed. This cannot be undone.`, confirmLabel: "Merge", danger: true }))) return;
+          const result = await Aira.api(`/api/suite/customers/${keep.id}/merge`, { method: "POST", body: { other_id: other.id } });
+          Aira.toast(`Merged: ${result.moved} ${result.moved === 1 ? "record" : "records"} moved.`, "success");
+          if (dialog) dialog.close();
+          rerender();
+        }, { kind: "secondary sm" })))) : h("p", { class: "muted", text: "Nobody else matches." }));
+    };
+    input.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); find(); } });
+    dialog = Aira.modal({
+      title: `Merge with ${keepLabel}`,
+      body: h("div", { class: "suite-body" }, h("div", { class: "btn-row" }, input, S.button("Search", find, { kind: "secondary sm" })), results),
+      actions: [{ label: "Close", kind: "ghost" }],
+    });
+  }
+
   async function revenueTab(body) {
     const data = await Aira.api("/api/suite/revenue");
     const summary = data.summary;
@@ -111,7 +231,8 @@
           columns: [
             { key: "at", label: "Date", render: (r) => S.day(r.at) },
             { key: "app", label: "App", render: (r) => APP_NAMES[r.app] || r.app },
-            { key: "label", label: "For" },
+            // a sale recorded by two apps (a Marketing lead and its Sales invoice) counts once, in the later one
+            { key: "label", label: "For", render: (r) => (r.covered_by ? h("span", {}, r.label, h("div", { class: "muted small", text: `Counted in ${APP_NAMES[r.covered_by.split(":")[0]] || r.covered_by.split(":")[0]} instead` })) : r.label) },
             { key: "customer", label: "Customer" },
             { key: "amount_cents", label: "Amount", num: true, render: (r) => (r.voided_at ? h("s", { text: S.money(r.amount_cents, r.currency) }) : S.money(r.amount_cents, r.currency)) },
             { key: "currency", label: "Currency" },
@@ -415,7 +536,8 @@
       panel.replaceChildren(Aira.ui.skeleton(4));
       const holder = h("div", { class: "suite-body" });
       try {
-        if (tab === "revenue") await revenueTab(holder);
+        if (tab === "customers") await customersTab(holder, route, render);
+        else if (tab === "revenue") await revenueTab(holder);
         else if (tab === "outbox") await outboxTab(holder, render);
         else if (tab === "business") await businessTab(holder);
         else if (tab === "email") await emailTab(holder, render);

@@ -369,6 +369,9 @@
         files, after, error, h("div", { class: "btn-row" }, send)),
       chargeSection,
       historySection,
+      // A customer asking for something to buy (a quote, an upgrade) becomes a deal in the Sales pipeline.
+      c.customer_email || c.customer_phone ? S.section("Sales", S.salesHandoff({ app: "service", objectType: "case", objectId: caseId }),
+        c.contact_id ? h("p", { class: "small" }, h("a", { href: `#/hub?tab=customers&contact=${c.contact_id}`, text: "See everything from this customer" })) : null) : null,
     );
     Aira.drawer({ title: `${c.reference} · ${c.subject}`, subtitle: [statusPill(c.status), " ", pill(c.priority)], body });
   }

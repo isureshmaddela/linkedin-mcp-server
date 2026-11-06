@@ -803,6 +803,7 @@ def place_order(
                 moment,
             ),
         )
+        kit.link_row(connection, "ev_orders", order_id)  # the buyer's one record (aira.suite.customers)
         seat = 0
         for line in priced["lines"]:
             for _ in range(line["quantity"]):

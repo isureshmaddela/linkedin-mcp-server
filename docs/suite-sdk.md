@@ -88,6 +88,15 @@ def services_list(request: Request):
 * **Revenue.** When money is received (an invoice marked paid, an order paid, a booking deposit, a ticket sold, an
   enrolment paid), call `kit.record_revenue(connection, "<id>", source_type=, source_id=, amount_cents=, label=,
   customer=)`; recording the same source twice updates it. Call `kit.void_revenue` on refund or "mark unpaid".
+  When the payment stands for another app's line of the same sale (a Sales invoice for a deal handed over from a
+  Marketing lead), pass `covers=kit.revenue_key(app, source_type, source_id)`: while this line counts, that one
+  does not, whichever was recorded first.
+* **Customers.** A table that holds a customer (an order, a booking customer, a lead) points at the suite's one
+  record of that person. Add the table to `kit.CONTACT_SOURCES` (its email, phone, name and company columns), call
+  `kit.contact_columns(connection, "<table>")` from the app's `ensure()` (it adds the nullable `contact_id` and
+  links older rows once), and `kit.link_row(connection, "<table>", row_id)` after inserting a row. For anything
+  else, `kit.contact_for(connection, email=, phone=, name=, source=)` upserts the contact and returns its id. The
+  Business hub's Customers tab (`aira/suite/customers.py`) builds the timeline from these rows.
   Aira does not process cards: customers pay through the business's own payment link
   (`kit.business(...)["payment_link"]`) or instructions, and the business marks the payment received (or the app
   records it when the business confirms). Never claim money moved that did not.

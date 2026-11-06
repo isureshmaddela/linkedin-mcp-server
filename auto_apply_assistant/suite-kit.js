@@ -213,6 +213,77 @@
     return card;
   };
 
+  // ---------------------------------------------------------------- online payments (aira/payments, Razorpay)
+  // S.payments({app, objectType, objectId, requests, payable, onChange}) -> a card with the thing's payment links:
+  // "Create payment link" (made for the exact amount due, and copied), "Copy link" (the open one) and "Refund" (a paid
+  // one, all or part), through /api/suite/payments/requests. ``requests`` is what the app's own view sends.
+  const PAY_TONES = { created: "warn", paid: "good", partially_refunded: "warn", refunded: "bad", expired: "", cancelled: "", mismatch: "bad" };
+  S.payments = ({ app, objectType, objectId, requests = [], payable = true, onChange } = {}) => {
+    const open = requests.find((request) => request.status === "created" && request.short_url);
+    const refundable = requests.filter((request) => ["paid", "partially_refunded"].includes(request.status) && request.refundable_cents > 0);
+    const changed = async () => { if (onChange) await onChange(); };
+    const create = async () => {
+      const made = await Aira.api("/api/suite/payments/requests", { method: "POST", body: { app, object_type: objectType, object_id: objectId } });
+      if (made.request && made.request.short_url) await S.copy(made.request.short_url);
+      await changed();
+    };
+    const refund = async (request) => {
+      const done = await S.edit({
+        title: `Refund ${S.money(request.paid_cents || request.amount_cents, request.currency)}`,
+        fields: [
+          { name: "amount_cents", label: `Amount to refund (${request.currency})`, type: "money", hint: `Up to ${S.money(request.refundable_cents, request.currency)}. Leave it empty to refund all of it.` },
+          { name: "note", label: "Note", placeholder: "Only you see it" },
+        ],
+        submitLabel: "Refund",
+        onSave: (values) => Aira.api(`/api/suite/payments/requests/${request.id}/refund`, { method: "POST", body: { amount_cents: values.amount_cents || undefined, note: values.note } }),
+      });
+      if (done) { Aira.toast("The refund is on its way to the customer through Razorpay.", "success"); await changed(); }
+    };
+    const list = requests.length
+      ? S.table({
+        columns: [
+          { key: "created_at", label: "Made", render: (request) => S.day(request.created_at) },
+          { key: "amount_cents", label: "Amount", num: true, render: (request) => S.money(request.amount_cents, request.currency) },
+          { key: "status", label: "Status", render: (request) => h("span", {}, S.pill(request.status, PAY_TONES), request.problem ? h("div", { class: "muted small", text: request.problem }) : null) },
+          { key: "refunded_cents", label: "Refunded", num: true, render: (request) => (request.refunded_cents ? S.money(request.refunded_cents, request.currency) : "") },
+        ],
+        rows: requests,
+        caption: "Payment links",
+      })
+      : h("p", { class: "muted", text: "No payment link yet. Make one for the amount due and send it: the customer pays by UPI, card or netbanking on Razorpay's page, and it is marked paid here by itself." });
+    return h("section", { class: "card suite-section suite-payments" },
+      h("h2", { class: "suite-h2", text: "Online payment" }),
+      list,
+      h("div", { class: "btn-row" },
+        payable && !open ? S.button("Create payment link", create, { kind: "secondary sm" }) : null,
+        open ? S.button("Copy link", () => S.copy(open.short_url), { kind: "secondary sm" }) : null,
+        open ? h("a", { class: "btn ghost sm", href: open.short_url, target: "_blank", rel: "noopener noreferrer", text: "Open" }) : null,
+        ...refundable.map((request) => S.button(refundable.length > 1 ? `Refund ${S.money(request.amount_cents, request.currency)}` : "Refund", () => refund(request), { kind: "ghost sm" }))));
+  };
+
+  // ---------------------------------------------------------------- Send to Sales (aira/suite/customers.py)
+  // S.salesHandoff({app, objectType, objectId}) -> a row that says which Sales deal a Marketing lead or a Service case
+  // became, or offers "Send to Sales" (once: sending it again opens the same deal). Empty without Sales.
+  S.salesHandoff = ({ app, objectType, objectId } = {}) => {
+    const row = h("div", { class: "btn-row suite-handoff" });
+    const open = (deal) => Aira.router.go(["studio"], { tab: "deals", deal: deal.id });
+    const draw = (data) => {
+      if (data.deal) {
+        row.replaceChildren(h("span", { class: "muted", text: `In Sales: ${data.deal.title} (${String(data.deal.stage).replaceAll("_", " ")})` }), S.button("Open the deal", () => { Aira.closeDrawer(); open(data.deal); }, { kind: "ghost sm" }));
+        return;
+      }
+      if (!data.sales_available) { row.replaceChildren(); return; }
+      row.replaceChildren(S.button("Send to Sales", async () => {
+        const result = await Aira.api("/api/suite/sales/handoff", { method: "POST", body: { app, object_type: objectType, object_id: objectId } });
+        Aira.toast(result.created ? "Sent to Sales: a new deal is in your pipeline." : "This is in Sales already.", "success");
+        draw({ deal: result.deal, sales_available: true });
+      }, { kind: "secondary" }), h("span", { class: "muted small", text: "Makes an open deal in your Sales pipeline, with this person as the contact." }));
+    };
+    const params = new URLSearchParams({ app, object_type: objectType, object_id: objectId });
+    Aira.api(`/api/suite/sales/handoff?${params}`, { silent: true }).then(draw).catch(() => row.replaceChildren());
+    return row;
+  };
+
   // ---------------------------------------------------------------- engagement widgets
   S.checklist = (steps = []) => {
     const done = steps.filter((step) => step.done).length;

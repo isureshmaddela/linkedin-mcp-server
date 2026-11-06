@@ -229,7 +229,13 @@ def _insert(connection: sqlite3.Connection, table: str, values: dict[str, Any]) 
     columns = ", ".join(row)
     marks = ", ".join(f":{column}" for column in row)
     connection.execute(f"INSERT INTO {table} ({columns}) VALUES ({marks})", row)  # noqa: S608 - fixed names
+    if table in CONTACT_TABLES:
+        kit.link_row(connection, table, row_id)  # a lead or a subscriber is one of the business's contacts
     return row_id
+
+
+# Leads and subscribers point at the suite's one customer record (kit.contact_for).
+CONTACT_TABLES = ("mk_submissions", "mk_subscribers")
 
 
 def _update(
@@ -238,6 +244,8 @@ def _update(
     kit.update_row(
         connection, table, row_id, {**_store_values(values), "updated_at": kit.now()}
     )
+    if table == "mk_subscribers" and "status" in values:
+        kit.link_row(connection, table, row_id)  # confirmed or unsubscribed: the contact's email consent follows
 
 
 def roi_percent(revenue_cents: int, spend_cents: int) -> int | None:
@@ -1807,6 +1815,43 @@ def confirm_subscription(
             public=True,
         )
         connection.commit()
+    return store.get(connection, "mk_subscribers", subscriber_id, "subscriber")
+
+
+def resend_confirmation(
+    connection: sqlite3.Connection, subscriber_id: str, *, origin: Any = None
+) -> dict[str, Any]:
+    """The business sends the double opt-in email again to someone who has not confirmed yet (it went to spam, or
+    they lost it). At most once an hour, like a form sent again; an unsubscribed address is never asked again."""
+    current = store.get(connection, "mk_subscribers", subscriber_id, "subscriber")
+    if current["status"] != "pending":
+        raise ValueError(
+            "Only someone who has not confirmed yet can be sent the confirmation email again."
+        )
+    last = current.get("confirm_sent_at")
+    if last and kit.parse_time(last) > kit.utcnow() - CONFIRM_AGAIN_AFTER:
+        raise ValueError(
+            "The confirmation email went to them less than an hour ago. Try again later."
+        )
+    connection.execute(
+        "UPDATE mk_subscribers SET confirm_sent_at = NULL WHERE id = ?", (subscriber_id,)
+    )
+    request_confirmation(
+        connection,
+        {"email": current["email"], "name": current["name"]},
+        source=current["source"] or "form",
+        campaign_id=current["campaign_id"],
+        origin=origin,
+    )
+    kit.log(
+        connection,
+        APP,
+        "subscriber",
+        f"Confirmation sent again to {current['email']}",
+        ref_type="subscriber",
+        ref_id=subscriber_id,
+    )
+    connection.commit()
     return store.get(connection, "mk_subscribers", subscriber_id, "subscriber")
 
 

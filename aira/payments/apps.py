@@ -353,6 +353,82 @@ payments.payable(
 
 
 # ---------------------------------------------------------------------------
+# Studio (Sales): an invoice the client pays, all of what is still due
+# ---------------------------------------------------------------------------
+
+
+def _invoice_describe(
+    connection: sqlite3.Connection, invoice_id: str
+) -> dict[str, Any]:
+    from aira.suite.studio import service, store
+
+    store.ensure(connection)
+    invoice = service.get_invoice(connection, invoice_id, kit.today())
+    if invoice["status"] == "void":
+        return _no("This invoice was voided.")
+    if invoice["status"] == "draft":
+        return _no("Send this invoice before asking for payment.")
+    if int(invoice["balance_cents"]) <= 0:
+        return _no("This invoice is paid.")
+    client = (
+        kit.fetch_one(
+            connection,
+            "SELECT name, company, email, phone FROM st_clients WHERE id = ?",
+            (invoice["client_id"],),
+        )
+        or {}
+    )
+    link = public.link_for(connection, "studio", "invoice", invoice_id) or public.create_link(
+        connection, "studio", "invoice", invoice_id, title=f"Invoice {invoice['number']}"
+    )
+    return _due(
+        amount=int(invoice["balance_cents"]),
+        currency=_home_currency(connection),
+        description=f"Invoice {invoice['number']}",
+        name=str(client.get("name") or client.get("company") or ""),
+        email=str(client.get("email") or ""),
+        phone=str(client.get("phone") or ""),
+        return_path=link["path"],
+    )
+
+
+def _invoice_paid(
+    connection: sqlite3.Connection, invoice_id: str, paid: dict[str, Any]
+) -> Any:
+    from aira.suite.studio import service
+
+    method = str(paid.get("method") or "").lower()
+    service.add_payment(
+        connection,
+        invoice_id,
+        {
+            "amount_cents": int(paid["amount_cents"]),
+            "method": method if method in service.PAYMENT_METHODS else "other",
+            "note": str(paid.get("note") or "")[:300],
+        },
+        today=kit.today(),
+    )
+    payment = kit.fetch_one(
+        connection,
+        "SELECT id FROM st_payments WHERE invoice_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
+        (invoice_id,),
+    )
+    return {"source_type": "payment", "source_id": (payment or {}).get("id") or invoice_id}
+
+
+payments.payable(
+    "studio",
+    "invoice",
+    label="the invoice",
+    describe=_invoice_describe,
+    on_paid=_invoice_paid,
+)
+payments.public_page(
+    "studio", "invoice", "invoice", lambda connection, link, payload: link["ref_id"]
+)
+
+
+# ---------------------------------------------------------------------------
 # Sites: a website project the client pays for
 # ---------------------------------------------------------------------------
 

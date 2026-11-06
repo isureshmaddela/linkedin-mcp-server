@@ -938,6 +938,7 @@ def place_order(
                 order_id,
             ),
         )
+        kit.link_row(connection, "sh_orders", order_id)  # the customer's one record (aira.suite.customers)
         connection.commit()
     except BaseException:
         connection.rollback()

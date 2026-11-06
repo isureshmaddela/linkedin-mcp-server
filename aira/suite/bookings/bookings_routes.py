@@ -334,6 +334,10 @@ def bookings_get(request: Request) -> tuple[int, dict[str, Any]]:
             )
             if item["status"] == "active" and item["remaining"] > 0
         ]
+        from aira.payments import service as payments
+
+        # its online payment links (Razorpay): the deposit, then the rest
+        booking["payments"] = payments.requests_for(connection, APP, "booking", booking["id"])
         return 200, {"booking": booking}
 
 

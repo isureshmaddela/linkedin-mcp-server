@@ -203,6 +203,7 @@ def ensure(connection: sqlite3.Connection) -> None:
     kit.ensure(connection, "shop.v2", SCHEMA_V2)
     kit.ensure(connection, "shop.v3", SCHEMA_V3)
     _add_columns(connection)
+    kit.contact_columns(connection, "sh_orders")
 
 
 # ---------------------------------------------------------------------------

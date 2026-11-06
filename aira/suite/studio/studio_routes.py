@@ -445,9 +445,13 @@ def projects_invoice_time(request: Request) -> tuple[int, dict[str, Any]]:
 
 
 def _invoice_out(connection: Any, invoice_id: str) -> dict[str, Any]:
+    from aira.payments import service as payments
+
     return {
         "invoice": service.get_invoice(connection, invoice_id, _today()),
         "link": public.link_for(connection, APP, "invoice", invoice_id),
+        # its online payment links (Razorpay, aira.payments): open, paid, refunded or a mismatch to look at
+        "payments": payments.requests_for(connection, APP, "invoice", invoice_id),
     }
 
 

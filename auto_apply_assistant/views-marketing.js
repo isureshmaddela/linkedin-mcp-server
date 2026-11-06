@@ -47,7 +47,7 @@
   const CHANNELS = [["instagram", "Instagram"], ["facebook", "Facebook"], ["linkedin", "LinkedIn"], ["x", "X"], ["tiktok", "TikTok"], ["youtube", "YouTube"], ["email", "Email"], ["blog", "Blog"], ["whatsapp", "WhatsApp"]];
   const LIMITS = { instagram: 2200, facebook: 5000, linkedin: 3000, x: 280, tiktok: 2200, youtube: 5000, email: 10000, blog: 20000, whatsapp: 1000 };
   const CHANNEL_NAME = Object.fromEntries(CHANNELS);
-  const STATUS_TONES = { idea: "", draft: "", scheduled: "info", published: "good", new: "warn", contacted: "info", won: "good", lost: "bad", subscribed: "good", unsubscribed: "", partial: "warn", queued: "good", active: "good", paused: "warn", ended: "" };
+  const STATUS_TONES = { idea: "", draft: "", scheduled: "info", published: "good", new: "warn", contacted: "info", won: "good", lost: "bad", subscribed: "good", pending: "warn", unsubscribed: "", partial: "warn", queued: "good", active: "good", paused: "warn", ended: "" };
   let campaigns = [];
   let rerender = () => {};
   let newsletterCap = 500; // the server's per-queue cap, refreshed whenever the newsletters list loads
@@ -516,6 +516,9 @@
         row.email ? S.button("Reply by email", reply) : null,
         !row.paid ? S.button("Ask for payment", askPayment, { kind: "secondary" }) : null,
         row.paid ? S.button("Mark not paid", async () => { if (await Aira.confirm({ title: "Mark not paid", message: "Take this payment off your revenue? Use this for a mistake or a refund.", confirmLabel: "Mark not paid" })) { await M(`/submissions/${row.id}/paid`, { method: "DELETE" }); done("Marked not paid."); } }, { kind: "secondary" }) : S.button("Mark paid", markPaid, { kind: "secondary" })),
+      // A lead worth a deal goes to the Sales pipeline; once its invoice is paid there, the sale counts once.
+      S.salesHandoff({ app: "marketing", objectType: "lead", objectId: row.id }),
+      row.contact_id ? h("p", { class: "small" }, h("a", { href: `#/hub?tab=customers&contact=${row.contact_id}`, text: "See everything from this customer" })) : null,
       form.node,
       h("div", { class: "btn-row" },
         S.button("Save", async () => { form.setError(""); try { await M(`/submissions/${row.id}`, { method: "PATCH", body: form.read() }); done("Saved."); } catch (error) { form.setError(error.message); } }),
@@ -684,13 +687,13 @@
     const data = await M(`/subscribers?${params}`);
     const search = h("input", { type: "search", placeholder: "Search email or name", value: route.query.q || "", "data-search": "1", "aria-label": "Search subscribers" });
     search.addEventListener("keydown", (event) => { if (event.key === "Enter") Aira.router.go(["marketing"], { ...route.query, tab: "subscribers", q: search.value.trim() }); });
-    const statusFilter = Aira.ui.select([["", "Everyone"], ["subscribed", "Subscribed"], ["unsubscribed", "Unsubscribed"]], route.query.status || "", { "aria-label": "Status" });
+    const statusFilter = Aira.ui.select([["", "Everyone"], ["subscribed", "Subscribed"], ["pending", "Waiting to confirm"], ["unsubscribed", "Unsubscribed"]], route.query.status || "", { "aria-label": "Status" });
     statusFilter.addEventListener("change", () => Aira.router.go(["marketing"], { ...route.query, tab: "subscribers", status: statusFilter.value }));
     const tagFilter = Aira.ui.select([["", "Any tag"], ...data.tags.map((t) => [t, t])], route.query.tag || "", { "aria-label": "Tag" });
     tagFilter.addEventListener("change", () => Aira.router.go(["marketing"], { ...route.query, tab: "subscribers", tag: tagFilter.value }));
     const importMany = () => S.edit({ title: "Import subscribers", fields: [{ name: "csv", label: "Paste CSV: email,name,tags (one per line)", type: "textarea", rows: 10, required: true, hint: "Only add people who agreed to hear from you. Addresses that unsubscribed are skipped." }], submitLabel: "Import", onSave: async (values) => { const result = await M("/subscribers/import", { method: "POST", body: values }); Aira.toast(`${result.added} added, ${result.updated} updated, ${result.skipped} skipped, ${result.invalid} invalid.`, "success"); rerender(); } });
     body.append(
-      S.kpis([{ label: "Subscribed", value: data.counts.subscribed, tone: "good" }, { label: "Unsubscribed", value: data.counts.unsubscribed }]),
+      S.kpis([{ label: "Subscribed", value: data.counts.subscribed, tone: "good" }, { label: "Waiting to confirm", value: data.counts.pending || 0, hint: "Signed up on a form; newsletters start once they confirm from the email", tone: data.counts.pending ? "warn" : "" }, { label: "Unsubscribed", value: data.counts.unsubscribed }]),
       S.section("Subscribers",
         filterBar(search, statusFilter, tagFilter),
         h("div", { class: "btn-row" }, S.button("Add", addSubscriber, { kind: "sm" }), S.button("Import", importMany, { kind: "secondary sm" }), S.button("Download CSV", () => csv(`/subscribers?format=csv&${params}`, "subscribers.csv"), { kind: "secondary sm" })),
@@ -699,7 +702,9 @@
             { key: "email", label: "Email", render: (s) => h("span", {}, h("strong", { text: s.email }), s.name ? h("div", { class: "muted small", text: s.name }) : null) },
             { key: "tags", label: "Tags", render: (s) => s.tags.join(", ") },
             { key: "source", label: "Source" },
-            { key: "status", label: "Status", render: (s) => S.pill(s.status, STATUS_TONES) },
+            { key: "status", label: "Status", render: (s) => (s.status === "pending"
+              ? h("span", {}, S.pill("pending", STATUS_TONES), h("div", { class: "muted small", text: s.confirm_sent_at ? `Not confirmed yet · asked ${Aira.fmt.ago(s.confirm_sent_at)}` : "Not confirmed yet" }), S.button("Send again", () => confirmAgain(s), { kind: "ghost sm" }))
+              : S.pill(s.status, STATUS_TONES)) },
             { key: "created_at", label: "Joined", render: (s) => S.day(s.created_at) },
           ],
           rows: data.subscribers,
@@ -711,10 +716,22 @@
 
   const addSubscriber = () => S.edit({ title: "Add subscriber", fields: [{ name: "email", label: "Email", type: "email", required: true }, { name: "name", label: "Name" }, { name: "tags", label: "Tags", placeholder: "vip, autumn" }], onSave: async (values) => { await M("/subscribers", { method: "POST", body: values }); rerender(); } });
 
+  // Double opt-in: someone who signed up on a form gets the confirmation email again (at most once an hour).
+  async function confirmAgain(row, drawer) {
+    await M(`/subscribers/${row.id}/confirm-again`, { method: "POST", body: {} });
+    Aira.toast(`The confirmation email to ${row.email} waits in Business hub > Outbox (or goes now if you send these automatically).`, "success");
+    if (drawer) drawer.close(false);
+    rerender();
+  }
+
   function openSubscriber(row) {
+    const pendingNote = row.status === "pending" ? h("p", { class: "muted", text: "Signed up on a form but has not confirmed from the email yet. They get no newsletters until they do." }) : null;
     const drawer = Aira.drawer({ title: row.name || row.email, subtitle: S.pill(row.status, STATUS_TONES), body: h("div", { class: "suite-body" },
-      Aira.ui.kv([["Email", row.email], ["Source", row.source], ["Tags", row.tags.join(", ")], ["Opted in", S.when(row.consent_at)], ["Joined", S.when(row.created_at)], ["Unsubscribed", S.when(row.unsubscribed_at)]]),
+      Aira.ui.kv([["Email", row.email], ["Source", row.source], ["Tags", row.tags.join(", ")], ["Opted in", S.when(row.consent_at)], ["Confirmation sent", row.status === "pending" ? S.when(row.confirm_sent_at) : ""], ["Confirmed", S.when(row.confirmed_at)], ["Joined", S.when(row.created_at)], ["Unsubscribed", S.when(row.unsubscribed_at)]]),
+      pendingNote,
+      row.contact_id ? h("p", { class: "small" }, h("a", { href: `#/hub?tab=customers&contact=${row.contact_id}`, text: "See everything from this customer" })) : null,
       h("div", { class: "btn-row" },
+        row.status === "pending" ? S.button("Send the confirmation again", () => confirmAgain(row, drawer), { kind: "secondary" }) : null,
         S.button("Edit", async () => { drawer.close(false); await S.edit({ title: "Edit subscriber", fields: [{ name: "name", label: "Name" }, { name: "tags", label: "Tags" }], values: { name: row.name, tags: row.tags.join(", ") }, onSave: async (values) => { await M(`/subscribers/${row.id}`, { method: "PATCH", body: values }); rerender(); } }); }),
         row.status === "subscribed" ? S.button("Unsubscribe", async () => { await M(`/subscribers/${row.id}`, { method: "PATCH", body: { status: "unsubscribed" } }); drawer.close(false); rerender(); }, { kind: "secondary" }) : null,
         S.button("Delete", async () => { if (await S.confirmDelete(row.email)) { await M(`/subscribers/${row.id}`, { method: "DELETE" }); drawer.close(false); rerender(); } }, { kind: "ghost" }))) });

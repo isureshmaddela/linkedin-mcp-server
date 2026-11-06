@@ -258,6 +258,7 @@ def create_case(
             stamp,
         ),
     )
+    kit.link_row(connection, "sv_cases", case_id)  # the customer's one record (aira.suite.customers)
     if description:
         _message(
             connection,
@@ -2343,6 +2344,61 @@ def staff_channel(name: str) -> Callable[[StaffChannel], StaffChannel]:
         return fn
 
     return wrap
+
+
+_APP_NOTICES = {
+    # what a push may say on a lock screen: no customer names or words (those are in ``detail``, shown in the app)
+    "new_case": ("New helpdesk case", "A customer sent a new request.", "normal"),
+    "new_chat": ("New live chat", "A visitor is waiting in live chat.", "high"),
+    "sla_breach": ("A case is overdue", "A case is past its due time.", "high"),
+}
+
+
+def _staff_person(connection: sqlite3.Connection, address: str) -> Any:
+    """Whose notification centre a notice goes to: the household (or hosted member) profile with the staff address
+    as its email, else the account's owner, who runs the helpdesk."""
+    text = str(address or "").strip().lower()
+    if text and kit.fetch_one(
+        connection,
+        "SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'life_profiles'",
+    ):
+        found = kit.fetch_one(
+            connection,
+            "SELECT * FROM life_profiles WHERE lower(email) = ? AND archived_at IS NULL ORDER BY created_at LIMIT 1",
+            (text,),
+        )
+        if found:
+            return found
+    return "owner"
+
+
+@staff_channel("notify")
+def _notify_staff_in_app(
+    connection: sqlite3.Connection,
+    kind: str,
+    case: Mapping[str, Any],
+    notice: dict[str, Any],
+) -> None:
+    """The team's in-app and Web Push alert (aira.notify, the helpdesk category), next to the email: the person
+    chooses push or email per category in their notification settings. Never emailed from here (the outbox email
+    above is the email), and each case or chat is told once per kind."""
+    from aira import notify
+
+    title, body, urgency = _APP_NOTICES[kind]
+    record = str(case.get("id", ""))
+    url = "/#/service?tab=chat" if kind == "new_chat" else f"/#/service?open={record}"
+    notify.notify(
+        connection,
+        _staff_person(connection, str(notice.get("to") or "")),
+        "helpdesk",
+        title,
+        body,
+        url,
+        urgency=urgency,
+        detail=str(notice.get("subject") or ""),
+        key=f"service:{kind}:{record}",
+        email=False,
+    )
 
 
 def staff_address(connection: sqlite3.Connection, case: Mapping[str, Any]) -> str:

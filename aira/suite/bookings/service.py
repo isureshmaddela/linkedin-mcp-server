@@ -292,6 +292,7 @@ def upsert_customer(
         if name and not found["name"]:
             updates["name"] = name
         kit.update_row(connection, "bk_customers", found["id"], updates)
+        kit.link_row(connection, "bk_customers", found["id"])  # seen again: the one customer record moves on
         return {**found, **updates}
     customer = {
         "id": kit.new_id(),
@@ -307,6 +308,7 @@ def upsert_customer(
         "INSERT INTO bk_customers (id, name, email, phone, notes, tags, created_at, updated_at) VALUES (:id, :name, :email, :phone, :notes, :tags, :created_at, :updated_at)",
         customer,
     )
+    customer["contact_id"] = kit.link_row(connection, "bk_customers", customer["id"])
     return customer
 
 

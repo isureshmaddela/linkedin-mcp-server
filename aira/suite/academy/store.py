@@ -142,6 +142,7 @@ def ensure(connection: sqlite3.Connection) -> None:
     kit.ensure_core(connection)
     kit.ensure(connection, "academy.v1", SCHEMA)
     kit.ensure(connection, "academy.reviews.v1", REVIEW_SCHEMA)
+    kit.contact_columns(connection, "ac_enrolments")
 
 
 # ---------------------------------------------------------------------------

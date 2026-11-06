@@ -178,7 +178,9 @@
     const live = order.fulfilment_status !== "cancelled";
     // A refunded or cancelled order is not paid again (that would count its revenue twice): place a new order.
     if (order.payment_status === "unpaid" && live) actions.push(act("Mark paid", "paid", {}, ""));
-    if (order.payment_status === "paid") actions.push(act("Mark unpaid", "unpaid", {}, "ghost sm"), S.button("Refund", async () => { if (await Aira.confirm({ title: "Refund this order", message: "Mark the order refunded? Its revenue stops counting. Send the money back through your payment provider yourself.", confirmLabel: "Mark refunded", danger: true })) { await call(`/orders/${orderId}/refund`, { method: "POST", body: {} }); await refresh(); } }, { kind: "ghost sm" }));
+    // Paid online, the refund goes back through Razorpay from the Online payment card; paid by hand, the shop marks it.
+    const paidOnline = (order.payments || []).some((p) => ["paid", "partially_refunded"].includes(p.status));
+    if (order.payment_status === "paid" && !paidOnline) actions.push(act("Mark unpaid", "unpaid", {}, "ghost sm"), S.button("Refund", async () => { if (await Aira.confirm({ title: "Refund this order", message: "Mark the order refunded? Its revenue stops counting. Send the money back through your payment provider yourself.", confirmLabel: "Mark refunded", danger: true })) { await call(`/orders/${orderId}/refund`, { method: "POST", body: {} }); await refresh(); } }, { kind: "ghost sm" }));
     if (live && order.fulfilment_status === "placed") actions.push(act("Packed", "fulfil", { status: "packed" }));
     if (live && ["placed", "packed"].includes(order.fulfilment_status)) actions.push(S.button("Shipped", async () => {
       const result = await S.edit({ title: `Ship order #${order.number}`, fields: [{ name: "tracking_url", label: "Tracking link", type: "url", placeholder: "https://", hint: "Optional. The customer gets it in the shipping email." }], values: { tracking_url: order.tracking_url }, submitLabel: "Mark shipped", onSave: (values) => call(`/orders/${orderId}/fulfil`, { method: "POST", body: { status: "shipped", tracking_url: values.tracking_url } }) });
@@ -232,6 +234,7 @@
       h("div", { class: "btn-row" }, S.pill(order.payment_status, TONES), S.pill(order.fulfilment_status, TONES), order.customer_says_paid_at && order.payment_status === "unpaid" ? h("span", { class: "muted", text: `Customer says paid ${Aira.fmt.ago(order.customer_says_paid_at)}` }) : null),
       h("div", { class: "btn-row" }, ...actions),
       S.section("Items", lines, totals),
+      S.payments({ app: "shop", objectType: "order", objectId: orderId, requests: order.payments || [], payable: order.payment_status === "unpaid" && live, onChange: refresh }),
       businessBox,
       S.section("Customer", customer),
       S.share({ title: order.buyer_type === "business" ? "Order and invoice page" : "Customer's order page", text: "Shows the order, its status and how to pay.", link: order.link, onCreate: async () => (await call(`/orders/${orderId}/link`, { method: "POST", body: {} })).link, onRevoke: async () => { await call(`/orders/${orderId}/link`, { method: "DELETE" }); } }),

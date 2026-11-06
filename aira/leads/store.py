@@ -154,6 +154,16 @@ def ensure_schema(connection: sqlite3.Connection) -> None:
     connection.execute(
         "CREATE INDEX IF NOT EXISTS idx_lead_calls_lead ON lead_calls(lead_id, created_at)"
     )
+    from aira.suite import kit
+
+    kit.contact_columns(connection, "leads")  # each lead points at the suite's one customer record
+
+
+def _link_contact(connection: sqlite3.Connection, lead_id: str) -> None:
+    """The lead's contact in the suite's one customer record (kit.contact_for), by its email or phone."""
+    from aira.suite import kit
+
+    kit.link_row(connection, "leads", lead_id)
 
 
 # ---------------------------------------------------------------------------
@@ -551,6 +561,7 @@ def insert_lead(
         ),
     )
     _remember_keys(connection, lead_id, lead)
+    _link_contact(connection, lead_id)
     connection.commit()
     return {"lead": get_lead(connection, lead_id), "created": True}
 
@@ -680,6 +691,8 @@ def update_lead(
             "source_ref": current["source_ref"],
         },
     )
+    if lead["email"] != current["email"] or lead["phone"] != current["phone"]:
+        _link_contact(connection, lead_id)
     connection.commit()
     return get_lead(connection, lead_id)
 
@@ -716,6 +729,8 @@ def save_enrichment(
             lead_id,
         ),
     )
+    if (email and not current["email"]) or (phone and not current["phone"]):
+        _link_contact(connection, lead_id)  # found an email or phone: now it can join its contact
     connection.commit()
     return get_lead(connection, lead_id)
 

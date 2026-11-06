@@ -14,7 +14,7 @@ from aira.airaapi.http import Raw, Request, aira_route
 from aira.payments import apps as _payment_apps  # noqa: F401 - registers what each app lets customers pay
 from aira.payments import razorpay
 from aira.payments import service as payments
-from aira.suite import kit, life, public
+from aira.suite import app_enabled, customers, kit, life, public
 
 BASE = "/api/suite"
 TOKEN = f"({public.TOKEN_PATTERN})"
@@ -425,6 +425,7 @@ def revenue(request: Request) -> tuple[int, dict[str, Any]] | Raw:
                         "source_id",
                         "voided_at",
                         "kind",
+                        "covered_by",
                     ),
                 ),
                 "text/csv; charset=utf-8",
@@ -436,6 +437,94 @@ def revenue(request: Request) -> tuple[int, dict[str, Any]] | Raw:
             ),
             "lines": lines[:200],
         }
+
+
+# ---------------------------------------------------------------------------
+# customers: the one record of each person across the apps (aira.suite.customers)
+# ---------------------------------------------------------------------------
+
+CONTACT = "([0-9a-f]{32})"
+
+
+@aira_route("GET", f"{BASE}/customers")
+def customers_list(request: Request) -> tuple[int, dict[str, Any]]:
+    _grown_up(request)
+    with request.connect() as connection:
+        return 200, customers.search(
+            connection,
+            q=request.q("q"),
+            app=request.q("app"),
+            limit=request.qint("limit", 200, 1, 1000),
+        )
+
+
+@aira_route("GET", f"{BASE}/customers/{CONTACT}")
+def customers_get(request: Request) -> tuple[int, dict[str, Any]]:
+    _grown_up(request)
+    with request.connect() as connection:
+        return 200, customers.get(connection, request.match.group(1))
+
+
+@aira_route("PATCH", f"{BASE}/customers/{CONTACT}")
+def customers_update(request: Request) -> tuple[int, dict[str, Any]]:
+    _grown_up(request)
+    with request.connect() as connection:
+        return 200, {"contact": customers.update(connection, request.match.group(1), request.payload)}
+
+
+@aira_route("POST", f"{BASE}/customers/{CONTACT}/merge")
+def customers_merge(request: Request) -> tuple[int, dict[str, Any]]:
+    """Merge ``other_id`` into this customer: its records, deals and lookup keys move here and it is gone."""
+    _grown_up(request)
+    other = kit.text(request.payload.get("other_id"), "the customer to merge", max_len=64, required=True)
+    with request.connect() as connection:
+        result = customers.merge(connection, request.match.group(1), other, actor=_actor(request))
+    request.audit("suite.customer_merge", "contact", request.match.group(1), {"merged": other, "moved": result["moved"]})
+    return 200, result
+
+
+@aira_route("POST", f"{BASE}/customers/{CONTACT}/sales")
+def customers_to_sales(request: Request) -> tuple[int, dict[str, Any]]:
+    _grown_up(request)
+    with request.connect() as connection:
+        result = customers.send_to_sales(
+            connection, "suite", "contact", request.match.group(1), request.payload, actor=_actor(request)
+        )
+    request.audit("suite.send_to_sales", "contact", request.match.group(1), {"deal": result["deal"]["id"]})
+    return (201 if result["created"] else 200), result
+
+
+@aira_route("GET", f"{BASE}/sales/handoff")
+def sales_handoff_get(request: Request) -> tuple[int, dict[str, Any]]:
+    """The deal a Marketing lead or a Service case was sent to Sales as (``deal`` is null when it was not)."""
+    _grown_up(request)
+    with request.connect() as connection:
+        return 200, {
+            "deal": customers.handoff_for(
+                connection,
+                kit.text(request.q("app"), "the app", max_len=40, required=True),
+                kit.text(request.q("object_type"), "what was sent", max_len=40, required=True),
+                kit.text(request.q("object_id"), "the item", max_len=64, required=True),
+            ),
+            "sales_available": app_enabled("studio"),
+        }
+
+
+@aira_route("POST", f"{BASE}/sales/handoff")
+def sales_handoff(request: Request) -> tuple[int, dict[str, Any]]:
+    """Send to Sales: ``{app: "marketing", object_type: "lead"}`` or ``{app: "service", object_type: "case"}`` with
+    its ``object_id`` becomes an open deal in the Sales pipeline (once: sending it again returns that deal)."""
+    _grown_up(request)
+    payload = request.payload
+    app = kit.text(payload.get("app"), "the app", max_len=40, required=True)
+    object_type = kit.text(payload.get("object_type"), "what to send", max_len=40, required=True)
+    object_id = kit.text(payload.get("object_id"), "the item", max_len=64, required=True)
+    with request.connect() as connection:
+        result = customers.send_to_sales(
+            connection, app, object_type, object_id, payload, actor=_actor(request)
+        )
+    request.audit("suite.send_to_sales", app, object_id, {"deal": result["deal"]["id"]})
+    return (201 if result["created"] else 200), result
 
 
 # ---------------------------------------------------------------------------
