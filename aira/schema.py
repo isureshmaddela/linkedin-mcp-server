@@ -727,6 +727,13 @@ MIGRATIONS: tuple[Migration, ...] = (
         "cached AI summaries of a contact's story and the do-not-contact list for recruiter outreach.",
         _recruiter_contacts,
     ),
+    Migration(
+        21,
+        "autopilot_reliability",
+        "Auto-apply runs count their tries and keep when the next retry is due (passing failures are tried again "
+        "twice; a run whose result is unknown waits for the person as interrupted).",
+        _autopilot,
+    ),
 )
 
 

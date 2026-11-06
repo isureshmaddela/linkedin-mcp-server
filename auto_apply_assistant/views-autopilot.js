@@ -16,9 +16,13 @@
     unsupported: ["Apply manually", ""],
     already_applied: ["Already applied", ""],
     skipped: ["Skipped", ""],
+    interrupted: ["Check the site", "warn"],
   };
   const intervalLabel = (minutes) => (INTERVALS.find(([value]) => value === minutes) || [0, `Every ${minutes} minutes`])[1];
   const statusBadge = (status) => { const [label, tone] = STATUS[status] || [fmt.stage(status), ""]; return h("span", { class: `badge aap-status ${tone}`, text: label }); };
+  // A run waiting for a retry says when; any run tried more than once says which try it is on.
+  const runBadge = (run) => (run.status === "queued" && run.next_try_at ? h("span", { class: "badge aap-status info", text: `Tries again ${fmt.ago(run.next_try_at)}` }) : statusBadge(run.status));
+  const tryNote = (run) => (run.attempts > 1 || (run.status === "queued" && run.next_try_at) ? h("small", { class: "muted aap-tries", text: `Try ${Math.max(1, run.attempts)} of ${run.max_attempts || 3}` }) : null);
   const jobLabel = (run) => [run.job && run.job.title, run.job && run.job.company].filter(Boolean).join(" · ") || run.job_id;
   const toggle = (...args) => Aira.serp.toggleSwitch(...args);
 
@@ -103,6 +107,25 @@
       const body = h("div", { class: "aap-open-body" });
       const head = h("header", {}, h("div", {}, h("button", { type: "button", class: "aap-job-link", text: jobLabel(run), onclick: () => Aira.openJob(run.job_id) }), h("div", { class: "aap-meta" }, statusBadge(run.status), run.score != null ? h("span", { class: "badge", text: `${Math.round(run.score)}% match` }) : null, run.ats ? h("span", { class: "badge source", text: run.ats }) : null, h("small", { class: "muted", text: fmt.ago(run.finished_at || run.created_at) }))));
       const skip = h("button", { type: "button", class: "btn ghost sm", text: "Skip this job", onclick: (event) => withBusy(event.currentTarget, async () => { await api(`${BASE}/runs/${run.run_id}/skip`, { method: "POST", body: {} }); toast("Skipped. Monosage will not apply to it.", "success"); load(); }) });
+      const site = run.application_url ? h("a", { class: "btn secondary sm", href: run.application_url, target: "_blank", rel: "noopener noreferrer", text: "Open the application ↗" }) : null;
+      const applied = h("button", { type: "button", class: "btn secondary sm", text: "I applied", onclick: () => appliedDialog(run) });
+      const details = h("button", { type: "button", class: "btn ghost sm", text: "Details", onclick: () => runDrawer(run.run_id) });
+      if (run.status === "interrupted") {
+        body.append(h("p", { class: "note warn", text: run.error || "Monosage could not confirm whether this was sent; check the site, then choose I applied or Try again." }));
+        const again = h("button", { type: "button", class: "btn sm", text: "Try again" });
+        again.addEventListener("click", () => withBusy(again, async () => {
+          if (!(await Aira.confirm({ title: "Try this application again?", message: `${jobLabel(run)}. Check the site first: if the application already went through, choose I applied instead, so it is not sent twice.`, confirmLabel: "Try again" }))) return;
+          await api(`${BASE}/runs/${run.run_id}/retry`, { method: "POST", body: {} });
+          afterStart("Trying again… the result appears here in a moment.");
+        }));
+        actions.append(site, applied, again, details, skip);
+        return h("article", { class: `aap-open ${run.status}`, "aria-label": jobLabel(run) }, head, body, actions);
+      }
+      if (run.status === "unsupported") {
+        body.append(h("p", { class: "note", text: run.error || "Monosage cannot fill this application. Apply on the site, then tell Monosage you did." }));
+        actions.append(site, applied, details, skip);
+        return h("article", { class: `aap-open ${run.status}`, "aria-label": jobLabel(run) }, head, body, actions);
+      }
       if (run.status === "ready") {
         body.append(h("p", { text: "Monosage filled the whole form. Look it over, then submit it with one click." }));
         const submit = h("button", { type: "button", class: "btn", text: "Submit application" });
@@ -144,9 +167,27 @@
           });
         });
         if (questions.length) { form.append(h("div", { class: "btn-row" }, go)); body.append(form); }
-        actions.append(h("a", { class: "btn secondary sm", href: run.application_url || "#", target: "_blank", rel: "noopener noreferrer", text: "Apply on the site ↗" }), h("button", { type: "button", class: "btn ghost sm", text: "Details", onclick: () => runDrawer(run.run_id) }), skip);
+        actions.append(h("a", { class: "btn secondary sm", href: run.application_url || "#", target: "_blank", rel: "noopener noreferrer", text: "Apply on the site ↗" }), applied, details, skip);
       }
       return h("article", { class: `aap-open ${run.status}`, "aria-label": jobLabel(run) }, head, body, actions);
+    }
+
+    // "I applied": the person applied on the site; Monosage records it with the day (today unless they change it).
+    function appliedDialog(run) {
+      const today = new Date();
+      const iso = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      const day = h("input", { type: "date", id: "aapAppliedOn", value: iso(today), max: iso(today), required: true });
+      const body = h("div", {}, h("p", { class: "muted", text: `${jobLabel(run)}. Monosage records the application as yours, moves the job to Applied and reminds you to follow up in a week.` }), ui.field("The day you applied", day));
+      Aira.modal({ title: "You applied on the site?", body, actions: [
+        { label: "Cancel", kind: "ghost" },
+        { label: "Record it", kind: "", onClick: async () => {
+          if (!day.value) { toast("Choose the day you applied.", "error"); return false; }
+          await api(`${BASE}/runs/${run.run_id}/applied`, { method: "POST", body: { applied_on: day.value } });
+          toast("Recorded. The job is in Applied.", "success");
+          load();
+          return true;
+        } },
+      ] });
     }
 
     // ---- plans ---------------------------------------------------------------------------------
@@ -195,7 +236,7 @@
         h("thead", {}, h("tr", {}, ...["Job", "Status", "Match", "When", "Confirmation", ""].map((label) => h("th", { scope: "col", text: label })))),
         h("tbody", {}, ...runs.map((run) => h("tr", {},
           h("td", {}, h("button", { type: "button", class: "aap-job-link", text: jobLabel(run), onclick: () => Aira.openJob(run.job_id) }), run.error && run.status !== "submitted" ? h("div", { class: "aap-err", text: run.error }) : null),
-          h("td", {}, statusBadge(run.status)),
+          h("td", {}, runBadge(run), tryNote(run)),
           h("td", { class: "num", text: run.score != null ? `${Math.round(run.score)}%` : "—" }),
           h("td", { text: fmt.ago(run.finished_at || run.created_at) }),
           h("td", { text: run.confirmation_number || "—" }),
@@ -323,7 +364,7 @@
       body.replaceChildren(
         h("div", { class: "btn-row", style: { marginBottom: "12px" } }, statusBadge(run.status), h("button", { type: "button", class: "btn secondary sm", text: "Open job", onclick: () => Aira.openJob(run.job_id) }), run.application_url ? h("a", { class: "btn ghost sm", href: run.application_url, target: "_blank", rel: "noopener noreferrer", text: "Application page ↗" }) : null),
         run.error ? h("p", { class: `note ${run.status === "submitted" ? "" : "warn"}`, text: run.error }) : null,
-        ui.kv([["Mode", run.mode === "apply" ? "Apply automatically" : "Ask before submitting"], ["Started by", run.trigger === "user" ? "You" : "Schedule"], ["Form", run.ats || run.route || "—"], ["Confirmation", run.confirmation_number || (run.status === "submitted" ? "Shown on the page (see screenshot)" : "—")], ["Started", fmt.datetime(run.started_at || run.created_at)], ["Finished", run.finished_at ? fmt.datetime(run.finished_at) : "—"]]),
+        ui.kv([["Mode", run.mode === "apply" ? "Apply automatically" : "Ask before submitting"], ["Started by", run.trigger === "user" ? "You" : "Schedule"], ["Form", run.ats || run.route || "—"], ["Confirmation", run.confirmation_number || (run.status === "submitted" ? "Shown on the page (see screenshot)" : "—")], ["Started", fmt.datetime(run.started_at || run.created_at)], ["Finished", run.finished_at ? fmt.datetime(run.finished_at) : "—"], ["Tries", `${Math.max(1, run.attempts || 0)} of ${run.max_attempts || 3}`], run.status === "queued" && run.next_try_at ? ["Next try", fmt.datetime(run.next_try_at)] : ["", null]]),
         shot,
         drafted.length ? h("p", { class: "note" }, h("span", { text: drafted.length === 1 ? "1 answer was drafted by the AI from your resume." : `${drafted.length} answers were drafted by the AI from your resume.` }), " ", h("span", { text: drafted.every((d) => d.approved_by === "you") ? "You approved them." : drafted.some((d) => d.approved_by === "auto") ? "Confident ones were used without review." : "" })) : null,
         questions.length ? h("div", { class: "card", style: { marginTop: "12px" } }, h("h3", { text: `Questions on the form (${questions.length})` }), h("ul", { class: "aap-qlist" }, ...questions.map((q) => h("li", { class: q.status }, h("span", {}, q.label + (q.required ? " *" : ""), q.drafted ? h("span", { class: "badge aap-drafted-badge", title: q.drafted.based_on || "", text: q.drafted.approved_by === "auto" ? "AI-drafted" : q.drafted.edited ? "AI-drafted, edited by you" : "AI-drafted, approved by you" }) : null), h("span", { class: "muted", text: q.value ? `${q.value}` : q.message || fmt.stage(q.status) }))))) : null,
@@ -358,7 +399,8 @@
       return card;
     }
     const last = runs[0];
-    if (last) card.append(h("p", { class: "muted" }, "Last attempt: ", statusBadge(last.status), last.error ? ` ${last.error}` : ""));
+    if (last) card.append(h("p", { class: "muted" }, "Last attempt: ", runBadge(last), last.error ? ` ${last.error}` : ""));
+    if (last && last.status === "interrupted") card.append(h("p", { class: "note warn", text: "Check the site before you apply again: the last attempt may already have gone through." }));
     card.append(h("p", { class: "muted", text: "Monosage fills the employer's form with your profile and confirmed answers. Questions it cannot answer come back to you; nothing is guessed." }),
       h("p", { class: "muted", text: job.auto_review_drafts === false ? "The AI drafts answers from your resume for the rest; confident ones are submitted. Sensitive questions always wait for you." : "The AI drafts answers from your resume for the rest; you review them before anything is sent. Sensitive questions always wait for you." }));
     const start = (mode) => async (event) => withBusy(event.currentTarget, async () => {

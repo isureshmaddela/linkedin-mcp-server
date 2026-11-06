@@ -174,6 +174,39 @@ class Scheduler:
                 queued += 1
         return queued
 
+    @staticmethod
+    def _autopilot_recovery(
+        connection: sqlite3.Connection, now_iso: str
+    ) -> dict[str, Any]:
+        """Auto-apply work besides plans: a retry that is due, or a run running past its time limit (a lost worker).
+
+        Either queues ``autopilot.due``, whose worker interrupts lost runs and tries due retries before the plans
+        (``auto_apply_assistant._autopilot_recover``). ``next`` is when the next of them comes due (epoch).
+        """
+        from aira.autopilot import RUN_TIME_LIMIT
+
+        moment = datetime.fromisoformat(now_iso)
+        stale_iso = (moment - RUN_TIME_LIMIT).isoformat(timespec="seconds")
+        try:
+            due = connection.execute(
+                "SELECT 1 FROM application_runs WHERE (status = 'queued' AND next_try_at IS NOT NULL AND next_try_at <= ?) "
+                "OR (status = 'running' AND COALESCE(started_at, created_at) < ?) LIMIT 1",
+                (now_iso, stale_iso),
+            ).fetchone()
+            row = connection.execute(
+                "SELECT MIN(next_try_at), (SELECT MIN(COALESCE(started_at, created_at)) FROM application_runs "
+                "WHERE status = 'running') FROM application_runs WHERE status = 'queued' AND next_try_at IS NOT NULL"
+            ).fetchone()
+        except sqlite3.Error:  # no runs table yet, or before migration 21
+            return {"due": False, "next": None}
+        moments = [_to_epoch(row[0]) if row else None]
+        if row and row[1]:
+            started = _to_epoch(row[1])
+            if started is not None:
+                moments.append(started + int(RUN_TIME_LIMIT.total_seconds()) + 1)
+        upcoming = [value for value in moments if value is not None]
+        return {"due": due is not None, "next": min(upcoming) if upcoming else None}
+
     def _due(self, path: Path, now_iso: str) -> dict[str, Any]:
         result: dict[str, Any] = {
             "plans": False,
@@ -200,6 +233,12 @@ class Scheduler:
                 "SELECT MIN(next_run_at) FROM autopilot_plans WHERE enabled = 1"
             ).fetchone()[0]
             result["next_due"] = _to_epoch(earliest)
+            recovery = self._autopilot_recovery(connection, now_iso)
+            result["plans"] = result["plans"] or recovery["due"]
+            if recovery["next"] is not None and (
+                result["next_due"] is None or recovery["next"] < result["next_due"]
+            ):
+                result["next_due"] = recovery["next"]
             try:
                 result["schedules"] = bool(
                     connection.execute(
