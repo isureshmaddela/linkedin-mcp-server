@@ -69,7 +69,12 @@ Rules:
   photos that match the topic from https://loremflickr.com/1200/800/<keyword>?lock=<number> (e.g. coffee, bakery,
   gym, office; a different lock number for each picture), inline SVG, or CSS gradients. Give every image alt text.
 - Accessibility: semantic landmarks, labels on form fields, visible focus, alt text, sufficient contrast.
-- There is no server: a contact form shows a friendly thank-you message with JavaScript (or uses mailto:).
+- The business's own pages (its contact form, booking page, shop, events, courses, help centre) are listed in the
+  request when it has them. Every matching button and link ("Contact us", "Book now", "Shop", "Tickets") goes to
+  that exact address, with target="_blank" rel="noopener". The contact section links to the contact form address:
+  do not build a form of your own there (messages sent through the contact form reach the business as leads).
+- Never fake sending: no form that only shows a thank-you message, and no mailto: forms. Without a contact form
+  address, the contact section shows the business's email and phone as links (mailto:, tel:).
 - Wrap any use of localStorage in try/catch: the preview runs in a sandbox where it may be unavailable.
 - Do not put code fences inside <file> blocks. Do not explain outside the tags."""
 
@@ -97,6 +102,36 @@ BUYER_NOTES = {
 }
 
 
+def links_note(
+    links: list[dict[str, Any]] | None, contact: dict[str, str] | None = None
+) -> list[str]:
+    """The business's own public pages and contact details, for the prompt (see the rule in SYSTEM)."""
+    lines: list[str] = []
+    if links:
+        lines.append(
+            "The business's own pages. Use these exact addresses for the matching buttons and links:"
+        )
+        lines.extend(
+            f"- {link['label']}{': ' + link['title'] if link.get('title') else ''}: {link['url']}"
+            for link in links
+            if str(link.get("url") or "").startswith(("https://", "http://"))
+        )
+    details = [
+        f"{label}: {value}"
+        for label, value in (
+            ("Business name", (contact or {}).get("name", "")),
+            ("Email", (contact or {}).get("email", "")),
+            ("Phone", (contact or {}).get("phone", "")),
+            ("Address", (contact or {}).get("address", "")),
+        )
+        if value
+    ]
+    if details:
+        lines.append("The business's contact details (use them, never made-up ones):")
+        lines.extend(f"- {item}" for item in details)
+    return [*lines, ""] if lines else []
+
+
 def user_prompt(
     request: str,
     *,
@@ -105,11 +140,15 @@ def user_prompt(
     assets: list[dict[str, Any]] | None = None,
     project_name: str = "",
     sell_to: str = "",
+    links: list[dict[str, Any]] | None = None,
+    contact: dict[str, str] | None = None,
 ) -> str:
-    """The message for one run: the request, and for a change the site's current files and the recent turns."""
+    """The message for one run: the business's own pages and details, the request, and for a change the site's
+    current files and the recent turns."""
     lines: list[str] = []
     if sell_to in BUYER_NOTES:
         lines.extend([BUYER_NOTES[sell_to], ""])
+    lines.extend(links_note(links, contact))
     if assets:
         lines.append("Files the person uploaded (use them where they fit):")
         lines.extend(f"- assets/{a['name']} ({a['mime']})" for a in assets)

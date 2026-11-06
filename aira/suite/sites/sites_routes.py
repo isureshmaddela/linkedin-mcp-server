@@ -179,7 +179,11 @@ def project_generate(request: Request) -> tuple[int, dict[str, Any]]:
     with closing(_open(request)) as connection:
         api_store.ensure_schema(connection)
         row, config, context = service.start_run(
-            connection, request.secret_store, _id(request), request.payload
+            connection,
+            request.secret_store,
+            _id(request),
+            request.payload,
+            origin=request,  # the address the business's own links (contact form, shop) use in the site
         )
     result = service.run_build(
         request.connect, row, config, context, actor=_actor(request)
