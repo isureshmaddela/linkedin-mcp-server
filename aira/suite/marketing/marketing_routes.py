@@ -438,6 +438,11 @@ def subscribers_list(request: Request) -> tuple[int, dict[str, Any]] | Raw:
                 connection,
                 "SELECT COUNT(*) FROM mk_subscribers WHERE status = 'unsubscribed'",
             ),
+            # double opt-in: signed up on a form, not confirmed from the email yet
+            "pending": store.count(
+                connection,
+                "SELECT COUNT(*) FROM mk_subscribers WHERE status = 'pending'",
+            ),
         }
         tags = service.all_tags(connection)
     if request.q("format") == "csv":
@@ -477,6 +482,17 @@ def subscribers_update(request: Request) -> tuple[int, dict[str, Any]]:
                 connection, request.match.group(1), request.payload
             )
         }
+
+
+@aira_route("POST", f"{BASE}/subscribers/{ID}/confirm-again")
+def subscribers_confirm_again(request: Request) -> tuple[int, dict[str, Any]]:
+    """Send the double opt-in email again to someone who has not confirmed (at most once an hour)."""
+    with _connect(request) as connection:
+        subscriber = service.resend_confirmation(
+            connection, request.match.group(1), origin=request
+        )
+    request.audit("marketing.subscriber_confirm_again", "subscriber", request.match.group(1))
+    return 200, {"subscriber": subscriber}
 
 
 @aira_route("DELETE", f"{BASE}/subscribers/{ID}")

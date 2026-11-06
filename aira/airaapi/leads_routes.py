@@ -318,7 +318,9 @@ def items_bulk(request: Request) -> tuple[int, dict[str, Any]]:
 @aira_route("GET", f"{BASE}/items/{ID}")
 def item_get(request: Request) -> tuple[int, dict[str, Any]]:
     with _connect(request) as connection:
-        return 200, {"lead": store.get_lead(connection, request.match.group(1))}
+        lead = store.get_lead(connection, request.match.group(1))
+        # the follow-up sequences it is in, and when and why each one stopped
+        return 200, {"lead": lead, "sequences": sequences.lead_enrollments(connection, lead["id"])}
 
 
 @aira_route("PATCH", f"{BASE}/items/{ID}")

@@ -1818,6 +1818,43 @@ def confirm_subscription(
     return store.get(connection, "mk_subscribers", subscriber_id, "subscriber")
 
 
+def resend_confirmation(
+    connection: sqlite3.Connection, subscriber_id: str, *, origin: Any = None
+) -> dict[str, Any]:
+    """The business sends the double opt-in email again to someone who has not confirmed yet (it went to spam, or
+    they lost it). At most once an hour, like a form sent again; an unsubscribed address is never asked again."""
+    current = store.get(connection, "mk_subscribers", subscriber_id, "subscriber")
+    if current["status"] != "pending":
+        raise ValueError(
+            "Only someone who has not confirmed yet can be sent the confirmation email again."
+        )
+    last = current.get("confirm_sent_at")
+    if last and kit.parse_time(last) > kit.utcnow() - CONFIRM_AGAIN_AFTER:
+        raise ValueError(
+            "The confirmation email went to them less than an hour ago. Try again later."
+        )
+    connection.execute(
+        "UPDATE mk_subscribers SET confirm_sent_at = NULL WHERE id = ?", (subscriber_id,)
+    )
+    request_confirmation(
+        connection,
+        {"email": current["email"], "name": current["name"]},
+        source=current["source"] or "form",
+        campaign_id=current["campaign_id"],
+        origin=origin,
+    )
+    kit.log(
+        connection,
+        APP,
+        "subscriber",
+        f"Confirmation sent again to {current['email']}",
+        ref_type="subscriber",
+        ref_id=subscriber_id,
+    )
+    connection.commit()
+    return store.get(connection, "mk_subscribers", subscriber_id, "subscriber")
+
+
 def _withdraw_newsletters(connection: sqlite3.Connection, address: str) -> int:
     """An unsubscribe also stops newsletters already waiting in the outbox (approved or not)."""
     return kit.cancel_queued(

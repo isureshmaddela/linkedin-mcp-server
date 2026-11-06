@@ -191,6 +191,155 @@
       } catch { /* the list is only a convenience */ }
     }
     loadMessages();
+    if (lead.email) box.append(sequenceStatus(lead));
+    return box;
+  }
+
+  // ===========================================================================
+  // Follow-up sequences (aira/leads/sequences.py): a few emails with waits between them, stopped by a reply
+  // ===========================================================================
+
+  const ENROLL_LABEL = { active: "Running", finished: "Finished", stopped: "Stopped" };
+  const ENROLL_TONE = { active: "ok", finished: "", stopped: "warn" };
+
+  // The lead drawer: which sequences this lead is in, the step it is on, and when and why one stopped.
+  function sequenceStatus(lead) {
+    const box = h("div", { class: "ld-sequences", id: "ldLeadSequences" });
+    const load = async () => {
+      let entries = [];
+      let all = [];
+      try {
+        [entries, all] = await Promise.all([
+          api(`${BASE}/items/${lead.id}`, { silent: true }).then((out) => out.sequences || []),
+          api(`${BASE}/sequences`, { silent: true }).then((out) => out.sequences || []),
+        ]);
+      } catch { return; }
+      const taken = new Set(entries.map((entry) => entry.sequence_id));
+      const open = all.filter((sequence) => sequence.status === "active" && !taken.has(sequence.id));
+      const rows = entries.map((entry) => h("li", {},
+        tonedChip(ENROLL_LABEL[entry.status] || entry.status, ENROLL_TONE[entry.status]), " ",
+        h("strong", { text: entry.sequence_name || "A deleted sequence" }),
+        h("span", { class: "muted", text: entry.status === "active"
+          ? ` · step ${Math.min(entry.step + 1, entry.steps_total)} of ${entry.steps_total}${entry.next_at ? ` · next email ${fmt.datetime(entry.next_at)}` : ""}`
+          : entry.status === "stopped" ? ` · stopped ${fmt.datetime(entry.stopped_at)}: ${entry.stop_label || "stopped"}` : ` · all ${entry.steps_total} sent ${fmt.datetime(entry.finished_at)}` }),
+        entry.status === "active" ? btn("Stop", { sm: true, kind: "ghost", aria: `Stop ${entry.sequence_name}`, onClick: (event) => busy(event.currentTarget, async () => {
+          await api(`${BASE}/sequences/${entry.sequence_id}/stop`, { method: "POST", body: { lead_ids: [lead.id] } });
+          toast("Stopped. Its unsent emails left the outbox.", "success");
+          await load();
+        }) }) : null));
+      const pick = open.length ? ui.select(open.map((sequence) => [sequence.id, sequence.name]), open[0].id, { "aria-label": "Sequence" }) : null;
+      fill(box,
+        h("h4", { text: "Follow-up sequences" }),
+        rows.length ? h("ul", { class: "ld-calls", "aria-label": "Sequences for this lead" }, ...rows) : h("p", { class: "muted", text: "Not in a sequence." }),
+        pick ? h("div", { class: "btn-row" }, pick, btn("Add to the sequence", { sm: true, onClick: (event) => busy(event.currentTarget, async () => {
+          const out = await api(`${BASE}/sequences/${pick.value}/enroll`, { method: "POST", body: { lead_ids: [lead.id] } });
+          if (out.enrolled) toast("Added. The first email goes to your Outbox when it is due.", "success");
+          else toast((out.skipped[0] && out.skipped[0].reason) || "Not added.", "info");
+          await load();
+        }) })) : null);
+    };
+    load();
+    return box;
+  }
+
+  // The editor: a name, the steps (wait, subject, email) and whether each step waits for your approval.
+  function editSequence(sequence, onSaved) {
+    const current = sequence || { name: "", review: true, status: "active", steps: [{ delay_days: 0, subject: "", body: "" }] };
+    const name = h("input", { type: "text", maxlength: "120", value: current.name || "", "aria-label": "Name", placeholder: "Website follow-up" });
+    const review = h("input", { type: "checkbox", checked: current.review !== false });
+    const paused = h("input", { type: "checkbox", checked: current.status === "paused" });
+    const list = h("ol", { class: "ld-seq-steps" });
+    const error = h("p", { class: "ld-formerror", role: "alert" });
+    const stepRow = (step = {}) => {
+      const delay = h("input", { type: "number", min: "0", max: "90", value: String(step.delay_days ?? 3), "aria-label": "Wait (days)", class: "ld-seq-delay" });
+      const subject = h("input", { type: "text", maxlength: "200", value: step.subject || "", "aria-label": "Subject", placeholder: "Re: your website" });
+      const body = h("textarea", { rows: 5, maxlength: "4000", "aria-label": "Email", placeholder: "Hi {first_name}, ..." });
+      body.value = step.body || "";
+      const row = h("li", { class: "ld-seq-step" },
+        h("div", { class: "ld-grid" }, h("div", { class: "field" }, h("label", { text: "Wait (days)" }), delay), h("div", { class: "field" }, h("label", { text: "Subject" }), subject)),
+        h("div", { class: "field" }, h("label", { text: "Email" }), body),
+        btn("Remove this step", { sm: true, kind: "ghost", onClick: () => { row.remove(); renumber(); } }));
+      row.read = () => ({ delay_days: Number(delay.value || 0), subject: subject.value.trim(), body: body.value });
+      return row;
+    };
+    const renumber = () => [...list.children].forEach((row, index) => { row.dataset.step = String(index + 1); });
+    (current.steps || []).forEach((step) => list.append(stepRow(step)));
+    renumber();
+    const addStep = btn("Add a step", { sm: true, icon: "plus", onClick: () => { if (list.children.length >= 10) { error.textContent = "A sequence has at most 10 steps."; return; } list.append(stepRow({ delay_days: 3 })); renumber(); } });
+    Aira.modal({
+      title: sequence ? `Edit ${sequence.name}` : "New follow-up sequence",
+      wide: true,
+      body: h("div", { class: "ld-seq-editor" },
+        h("div", { class: "field" }, h("label", { text: "Name" }), name),
+        h("p", { class: "muted", text: "Step 1's wait counts from when you add a lead; every later wait counts from when the step before was sent. It stops by itself when the lead replies, unsubscribes, bounces or is marked qualified, disqualified or a customer. Use {first_name}, {name} and {company} in the text." }),
+        list, h("div", { class: "btn-row" }, addStep),
+        h("label", { class: "suite-check" }, review, h("span", { text: "Each email waits in the Outbox for my approval" })),
+        h("label", { class: "suite-check" }, paused, h("span", { text: "Paused (no new emails are written)" })),
+        error),
+      actions: [
+        { label: "Cancel", kind: "ghost" },
+        { label: "Save sequence", kind: "primary", onClick: async () => {
+          error.textContent = "";
+          const body = { name: name.value.trim(), review: review.checked, status: paused.checked ? "paused" : "active", steps: [...list.children].map((row) => row.read()) };
+          try {
+            if (sequence) await api(`${BASE}/sequences/${sequence.id}`, { method: "PATCH", body, silent: true });
+            else await api(`${BASE}/sequences`, { method: "POST", body, silent: true });
+          } catch (err) { error.textContent = message(err); return false; }
+          toast("Sequence saved.", "success");
+          if (onSaved) await onSaved();
+          return true;
+        } },
+      ],
+    });
+  }
+
+  // The people in one sequence: where each lead is, and when and why it stopped.
+  async function sequencePeople(sequence) {
+    const out = await api(`${BASE}/sequences/${sequence.id}`);
+    const rows = out.enrollments || [];
+    Aira.modal({
+      title: `${sequence.name}: people`,
+      wide: true,
+      body: rows.length ? h("div", { class: "table-wrap ld-table-wrap" }, h("table", { class: "table ld-table", id: "ldSeqPeople" },
+        h("caption", { class: "visually-hidden", text: "People in this sequence" }),
+        h("thead", {}, h("tr", {}, ...["Lead", "Status", "Step", "Next email", "Stopped"].map((t) => h("th", { text: t })))),
+        h("tbody", {}, ...rows.map((row) => h("tr", {},
+          h("td", { "data-label": "Lead", text: [row.lead_name, row.lead_company].filter(Boolean).join(" · ") || row.email }),
+          h("td", { "data-label": "Status" }, tonedChip(ENROLL_LABEL[row.status] || row.status, ENROLL_TONE[row.status])),
+          h("td", { "data-label": "Step", text: `${Math.min(Number(row.step) + (row.status === "active" ? 1 : 0), sequence.steps.length)} of ${sequence.steps.length}` }),
+          h("td", { "data-label": "Next email", text: row.status === "active" && row.next_at ? fmt.datetime(row.next_at) : "—" }),
+          h("td", { "data-label": "Stopped", text: row.status === "stopped" ? `${fmt.datetime(row.updated_at)}: ${row.stop_reason}` : "—" })))))) : h("p", { class: "muted", text: "Nobody yet. Open a lead and add them to this sequence." }),
+      actions: [{ label: "Close", kind: "ghost" }],
+    });
+  }
+
+  function sequencesPanel(box) {
+    const load = async () => {
+      let sequences = [];
+      try { sequences = (await api(`${BASE}/sequences`, { silent: true })).sequences || []; } catch (err) { fill(box, h("p", { class: "ld-formerror", text: message(err) })); return; }
+      const rows = sequences.map((sequence) => h("tr", { dataset: { id: sequence.id } },
+        h("td", { "data-label": "Sequence" }, h("strong", { text: sequence.name }), h("div", { class: "muted", text: `${plural(sequence.steps.length, "step")} · ${sequence.review ? "you approve each email" : "approved once"}` })),
+        h("td", { "data-label": "Status" }, tonedChip(sequence.status === "active" ? "Active" : "Paused", sequence.status === "active" ? "ok" : "warn")),
+        h("td", { "data-label": "People", text: `${sequence.counts.active} running · ${sequence.counts.finished} finished · ${sequence.counts.stopped} stopped (${sequence.counts.replied} replied)` }),
+        h("td", {}, h("div", { class: "btn-row" },
+          btn("People", { sm: true, kind: "ghost", aria: `People in ${sequence.name}`, onClick: (event) => busy(event.currentTarget, () => sequencePeople(sequence)) }),
+          btn("Edit", { sm: true, kind: "ghost", aria: `Edit ${sequence.name}`, onClick: () => editSequence(sequence, load) }),
+          btn("Delete", { sm: true, kind: "ghost", aria: `Delete ${sequence.name}`, onClick: (event) => busy(event.currentTarget, async () => {
+            if (!(await Aira.confirm({ title: "Delete this sequence", message: `Delete ${sequence.name}? It stops for everyone in it, and its unsent emails leave the outbox.`, confirmLabel: "Delete", danger: true }))) return;
+            await api(`${BASE}/sequences/${sequence.id}`, { method: "DELETE" });
+            toast("Sequence deleted.", "success");
+            await load();
+          }) })))));
+      fill(box,
+        h("div", { class: "panel-head" }, h("h2", { id: "ldSeqTitle", text: "Follow-up sequences" }), btn("New sequence", { icon: "plus", sm: true, id: "ldSeqNew", onClick: () => editSequence(null, load) })),
+        h("div", { class: "panel-body" },
+          h("p", { class: "muted", text: "A few emails with waits between them, written into your Outbox when each is due. It stops for a lead as soon as they reply." }),
+          rows.length ? h("div", { class: "table-wrap ld-table-wrap" }, h("table", { class: "table ld-table", id: "ldSeqTable" },
+            h("caption", { class: "visually-hidden", text: "Follow-up sequences" }),
+            h("thead", {}, h("tr", {}, ...["Sequence", "Status", "People", ""].map((t) => h("th", { text: t })))),
+            h("tbody", {}, ...rows))) : h("p", { class: "muted", text: "No sequences yet." })));
+    };
+    load();
     return box;
   }
 
@@ -422,9 +571,10 @@
 
     if (!(await loadAll())) return;
     paintStrip(); paintOutbox(); paintSender(); paintDnc();
+    const sequenceBox = sequencesPanel(h("section", { class: "panel ld-panel", id: "ldSequences", "aria-labelledby": "ldSeqTitle" }));
     fill(content, h("div", { class: "ld-outreach" },
-      h("nav", { class: "ld-jump", "aria-label": "On this page" }, h("a", { href: "#ldOutbox", text: "Outbox" }), h("a", { href: "#ldSender", text: "Sender settings" }), h("a", { href: "#ldDnc", text: "Do-not-contact list" })),
-      strip, outboxBox, senderBox, dncBox, compliance));
+      h("nav", { class: "ld-jump", "aria-label": "On this page" }, h("a", { href: "#ldOutbox", text: "Outbox" }), h("a", { href: "#ldSequences", text: "Follow-up sequences" }), h("a", { href: "#ldSender", text: "Sender settings" }), h("a", { href: "#ldDnc", text: "Do-not-contact list" })),
+      strip, outboxBox, sequenceBox, senderBox, dncBox, compliance));
   }
 
   Aira.leads.outreach = { render, writeEmails, showDraftResult };
