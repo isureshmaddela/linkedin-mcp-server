@@ -65,7 +65,14 @@ __all__ = [
 
 MODES = ("apply", "review")
 PLAN_SOURCES = ("linkedin", "aira_jobs", "google_jobs")
-BOARD_SOURCES = ("greenhouse", "lever", "ashby", "smartrecruiters")
+BOARD_SOURCES = (
+    "greenhouse",
+    "lever",
+    "ashby",
+    "smartrecruiters",
+    "workable",
+    "recruitee",
+)
 WORKPLACES = ("", "remote", "hybrid", "on_site")
 JOB_TYPES = ("", "full_time", "part_time", "contract", "temporary", "internship")
 RUN_STATUSES = (
@@ -292,7 +299,7 @@ def _boards(raw: Any) -> list[dict[str, str]]:
         identifier = str(item.get("identifier", "")).strip()[:128]
         if source not in BOARD_SOURCES:
             raise ValueError(
-                "Company boards can be Greenhouse, Lever, Ashby or SmartRecruiters."
+                "Company boards can be Greenhouse, Lever, Ashby, SmartRecruiters, Workable or Recruitee."
             )
         if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]{0,127}", identifier):
             raise ValueError(

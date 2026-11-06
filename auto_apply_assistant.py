@@ -4917,7 +4917,14 @@ def _run_suite_background() -> None:
 # Career Copilot services (database-bound wrappers over the aira domain modules)
 # ---------------------------------------------------------------------------
 
-ATS_SOURCES = ("greenhouse", "lever", "ashby", "smartrecruiters")
+ATS_SOURCES = (
+    "greenhouse",
+    "lever",
+    "ashby",
+    "smartrecruiters",
+    "workable",
+    "recruitee",
+)
 JOB_VIEWS = (
     "all",
     "linkedin",
@@ -5974,7 +5981,7 @@ def _import_job_from_url(url: str) -> dict[str, Any]:
     portal = detect_portal(url)
     if portal is None:
         raise ValueError(
-            "This URL is not a supported company portal yet. Supported: Greenhouse, Lever, Ashby, SmartRecruiters, LinkedIn."
+            "This URL is not a supported company portal yet. Supported: Greenhouse, Lever, Ashby, SmartRecruiters, Workable, Recruitee, LinkedIn."
         )
     if portal.external_id is None:
         raise ValueError(

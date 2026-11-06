@@ -5,7 +5,7 @@
   const { h, api, fmt, ui, toast, withBusy } = Aira;
   const BASE = "/api/autopilot";
   const INTERVALS = [[60, "Every hour"], [120, "Every 2 hours"], [240, "Every 4 hours"], [480, "Every 8 hours"], [720, "Twice a day"], [1440, "Once a day"]];
-  const BOARD_LABELS = { greenhouse: "Greenhouse", lever: "Lever", ashby: "Ashby", smartrecruiters: "SmartRecruiters" };
+  const BOARD_LABELS = { greenhouse: "Greenhouse", lever: "Lever", ashby: "Ashby", smartrecruiters: "SmartRecruiters", workable: "Workable", recruitee: "Recruitee" };
   const STATUS = {
     queued: ["Queued", ""],
     running: ["Applying…", "info"],
@@ -280,7 +280,7 @@
           h("label", { class: "check" }, linkedin, "LinkedIn (needs LinkedIn connected)"),
           h("label", { class: "check" }, airaJobs, "Free job boards (Himalayas, The Muse, Remotive, Jobicy, Arbeitnow), no key needed"),
           h("label", { class: "check" }, google, "Google Jobs (uses one SerpApi search per position per run)"),
-          ui.field("Company boards", boards, "Greenhouse, Lever, Ashby or SmartRecruiters, as source: identifier")),
+          ui.field("Company boards", boards, "Greenhouse, Lever, Ashby, SmartRecruiters, Workable or Recruitee, as source: identifier")),
         h("fieldset", { class: "aap-fieldset" }, h("legend", { text: "When to apply" }),
           h("div", { class: "form-grid" }, ui.field("Minimum match", minScore), ui.field("Applications per run", perRun), ui.field("Run", every)),
           h("label", { class: "check" }, modeApply, h("span", {}, h("strong", { text: "Apply automatically. " }), "Monosage submits forms it can fill completely; anything else waits for you.")),

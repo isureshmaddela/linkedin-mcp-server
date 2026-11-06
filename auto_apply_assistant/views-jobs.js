@@ -207,7 +207,7 @@
     const w2 = h("input", { type: "checkbox" });
     const hint = h("p", { class: "muted", style: { margin: "8px 0 0", fontSize: "12px" } });
     const submit = h("button", { type: "submit", class: "btn" }, "Find roles");
-    const importUrl = h("input", { type: "url", placeholder: "Paste a LinkedIn, Greenhouse, Lever, Ashby, or SmartRecruiters job URL", maxlength: 500 });
+    const importUrl = h("input", { type: "url", placeholder: "Paste a LinkedIn, Greenhouse, Lever, Ashby, SmartRecruiters, Workable or Recruitee job URL", maxlength: 500 });
     const importBtn = h("button", { type: "button", class: "btn secondary" }, "Import job");
 
     const grid = h("div", { class: "form-grid" }, ui.field("Role or keywords", keywords), ui.field("Location", location), ui.field("Source", sourceSelect), identifierField, ui.field("Arrangement", workType), ui.field("Employment type", jobType), ui.field("Depth", pages), h("div", { class: "field" }, h("span", { class: "label", text: "Pay wording" }), h("label", { class: "check" }, w2, "Search W-2 wording")));
@@ -223,7 +223,7 @@
       identifier.required = Boolean(chosen.identifier_label);
       identifier.placeholder = chosen.identifier_label || "";
       pages.parentElement.hidden = !["linkedin", "google_jobs"].includes(chosen.source);
-      const structured = ["linkedin", "google_jobs", "aira_jobs", "lever", "ashby", "smartrecruiters"].includes(chosen.source);
+      const structured = ["linkedin", "google_jobs", "aira_jobs", "lever", "ashby", "smartrecruiters", "workable", "recruitee"].includes(chosen.source);
       workType.disabled = !structured;
       jobType.disabled = !structured;
       if (chosen.source === "google_jobs" && !chosen.connected) hint.replaceChildren(`${chosen.label}: `, h("a", { href: KEY_PAGE, text: "connect a SerpApi key in API > Account" }), " (or set SERPAPI_API_KEY in .env), or search the ", h("a", { href: FREE_BOARDS, text: "free job boards" }), " without a key.");

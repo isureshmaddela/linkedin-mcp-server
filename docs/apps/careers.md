@@ -49,8 +49,8 @@ in `views-jobs.js`.
 ## Jobs
 
 * **Find roles** across LinkedIn (your own session), **Aira Jobs** (free job boards, no key), **Google Jobs**
-  (a SerpApi key, connected once in API > Account) and company portals (Greenhouse, Lever, Ashby and
-  SmartRecruiters). Every result goes into one list without duplicates.
+  (a SerpApi key, connected once in API > Account) and company portals (Greenhouse, Lever, Ashby,
+  SmartRecruiters, Workable and Recruitee). Every result goes into one list without duplicates.
 * **Import job** pastes a posting's address.
 * **+ Add a job** is for a job that has no posting Aira can read: one a friend told you about, a sign in a shop
   window, a phone call. Only the title and the employer are needed; add a link, the pay range and a few lines about

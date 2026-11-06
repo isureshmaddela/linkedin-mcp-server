@@ -12,11 +12,22 @@ Every provider sits behind an adapter that declares its capabilities. The catalo
 | Lever | Available | Official public Postings API (`api.lever.co/v0/postings/{site}`) | Site name | search, import, normalize, resolve link, health | Company name is the site identifier (API omits it). Verified live (boards with zero postings return an empty, successful result). |
 | Ashby | Available | Official public Job Board API (`api.ashbyhq.com/posting-api/job-board/{name}`) | Job board name | search, import, normalize, resolve link, health | Unlisted jobs skipped in search; compensation parsed when present. Verified live (Ashby board, 71 postings). |
 | SmartRecruiters | Available | Official public Posting API (`api.smartrecruiters.com/v1/companies/{id}/postings`) | Company identifier | search, import, normalize, resolve link, health | Server-side keyword search, offset pagination, detail fetch for up to 25 postings per search. |
+| Workable | Available | Official public jobs feed for careers pages (`www.workable.com/api/accounts/{subdomain}?details=true`, GET; Workable's own job widget reads the same feed) | Account subdomain | search, import, normalize, resolve link, health | One response holds the whole board with descriptions; keyword and location matching are local. Jobs are keyed by their shortcode (`apply.workable.com/{account}/j/{shortcode}`). `apply.workable.com/j/{shortcode}` links name no account, so they cannot be imported; open the job from the company's board. Applications go through the generic form engine. Tested against a stand-in server only. |
+| Recruitee | Available | Official public Careers Site API (`{company}.recruitee.com/api/offers/` and `/api/offers/{id or slug}`, GET) | Company subdomain | search, import, normalize, resolve link, health | Local keyword (title, description, department, tags) and location matching; jobs are keyed by the numeric offer id, and `/o/{slug}` links import through the slug. Companies on a custom careers domain are not detected from a pasted link: add the Recruitee subdomain as a board. Applications go through the generic form engine. Tested against a stand-in server only. |
 | Workday, iCIMS, Taleo, Oracle Recruiting, SAP SuccessFactors, BambooHR, UKG, direct career sites | Planned | — | — | — | No official public candidate-facing posting API; tenant-specific portals would need per-portal scraping, which this build does not do. |
 
 Shared behaviour: retry with backoff on 429/5xx (max 3 attempts), URL-level canonicalisation, dedupe by `(source, external_id)` then canonical URL then fingerprint+company+title+location, `source_sync_runs` history, health reported to `/api/metrics`.
 
-Portal URL detection (`aira.ats.detect_portal`) recognises Greenhouse, Lever, Ashby, SmartRecruiters (and Workday hosts, reported as planned) so a pasted careers URL imports the posting or explains why it cannot.
+Portal URL detection (`aira.ats.detect_portal`) recognises Greenhouse, Lever, Ashby, SmartRecruiters, Workable, Recruitee (and Workday hosts, reported as planned) so a pasted careers URL imports the posting or explains why it cannot.
+
+### Boards Monosage does not read
+
+Monosage reads only official, public employer-board APIs and documented feeds. It does not scrape job boards whose
+terms forbid automated access: **Naukri**, **Indeed** and **Foundit** (formerly Monster India) are not integrated, and
+no adapter will be added for them unless they offer an official partner feed or API that permits it. Instahyre has no
+public candidate API either. Jobs in India are reached through Google Jobs (which needs a SerpApi key), the employers'
+own ATS boards above (many Indian employers use Greenhouse, Lever, Workable, Recruitee or SmartRecruiters), the free
+job boards, and later official partner feeds where a board offers one.
 
 ## SerpApi (API console)
 

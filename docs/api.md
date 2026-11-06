@@ -50,7 +50,7 @@ Base URL: `http://127.0.0.1:8765` (loopback only). All responses are JSON unless
 |---|---|---|---|
 | GET | `/api/jobs` | `view=all|linkedin|google_jobs|portals|recommended|saved`, `source`, `stage`, `classification`, `min_score`, `q`, `sort=updated|score|posted|company|title|stage`, `workplace_type`, `page`, `page_size`, `archived=1` | Paginated list with facets. Without query parameters returns the legacy `{jobs: [...]}`. |
 | POST | `/api/jobs/search` | `{source, identifier, keywords, location, max_pages, work_type, job_type, w2_search}` | Unified search. `identifier` is the board token/site/company for ATS sources. Records a sync run. |
-| POST | `/api/jobs/import` | `{url}` | Import one posting from LinkedIn, Greenhouse, Lever, Ashby, or SmartRecruiters. |
+| POST | `/api/jobs/import` | `{url}` | Import one posting from LinkedIn, Greenhouse, Lever, Ashby, SmartRecruiters, Workable or Recruitee. |
 | POST | `/api/jobs/rescore` | `{}` | Rescore up to 400 jobs with descriptions. |
 | GET | `/api/sources` | | Source catalog with status, access method, capabilities, connection hints, last run. |
 | GET | `/api/jobs/{id}` | | Full detail: source records, score explanation, events, interviews, tasks, documents, preparation, submission, recruiters, allowed stages. |

@@ -12,7 +12,7 @@ Aira is a local-first AI Career Copilot layered beside the existing LinkedIn MCP
 | Domain modules | `aira/` package (pure functions, connection injection) | Testable in isolation; the server module only wires routes. |
 | LinkedIn | Existing FastMCP + Patchright server, one isolated worker per account | Preserves the upstream integration unchanged. |
 | SerpApi (API and Careers) | `aira/airaapi/` (catalog of 136 engines, client, store, service, `/v1` compatibility layer, Careers) | One validated key, one recorded and cached call path for the console, Careers, the Jobs-tab Google source and scripts. `urllib` only. |
-| ATS and Google Jobs | `linkedin_mcp_server/job_sources.py` (contracts, LinkedIn, Greenhouse, Google/SerpApi) and `aira/ats.py` (Lever, Ashby, SmartRecruiters, catalog, portal detection) | Official public APIs only, injected transports for tests. |
+| ATS and Google Jobs | `linkedin_mcp_server/job_sources.py` (contracts, LinkedIn, Greenhouse, Google/SerpApi) and `aira/ats.py` (Lever, Ashby, SmartRecruiters, Workable, Recruitee, catalog, portal detection) | Official public APIs only, injected transports for tests. |
 | UI | Static HTML/CSS/vanilla JS served by Aira (`auto_apply_assistant/`), hash router, no build step | Works offline, CSP `script-src 'self'`, no bundler to maintain. |
 | AI | Ollama (`/api/chat`, JSON mode) | Local inference; nothing leaves the machine. |
 | Encryption | `cryptography` Fernet for documents at rest | Vetted library; key file beside the database or `AIRA_DOCUMENT_KEY`. |
@@ -31,7 +31,7 @@ flowchart LR
     Domain --> Analytics[analytics]
     Server --> Sources[job_sources + aira.ats adapters]
     Sources --> LinkedInWorker[Per-account LinkedIn MCP worker]
-    Sources --> ATS[Greenhouse / Lever / Ashby / SmartRecruiters public APIs]
+    Sources --> ATS[Greenhouse / Lever / Ashby / SmartRecruiters / Workable / Recruitee public APIs]
     Sources --> Serp[SerpApi google_jobs]
     Server --> AiraApi[aira.airaapi
 service + store + client]
@@ -58,7 +58,7 @@ service + store + client]
 | `candidate` | Universal candidate profile fields with sensitivity, validation, completeness, scoring-profile projection, standard answers. |
 | `scoring` | `explainable-match-v2`: ten evidence-only dimensions, configurable weights, classification, skill lexicon, section-aware skill extraction, hard blockers for explicit sponsorship conflicts. Reuses `matching.score_keyword_evidence` for resume coverage. |
 | `field_mapping` | 42 canonical ATS fields with synonyms, sensitivity, confirmation rules; label mapping with confidence; prefill that never fills sensitive answers without explicit confirmation. |
-| `ats` | Lever, Ashby, SmartRecruiters adapters; shared retrying transport; `SOURCE_CATALOG` (available vs planned with reasons); portal URL detection; single-posting import; Greenhouse application questions. |
+| `ats` | Lever, Ashby, SmartRecruiters, Workable, Recruitee adapters; shared retrying transport; `SOURCE_CATALOG` (available vs planned with reasons); portal URL detection; single-posting import; Greenhouse application questions. |
 | `applications` | Packet building, review, approval, submission records with idempotency keys, queue, daily limit, auto-submit policy (disabled). |
 | `email_intel` | Rule-based classification (nine categories), explicit extraction (dates with time zones, links, deadlines, IDs, contacts), `.eml` parsing, fingerprints, suggested actions with confirmation gates. |
 | `interviews` | Interview CRUD, participants, reminders/tasks, duplicate guard, calendar UID/sequence management. |
