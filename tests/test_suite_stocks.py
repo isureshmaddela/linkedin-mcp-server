@@ -999,6 +999,7 @@ def test_paid_subscriptions_from_request_to_access_code_with_revenue_counted_onc
             "target": "120",
             "stop": "90",
             "access": "paid",
+            "holding": "none",
             "reasoning": "secret sauce",
         },
     )
@@ -1154,6 +1155,7 @@ def test_an_analyst_page_shows_closed_paid_ideas_in_the_track_record(db, people)
             "target": "110",
             "stop": "95",
             "access": "paid",
+            "holding": "none",
         },
     )
     db.execute(
@@ -1422,6 +1424,7 @@ def test_the_analyst_page_works_for_a_visitor_without_an_account(env, api, local
             "target_cents": 108_00,
             "stop_cents": 96_00,
             "access": "paid",
+            "holding": "self",
             "reasoning": "members only",
         },
         expect=201,
