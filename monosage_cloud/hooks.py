@@ -398,6 +398,32 @@ def install(app: CloudApp) -> None:
         return lend(app, ctx.org_id, ctx.candidate_id)
 
     HOOKS.application_mail = application_mail
+    _install_notify(app)
+
+
+def _install_notify(app: CloudApp) -> None:
+    """Notifications (aira/notify) in the hosted build: the VAPID key lives with the platform's secrets, email goes
+    through the platform mail (from the delivery thread, never inside a request), and pages poll instead of
+    streaming, because the gateway answers with whole responses."""
+    from monosage_cloud import mail as platform_mail
+
+    platform_mail.TEMPLATES.setdefault("notification", ("{subject}", "{body}"))
+
+    def mailer() -> Any:
+        bound = context.current()
+        org_id = bound.org_id if bound else ""
+        return lambda to, subject, body: app.mail.send(
+            org_id, to, "notification", subject=subject, body=body
+        )
+
+    HOOKS.notify = {
+        "key_dir": lambda: app.config.data_root / "secrets",
+        "subject": lambda: app.config.base_url
+        if app.config.base_url.startswith("https://")
+        else "",
+        "mailer": mailer,
+        "live": False,
+    }
 
 
 def _org_serpapi_key(app: CloudApp, org_id: str) -> str | None:

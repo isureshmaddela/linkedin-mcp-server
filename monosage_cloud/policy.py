@@ -79,6 +79,31 @@ POLICY: dict[str, Rule] = {
     "api_ready": PUBLIC,
     "api_metrics": OPERATOR,
     "api_apps": DENY,  # the control plane answers /api/apps with the organization's subscriptions
+    # -- notifications (aira/notify) ------------------------------------------------------------
+    # The installable app's service worker and manifest are public files. The notification centre, its choices and
+    # the person's Web Push browsers are life routes every member has, kept out of the organization's audit log
+    # (personal choices, never business data). The live stream is the single-user build's: the gateway answers with
+    # whole responses and cannot hold a stream open, so hosted pages keep polling.
+    "ui_service_worker": PUBLIC,
+    "ui_manifest": PUBLIC,
+    "api_notify_stream": DENY,
+    "airaapi__notify_routes__items_list": Rule("org_api", "life.read"),
+    "airaapi__notify_routes__items_read": Rule(
+        "org_api", "life.manage", write=True, audit=False
+    ),
+    "airaapi__notify_routes__settings_get": Rule("org_api", "life.read"),
+    "airaapi__notify_routes__settings_save": Rule(
+        "org_api", "life.manage", write=True, audit=False
+    ),
+    "airaapi__notify_routes__push_subscribe": Rule(
+        "org_api", "life.manage", write=True, audit=False
+    ),
+    "airaapi__notify_routes__push_unsubscribe": Rule(
+        "org_api", "life.manage", write=True, audit=False
+    ),
+    "airaapi__notify_routes__push_test": Rule(
+        "org_api", "life.manage", write=True, audit=False
+    ),
     # -- sign-in is the control plane's (these local routes are replaced) -----------------
     "api_auth_me": DENY,
     "api_auth_register": DENY,
