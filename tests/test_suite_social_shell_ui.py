@@ -7,6 +7,7 @@ phone in light and dark."""
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -99,7 +100,13 @@ def seeded(browser, env, **size):
     )["listing"]
     event = call(
         "/api/family/events",
-        {"title": "Sunday lunch at Grandma's", "starts_at": "2026-11-01T12:00:00Z"},
+        {
+            # the calendar lists events from yesterday on, so the sample lunch is always a few days ahead
+            "title": "Sunday lunch at Grandma's",
+            "starts_at": (datetime.now(UTC) + timedelta(days=3))
+            .replace(hour=12, minute=0, second=0, microsecond=0)
+            .strftime("%Y-%m-%dT%H:%M:%SZ"),
+        },
         owner["id"],
     )["event"]
     return (
@@ -167,7 +174,9 @@ def test_new_search_and_folders_in_the_frame(browser, env):
     open_app(page, env, made["owner"], problems)
     # The top bar says only Monosage; the app is named for screen readers and in its menu below.
     assert page.locator("#appBrand").inner_text().strip() == "Monosage"
-    assert page.locator("#appBrand").get_attribute("aria-label") == "Monosage Social: home"
+    assert (
+        page.locator("#appBrand").get_attribute("aria-label") == "Monosage Social: home"
+    )
     # The page is named after its tab, not the app again.
     assert page.locator("#main .page-head h1").inner_text().strip() == "Home"
 
@@ -280,7 +289,14 @@ def test_new_search_and_folders_in_the_frame(browser, env):
     folders = page.locator(".shell-subnav[data-section='social'] .shell-sublink")
     names = [name.splitlines()[0].strip() for name in folders.all_inner_texts()]
     assert names[:5] == ["Home", "Explore", "Reels", "Chats", "Friends"], names
-    for section in ("Groups", "Pages", "Marketplace", "Notifications", "Saved", "Profile"):
+    for section in (
+        "Groups",
+        "Pages",
+        "Marketplace",
+        "Notifications",
+        "Saved",
+        "Profile",
+    ):
         assert section in names, (section, names)
     assert page.locator(".shell-subnav .shell-sublink .shell-subdot").count() == 0
     folders.filter(has_text="Pages").click()

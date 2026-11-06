@@ -492,9 +492,8 @@ def test_a_family_plays_together_on_the_local_build(env, api, local_index):
         game = session["game"]
         secret = _secret(env, session["id"])
         payload = _solve(game, secret, session, good)
-        if game == "memory":
-            for move in payload.pop("moves"):
-                person.post(f"/api/play/sessions/{session['id']}/move", move)
+        for move in payload.pop("moves", []):
+            person.post(f"/api/play/sessions/{session['id']}/move", move)
         person.post(f"/api/play/sessions/{session['id']}/finish", payload)
         status, body = person.call("POST", "/api/play/sessions", {"daily": True})
         assert status == 400 and "today's challenge" in body["error"]
@@ -595,7 +594,14 @@ def _solve(game, secret, session, good):
     if game == "scramble":
         return {"answers": secret["words"] if good else [""] * len(secret["words"])}
     if game == "sudoku":
-        return {"grid": secret["solution"]}
+        # A relaxed sudoku always scores the same when solved; the weaker player asks for a hint (50 points each),
+        # so the daily board has a clear order on sudoku days too.
+        hints = (
+            []
+            if good
+            else [{"action": "hint", "grid": list(session["puzzle"]["grid"])}]
+        )
+        return {"grid": secret["solution"], "moves": hints}
     if game == "memory":
         layout = secret["layout"]
         pairs: dict[str, list[int]] = {}
