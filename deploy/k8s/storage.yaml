@@ -1,17 +1,18 @@
-# The data root shared by web and worker pods: control.sqlite3 (WAL), tenants/ (one SQLite per candidate), secrets/.
+# The data root of the one `serve --worker` pod (web.yaml): control.sqlite3 (WAL), tenants/ (one SQLite per
+# candidate and per organization), secrets/ and the scheduled backups (AIRA_CLOUD_BACKUP_DIR, when set under /data).
 #
-# It must be ReadWriteMany, and the storage class must give SQLite reliable file locking (a managed NFS or a
-# cluster file system, not a best-effort network mount). SQLite allows one writer at a time, so this volume bounds
-# how far the control plane scales; see "Differences from the scope document and known gaps" in docs/multitenant.md.
-# Documents live in object storage (AIRA_CLOUD_STORAGE=s3), not here. Back this volume up with the master key kept elsewhere.
+# ReadWriteOnce on purpose: SQLite's WAL index is shared memory that only one machine can share, so the volume is
+# mounted by one node and written by one process. Do not switch it to ReadWriteMany to add replicas. Documents live
+# in object storage (AIRA_CLOUD_STORAGE=s3), not here. Snapshot this volume (or set AIRA_CLOUD_BACKUP_HOURS and copy
+# the backup directory off it) and keep the master key elsewhere.
 apiVersion: v1
 kind: PersistentVolumeClaim
 metadata:
   name: aira-data
   namespace: aira
 spec:
-  accessModes: [ReadWriteMany]
-  storageClassName: replace-with-an-rwx-storage-class
+  accessModes: [ReadWriteOnce]
+  storageClassName: replace-with-a-block-storage-class
   resources:
     requests:
       storage: 100Gi

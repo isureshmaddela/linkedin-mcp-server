@@ -1,6 +1,13 @@
-# TLS terminates here. The application sets no Strict-Transport-Security header: enable HSTS on the controller
-# (ingress-nginx: `hsts: "true"` in its ConfigMap) or add the header at your edge.
+# TLS terminates here. The application sends Strict-Transport-Security itself on https (AIRA_CLOUD_TRUST_PROXY with
+# X-Forwarded-Proto); enabling HSTS on the controller as well is harmless.
 # The application accepts bodies up to 25 MB (resume and document uploads); keep the proxy limit at or above it.
+#
+# Access logs: some URLs are capabilities (whoever has the link has the access): an export download, an
+# invitation, a public page of a business's app. The application masks them in its own log; the controller logs
+# every request line in full, so a second Ingress below serves those prefixes with the access log off. If your
+# controller's ConfigMap sets a custom `log-format-upstream`, log `$uri` without `$args`, or keep the default for
+# everything except these prefixes as here. The application's own idle timeout is 75 seconds
+# (AIRA_CLOUD_HTTP_TIMEOUT): keep the controller's `upstream-keepalive-timeout` below it (the default, 60, is).
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
@@ -29,3 +36,27 @@ spec:
               service:
                 name: aira-web
                 port: { name: http }
+---
+# Capability links: the same service, with the controller's access log off so the token in the path is not written.
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: aira-capability-links
+  namespace: aira
+  annotations:
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/proxy-body-size: 25m
+    nginx.ingress.kubernetes.io/enable-access-log: "false"
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts: [aira.example.com]
+      secretName: aira-tls
+  rules:
+    - host: aira.example.com
+      http:
+        paths:
+          - { path: /api/exports/download/, pathType: Prefix, backend: { service: { name: aira-web, port: { name: http } } } }
+          - { path: /api/invites/, pathType: Prefix, backend: { service: { name: aira-web, port: { name: http } } } }
+          - { path: /api/public/, pathType: Prefix, backend: { service: { name: aira-web, port: { name: http } } } }
+          - { path: /p/, pathType: Prefix, backend: { service: { name: aira-web, port: { name: http } } } }

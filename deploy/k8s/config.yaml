@@ -24,3 +24,11 @@ data:
   AIRA_CLOUD_S3_ENDPOINT: https://s3.eu-west-1.amazonaws.com
   AIRA_CLOUD_S3_BUCKET: aira-documents-example
   AIRA_CLOUD_S3_REGION: eu-west-1
+  # one pod serves everything (web.yaml); SIGTERM drains in-flight requests this long before the worker stops
+  AIRA_CLOUD_DRAIN_SECONDS: "25"
+  AIRA_CLOUD_HTTP_TIMEOUT: "75"           # idle connection timeout; keep the ingress's keep-alive timeout below it
+  AIRA_CLOUD_HTTP_MAX_CONNECTIONS: "512"  # above this the server answers 503 at once
+  # scheduled per-organization backups (off when 0); keep them on the data volume and copy them off it
+  AIRA_CLOUD_BACKUP_HOURS: "24"
+  AIRA_CLOUD_BACKUP_DIR: /data/backups
+  AIRA_CLOUD_BACKUP_KEEP: "7"

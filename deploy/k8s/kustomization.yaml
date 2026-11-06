@@ -1,5 +1,7 @@
 # kubectl apply -k deploy/k8s
 # secret.example.yaml is deliberately not listed: create the real aira-secrets Secret from your secret manager.
+# The default is one `serve --worker` pod on a ReadWriteOnce volume (web.yaml, storage.yaml). The control plane on
+# PostgreSQL is deploy/k8s-overlays/postgres.
 apiVersion: kustomize.config.k8s.io/v1beta1
 kind: Kustomization
 namespace: aira
@@ -8,8 +10,6 @@ resources:
   - config.yaml
   - storage.yaml
   - web.yaml
-  - worker.yaml
-  - tick-cronjob.yaml
   - pdb.yaml
   - networkpolicy.yaml
   - ingress.yaml

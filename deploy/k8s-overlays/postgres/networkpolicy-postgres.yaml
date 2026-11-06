@@ -1,0 +1,19 @@
+# The default egress policy (deploy/k8s/networkpolicy.yaml) reaches only public addresses on 443, 465 and 587. A
+# managed PostgreSQL usually has a private address in the cluster's network: allow 5432 to it. Replace the ranges
+# with your database's own address or subnet (a /32 is best).
+apiVersion: networking.k8s.io/v1
+kind: NetworkPolicy
+metadata:
+  name: postgres-egress
+  namespace: aira
+spec:
+  podSelector:
+    matchLabels: { app.kubernetes.io/name: aira-web }
+  policyTypes: [Egress]
+  egress:
+    - to:
+        - ipBlock: { cidr: 10.0.0.0/8 }
+        - ipBlock: { cidr: 172.16.0.0/12 }
+        - ipBlock: { cidr: 192.168.0.0/16 }
+      ports:
+        - { protocol: TCP, port: 5432 }

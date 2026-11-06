@@ -7,10 +7,11 @@
     python deploy/k8s_smoke.py --no-apply           # only checks what is already deployed in namespace `aira`
     python deploy/k8s_smoke.py --teardown           # delete the namespace afterwards
 
-Checks: pods reach Ready under the `restricted` Pod Security level with an allowed-host list set (probes address pods
-by IP); the service answers through a port-forward; a rolling update under steady traffic drops no request; killing a
-web pod keeps the service up and a replacement becomes Ready; the worker pod registers a heartbeat; the tick CronJob
-completes; an organization can sign up and sign in.
+Checks: the one `serve --worker` pod reaches Ready under the `restricted` Pod Security level with an allowed-host
+list set (probes address pods by IP); the service answers through a port-forward; an organization can sign up; the
+pod's worker pool registers a heartbeat; a restart (strategy Recreate: the old pod stops before the new one starts,
+so two machines never write the SQLite files at once) brings the service back with the account intact; the volume is
+ReadWriteOnce and there is one replica.
 """
 
 from __future__ import annotations
@@ -22,7 +23,6 @@ import os
 import secrets
 import subprocess
 import sys
-import threading
 import time
 import urllib.error
 import urllib.request
@@ -179,17 +179,30 @@ def main() -> int:
                 or "unchanged" in applied.stdout,
             )
         kubectl(
-            "-n", NAMESPACE, "rollout", "status", "deploy/aira-web", "--timeout=240s"
+            "-n", NAMESPACE, "rollout", "status", "deploy/aira-web", "--timeout=300s"
         )
         check(
-            "web pods become Ready (probes pass with an allowed-host list set)",
-            len(ready_web_pods()) >= 2,
+            "the one pod becomes Ready (probes pass with an allowed-host list set)",
+            len(ready_web_pods()) == 1,
             str(ready_web_pods()),
         )
-        kubectl(
-            "-n", NAMESPACE, "rollout", "status", "deploy/aira-worker", "--timeout=240s"
+        deployment = json.loads(
+            kubectl("-n", NAMESPACE, "get", "deploy/aira-web", "-o", "json").stdout
         )
-        check("the worker pod is Ready", True)
+        check(
+            "one replica, replaced with strategy Recreate",
+            deployment["spec"]["replicas"] == 1
+            and deployment["spec"]["strategy"]["type"] == "Recreate",
+            json.dumps(deployment["spec"].get("strategy")),
+        )
+        claim = json.loads(
+            kubectl("-n", NAMESPACE, "get", "pvc/aira-data", "-o", "json").stdout
+        )
+        check(
+            "the data volume is ReadWriteOnce",
+            claim["spec"]["accessModes"] == ["ReadWriteOnce"],
+            str(claim["spec"]["accessModes"]),
+        )
         namespace = json.loads(kubectl("get", "ns", NAMESPACE, "-o", "json").stdout)
         check(
             "the namespace enforces the restricted Pod Security level",
@@ -200,175 +213,48 @@ def main() -> int:
         forward.start()
         check("/api/ready answers through the service", get("/api/ready") == 200)
         email = f"owner-{secrets.token_hex(3)}@kind.test"
+        password = "Kind-test-password-1!"
         status, body = post(
             "/api/auth/signup-org",
             {
                 "organization": "Kind Org",
                 "email": email,
-                "password": "Kind-test-password-1!",
+                "password": password,
                 "name": "Kay Kind",
+                "adult": True,
             },
         )
         check("an organization signs up through the cluster", status == 201, str(body))
 
-        # -- rolling update under steady traffic ------------------------------------------------------
-        failures: list[int] = []
-        count = [0]
-        stop = threading.Event()
+        log = kubectl("-n", NAMESPACE, "logs", "deploy/aira-web", check=False).stdout
+        check(
+            "the pod started its worker pool and scheduler",
+            "started with" in log,
+            log[-300:],
+        )
 
-        def traffic() -> None:
-            while not stop.is_set():
-                code = get("/api/health", timeout=3)
-                count[0] += 1
-                if code != 200:
-                    failures.append(code)
-                time.sleep(0.05)
-
-        # A port-forward pins to one pod; use the service by hopping through a fresh forward when a pod is replaced.
-        thread = threading.Thread(target=traffic, daemon=True)
-        thread.start()
+        # -- a restart: the old pod stops (draining) before the new one starts ---------------------------
+        old_pods = set(ready_web_pods())
         kubectl("-n", NAMESPACE, "rollout", "restart", "deploy/aira-web")
-        deadline = time.time() + 240
-        while time.time() < deadline:
-            rollout = kubectl(
-                "-n",
-                NAMESPACE,
-                "rollout",
-                "status",
-                "deploy/aira-web",
-                "--timeout=5s",
-                check=False,
-            )
-            if rollout.returncode == 0:
-                break
-            if get("/api/health") == 0:
-                forward.start()  # the pod the forward was attached to was replaced; this is the client's problem, not the service's
-            time.sleep(1)
-        time.sleep(1)
-        stop.set()
-        thread.join(timeout=5)
-        in_cluster = kubectl(
-            "-n",
-            NAMESPACE,
-            "get",
-            "endpoints",
-            "aira-web",
-            "-o",
-            "jsonpath={.subsets[0].addresses[*].ip}",
-        ).stdout.split()
-        check(
-            "a rolling update completes with two Ready pods behind the service",
-            rollout.returncode == 0 and len(in_cluster) >= 2,
-            f"{rollout.stdout} {in_cluster}",
-        )
-
-        # -- availability through a pod kill, measured inside the cluster --------------------------------
-        forward.start()
-        victim = ready_web_pods()[0]
         kubectl(
-            "-n",
-            NAMESPACE,
-            "delete",
-            "pod",
-            "aira-probe",
-            "--ignore-not-found",
-            "--wait=true",
+            "-n", NAMESPACE, "rollout", "status", "deploy/aira-web", "--timeout=300s"
         )
-        probe_spec = {
-            "apiVersion": "v1",
-            "kind": "Pod",
-            "metadata": {"name": "aira-probe", "namespace": NAMESPACE},
-            "spec": {
-                "restartPolicy": "Never",
-                "securityContext": {
-                    "runAsNonRoot": True,
-                    "runAsUser": 10001,
-                    "seccompProfile": {"type": "RuntimeDefault"},
-                },
-                "containers": [
-                    {
-                        "name": "probe",
-                        "image": "aira-deploy-web:latest",
-                        "imagePullPolicy": "IfNotPresent",
-                        "command": [
-                            "python",
-                            "-c",
-                            (
-                                "import time, urllib.request\n"
-                                "while True:\n"
-                                "    try:\n"
-                                "        urllib.request.urlopen('http://aira-web.aira.svc.cluster.local/api/health', timeout=2); print('ok', flush=True)\n"
-                                "    except Exception:\n"
-                                "        print('fail', flush=True)\n"
-                                "    time.sleep(0.2)\n"
-                            ),
-                        ],
-                        "securityContext": {
-                            "allowPrivilegeEscalation": False,
-                            "capabilities": {"drop": ["ALL"]},
-                        },
-                    }
-                ],
-            },
-        }
-        kubectl("apply", "-f", "-", stdin=json.dumps(probe_spec))
-        kubectl(
-            "-n",
-            NAMESPACE,
-            "wait",
-            "--for=condition=Ready",
-            "pod/aira-probe",
-            "--timeout=120s",
-        )
-        time.sleep(3)
-        kubectl("-n", NAMESPACE, "delete", "pod", victim, "--wait=false")
-        time.sleep(1)
-        deadline = time.time() + 180
-        while time.time() < deadline and len(ready_web_pods()) < 2:
+        deadline = time.time() + 120
+        while time.time() < deadline and (
+            len(ready_web_pods()) != 1 or set(ready_web_pods()) & old_pods
+        ):
             time.sleep(2)
-        time.sleep(3)
-        log = kubectl(
-            "-n", NAMESPACE, "logs", "pod/aira-probe", check=False
-        ).stdout.split()
-        ok, failed = log.count("ok"), log.count("fail")
         check(
-            "killing a web pod: a replacement becomes Ready",
-            len(ready_web_pods()) >= 2,
+            "a restart replaces the pod (never two at once)",
+            len(ready_web_pods()) == 1 and not set(ready_web_pods()) & old_pods,
             str(ready_web_pods()),
         )
+        forward.start()
+        status, body = post("/api/auth/login", {"email": email, "password": password})
         check(
-            "killing a web pod: the service kept answering",
-            ok > 20 and failed <= max(2, ok // 50),
-            f"{ok} ok, {failed} failed",
-        )
-        kubectl(
-            "-n",
-            NAMESPACE,
-            "delete",
-            "pod",
-            "aira-probe",
-            "--ignore-not-found",
-            "--wait=false",
-            check=False,
-        )
-
-        # -- worker and scheduler ---------------------------------------------------------------------
-        worker_log = kubectl(
-            "-n", NAMESPACE, "logs", "deploy/aira-worker", check=False
-        ).stdout
-        check(
-            "the worker pod started its pool",
-            "started with" in worker_log,
-            worker_log[-300:],
-        )
-        jobs = json.loads(kubectl("-n", NAMESPACE, "get", "jobs", "-o", "json").stdout)[
-            "items"
-        ]
-        done = [j for j in jobs if j["status"].get("succeeded")]
-        check(
-            "the tick CronJob has completed at least once",
-            len(done) >= 1,
-            f"{len(jobs)} jobs",
+            "the account survives the restart (the volume kept the data)",
+            status == 200,
+            str(body),
         )
         restarts = sum(
             c.get("restartCount", 0)
@@ -376,10 +262,10 @@ def main() -> int:
                 kubectl("-n", NAMESPACE, "get", "pods", "-o", "json").stdout
             )["items"]
             for c in pod["status"].get("containerStatuses", [])
-            if pod["metadata"]["name"].startswith("aira-worker")
+            if pod["metadata"]["name"].startswith("aira-web")
         )
         check(
-            "the worker's liveness probe has not restarted it",
+            "the liveness probe has not restarted the pod",
             restarts == 0,
             str(restarts),
         )
