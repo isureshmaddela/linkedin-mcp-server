@@ -377,7 +377,10 @@
     const wishes = h("input", { type: "checkbox", checked: data.settings.show_wishes });
     body.append(
       S.section("The family board", h("p", { class: "muted", text: "A page relatives without an account can open: they see the family feed (never your chats), react, and write a message. You approve their messages first unless you turn that off." }),
-        S.share({ title: "Board link", text: "Create a link to send to grandparents, aunts, uncles and friends.", link: data.link, onCreate: async () => (await api("/board/link", { method: "POST", body: {} })).link, onRevoke: async () => { await api("/board/link", { method: "DELETE" }); } }),
+        S.share({ title: "Board link", text: "Create a link to send to grandparents, aunts, uncles and friends. It works for 30 days. Children and teens appear by their initials only.", link: data.link, onCreate: async () => (await api("/board/link", { method: "POST", body: {} })).link, onRevoke: async () => { await api("/board/link", { method: "DELETE" }); } }),
+        data.link ? h("div", { class: "btn-row" },
+          data.link_expires && data.link_expires.expires_at ? h("span", { class: "muted small", text: `The link works until ${new Date(data.link_expires.expires_at).toLocaleDateString()}.` }) : null,
+          S.button("Make a new link", async () => { await api("/board/link/rotate", { method: "POST", body: {} }); Aira.toast("New link made. The old one no longer works.", "success"); Aira.router.render(); }, { kind: "ghost sm" })) : null,
         Aira.ui.field("Title", title),
         h("label", { class: "life-toggle" }, auto, h("span", {}, h("strong", { text: "Publish messages from relatives at once" }), h("span", { class: "muted", text: "Off: you approve each one first." }))),
         h("label", { class: "life-toggle" }, wishes, h("span", {}, h("strong", { text: "Show our wish lists on the board" }), h("span", { class: "muted", text: "Relatives see gift ideas and can say they will get one, so nobody buys the same present twice." }))),
