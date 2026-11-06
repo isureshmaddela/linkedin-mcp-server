@@ -651,6 +651,14 @@ class WorkspaceManager:
             snapshot["next_due_at"] = connection.execute(
                 "SELECT MIN(next_run_at) FROM autopilot_plans WHERE enabled = 1"
             ).fetchone()[0]
+            # An Auto-apply retry due sooner than the next plan brings the scheduler back for it (aira.autopilot).
+            from aira.autopilot import next_due_retry
+
+            retry_at = next_due_retry(connection)
+            if retry_at and (
+                not snapshot["next_due_at"] or retry_at < snapshot["next_due_at"]
+            ):
+                snapshot["next_due_at"] = retry_at
             day_start = datetime.fromtimestamp(now, timezone.utc).replace(
                 hour=0, minute=0, second=0, microsecond=0
             )

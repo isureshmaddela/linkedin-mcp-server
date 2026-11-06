@@ -256,6 +256,12 @@ POLICY: dict[str, Rule] = {
     "api_autopilot_plan_delete": write("search.run"),
     "api_autopilot_plan_run": write("search.run", kind="automation"),
     "api_autopilot_run_skip": write("search.run"),
+    # Try again on an interrupted or failed run (the person checked the site): starts automation like Run now.
+    "api_autopilot_run_retry": write("search.run", kind="automation", audit=True),
+    # I applied: the person applied on the site themselves; recorded like any manual submission.
+    "api_autopilot_run_applied": write(
+        "applications.submit", kind="submit_manual", audit=True
+    ),
     "api_autopilot_run_answer": write("held.answer", kind="run_answer", audit=True),
     "api_autopilot_run_submit": write(
         "applications.submit", kind="automation", audit=True

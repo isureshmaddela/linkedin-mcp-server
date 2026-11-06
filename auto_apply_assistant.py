@@ -7194,6 +7194,10 @@ def _autopilot_overview(user: dict[str, Any]) -> dict[str, Any]:
         today = autopilot.counts_today(connection)
         standard = standard_answers_map(connection)
         remembered = autopilot.list_custom_answers(connection)
+    # A run is shown once: in Needs you when it waits there, otherwise in the activity list.
+    open_ids = {run["run_id"] for run in open_runs}
+    for run in recent:
+        run["open"] = run["run_id"] in open_ids
     jobs = {run["job_id"]: _job_row(run["job_id"]) for run in [*open_runs, *recent]}
     for run in [*open_runs, *recent]:
         job = jobs.get(run["job_id"]) or {}
@@ -7266,7 +7270,7 @@ def _autopilot_answer(
         raise ValueError("Answer at least one question.")
     with _connect() as connection:
         run = autopilot.get_run(connection, run_id)
-        if run["status"] not in autopilot.OPEN_STATUSES and run["status"] != "failed":
+        if run["status"] not in autopilot.ANSWERABLE_STATUSES:
             raise ValueError("This application is not waiting for answers.")
         if payload.get("remember"):
             for label, value in answers.items():
@@ -7376,6 +7380,101 @@ def _autopilot_skip(run_id: str) -> dict[str, Any]:
     return updated
 
 
+def _autopilot_retry(user: dict[str, Any], run_id: str) -> dict[str, Any]:
+    """Try again: an interrupted or failed run goes back to the queue and starts now (the person checked the site)."""
+    with _connect() as connection:
+        run = autopilot.get_run(connection, run_id)
+        if run["status"] not in ("interrupted", "failed"):
+            raise ValueError(
+                "Only an interrupted or failed application can be tried again."
+            )
+        if connection.execute(
+            "SELECT 1 FROM application_submissions WHERE job_id = ?", (run["job_id"],)
+        ).fetchone():
+            raise ValueError("Monosage already recorded an application for this job.")
+    services = _autopilot_services(user)
+    if run["mode"] == "apply":
+        remaining = services.daily_remaining()
+        if remaining is not None and remaining <= 0:
+            raise ValueError(
+                "The daily application limit is reached. Raise it, or try again tomorrow."
+            )
+    with _connect() as connection:
+        run = autopilot.retry_run(connection, run_id)
+    _audit("autopilot.retry", "application_run", run_id, {"from": run["status"]})
+    plan = _autopilot_plan_or_none(run["plan_id"]) if run.get("plan_id") else None
+    return _autopilot_start(
+        user,
+        "Trying the application again",
+        lambda: autopilot.execute_run(services, run_id, plan=plan),
+        {
+            "action": "execute_run",
+            "run_id": run_id,
+            "plan_id": run.get("plan_id") or "",
+        },
+    )
+
+
+def _autopilot_mark_applied(run_id: str, payload: dict[str, Any]) -> dict[str, Any]:
+    """I applied: the person applied on the site; record it as their own (manual) submission."""
+    applied_on = str(payload.get("applied_on") or "").strip()[:10]
+    if applied_on and not re.fullmatch(r"\d{4}-\d{2}-\d{2}", applied_on):
+        raise ValueError("Send the date you applied as YYYY-MM-DD.")
+    if applied_on:
+        try:
+            day = datetime.strptime(applied_on, "%Y-%m-%d").date()
+        except ValueError as error:
+            raise ValueError("That is not a real date.") from error
+        if day > datetime.now(timezone.utc).date() + timedelta(days=1):
+            raise ValueError("The date you applied cannot be in the future.")
+    with _connect() as connection:
+        run = autopilot.get_run(connection, run_id)
+    if run["status"] not in autopilot.APPLIED_BY_PERSON_STATUSES:
+        raise ValueError("This application cannot be marked as applied now.")
+    job = _autopilot_job(run["job_id"])
+    if job is None:
+        raise LookupError("Job not found.")
+    with _connect() as connection:
+        # The day only (midnight UTC), so "today" typed ahead of UTC is not refused as the future.
+        submission = record_submission(
+            connection,
+            job_id=job["job_id"],
+            prep_id=None,
+            confirmation_text=f"Applied on the site by you{' on ' + applied_on if applied_on else ''} (recorded from Needs you).",
+            confirmation_number="",
+            evidence_document_id=None,
+            method="manual",
+            actor=_actor(),
+            correlation_id=_correlation_id(),
+            idempotency_key=f"autopilot-manual:{run_id}",
+            submitted_at=f"{applied_on}T00:00" if applied_on else None,
+        )
+        try:
+            updated = autopilot.mark_applied_by_person(
+                connection,
+                run_id,
+                applied_on=applied_on,
+                now=datetime.now(timezone.utc),
+            )
+        except ValueError:  # changed meanwhile; the application is recorded anyway
+            updated = autopilot.get_run(connection, run_id)
+    _audit(
+        "autopilot.applied_by_person",
+        "application_run",
+        run_id,
+        {"applied_on": applied_on or "today"},
+    )
+    if not submission.get("duplicate"):
+        _move_stage_along(job["job_id"], "applied", "You applied on the site")
+        _after_submission(job, "Applied on the site by you")
+    return {
+        "run": updated,
+        "submission": {
+            k: submission.get(k) for k in ("submission_id", "submitted_at", "method")
+        },
+    }
+
+
 def _autopilot_apply_job_now(
     user: dict[str, Any], job_id: str, payload: dict[str, Any]
 ) -> dict[str, Any]:
@@ -7404,6 +7503,16 @@ def _autopilot_apply_job_now(
                 "The daily application limit is reached. Raise it, or apply tomorrow."
             )
     with _connect() as connection:
+        # A run waiting in Needs you only for "apply on the site" or "check the site" is replaced by this one.
+        connection.execute(
+            "UPDATE application_runs SET status = 'skipped', error = ?, finished_at = ? WHERE job_id = ? AND status IN ('interrupted', 'unsupported')",
+            (
+                "Replaced by a new attempt.",
+                datetime.now(timezone.utc).isoformat(timespec="seconds"),
+                job_id,
+            ),
+        )
+        connection.commit()
         run = autopilot.create_run(
             connection,
             job=job,
@@ -7449,15 +7558,55 @@ def _run_autopilot_spec(user: dict[str, Any], spec: Mapping[str, Any]) -> None:
     raise ValueError(f"Unknown automation action: {action}")
 
 
+def _autopilot_plan_or_none(plan_id: str) -> dict[str, Any] | None:
+    with _connect() as connection:
+        if not connection.execute(
+            "SELECT 1 FROM autopilot_plans WHERE plan_id = ?", (plan_id,)
+        ).fetchone():
+            return None
+        return autopilot.get_plan(connection, plan_id)
+
+
+def _autopilot_recover(user: dict[str, Any], services: autopilot.Services) -> None:
+    """Interrupt lost runs, then the retries that are due. The caller holds the account's automation slot.
+
+    Locally that slot is the only way a run starts, so a run still marked running was lost (Monosage stopped
+    mid-run); a hosted worker allows RUN_TIME_LIMIT because another worker may be busy with a run.
+    """
+    now = datetime.now(timezone.utc)
+    # Locally every running run is stale (a minute ahead, so one marked this very second counts too).
+    stale_before = (
+        now + timedelta(minutes=1)
+        if HOSTING.start_background is None
+        else now - autopilot.RUN_TIME_LIMIT
+    )
+    result = autopilot.recover(
+        services, stale_before=stale_before, plans=_autopilot_plan_or_none
+    )
+    if result["interrupted"] or result["retried"]:
+        logger.info(
+            "Auto-apply recovery for %s: %s interrupted, %s retried",
+            user["user_id"],
+            result["interrupted"],
+            result["retried"],
+        )
+
+
 def _run_autopilot_for(user: dict[str, Any]) -> None:
-    """One account's due plans, one after another, in its automation slot."""
+    """One account's lost runs and due retries, then its due plans, one after another, in its automation slot."""
     _bind_user(user)
     _request_context.source = "autopilot"
     try:
         now = datetime.now(timezone.utc)
+        services = _autopilot_services(user)
+        try:
+            _autopilot_recover(user, services)
+        except Exception:
+            logger.exception(
+                "Auto-apply recovery failed for account %s", user["user_id"]
+            )
         with _connect() as connection:
             due = autopilot.due_plans(connection, now)
-        services = _autopilot_services(user)
         for plan in due:
             with _connect() as connection:
                 if not autopilot.claim_plan(connection, plan, now):
@@ -7479,6 +7628,21 @@ def _run_autopilot_for(user: dict[str, Any]) -> None:
         _end_automation(user["user_id"])
 
 
+def _autopilot_recovery_due(connection: sqlite3.Connection, now: str) -> bool:
+    """A retry is due, or a run is marked running while the account's slot is free (so it was lost)."""
+    try:
+        return (
+            connection.execute(
+                "SELECT 1 FROM application_runs WHERE status = 'running' "
+                "OR (status = 'queued' AND next_try_at IS NOT NULL AND next_try_at <= ?) LIMIT 1",
+                (now,),
+            ).fetchone()
+            is not None
+        )
+    except sqlite3.OperationalError:  # before migration 21 (no next_try_at yet)
+        return False
+
+
 def _run_due_autopilot() -> None:
     now = datetime.now(timezone.utc).isoformat(timespec="seconds")
     with _auth_connect() as connection:
@@ -7492,7 +7656,7 @@ def _run_due_autopilot() -> None:
                 due = connection.execute(
                     "SELECT 1 FROM autopilot_plans WHERE enabled = 1 AND next_run_at <= ? LIMIT 1",
                     (now,),
-                ).fetchone()
+                ).fetchone() or _autopilot_recovery_due(connection, now)
         except (sqlite3.Error, OSError):
             continue
         finally:
@@ -9971,6 +10135,27 @@ class RequestHandler(BaseHTTPRequestHandler):
         user: dict[str, Any] | None,
     ) -> None:
         self._send_json(200, {"run": _autopilot_skip(match.group(1))})
+
+    @route("POST", r"/api/autopilot/runs/([0-9a-f]{32})/retry")
+    def api_autopilot_run_retry(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        assert user is not None
+        self._send_json(202, _autopilot_retry(user, match.group(1)))
+
+    @route("POST", r"/api/autopilot/runs/([0-9a-f]{32})/applied")
+    def api_autopilot_run_applied(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        self._send_json(200, _autopilot_mark_applied(match.group(1), payload))
 
     @route("DELETE", r"/api/autopilot/answers/([a-z0-9%]{1,720})")
     def api_autopilot_answer_delete(

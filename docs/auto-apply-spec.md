@@ -257,10 +257,11 @@ Where this section and section 5 differ, this section wins.
 5. Keep jobs with stage `discovered|saved`, no hard blocker, not `Not Recommended`, and a score of at least `min_score`.
 6. Apply to the best of them, at most `max_per_run`, stopping at the daily limit or the global pause.
 
-Every job is tried once. Each pass is logged with counts, the reasons jobs were left out, and a summary; 50 passes are
-kept per plan. Sources that cannot run (LinkedIn offline, no SerpApi key) are skipped with the reason.
+A pass starts one run per job: a job with any earlier run is left to it (see section 7 for retries). Each pass is
+logged with counts, the reasons jobs were left out, and a summary; 50 passes are kept per plan. Sources that cannot
+run (LinkedIn offline, no SerpApi key) are skipped with the reason.
 
-**An application run** (`execute_run`) has statuses `queued|running|submitted|ready|needs_review|failed|unsupported|already_applied|skipped`.
+**An application run** (`execute_run`) has statuses `queued|running|submitted|ready|needs_review|failed|unsupported|already_applied|skipped|interrupted`.
 - LinkedIn jobs marked Easy Apply go through the MCP tool `apply_to_job`, only when the plan allows it. When the tool
   returns `needs_review`, Aira answers the questions it can (exact field matches from the profile, and confirmed
   standard answers for sensitive ones) and retries once. `external` with a URL goes to the form engine.
@@ -295,6 +296,8 @@ GET    /api/autopilot/runs/{id}
 POST   /api/autopilot/runs/{id}/answer         {answers: {label: value}, remember} -> 202
 POST   /api/autopilot/runs/{id}/submit         -> 202 (a `ready` run only)
 POST   /api/autopilot/runs/{id}/skip
+POST   /api/autopilot/runs/{id}/retry          -> 202 (an `interrupted` or `failed` run; section 7)
+POST   /api/autopilot/runs/{id}/applied        {applied_on: YYYY-MM-DD?} -> {run, submission} (section 7)
 DELETE /api/autopilot/answers/{label_key}
 POST   /api/jobs/{id}/auto-apply               {mode: apply|review} -> 202 {run}
 ```
@@ -319,3 +322,62 @@ run failed at its first navigation. The handler is now registered after the page
 
 Tests: `tests/test_apply_engine.py` (every stand-in ATS and outcome, real Chromium), `tests/test_autopilot.py` (rules,
 the pipeline with fakes, the LinkedIn route, and HTTP journeys with the real engine against `tests/ats_stub.py`).
+
+## 7. As built: one submission per application, lost runs, retries (2026-11-06)
+
+Round 1 items R1.1-R1.3 of `docs/careers-maturity-scope.md` (findings F1, F2, F7, F8). Code in `aira/autopilot.py`
+(migration 21 `autopilot_reliability`: `application_runs.attempts`, `application_runs.next_try_at`), the glue in
+`auto_apply_assistant.py` (`_autopilot_recover`, `_autopilot_retry`, `_autopilot_mark_applied`), the hosted scheduler
+(`monosage_cloud/scheduler.py`, `workspace.py` snapshot `next_due_at`) and `views-autopilot.js`.
+
+**The claim.** `execute_run` starts only a `queued` or `ready` run (or a `needs_review` one when the person's answers
+come with the call), and moves it to `running` with a compare-and-set (`UPDATE … WHERE status IN (…)`), counting the
+try in `attempts`. A second worker, or a hosted `autopilot.exec` job delivered again after its worker lost the lease,
+finds the run running or finished and returns it unchanged. Ending a run without a claim (the job is gone, Monosage
+already has a submission) uses the same guard.
+
+**Interrupted.** A run whose result is unknown waits for the person as `interrupted`, with "Monosage could not
+confirm whether this was sent; check the site, then choose I applied or Try again." It is never applied for again on
+its own. Two ways in:
+- a run left `running` (Monosage stopped mid-run, a hosted worker vanished). `recover()` finds it: locally on the next
+  scheduler tick (the account's single automation slot is free, so every running run is lost), hosted when it has been
+  running longer than `RUN_TIME_LIMIT` (30 minutes; the queue lease is 15 minutes and renewed while a job runs). A
+  pass left running is closed as `interrupted` too;
+- a failure after the button that sends the application: the engine's "after submitting" failures and "No
+  confirmation appeared", a `Clicked …` step other than Workday's opening "Clicked Apply", or an Easy Apply press whose
+  label says submit.
+
+**Retries.** A passing failure is tried again twice, after 15 minutes and then 2 hours (`MAX_ATTEMPTS = 3`,
+`RETRY_DELAYS`): a timeout, HTTP 5xx, HTTP 429 (the engine reports it as a refusal), "Chromium could not be started",
+a closed browser, a `net::ERR_CONNECTION_*`-style network error, or a connection, timeout or URL exception from the
+apply tool. Only when no `Clicked …`/`Pressed …` step was recorded: after a click nothing is retried. Everything else
+(no form, a refused visit with 401/403/451, a missing browser install, a 404, an unknown exception) is final. A retry
+waits as `queued` with `next_try_at`; the run's steps say when ("Try 1 of 3 hit a passing problem; Monosage tries
+again at 14:30 UTC."), and the last one says "Stopped after 3 tries.". Retries follow the run's mode, wait while
+Auto-apply is paused and stop at the daily limit. A pass never starts a second run for a job a retry owns.
+- Locally the scheduler tick (`_run_due_autopilot`) starts `_run_autopilot_for` when a plan is due, a retry is due or a
+  run is marked running; `_run_autopilot_for` recovers first, then runs the due plans.
+- Hosted, `Scheduler._due` queues `autopilot.due` for a due retry or a run past its time limit, and wakes for the
+  earliest of them; the workspace snapshot's `next_due_at` includes the earliest retry.
+
+**Needs you** (`GET /api/autopilot` → `open`, `list_runs(status="open")`) lists `needs_review`, `ready` and
+`interrupted` runs, and `unsupported` runs ("Apply manually": an unsupported site, a refused visit, no form) for 30 days
+(`NEEDS_YOU_DAYS`) unless the job was applied to meanwhile or a newer run replaced it. The cards offer:
+- interrupted: Open the application, I applied, Try again (with a reminder to check the site first), Details, Skip;
+- unsupported: Open the application, I applied, Details, Skip;
+- questions and filled forms: as before, plus I applied.
+
+**I applied** records the person's own submission (`method = "manual"`, idempotency key `autopilot-manual:{run_id}`,
+the day they chose at midnight UTC, not in the future), moves the job to Applied with the usual notification and
+follow-up, and closes the run as `already_applied` ("You applied on the site on …"). **Try again** queues an
+interrupted or failed run and starts it in the automation slot. **Apply for me** on a job whose last run is
+interrupted or unsupported replaces that run (it becomes `skipped`, "Replaced by a new attempt.").
+
+Hosted rules (`monosage_cloud/policy.py`): `api_autopilot_run_retry` is `write("search.run", kind="automation")` (the
+gate's automation check, like Run now); `api_autopilot_run_applied` is `write("applications.submit",
+kind="submit_manual")`, like recording any manual submission.
+
+Tests: `tests/test_autopilot_reliability.py` (the claim and a two-worker race, lost runs and the time limit, which
+failures are retried and when, failures after Submit, Needs you, I applied and Try again, migration 21, HTTP journeys
+with the real engine against a server error after Submit and a rate-limited page, the local tick after a restart, a
+hosted job delivered twice, and the hosted scheduler waking for retries).

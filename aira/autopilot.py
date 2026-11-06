@@ -11,7 +11,18 @@ confirmed the application), is *held* because a required question has no
 confirmed answer (the user answers once, optionally remembering the answer, and
 the run resumes), is *ready* (review mode: the form was filled and waits for the
 user's click), or ends as failed, unsupported or already applied with the reason.
-Every job is tried once; nothing is retried behind the user's back.
+
+One submission per application: a run is *claimed* (``queued``/``ready`` ->
+``running``) with a compare-and-set, so a second worker or a redelivered queue
+job that finds it running or finished does nothing. A run left ``running`` (a
+crash, a lost worker) is *interrupted* by :func:`recover`, and so is a run whose
+Submit was clicked but whose confirmation never came: both wait for the person
+("check the site, then I applied or Try again") and are never sent again on
+their own. A passing failure (a timeout, HTTP 5xx or 429, a browser that would
+not start, a dropped connection) before any Submit click is tried again twice,
+after about 15 minutes and then 2 hours; anything else is not retried. Jobs
+Monosage cannot apply to (``unsupported``) wait in Needs you with Open the
+application, I applied and Skip.
 
 The pipeline is written against :class:`Services`, a bundle of callables the
 server provides (search, details and scoring, applying, recording a submission),
@@ -67,11 +78,31 @@ RUN_STATUSES = (
     "unsupported",
     "already_applied",
     "skipped",
+    "interrupted",
 )
-# Runs in these states still want something from the user.
-OPEN_STATUSES = frozenset({"needs_review", "ready"})
+# Runs in these states still want something from the user (Needs you). An ``unsupported`` run is in Needs you
+# for NEEDS_YOU_DAYS after it ended, unless the job was applied to meanwhile or a newer run replaced it.
+OPEN_STATUSES = frozenset({"needs_review", "ready", "interrupted", "unsupported"})
 # Runs in these states hold the job: a pass never starts another run for it.
 ACTIVE_STATUSES = frozenset({"queued", "running"})
+# A worker may start a run only from these states (the compare-and-set claim in execute_run).
+CLAIMABLE_STATUSES = ("queued", "ready")
+# Runs that answers (or Try again) can resume.
+ANSWERABLE_STATUSES = frozenset({"needs_review", "ready", "failed", "interrupted"})
+# Runs the person may mark "I applied" (they applied on the site themselves).
+APPLIED_BY_PERSON_STATUSES = frozenset(
+    {"needs_review", "ready", "failed", "interrupted", "unsupported", "queued"}
+)
+NEEDS_YOU_DAYS = 30
+# A run still "running" after this long was lost (a crash, a vanished worker): see recover().
+RUN_TIME_LIMIT = timedelta(minutes=30)
+# Tries per run (the first plus two retries) and the wait before each retry.
+MAX_ATTEMPTS = 3
+RETRY_DELAYS = (timedelta(minutes=15), timedelta(hours=2))
+INTERRUPTED_MESSAGE = (
+    "Monosage could not confirm whether this was sent; check the site, then choose I applied "
+    "or Try again."
+)
 OUTCOME_TO_STATUS = {
     "submitted": "submitted",
     "filled": "ready",
@@ -140,6 +171,11 @@ def _loads(text: Any, default: Any) -> Any:
 # Schema
 # --------------------------------------------------------------------------- #
 
+_RUN_COLUMNS = {
+    "attempts": "INTEGER NOT NULL DEFAULT 0",
+    "next_try_at": "TEXT",
+}
+
 
 def ensure_schema(connection: sqlite3.Connection) -> None:
     """Create the auto-apply tables. Additive and idempotent."""
@@ -188,6 +224,16 @@ def ensure_schema(connection: sqlite3.Connection) -> None:
     )
     connection.execute(
         "CREATE INDEX IF NOT EXISTS idx_application_runs_status ON application_runs(status, created_at)"
+    )
+    # Tries so far and when the next retry is due (migration 21, autopilot_reliability).
+    have = {row[1] for row in connection.execute("PRAGMA table_info(application_runs)")}
+    for name, declaration in _RUN_COLUMNS.items():
+        if name not in have:
+            connection.execute(
+                f"ALTER TABLE application_runs ADD COLUMN {name} {declaration}"
+            )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS idx_application_runs_retry ON application_runs(status, next_try_at)"
     )
     connection.execute(
         """CREATE TABLE IF NOT EXISTS custom_answers (
@@ -520,13 +566,33 @@ _JSON_RUN_FIELDS = {
 }
 
 
+def _needs_you_since(now: datetime | None = None) -> str:
+    return _iso((now or _now()) - timedelta(days=NEEDS_YOU_DAYS))
+
+
 def run_view(row: sqlite3.Row | Mapping[str, Any]) -> dict[str, Any]:
     run = dict(row)
     for name, default in _JSON_RUN_FIELDS.items():
         run[name] = _loads(run.get(name), json.loads(default))
-    run["open"] = run["status"] in OPEN_STATUSES
+    status = run["status"]
+    run["open"] = status in OPEN_STATUSES and (
+        status != "unsupported"
+        or str(run.get("finished_at") or run.get("created_at") or "")
+        >= _needs_you_since()
+    )
+    run["attempts"] = int(run.get("attempts") or 0)
+    run["max_attempts"] = MAX_ATTEMPTS
     run["drafted_answers"] = answer_drafts.drafted_answers(run["questions"])
     return run
+
+
+# The runs Needs you lists: questions, a filled form, an interrupted run, and (for NEEDS_YOU_DAYS) a job to apply
+# to on the site that was not applied to since and has no newer run.
+_NEEDS_YOU_SQL = """(status IN ('needs_review', 'ready', 'interrupted') OR (
+    status = 'unsupported' AND COALESCE(finished_at, created_at) >= ?
+    AND job_id NOT IN (SELECT job_id FROM application_submissions)
+    AND NOT EXISTS (SELECT 1 FROM application_runs later WHERE later.job_id = application_runs.job_id
+        AND later.created_at > application_runs.created_at)))"""
 
 
 def _run_rows(
@@ -557,9 +623,11 @@ def list_runs(
     job_id: str = "",
     limit: int = 50,
 ) -> list[dict[str, Any]]:
-    clauses, args = [], []
+    clauses: list[str] = []
+    args: list[Any] = []
     if status == "open":
-        clauses.append("status IN ('needs_review', 'ready')")
+        clauses.append(_NEEDS_YOU_SQL)
+        args.append(_needs_you_since())
     elif status:
         clauses.append("status = ?")
         args.append(status)
@@ -632,6 +700,8 @@ def update_run(
         "started_at",
         "finished_at",
         "mode",
+        "attempts",
+        "next_try_at",
     }
     bad = set(fields) - allowed
     if bad:
@@ -910,6 +980,53 @@ def normalize_outcome(raw: Mapping[str, Any]) -> dict[str, Any]:
     }
 
 
+# Failures that may pass on their own: a timeout, a server error or rate limit, a browser that would not start, a
+# dropped connection. Matched against the engine's error text or the exception that escaped ``Services.apply``.
+_TRANSIENT_RE = re.compile(
+    r"did not respond in time|timed out|timeout|\(HTTP 429\)|answered HTTP 429|answered HTTP 5\d\d|"
+    r"Chromium could not be started|browser has been closed|Target (?:page, context or browser )?closed|"
+    r"net::ERR_(?:CONNECTION_\w+|TIMED_OUT|NETWORK_CHANGED|INTERNET_DISCONNECTED|EMPTY_RESPONSE|"
+    r"SOCKET_NOT_CONNECTED|ADDRESS_UNREACHABLE|NAME_NOT_RESOLVED)|"
+    r"^(?:TimeoutError|ConnectionResetError|ConnectionAbortedError|ConnectionRefusedError|BrokenPipeError|"
+    r"URLError|RemoteDisconnected|IncompleteRead|ConnectionError):|connection (?:was )?reset",
+    re.IGNORECASE,
+)
+
+
+def submit_clicked(outcome: Mapping[str, Any]) -> bool:
+    """Whether the run may have pressed a button that sends the application.
+
+    The form engine and Workday record ``Clicked …`` and Easy Apply ``Pressed …``. Any of them counts, so a failure
+    after one is never retried: better to ask the person than to send twice.
+    """
+    return any(
+        str(step).startswith(("Clicked ", "Pressed ", "Submitted"))
+        for step in outcome.get("steps") or []
+    )
+
+
+def _sent_unconfirmed(outcome: Mapping[str, Any]) -> bool:
+    """A failure after the button that sends the application: it may have gone out (so: interrupted, not failed)."""
+    steps = [str(step) for step in outcome.get("steps") or []]
+    error = str(outcome.get("error") or "")
+    if "after submit" in error.casefold() or any(
+        "after submit" in step.casefold() or step.startswith("No confirmation appeared")
+        for step in steps
+    ):
+        return True
+    if any(step.startswith("Clicked ") and step != "Clicked Apply" for step in steps):
+        return True  # the engine's only "Clicked" step is its Submit (Workday's "Clicked Apply" opens the form)
+    pressed = [step for step in steps if step.startswith("Pressed ")]
+    return bool(pressed) and "submit" in pressed[-1].casefold()
+
+
+def is_transient(outcome: Mapping[str, Any]) -> bool:
+    """A failure worth another try later (see :data:`_TRANSIENT_RE`); everything else is final."""
+    if outcome.get("status") not in ("failed", "unsupported"):
+        return False
+    return bool(_TRANSIENT_RE.search(str(outcome.get("error") or "")))
+
+
 def _job_label(job: Mapping[str, Any]) -> str:
     title = str(job.get("title") or job.get("job_id") or "a job")
     company = str(job.get("company") or "")
@@ -924,13 +1041,22 @@ def execute_run(
     submit: bool | None = None,
     plan: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
-    """Apply for one run and record what happened. ``submit`` defaults to the run's mode."""
+    """Apply for one run and record what happened. ``submit`` defaults to the run's mode.
+
+    Only a ``queued`` or ``ready`` run is applied for, and it is claimed with a compare-and-set first: a second
+    worker, or a queue job delivered again after its worker vanished, finds the run running or finished and
+    returns it unchanged.
+    """
+    # The person's answers also resume a run held for them (the answer route queues it first; callers may not).
+    claimable = (*CLAIMABLE_STATUSES, "needs_review") if answers else CLAIMABLE_STATUSES
     with services.connect() as connection:
         run = get_run(connection, run_id)
+    if run["status"] not in claimable:
+        return run
     job = services.job(run["job_id"])
     if job is None:
         with services.connect() as connection:
-            return update_run(
+            return _finish_unclaimed(
                 connection,
                 run_id,
                 {
@@ -938,6 +1064,7 @@ def execute_run(
                     "error": "The job no longer exists.",
                     "finished_at": _iso(services.now()),
                 },
+                claimable,
             )
     do_submit = run["mode"] == "apply" if submit is None else bool(submit)
     if submit is None and do_submit and not services.submit_allowed():
@@ -960,7 +1087,7 @@ def execute_run(
                 (job["job_id"],),
             ).fetchone()
         ):
-            return update_run(
+            return _finish_unclaimed(
                 connection,
                 run_id,
                 {
@@ -968,17 +1095,24 @@ def execute_run(
                     "error": "Monosage already recorded an application for this job.",
                     "finished_at": _iso(services.now()),
                 },
+                claimable,
             )
-        update_run(
-            connection,
-            run_id,
-            {
-                "status": "running",
-                "answers": merged_answers,
-                "started_at": _iso(services.now()),
-                "error": "",
-            },
-        )
+        # The claim: one worker moves the run to running; anyone else finds it taken and stops here.
+        claimed = connection.execute(
+            f"""UPDATE application_runs SET status = 'running', answers = ?, started_at = ?, error = '',
+                finished_at = NULL, attempts = attempts + 1, next_try_at = NULL
+            WHERE run_id = ? AND status IN ({", ".join("?" for _ in claimable)})""",
+            (
+                json.dumps(merged_answers, ensure_ascii=False),
+                _iso(services.now()),
+                run_id,
+                *claimable,
+            ),
+        ).rowcount
+        connection.commit()
+        run = get_run(connection, run_id)
+        if not claimed:
+            return run
     try:
         outcome = normalize_outcome(
             services.apply(job, run, merged_answers, do_submit, plan)
@@ -1033,11 +1167,38 @@ def execute_run(
         outcome["error"] = outcome["error"] or (
             f"This job applies on the company site{': ' + outcome['url'] if outcome['url'] else ''}."
         )
+    next_try: str | None = None
+    attempt = int(run.get("attempts") or 1)
+    if status == "failed" and do_submit and _sent_unconfirmed(outcome):
+        # Submit was pressed but no confirmation came: it may have been sent. Ask the person; never resend.
+        status = "interrupted"
+        outcome["error"] = f"{INTERRUPTED_MESSAGE} ({outcome['error']})"[:1000]
+    elif (
+        status in ("failed", "unsupported")
+        and is_transient(outcome)
+        and not submit_clicked(outcome)
+    ):
+        when = services.now()
+        if attempt < MAX_ATTEMPTS:
+            wait = RETRY_DELAYS[min(attempt, len(RETRY_DELAYS)) - 1]
+            next_try = _iso(when + wait)
+            status = "queued"
+            outcome["steps"] = [
+                *outcome["steps"],
+                f"Try {attempt} of {MAX_ATTEMPTS} hit a passing problem; Monosage tries again at "
+                f"{(when + wait).astimezone(timezone.utc).strftime('%H:%M')} UTC.",
+            ][-STEPS_KEPT:]
+        else:
+            outcome["steps"] = [
+                *outcome["steps"],
+                f"Stopped after {MAX_ATTEMPTS} tries.",
+            ][-STEPS_KEPT:]
     with services.connect() as connection:
         updated = update_run(
             connection,
             run_id,
             {
+                "next_try_at": next_try,
                 "status": status,
                 "route": outcome["route"],
                 "ats": outcome["ats"],
@@ -1051,7 +1212,7 @@ def execute_run(
                 "screenshot_document_id": outcome["screenshot_document_id"],
                 "application_url": outcome["url"] or run["application_url"],
                 "answers": merged_answers,
-                "finished_at": _iso(services.now()),
+                "finished_at": None if status == "queued" else _iso(services.now()),
             },
         )
     label = _job_label(job)
@@ -1062,18 +1223,185 @@ def execute_run(
             f"Monosage applied to {label}.{' Confirmation ' + outcome['confirmation_number'] + '.' if outcome['confirmation_number'] else ''}",
             "#/applications",
         )
-    elif status in OPEN_STATUSES:
+    elif status in ("needs_review", "ready", "interrupted"):
         services.on_held(job, updated, outcome)
         services.notify(
-            "Auto-apply needs you" if status == "needs_review" else "Ready to submit",
+            "Ready to submit" if status == "ready" else "Auto-apply needs you",
             (
                 f"{label}: {len(outcome['unanswered'])} question(s) need your answer."
                 if status == "needs_review"
                 else f"{label}: the form is filled and waits for your OK."
+                if status == "ready"
+                else f"{label}: {INTERRUPTED_MESSAGE}"
             ),
             "#/needs",
         )
     return updated
+
+
+def _finish_unclaimed(
+    connection: sqlite3.Connection,
+    run_id: str,
+    fields: Mapping[str, Any],
+    claimable: Sequence[str] = CLAIMABLE_STATUSES,
+) -> dict[str, Any]:
+    """End a run that was never claimed, unless another worker claimed it meanwhile (then leave it alone)."""
+    assignments = ", ".join(f"{key} = ?" for key in fields)
+    connection.execute(
+        f"UPDATE application_runs SET {assignments} WHERE run_id = ? AND status IN "
+        f"({', '.join('?' for _ in claimable)})",
+        (*fields.values(), run_id, *claimable),
+    )
+    connection.commit()
+    return get_run(connection, run_id)
+
+
+# --------------------------------------------------------------------------- #
+# Recovery: lost runs, due retries, and what the person did on the site
+# --------------------------------------------------------------------------- #
+
+
+def reap_stale_runs(
+    connection: sqlite3.Connection, *, stale_before: datetime, now: datetime
+) -> list[dict[str, Any]]:
+    """Runs still ``running`` that started before ``stale_before`` were lost: mark them interrupted.
+
+    Locally the caller holds the account's only automation slot, so every running run is stale; a hosted worker
+    passes ``now - RUN_TIME_LIMIT`` because another worker may be busy with a run. Passes left running are closed
+    too. An interrupted run is never applied for again on its own.
+    """
+    rows = connection.execute(
+        "SELECT run_id FROM application_runs WHERE status = 'running' AND COALESCE(started_at, created_at) < ?",
+        (_iso(stale_before),),
+    ).fetchall()
+    reaped: list[dict[str, Any]] = []
+    for (run_id,) in rows:
+        run = get_run(connection, run_id)
+        changed = connection.execute(
+            "UPDATE application_runs SET status = 'interrupted', error = ?, steps = ?, finished_at = ?, next_try_at = NULL "
+            "WHERE run_id = ? AND status = 'running'",
+            (
+                INTERRUPTED_MESSAGE,
+                json.dumps(
+                    [
+                        *run["steps"],
+                        "The run stopped before it finished (Monosage restarted or its worker was lost).",
+                    ][-STEPS_KEPT:],
+                    ensure_ascii=False,
+                ),
+                _iso(now),
+                run_id,
+            ),
+        ).rowcount
+        if changed:
+            reaped.append(get_run(connection, run_id))
+    connection.execute(
+        "UPDATE autopilot_passes SET status = 'interrupted', finished_at = ?, summary = ? "
+        "WHERE status = 'running' AND started_at < ?",
+        (_iso(now), "Stopped before it finished", _iso(stale_before)),
+    )
+    connection.commit()
+    return reaped
+
+
+def due_retries(connection: sqlite3.Connection, now: datetime) -> list[dict[str, Any]]:
+    return _run_rows(
+        connection,
+        "SELECT * FROM application_runs WHERE status = 'queued' AND next_try_at IS NOT NULL AND next_try_at <= ? "
+        "ORDER BY next_try_at LIMIT 20",
+        (_iso(now),),
+    )
+
+
+def next_due_retry(connection: sqlite3.Connection) -> str | None:
+    """When the earliest scheduled retry is due (ISO), for a scheduler that sleeps until then."""
+    try:
+        row = connection.execute(
+            "SELECT MIN(next_try_at) FROM application_runs WHERE status = 'queued' AND next_try_at IS NOT NULL"
+        ).fetchone()
+    except sqlite3.OperationalError:  # a database from before migration 21
+        return None
+    return row[0] if row else None
+
+
+def recover(
+    services: Services,
+    *,
+    stale_before: datetime,
+    plans: Callable[[str], Mapping[str, Any] | None] = lambda _plan_id: None,
+) -> dict[str, int]:
+    """Interrupt lost runs, then try again the retries that are due (paused: they wait; the daily limit: they wait).
+
+    ``plans`` gives the plan of a run (None when it was deleted), so a retry applies with the plan's settings.
+    """
+    now = services.now()
+    with services.connect() as connection:
+        reaped = reap_stale_runs(connection, stale_before=stale_before, now=now)
+    for run in reaped:
+        job = services.job(run["job_id"])
+        if job is None:
+            continue
+        services.on_held(job, run, {"status": "interrupted"})
+        services.notify(
+            "Auto-apply needs you",
+            f"{_job_label(job)}: {INTERRUPTED_MESSAGE}",
+            "#/needs",
+        )
+    retried = 0
+    if not services.paused():
+        with services.connect() as connection:
+            due = due_retries(connection, now)
+        for run in due:
+            try:
+                execute_run(
+                    services,
+                    run["run_id"],
+                    plan=plans(run["plan_id"]) if run.get("plan_id") else None,
+                )
+            except ValueError:
+                break  # the daily limit: the rest wait (they stay queued and due)
+            retried += 1
+    return {"interrupted": len(reaped), "retried": retried}
+
+
+def retry_run(connection: sqlite3.Connection, run_id: str) -> dict[str, Any]:
+    """The person's Try again: an interrupted or failed run goes back to the queue (the caller starts it)."""
+    run = get_run(connection, run_id)
+    if run["status"] not in ("interrupted", "failed"):
+        raise ValueError(
+            "Only an interrupted or failed application can be tried again."
+        )
+    changed = connection.execute(
+        "UPDATE application_runs SET status = 'queued', next_try_at = NULL, finished_at = NULL WHERE run_id = ? AND status = ?",
+        (run_id, run["status"]),
+    ).rowcount
+    connection.commit()
+    if not changed:
+        raise ValueError("This application changed meanwhile; reload and try again.")
+    return get_run(connection, run_id)
+
+
+def mark_applied_by_person(
+    connection: sqlite3.Connection, run_id: str, *, applied_on: str, now: datetime
+) -> dict[str, Any]:
+    """The person applied on the site: close the run (the caller records the submission)."""
+    run = get_run(connection, run_id)
+    if run["status"] not in APPLIED_BY_PERSON_STATUSES:
+        raise ValueError("This application cannot be marked as applied now.")
+    changed = connection.execute(
+        "UPDATE application_runs SET status = 'already_applied', error = ?, next_try_at = NULL, finished_at = ? "
+        "WHERE run_id = ? AND status = ?",
+        (
+            f"You applied on the site{' on ' + applied_on if applied_on else ''}.",
+            _iso(now),
+            run_id,
+            run["status"],
+        ),
+    ).rowcount
+    connection.commit()
+    if not changed:
+        raise ValueError("This application changed meanwhile; reload and try again.")
+    return get_run(connection, run_id)
 
 
 def _start_pass(
@@ -1095,6 +1423,8 @@ def _summary(counts: Mapping[str, int]) -> str:
         ("ready", "ready for your OK"),
         ("needs_review", "need answers"),
         ("failed", "failed"),
+        ("queued", "to try again later"),
+        ("interrupted", "to check on the site"),
         ("unsupported", "apply manually"),
         ("already_applied", "already applied"),
     ):
@@ -1223,8 +1553,13 @@ def run_plan(
                 note(str(error))
                 break
             counts[done["status"]] = counts.get(done["status"], 0) + 1
+            outcome_word = (
+                "will be tried again later"
+                if done["status"] == "queued"
+                else done["status"].replace("_", " ")
+            )
             note(
-                f"{_job_label(job)} ({round(float(job.get('match_score') or 0))}%): {done['status'].replace('_', ' ')}"
+                f"{_job_label(job)} ({round(float(job.get('match_score') or 0))}%): {outcome_word}"
             )
             sent += 1
         for reason, number in sorted(reasons.items(), key=lambda item: -item[1])[:8]:
