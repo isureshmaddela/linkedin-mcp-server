@@ -136,7 +136,7 @@ def test_the_board_shows_wish_lists_only_when_the_family_says_so(db, home):
     assert page["wish_lists"] == [
         {
             "person": {
-                "name": "Mia",
+                "name": "M.",  # the public board names children by their initial only
                 "emoji": page["wish_lists"][0]["person"]["emoji"],
                 "color": page["wish_lists"][0]["person"]["color"],
             },

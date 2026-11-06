@@ -330,7 +330,7 @@ def test_the_left_menu_follows_a_job_search_and_old_links_still_work(browser, en
 
     # Jobs has three folders; where a job comes from is a chip on All jobs.
     page.click("#primaryNav a[data-section='jobs']")
-    assert folders(page, "jobs") == ["All jobs", "Recommended", "Saved"]
+    assert folders(page, "jobs") == ["All jobs", "Recommended", "Saved", "Skill gaps"]
     chips = page.locator("#main .careers-source-chip")
     assert [t.strip() for t in chips.all_inner_texts()] == [
         "Every source",

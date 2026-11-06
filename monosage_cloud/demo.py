@@ -183,15 +183,17 @@ def seed_demo(app: CloudApp) -> dict[str, Any]:
 
     org_id, owner = signup("Northwind Outplacement", "owner@northwind.test")
     pay(org_id, "team", 50)
+    # LinkedIn only where the operator allows it (AIRA_CLOUD_LINKEDIN_AUTOMATION); the rest of the demo is the same.
+    linkedin = bool(app.config.linkedin_automation)
     app.tenancy.update_policy(
         owner,
         {
-            "linkedin_allowed": True,
+            "linkedin_allowed": linkedin,
             "allowed_sources": [
                 "aira_jobs",
                 "company_boards",
                 "google_jobs",
-                "linkedin",
+                *(["linkedin"] if linkedin else []),
             ],
             "submission_mode": "auto",
             "daily_cap_per_candidate": 15,
