@@ -16,11 +16,55 @@ _SECRET_RE = re.compile(
     re.IGNORECASE,
 )
 _EMAIL_RE = re.compile(r"[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}")
+# Capability links: whoever holds the URL holds the access (an export download, an invitation, a public page, a
+# password reset or a launch). The segment after one of these prefixes is masked wherever it appears in log text.
+CAPABILITY_PREFIXES = (
+    "/api/exports/download/",
+    "/api/invites/",
+    "/api/public/",
+    "/p/",
+    "#/invite/",
+    "#/reset/",
+    "#/verify/",
+    "#/recovery-cancel/",
+)
+_CAPABILITY_RE = re.compile(
+    "(" + "|".join(re.escape(prefix) for prefix in CAPABILITY_PREFIXES) + r")[^/?#\s\"'&]+"
+)
+# Query parameters that carry a credential or a one-time code: ``token=`` and ``api_key=`` are covered above.
+_QUERY_SECRET_RE = re.compile(
+    r"([?&;](?:token|api_key|code|state|sig|signature|key|access_token|refresh_token|client_secret|launch|t)=)[^&#\s\"']+",
+    re.IGNORECASE,
+)
+# Anything shaped like a random capability token in a path (32+ URL-safe characters mixing cases or digits and
+# letters, not a 32-character hexadecimal id): a route added later is masked before anyone lists it above.
+_LONG_TOKEN_RE = re.compile(r"(?<=/)(?![0-9a-f]{32}(?:[/?#\s]|$))[A-Za-z0-9_-]{32,}")
+
+
+def _looks_random(segment: str) -> bool:
+    kinds = sum(
+        (
+            any(c.islower() for c in segment),
+            any(c.isupper() for c in segment),
+            any(c.isdigit() for c in segment),
+        )
+    )
+    return kinds >= 2 and not re.fullmatch(r"[a-z0-9]+(?:-[a-z0-9]+)+", segment)
+
+
+def redact_path(path: str) -> str:
+    """A request path (or a URL) with capability tokens in its segments and its query masked."""
+    text = _CAPABILITY_RE.sub(lambda m: f"{m.group(1)}[redacted]", path)
+    text = _QUERY_SECRET_RE.sub(lambda m: f"{m.group(1)}[redacted]", text)
+    return _LONG_TOKEN_RE.sub(
+        lambda m: "[redacted]" if _looks_random(m.group(0)) else m.group(0), text
+    )
 
 
 def redact(text: str) -> str:
-    """Mask credential-looking values and email addresses in log text."""
+    """Mask credential-looking values, capability links and email addresses in log text."""
     text = _SECRET_RE.sub(lambda m: f"{m.group(1)}{m.group(2)}[redacted]", text)
+    text = redact_path(text)
     return _EMAIL_RE.sub("[email]", text)
 
 
@@ -44,7 +88,7 @@ class JsonFormatter(logging.Formatter):
         ):
             value = getattr(record, key, None)
             if value is not None:
-                payload[key] = value
+                payload[key] = redact_path(value) if key == "path" else value
         if record.exc_info and record.exc_info[1] is not None:
             payload["error"] = redact(
                 f"{type(record.exc_info[1]).__name__}: {record.exc_info[1]}"
@@ -54,8 +98,9 @@ class JsonFormatter(logging.Formatter):
 
 class TextFormatter(logging.Formatter):
     def format(self, record: logging.LogRecord) -> str:
-        record.msg = redact(str(record.msg))
-        base = super().format(record)
+        # The arguments are part of the message (a request path is one): redact the whole formatted line, traceback
+        # included, without changing the record other handlers see.
+        base = redact(super().format(record))
         correlation = getattr(record, "correlation_id", None)
         return f"{base} [cid={correlation}]" if correlation else base
 
