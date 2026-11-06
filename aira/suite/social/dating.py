@@ -167,7 +167,8 @@ SCHEMA = (
         transcript TEXT NOT NULL DEFAULT '[]',
         profiles TEXT NOT NULL DEFAULT '{}',
         ended_at TEXT NOT NULL,
-        purge_after TEXT NOT NULL
+        purge_after TEXT NOT NULL,
+        legal_hold TEXT NOT NULL DEFAULT ''
     )""",
     "CREATE INDEX IF NOT EXISTS so_dating_ended_pair ON so_dating_ended (a_id, b_id)",
 )

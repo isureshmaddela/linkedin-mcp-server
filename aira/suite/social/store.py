@@ -350,7 +350,8 @@ SCHEMA = (
         kind TEXT NOT NULL,
         data TEXT NOT NULL DEFAULT '{}',
         created_at TEXT NOT NULL,
-        purge_after TEXT NOT NULL
+        purge_after TEXT NOT NULL,
+        legal_hold TEXT NOT NULL DEFAULT ''
     )""",
     "CREATE INDEX IF NOT EXISTS so_evidence_report ON so_evidence (report_id)",
     # the people a guardian approved to befriend and message their child or teen
@@ -388,6 +389,10 @@ COLUMNS = (
     # a picture for a group or a page
     ("so_groups", "photo", "TEXT NOT NULL DEFAULT ''"),
     ("so_pages", "photo", "TEXT NOT NULL DEFAULT ''"),
+    # evidence of an open report about a person who was erased: kept under a legal hold until the report closes
+    # (service.erase_account, service.purge_kept)
+    ("so_evidence", "legal_hold", "TEXT NOT NULL DEFAULT ''"),
+    ("so_dating_ended", "legal_hold", "TEXT NOT NULL DEFAULT ''"),
 )
 
 
@@ -395,7 +400,7 @@ def migrate(connection: sqlite3.Connection) -> None:
     """Add the columns of :data:`COLUMNS` that an older database does not have yet."""
     for table, column, definition in COLUMNS:
         have = {r[1] for r in connection.execute(f"PRAGMA table_info({table})")}  # noqa: S608 - fixed names
-        if column not in have:
+        if have and column not in have:  # (a table made later, such as Dating's, gets it when it is made)
             connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")  # noqa: S608
     # the key that signs photo addresses (photos.py), made here so a view never writes while it reads
     connection.execute(
