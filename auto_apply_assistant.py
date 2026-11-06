@@ -9108,6 +9108,10 @@ class RequestHandler(BaseHTTPRequestHandler):
                     except ValueError:
                         length = 0
                     if length > suite_payments.MAX_WEBHOOK_BYTES:
+                        # never parsed; a body up to a few MB is drained so the answer arrives (Windows resets a
+                        # socket closed with unread bytes), anything larger just closes the connection
+                        if length <= 4_000_000:
+                            self._discard_body()
                         self.close_connection = True
                         self._send_json(413, {"error": "The webhook body is too large."})
                         return
