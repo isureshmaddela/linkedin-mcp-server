@@ -398,6 +398,14 @@ Which workspace: a candidate's own, or `X-Aira-Candidate: <member id>` for staff
 | POST | `/api/jobs/([A-Za-z0-9][A-Za-z0-9_.:-]{0,255})/documents/snapshot` | `api_job_documents_snapshot` |  |
 | GET | `/api/jobs/([A-Za-z0-9][A-Za-z0-9_.:-]{0,255})/documents/versions` | `api_job_document_versions` |  |
 | GET | `/api/jobs/([A-Za-z0-9][A-Za-z0-9_.:-]{0,255})/documents/versions/([0-9a-f]{32})` | `api_job_document_version_text` |  |
+| POST | `/api/jobs/([A-Za-z0-9][A-Za-z0-9_.:-]{0,255})/documents/preview` | `api_job_document_preview` | formatted pages of the editor's text |
+| POST | `/api/jobs/([A-Za-z0-9][A-Za-z0-9_.:-]{0,255})/documents/file` | `api_job_document_file` | audited (the Word option reads the master resume) |
+| POST | `/api/jobs/([A-Za-z0-9][A-Za-z0-9_.:-]{0,255})/documents/check` | `api_job_document_check` | ATS readiness, missing keywords, changes |
+| GET | `/api/resume-intel/skill-gaps` | `api_skill_gaps` |  |
+| POST | `/api/resume-intel/certifications` | `api_certifications` | model gateway call when `use_ai` |
+| GET | `/api/interviews/([0-9a-f]{32})/prep` | `api_interview_prep` |  |
+| GET | `/api/star-stories` | `api_star_stories` |  |
+| POST | `/api/star-stories/drafts` | `api_star_story_drafts` | nothing is saved |
 
 ### Candidate workspace, edits (`candidates.write`, a coach needs `act`)
 
@@ -418,6 +426,13 @@ Which workspace: a candidate's own, or `X-Aira-Candidate: <member id>` for staff
 | POST | `/api/interviews` | `api_interviews_create` |  |
 | PATCH | `/api/interviews/([0-9a-f]{32})` | `api_interview_update` |  |
 | DELETE | `/api/interviews/([0-9a-f]{32})` | `api_interview_delete` |  |
+| POST | `/api/interviews/([0-9a-f]{32})/prep` | `api_interview_prep_build` | model gateway call when `use_ai` |
+| PATCH | `/api/interviews/([0-9a-f]{32})/prep` | `api_interview_prep_notes` |  |
+| POST | `/api/star-stories` | `api_star_story_create` |  |
+| PATCH | `/api/star-stories/([0-9a-f]{32})` | `api_star_story_update` |  |
+| DELETE | `/api/star-stories/([0-9a-f]{32})` | `api_star_story_delete` |  |
+| POST | `/api/jobs/bulk` | `api_jobs_bulk` | `search.run`; per-job results |
+| POST | `/api/autopilot/runs/bulk` | `api_autopilot_runs_bulk` | `search.run`, gate check like Try again; per-run results |
 | POST | `/api/recruiters` | `api_recruiters_create` |  |
 | PATCH | `/api/recruiters/([0-9a-f]{32})` | `api_recruiter_update` |  |
 | DELETE | `/api/recruiters/([0-9a-f]{32})` | `api_recruiter_delete` |  |

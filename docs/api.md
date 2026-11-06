@@ -66,8 +66,14 @@ Base URL: `http://127.0.0.1:8765` (loopback only). All responses are JSON unless
 | PATCH | `/api/jobs/{id}/notes` | `{notes, follow_up_at}` | Follow-up creates a task. |
 | POST | `/api/jobs/{id}/documents/snapshot` | `{}` | Store drafts as versioned encrypted documents. |
 | GET | `/api/jobs/{id}/documents/versions` | | Resume editor history: versions of the tailored resume and cover letter, newest first, with `approved` and what applications send now (`in_use`). |
-| POST | `/api/jobs/{id}/documents/versions` | `{resume, cover_letter, approve}` | Saves the texts as the drafts and as new versions when they changed; `approve: true` ("I reviewed this") makes them the approved versions that applications upload. |
+| POST | `/api/jobs/{id}/documents/versions` | `{resume, cover_letter, approve, format}` | Saves the texts as the drafts and as new versions when they changed; `approve: true` ("I reviewed this") makes them the approved versions that applications upload. `format`: `pdf` (Monosage's layout, default) or `docx` (the master Word resume as the template; refused when it does not qualify). |
 | GET | `/api/jobs/{id}/documents/versions/{document_id}` | | One version's text. |
+| POST | `/api/jobs/{id}/documents/preview` | `{doc: resume\|cover_letter, text}` | The formatted pages employers receive, as positioned text (`pages`, `width`, `height`, `warnings`); for a resume also `outline` and `templates.docx` (whether the Word template is available, and why not). |
+| POST | `/api/jobs/{id}/documents/file` | `{doc, text, format}` | The exact file an application uploads for this text: `application/pdf`, or the Word copy for `format: docx`. |
+| POST | `/api/jobs/{id}/documents/check` | `{text}` | Resume intelligence for the editor's text: `ats` (score 0-100, grade, checks with fixes), `keywords` (the job's missing required and preferred skills, each with `in_master`) and `changes` (against the master resume: sections, lines, new skills and figures to check). |
+| POST | `/api/jobs/bulk` | `{action: save\|unsave\|archive\|restore\|stage\|score, job_ids[], stage?}` | One action on up to 200 jobs; `results[]` per job (`ok`, `error`), `done`, `failed`. |
+| GET | `/api/resume-intel/skill-gaps` | `?scope=active\|saved\|all` | The skills most often missing across the jobs, with the jobs each one unlocks (the only missing required skill) and curated certifications. |
+| POST | `/api/resume-intel/certifications` | `{skills[], use_ai, model}` | Curated certifications for the skills, plus the model's suggestions (marked `ai`) when asked and a model is set up. |
 | POST | `/api/search`, `/api/search/greenhouse`, `/api/search/google` | | Legacy single-source search routes (kept for compatibility). |
 
 ## Applications
@@ -107,6 +113,12 @@ Status model: `discovered → saved → ready_to_apply → applying → needs_re
 | DELETE | `/api/interviews/{id}` | | |
 | GET | `/api/interviews/{id}/calendar.ics` | | `text/calendar` download. |
 | GET | `/api/interviews/calendar.ics` | | All upcoming interviews. |
+| GET | `/api/interviews/{id}/prep` | | The interview's prep (`questions` with linked `story_ids` and practice `notes`, `research` brief) or `null`, the STAR stories and `ai_available`. |
+| POST | `/api/interviews/{id}/prep` | `{use_ai, model}` | Builds the prep from the posting, the interview type, the resume and the stories; with `use_ai` the model adds questions and a brief (marked `ai`). Notes on kept questions survive. |
+| PATCH | `/api/interviews/{id}/prep` | `{notes: {question_id: text}}` | Practice notes. |
+| GET/POST | `/api/star-stories` | `{title, skills[], situation, task, action, result}` | The person's STAR stories (title and an action or result are required). |
+| PATCH/DELETE | `/api/star-stories/{id}` | | |
+| POST | `/api/star-stories/drafts` | `{skills?[]}` | Drafts from resume bullets that name a skill (Action and Result filled; Situation and Task left to the person). Nothing is saved. |
 | GET/POST/PATCH/DELETE | `/api/tasks`, `/api/tasks/{id}` | `{title, kind, due_at, job_id, interview_id, recruiter_id}` / `{status}` | Follow-ups, prep reminders, assessment deadlines. |
 
 ## Recruiters

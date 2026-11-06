@@ -69,8 +69,39 @@ in `views-jobs.js`.
   the local model's review), **Documents** (a tailored resume and cover letter you review and approve), **Apply**
   and **History** (every status change with who, when and why).
 * Clearing a follow-up reminder also removes its task from the dashboard.
+* **Bulk actions**: tick jobs (or **Select all** on the page) and save, score, move to a status, or archive them
+  together (with **Undo**); on the archived list the same button restores them. Each job answers for itself: one that
+  cannot move does not stop the others, and the message says why. Applications > Pipeline and Needs you (skip, try
+  again) work the same way.
+* **Skill gaps** (Jobs > Skill gaps): the skills your jobs ask for that your resume and verified skills do not show,
+  how many jobs ask for each, and which jobs one skill would **unlock** (it is the only required skill you lack for
+  them). Each gap lists well-known certifications that show it; **Suggest certifications** can also ask your AI
+  model (its suggestions are marked, and you check each with the issuer).
 * **Auto-apply** (Jobs > Auto-apply): search plans that find, score and apply to the best matches on a schedule,
   within your limits; questions Aira cannot answer come back to you.
+
+## What employers receive
+
+The tailored resume you approve is laid out as a real resume before it is uploaded or emailed: your name and
+contact details at the top, section headings with a rule, role and company lines in bold with the dates on the
+right, bullets with hanging indents, and page breaks that never leave a heading or a role alone at the foot of a
+page. Cover letters get the same header, the date and spaced paragraphs. The text can be plain or written with
+Markdown-like marks (`## Experience`, `**bold**`, `- bullet`); ALL CAPS headings and the usual heading words
+(Summary, Experience, Education, Skills, Certifications, Projects and more) are recognised.
+
+* **Preview** (Documents tab) draws the exact pages from the same layout the PDF is written from; **Open the PDF**
+  and **Download** give you the file itself.
+* **Send my resume as**: *PDF in Monosage's layout*, or *Word, in my own resume's design* when your master resume
+  is a simple one-column Word file (no tables, text boxes, pictures or columns). The Word copy keeps your styles,
+  page setup, headers and footers and puts the tailored text in them; if it cannot be built, the PDF is sent.
+* The PDF uses the standard Helvetica fonts, which ATS parsers read. Accented letters outside them are
+  transliterated (Gdańsk becomes Gdansk); anything else (for example Chinese or Devanagari) shows as "?" and the
+  preview says so. Send the Word format to keep every character.
+* **ATS check** scores the editor's text from 0 to 100: parseable structure, standard headings, contact details,
+  the job's keywords and length, with the fix for each check that fails. It lists the job's missing skills (and
+  whether your master resume already has them, so you can bring them back truthfully) and what changed against
+  your master resume. Skills and figures that the master resume does not contain are flagged for you to check
+  before you approve.
 
 ## Applying
 
@@ -124,6 +155,14 @@ applications sent through Aira.
 ## Interviews
 
 Upcoming, past and all interviews with their time zone, people, preparation, notes, feedback and action items.
+**Interview prep** on each interview lists the questions it is likely to ask (openers, behavioural questions for the
+job's skills, technical questions, the gaps to prepare for, questions for the interview type, such as pay and notice
+period for a recruiter screen, which Monosage never answers for you) with your STAR stories linked to each and a box
+for practice notes, and a company brief from the posting (what they do, the role, the tech, what they value, your
+strengths and gaps, questions to ask). It works without a model; **Use AI as well** adds questions and a sharper
+brief from your AI model, marked as such. **STAR stories** (Interviews > STAR stories) are your own stories
+(situation, task, action, result) linked to skills; **Draft from my resume** starts drafts from resume bullets and
+leaves the situation and task to you.
 Add one by hand (link it to a job by picking its title) or from an invitation email. Each interview has calendar
 links (Google, Outlook, Office 365) and an `.ics` file; **Download all** gives every upcoming interview at once.
 Cancelling keeps the calendar entry in step (same UID, next sequence).
