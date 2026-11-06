@@ -16,6 +16,7 @@ from datetime import date, timedelta
 from typing import Any
 
 from aira.suite import kit, public
+from aira.suite.shop import delivery as zones
 from aira.suite.shop import store, trade
 from aira.suite.shop.store import APP, amount
 
@@ -187,6 +188,14 @@ def product_values(raw: Mapping[str, Any], *, partial: bool = False) -> dict[str
         values["price_breaks"] = _price_breaks(raw.get("price_breaks"))
     if has("hsn_sac"):
         values["hsn_sac"] = kit.hsn_code(raw.get("hsn_sac"))
+    if has("weight_grams"):  # what one weighs packed, for delivery priced by weight
+        values["weight_grams"] = kit.integer(
+            raw.get("weight_grams"),
+            "the weight (grams)",
+            default=0,
+            minimum=0,
+            maximum=1_000_000,
+        )
     if (
         values.get("compare_at_cents")
         and values.get("price_cents") is not None
@@ -539,8 +548,14 @@ def price(
     today: str = "",
     account: Mapping[str, Any] | None = None,
     customer_state: str = "",
+    address: Mapping[str, Any] | None = None,
+    strict_delivery: bool = True,
 ) -> dict[str, Any]:
     """The order as the shop prices it. Raises ValueError for anything that cannot be bought.
+
+    Delivery is priced by the zone that covers ``address`` (``{country, region, postcode}``; :mod:`delivery`) and
+    the order's weight. Where the shop does not deliver, ``strict_delivery`` raises; without it (a quote while the
+    customer is still typing) the quote says so in ``delivery_problem``.
 
     ``account`` is the business buyer's approved trade account: trade prices, minimum quantities, the business
     minimum order, its terms and (for a reseller) no tax. Without it the order is a consumer's.
@@ -613,6 +628,7 @@ def price(
                 "unit_cents": unit,
                 "quantity": quantity,
                 "line_cents": line_cents,
+                "weight_grams": int(product.get("weight_grams") or 0),
             }
         )
     if account is not None and subtotal < int(shop.get("trade_min_order_cents") or 0):
@@ -644,10 +660,44 @@ def price(
     goods = subtotal - discount_cents
     delivery_cents = 0
     free_over = int(shop["free_delivery_over_cents"] or 0)
+    weight = sum(int(line["weight_grams"]) * int(line["quantity"]) for line in lines)
+    where = {
+        "country": str((address or {}).get("country") or shop.get("default_country") or ""),
+        "region": str((address or {}).get("region") or customer_state or ""),
+        "postcode": str((address or {}).get("postcode") or ""),
+    }
+    zone_name = ""
+    delivery_problem = ""
     if method == "delivery":
-        delivery_cents = int(shop["delivery_fee_cents"] or 0)
-        if free_over and goods >= free_over:
-            delivery_cents = 0
+        zone = zones.choose_zone(connection, shop, where)
+        if zone is None:
+            needs = zones.address_needs(connection)
+            missing = [
+                label
+                for key, label in (
+                    ("postcode", "PIN or postcode"),
+                    ("region", "state"),
+                    ("country", "country"),
+                )
+                if needs[key] and not where[key]
+            ]
+            place = ", ".join(
+                part for part in (where["postcode"], where["region"], where["country"]) if part
+            )
+            if missing:
+                delivery_problem = f"Enter your {' and '.join(missing)} to see if the shop delivers there."
+            elif place:
+                delivery_problem = f"Sorry, the shop does not deliver to {place}. Choose pickup, or check the address."
+            else:
+                delivery_problem = "Enter your address to see if the shop delivers there."
+        else:
+            zone_name = "" if zone.get("default") else zone["name"]
+            free_over = int(zone.get("free_over_cents") or 0)
+            delivery_cents, delivery_problem = zones.rate(
+                zone, goods, weight, str(profile.get("currency") or "USD")
+            )
+        if delivery_problem and strict_delivery:
+            raise ValueError(delivery_problem)
     tax_exempt = account is not None and bool(account.get("tax_exempt"))
     state = ""
     if kit.gst_applies(profile):
@@ -683,6 +733,9 @@ def price(
         "delivery_method": method,
         "delivery_cents": delivery_cents,
         "free_delivery_over_cents": free_over,
+        "delivery_zone": zone_name,
+        "delivery_problem": delivery_problem,
+        "weight_grams": weight,
         "tax_label": profile.get("tax_label") or "Tax",
         "tax_cents": tax_cents,
         "tax_lines": tax["lines"],
@@ -743,6 +796,35 @@ def _take_stock(
         )
 
 
+def returned_quantities(
+    connection: sqlite3.Connection, order_id: str
+) -> dict[tuple[str, str], int]:
+    """What already came back into stock through returns, per (product, option)."""
+    out: dict[tuple[str, str], int] = {}
+    if not connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sh_returns'"
+    ).fetchone():
+        return out
+    for row in connection.execute(
+        "SELECT items FROM sh_returns WHERE order_id = ? AND restocked = 1", (order_id,)
+    ):
+        for item in kit.loads(row[0], []) or []:
+            key = (str(item.get("product_id") or ""), str(item.get("option") or ""))
+            out[key] = out.get(key, 0) + int(item.get("quantity") or 0)
+    return out
+
+
+def _give_back(connection: sqlite3.Connection, order: Mapping[str, Any]) -> None:
+    """Put an order's stock back, less what its returns already put back (inside the caller's transaction)."""
+    back = returned_quantities(connection, str(order["id"]))
+    for line in order["items"]:
+        key = (str(line["product_id"]), str(line.get("option") or ""))
+        left = int(line["quantity"]) - back.get(key, 0)
+        if left > 0:
+            _take_stock(connection, {**line, "quantity": left}, +1)
+        back[key] = max(0, back.get(key, 0) - int(line["quantity"]))
+
+
 def _history(order: Mapping[str, Any], status: str, note: str = "") -> str:
     entries = list(order.get("history") or [])
     entries.append({"status": status, "at": kit.now(), "note": note[:300]})
@@ -777,6 +859,18 @@ def customer_values(raw: Mapping[str, Any], method: str) -> dict[str, Any]:
         "customer_phone": phone_number,
         "address": address if method == "delivery" else "",
         "note": kit.text(raw.get("note"), "a note", max_len=1000, multiline=True),
+        **ship_to(raw, method),
+    }
+
+
+def ship_to(raw: Mapping[str, Any], method: str) -> dict[str, str]:
+    """The parts of a delivery address a zone is chosen by (empty for pickup)."""
+    if method != "delivery":
+        return {"ship_country": "", "ship_region": "", "ship_postcode": ""}
+    return {
+        "ship_country": kit.text(raw.get("country"), "the country", max_len=60),
+        "ship_region": kit.text(raw.get("region"), "the state or region", max_len=60),
+        "ship_postcode": kit.text(raw.get("postcode"), "the postcode or PIN code", max_len=20),
     }
 
 
@@ -799,6 +893,7 @@ def business_customer(
         "po_number": kit.text(
             raw.get("po_number"), "the purchase-order number", max_len=60
         ),
+        **ship_to(raw, method),
     }
 
 
@@ -864,6 +959,11 @@ def place_order(
             include_drafts=include_drafts,
             account=account,
             customer_state=str(raw.get("customer_state") or ""),
+            address={
+                "country": customer["ship_country"],
+                "region": customer["ship_region"],
+                "postcode": customer["ship_postcode"],
+            },
         )
         if account is not None:
             trade.check_credit(connection, account, quote["total_cents"])
@@ -927,7 +1027,8 @@ def place_order(
         )
         connection.execute(
             """UPDATE sh_orders SET expires_at = ?, pay_online = ?, client_key = ?, customer_state = ?, tax_lines = ?,
-            prices_include_tax = ? WHERE id = ?""",
+            prices_include_tax = ?, weight_grams = ?, ship_country = ?, ship_region = ?, ship_postcode = ?,
+            delivery_zone = ? WHERE id = ?""",
             (
                 expires_at if quote["total_cents"] > 0 else "",
                 1 if online and quote["total_cents"] > 0 else 0,
@@ -935,6 +1036,14 @@ def place_order(
                 quote["customer_state"],
                 kit.dumps(quote["tax_lines"]),
                 1 if quote["prices_include_tax"] else 0,
+                quote["weight_grams"],
+                # the country the zone was chosen by (the shop's own when the customer named none)
+                store.country_key(customer["ship_country"] or shop.get("default_country"))
+                if method == "delivery"
+                else "",
+                customer["ship_region"],
+                customer["ship_postcode"],
+                quote["delivery_zone"],
                 order_id,
             ),
         )
@@ -1301,8 +1410,7 @@ def refunded_online(
         if not order["restocked"]:
             connection.execute("BEGIN IMMEDIATE")
             try:
-                for line in order["items"]:
-                    _take_stock(connection, line, +1)
+                _give_back(connection, order)
                 if order["discount_code"]:
                     connection.execute(
                         "UPDATE sh_discounts SET uses = MAX(0, uses - 1) WHERE code = ?",
@@ -1360,8 +1468,7 @@ def cancel(
     connection.execute("BEGIN IMMEDIATE")
     try:
         if not order["restocked"]:
-            for line in order["items"]:
-                _take_stock(connection, line, +1)
+            _give_back(connection, order)
             if order["discount_code"]:
                 connection.execute(
                     "UPDATE sh_discounts SET uses = MAX(0, uses - 1) WHERE code = ?",
@@ -1407,25 +1514,41 @@ def set_fulfilment(
     status: str,
     *,
     tracking_url: str = "",
+    carrier: str = "",
+    tracking_number: str = "",
     note: str = "",
     origin: str = "",
 ) -> dict[str, Any]:
+    """Move an order on (packed, shipped, delivered). Shipping it may give the carrier and tracking number, which
+    make the tracking link (:func:`delivery.tracking_link`), or a tracking link typed in."""
     order = store.get_order(connection, order_id)
     wanted = kit.choice(
         status, "the status", ("placed", "packed", "shipped", "delivered")
     )
     if order["fulfilment_status"] == "cancelled":
         raise ValueError("This order was cancelled.")
+    chosen = zones.carrier_choice(carrier) if carrier else order.get("carrier") or ""
+    number = (
+        zones.tracking_number(tracking_number)
+        if tracking_number
+        else order.get("tracking_number") or ""
+    )
+    built = zones.tracking_link(store.settings(connection), chosen, number)
     tracking = (
         kit.url(tracking_url, "the tracking link")
         if tracking_url
-        else order["tracking_url"]
+        else built or order["tracking_url"]
     )
-    if wanted == order["fulfilment_status"] and tracking == order["tracking_url"]:
+    if (
+        wanted == order["fulfilment_status"]
+        and tracking == order["tracking_url"]
+        and chosen == (order.get("carrier") or "")
+        and number == (order.get("tracking_number") or "")
+    ):
         return order
     connection.execute(
-        "UPDATE sh_orders SET fulfilment_status = ?, tracking_url = ?, history = ?, updated_at = ? WHERE id = ?",
-        (wanted, tracking, _history(order, wanted, note), kit.now(), order_id),
+        "UPDATE sh_orders SET fulfilment_status = ?, tracking_url = ?, carrier = ?, tracking_number = ?, history = ?, updated_at = ? WHERE id = ?",
+        (wanted, tracking, chosen, number, _history(order, wanted, note), kit.now(), order_id),
     )
     kit.log(
         connection,
@@ -1470,6 +1593,16 @@ def update_order(
         )
     if "tracking_url" in raw:
         values["tracking_url"] = kit.url(raw.get("tracking_url"), "the tracking link")
+    if "carrier" in raw or "tracking_number" in raw:
+        current = store.get_order(connection, order_id)
+        chosen = zones.carrier_choice(raw.get("carrier", current.get("carrier")))
+        number = zones.tracking_number(
+            raw.get("tracking_number", current.get("tracking_number"))
+        )
+        values["carrier"], values["tracking_number"] = chosen, number
+        built = zones.tracking_link(store.settings(connection), chosen, number)
+        if built and "tracking_url" not in raw:
+            values["tracking_url"] = built
     if "po_number" in raw:
         values["po_number"] = kit.text(
             raw.get("po_number"), "the purchase-order number", max_len=60
@@ -2110,11 +2243,20 @@ def queue_message(
         )
     elif kind == "order_shipped":
         subject = f"Order #{number} is on its way - {name}"
+        carrier = zones.carrier_name(str(order.get("carrier") or ""))
+        sent_with = ""
+        if order.get("tracking_number"):
+            sent_with = (
+                f"Sent with {carrier}, tracking number {order['tracking_number']}."
+                if carrier
+                else f"Tracking number: {order['tracking_number']}."
+            )
         body = "\n\n".join(
             part
             for part in (
                 f"Hi {first},",
                 f"Good news: order #{number} has shipped.",
+                sent_with,
                 f"Track it: {order['tracking_url']}"
                 if order.get("tracking_url")
                 else "",
@@ -2424,6 +2566,8 @@ def storefront(
             "enabled": shop["delivery_enabled"],
             "fee_cents": shop["delivery_fee_cents"],
             "free_over_cents": shop["free_delivery_over_cents"],
+            # delivery zones: what checkout asks for (country, state, PIN) and whether the rest is covered
+            **zones.public_zones(connection, shop),
         },
         "categories": sorted({p["category"] for p in products if p["category"]}),
         "products": products,
@@ -2509,6 +2653,10 @@ def public_order(
         "payment_status": order["payment_status"],
         "fulfilment_status": order["fulfilment_status"],
         "tracking_url": order["tracking_url"],
+        "carrier": zones.carrier_name(str(order.get("carrier") or "")),
+        "tracking_number": order.get("tracking_number") or "",
+        "delivery_zone": order.get("delivery_zone") or "",
+        "ship_postcode": order.get("ship_postcode") or "",
         "customer_says_paid": bool(order["customer_says_paid_at"]),
         "buyer_type": order.get("buyer_type") or "consumer",
         "company": order.get("company") or "",

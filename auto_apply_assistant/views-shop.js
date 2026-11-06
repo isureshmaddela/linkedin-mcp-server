@@ -5,9 +5,11 @@
  * products (stock, options, images, an AI-written description, who is waiting for it to be back, CSV), discounts
  * (codes), customers (everyone who ordered, CSV), business buyers (B2B: who sells to businesses, trade accounts to
  * approve with payment terms, a percent off and a credit limit, trade codes, what businesses owe and reminders),
- * share and earn (customers' referral codes and the rewards they earn) and settings (open or closed, pickup,
- * delivery fee and free-delivery threshold, store notice). Products carry a trade price, a minimum quantity and
- * quantity price breaks for businesses; orders show the business, its PO number, terms and due date.
+ * share and earn (customers' referral codes and the rewards they earn), returns (approve or reject, mark received,
+ * refund) and settings (open or closed, pickup, delivery zones by country, state or PIN with flat, weight-band or
+ * free-over prices and the fee for everywhere else, the return window, the shop's own tracking page, store notice).
+ * Products carry a weight, a trade price, a minimum quantity and quantity price breaks for businesses; orders show
+ * the business, its PO number, terms and due date, the delivery zone, the carrier and tracking number.
  * Everything runs through /api/shop/* (aira/suite/shop/shop_routes.py). The storefront and order pages customers
  * see are in public-shop.js. DOM is built with h() and text only.
  *
@@ -26,6 +28,7 @@
   const TABS = [
     { id: "overview", label: "Overview", icon: "dashboard" },
     { id: "orders", label: "Orders", icon: "applications" },
+    { id: "returns", label: "Returns", icon: "emails" },
     { id: "products", label: "Products", icon: "shop" },
     { id: "discounts", label: "Discounts", icon: "events" },
     { id: "customers", label: "Customers", icon: "recruiters" },
@@ -169,6 +172,66 @@
     if (wanted) later(() => openOrder(wanted, rerender));
   }
 
+  // ------------------------------------------------------------------ shipping and returns
+  // The carriers whose tracking page takes the number (aira/suite/shop/delivery.py CARRIERS); "Other carrier" uses
+  // the shop's own tracking page from Settings, or a pasted link.
+  const CARRIERS = [["", "Choose a carrier"], ["india_post", "India Post"], ["delhivery", "Delhivery"], ["bluedart", "Blue Dart"], ["dtdc", "DTDC"], ["custom", "Other carrier"]];
+  const shipFields = () => [
+    { name: "carrier", label: "Carrier", type: "select", options: CARRIERS },
+    { name: "tracking_number", label: "Tracking number", placeholder: "EE123456789IN", hint: "With a carrier, this makes the tracking link the customer gets in the shipping email." },
+    { name: "tracking_url", label: "Or paste a tracking link", type: "url", placeholder: "https://", hint: "Optional. Used instead of the link made from the carrier and number." },
+  ];
+  const weightText = (grams) => (grams >= 1000 ? `${(grams / 1000).toFixed(1).replace(/\.0$/, "")} kg` : `${grams} g`);
+  const RETURN_TONES = { requested: "warn", approved: "info", rejected: "bad", received: "info", refunded: "good" };
+  const returnLabel = (entry) => `R-${String(entry.number).padStart(4, "0")}`;
+  function returnCard(entry, onDone) {
+    const act = (label, path, fields, opts = {}) => S.button(label, async () => {
+      const done = await S.edit({ title: `${label}: return ${returnLabel(entry)}`, fields, values: opts.values || {}, submitLabel: label, onSave: (values) => call(`/returns/${entry.id}/${path}`, { method: "POST", body: { ...values, ...(opts.body || {}) } }) });
+      if (done) { Aira.toast(`Return ${returnLabel(entry)}: ${opts.done || label.toLowerCase()}.`, "success"); await onDone(); }
+    }, { kind: opts.kind || "secondary sm" });
+    const value = S.money(entry.value_cents, entry.currency);
+    const buttons = [];
+    if (entry.status === "requested") {
+      buttons.push(act("Approve", "approve", [{ name: "note", label: "Note for the customer", type: "textarea", rows: 2, hint: "Optional. Your return instructions (Settings) are added." }], { kind: "sm", done: "approved" }));
+      buttons.push(act("Reject", "reject", [{ name: "note", label: "Why (the customer reads this)", type: "textarea", rows: 2, required: true }], { kind: "ghost sm", done: "rejected" }));
+    }
+    if (entry.status === "requested" || entry.status === "approved") {
+      buttons.push(act("Received", "receive", [
+        { name: "restock", label: "Put the items back in stock", type: "checkbox" },
+        { name: "amount_cents", label: "Refund", type: "money", hint: `The items' share of what was paid: ${value}. Change it to refund more (delivery) or less.` },
+        { name: "note", label: "Note (optional)" },
+      ], { values: { restock: true, amount_cents: entry.value_cents }, done: "received and refunded" }));
+    }
+    if (entry.status === "received") buttons.push(act("Refund", "refund", [{ name: "amount_cents", label: "Refund", type: "money" }], { values: { amount_cents: entry.value_cents }, done: "refunded" }));
+    const items = (entry.items || []).map((item) => `${item.quantity} × ${item.name}${item.option ? ` (${item.option})` : ""}`).join(", ");
+    return h("div", { class: "suite-body" },
+      h("div", { class: "btn-row" }, h("strong", { text: returnLabel(entry) }), S.pill(entry.status, RETURN_TONES), h("span", { class: "muted", text: `${entry.order_number ? `Order #${entry.order_number} · ` : ""}${S.when(entry.created_at)}` })),
+      Aira.ui.kv([
+        ["Items", items],
+        ["Reason", `${entry.reason_label}${entry.details ? `: ${entry.details}` : ""}`],
+        ["Worth", value],
+        ["Your note", entry.shop_note],
+        ["Refunded", entry.status === "refunded" ? S.money(entry.refund_cents, entry.currency) : ""],
+        ["Refund problem", entry.refund_error ? h("span", { class: "bad", text: entry.refund_error }) : ""],
+      ]),
+      buttons.length ? h("div", { class: "btn-row" }, ...buttons) : null);
+  }
+
+  async function returnsTab(body, route, rerender) {
+    const status = route.query.status || "open";
+    const data = await call(`/returns?status=${encodeURIComponent(status)}`);
+    const filter = Aira.ui.select([["open", "Open"], ["requested", "To decide"], ["approved", "Approved (on the way back)"], ["received", "Received, not refunded"], ["refunded", "Refunded"], ["rejected", "Rejected"], ["", "All"]], status, { "aria-label": "Show" });
+    filter.addEventListener("change", () => Aira.router.go(["shop"], { tab: "returns", status: filter.value }));
+    const counts = data.counts || {};
+    body.append(
+      S.kpis([{ label: "To decide", value: counts.requested || 0, tone: counts.requested ? "warn" : "" }, { label: "On the way back", value: counts.approved || 0 }, { label: "To refund", value: counts.received || 0, tone: counts.received ? "bad" : "" }, { label: "Refunded", value: counts.refunded || 0 }]),
+      h("div", { class: "btn-row" }, filter),
+      data.returns.length
+        ? h("div", { class: "suite-body" }, ...data.returns.map((entry) => S.section("", returnCard(entry, async () => rerender()), h("div", { class: "btn-row" }, S.button("Open the order", () => openOrder(entry.order_id, rerender), { kind: "ghost sm" })))))
+        : Aira.ui.empty("No returns here", "Customers ask for a return from their order page, within your return window (Settings). You approve it, mark it received and the refund goes back the way they paid."),
+    );
+  }
+
   async function openOrder(orderId, rerender) {
     const { order } = await call(`/orders/${orderId}`);
     const body = h("div", { class: "suite-body" });
@@ -183,9 +246,13 @@
     if (order.payment_status === "paid" && !paidOnline) actions.push(act("Mark unpaid", "unpaid", {}, "ghost sm"), S.button("Refund", async () => { if (await Aira.confirm({ title: "Refund this order", message: "Mark the order refunded? Its revenue stops counting. Send the money back through your payment provider yourself.", confirmLabel: "Mark refunded", danger: true })) { await call(`/orders/${orderId}/refund`, { method: "POST", body: {} }); await refresh(); } }, { kind: "ghost sm" }));
     if (live && order.fulfilment_status === "placed") actions.push(act("Packed", "fulfil", { status: "packed" }));
     if (live && ["placed", "packed"].includes(order.fulfilment_status)) actions.push(S.button("Shipped", async () => {
-      const result = await S.edit({ title: `Ship order #${order.number}`, fields: [{ name: "tracking_url", label: "Tracking link", type: "url", placeholder: "https://", hint: "Optional. The customer gets it in the shipping email." }], values: { tracking_url: order.tracking_url }, submitLabel: "Mark shipped", onSave: (values) => call(`/orders/${orderId}/fulfil`, { method: "POST", body: { status: "shipped", tracking_url: values.tracking_url } }) });
+      const result = await S.edit({ title: `Ship order #${order.number}`, fields: shipFields(), values: { carrier: order.carrier || "", tracking_number: order.tracking_number || "", tracking_url: order.carrier ? "" : order.tracking_url }, submitLabel: "Mark shipped", onSave: (values) => call(`/orders/${orderId}/fulfil`, { method: "POST", body: { status: "shipped", ...values } }) });
       if (result) await refresh();
     }, { kind: "secondary sm" }));
+    if (live && ["shipped", "delivered"].includes(order.fulfilment_status)) actions.push(S.button("Tracking", async () => {
+      const result = await S.edit({ title: `Tracking for order #${order.number}`, fields: shipFields(), values: { carrier: order.carrier || "", tracking_number: order.tracking_number || "", tracking_url: order.carrier ? "" : order.tracking_url }, onSave: (values) => call(`/orders/${orderId}`, { method: "PATCH", body: values.tracking_url ? values : { carrier: values.carrier, tracking_number: values.tracking_number } }) });
+      if (result) await refresh();
+    }, { kind: "ghost sm" }));
     if (live && order.fulfilment_status !== "delivered") actions.push(act(order.delivery_method === "pickup" ? "Picked up" : "Delivered", "fulfil", { status: "delivered" }));
     if (order.payment_status === "unpaid" && live && order.customer_email) actions.push(S.button("Send payment reminder", async () => { await call(`/orders/${orderId}/remind`, { method: "POST", body: {} }); Aira.toast("The reminder waits in Business hub > Outbox until you approve it (or goes now if you send these automatically).", "success"); }, { kind: "secondary sm" }));
     if (live && order.fulfilment_status !== "delivered") actions.push(S.button("Cancel order", async () => { if (await Aira.confirm({ title: `Cancel order #${order.number}`, message: "Its stock and discount use come back. A paid order stays paid until you refund it.", confirmLabel: "Cancel order", danger: true })) { await call(`/orders/${orderId}/cancel`, { method: "POST", body: {} }); await refresh(); } }, { kind: "ghost sm" }));
@@ -210,8 +277,10 @@
       ["Name", order.customer_name],
       ["Email", order.customer_email ? h("a", { href: `mailto:${order.customer_email}`, text: order.customer_email }) : ""],
       ["Phone", order.customer_phone ? h("a", { href: `tel:${order.customer_phone.replace(/[^0-9+]/g, "")}`, text: order.customer_phone }) : ""],
-      ["Delivery", order.delivery_method === "delivery" ? `Delivery to ${order.address}` : "Pickup"],
+      ["Delivery", order.delivery_method === "delivery" ? `Delivery to ${order.address}${order.ship_postcode ? ` (${order.ship_postcode})` : ""}` : "Pickup"],
+      ["Zone", order.delivery_method === "delivery" ? `${order.delivery_zone || "Everywhere else"}${order.weight_grams ? ` · ${weightText(order.weight_grams)}` : ""}` : ""],
       ["Note", order.note],
+      ["Carrier", order.carrier_name ? `${order.carrier_name}${order.tracking_number ? ` · ${order.tracking_number}` : ""}` : order.tracking_number],
       ["Tracking", order.tracking_url ? h("a", { href: order.tracking_url, target: "_blank", rel: "noopener noreferrer", text: order.tracking_url }) : ""],
       ["Source", order.source === "manual" ? "Entered by the shop" : "Storefront"],
     ]);
@@ -230,17 +299,19 @@
     const notes = h("textarea", { rows: 3, placeholder: "Only your team sees these notes", "aria-label": "Internal notes" });
     notes.value = order.internal_notes || "";
     const history = h("ol", { class: "suite-checklist" }, ...(order.history || []).slice().reverse().map((entry) => h("li", { class: "done" }, h("span", { class: "suite-tick", "aria-hidden": "true", text: "✓" }), h("span", {}, h("strong", { text: String(entry.status || "").replaceAll("_", " ") }), h("span", { class: "muted", text: ` ${S.when(entry.at)}${entry.note ? ` · ${entry.note}` : ""}` })))));
-    body.append(
+    // Native append would print "null" for a part a consumer order does not have (the business box, returns).
+    body.append(...[
       h("div", { class: "btn-row" }, S.pill(order.payment_status, TONES), S.pill(order.fulfilment_status, TONES), order.customer_says_paid_at && order.payment_status === "unpaid" ? h("span", { class: "muted", text: `Customer says paid ${Aira.fmt.ago(order.customer_says_paid_at)}` }) : null),
       h("div", { class: "btn-row" }, ...actions),
       S.section("Items", lines, totals),
       S.payments({ app: "shop", objectType: "order", objectId: orderId, requests: order.payments || [], payable: order.payment_status === "unpaid" && live, onChange: refresh }),
+      (order.returns || []).length ? S.section("Returns", ...order.returns.map((entry) => returnCard({ ...entry, currency: order.currency, order_number: order.number }, refresh))) : null,
       businessBox,
       S.section("Customer", customer),
       S.share({ title: order.buyer_type === "business" ? "Order and invoice page" : "Customer's order page", text: "Shows the order, its status and how to pay.", link: order.link, onCreate: async () => (await call(`/orders/${orderId}/link`, { method: "POST", body: {} })).link, onRevoke: async () => { await call(`/orders/${orderId}/link`, { method: "DELETE" }); } }),
       S.section("Notes", notes, h("div", { class: "btn-row" }, S.button("Save notes", async () => { await call(`/orders/${orderId}`, { method: "PATCH", body: { internal_notes: notes.value } }); Aira.toast("Saved.", "success"); }, { kind: "secondary sm" }))),
       S.section("History", history),
-    );
+    ].filter(Boolean));
     Aira.drawer({ title: `Order #${order.number}`, subtitle: `${S.money(order.total_cents, order.currency)} · ${S.when(order.created_at)}`, body });
   }
 
@@ -264,6 +335,9 @@
       { name: "phone", label: "Phone", type: "tel" },
       { name: "delivery_method", label: "Delivery", type: "select", options: [["pickup", "Pickup"], ["delivery", "Delivery"]] },
       { name: "address", label: "Delivery address", type: "textarea", rows: 2 },
+      { name: "postcode", label: "PIN or postcode", hint: "With delivery zones, it picks the delivery fee." },
+      { name: "region", label: "State or region" },
+      { name: "country", label: "Country", placeholder: "IN" },
       { name: "discount_code", label: "Discount code" },
       { name: "note", label: "Note", type: "textarea", rows: 2 },
       { name: "mark_paid", label: "Already paid", type: "checkbox" },
@@ -282,8 +356,8 @@
       timer = setTimeout(async () => {
         const values = form.read();
         try {
-          const quote = await call("/quote", { method: "POST", body: { items: payloadItems(), discount_code: values.discount_code, delivery_method: values.delivery_method, trade_account_id: buyerValues().trade_account_id || "" }, silent: true });
-          quoteBox.textContent = `Subtotal ${S.money(quote.subtotal_cents)}${quote.discount_cents ? ` · discount -${S.money(quote.discount_cents)}` : ""}${quote.delivery_cents ? ` · delivery ${S.money(quote.delivery_cents)}` : ""}${quote.tax_cents ? ` · ${quote.tax_label} ${S.money(quote.tax_cents)}` : ""} · Total ${S.money(quote.total_cents)}${quote.buyer_type === "business" ? ` · ${quote.terms_label}, due ${S.day(quote.due_on)}${quote.savings_cents ? ` · saves ${S.money(quote.savings_cents)}` : ""}` : ""}`;
+          const quote = await call("/quote", { method: "POST", body: { items: payloadItems(), discount_code: values.discount_code, delivery_method: values.delivery_method, postcode: values.postcode, region: values.region, country: values.country, trade_account_id: buyerValues().trade_account_id || "" }, silent: true });
+          quoteBox.textContent = `Subtotal ${S.money(quote.subtotal_cents)}${quote.discount_cents ? ` · discount -${S.money(quote.discount_cents)}` : ""}${quote.delivery_cents ? ` · delivery ${S.money(quote.delivery_cents)}` : ""}${quote.tax_cents ? ` · ${quote.tax_label} ${S.money(quote.tax_cents)}` : ""} · Total ${S.money(quote.total_cents)}${quote.delivery_problem ? ` · ${quote.delivery_problem}` : ""}${quote.buyer_type === "business" ? ` · ${quote.terms_label}, due ${S.day(quote.due_on)}${quote.savings_cents ? ` · saves ${S.money(quote.savings_cents)}` : ""}` : ""}`;
         } catch (error) { quoteBox.textContent = error.message; }
       }, 250);
     };
@@ -378,6 +452,7 @@
       { name: "track_stock", label: "Track stock", type: "checkbox" },
       { name: "stock", label: "Stock", type: "number", min: 0 },
       { name: "low_stock", label: "Low-stock alert at", type: "number", min: 0 },
+      { name: "weight_grams", label: "Weight (grams, packed)", type: "number", min: 0, hint: "For delivery zones priced by weight. Empty or 0 if you do not charge by weight." },
       { name: "options_text", label: "Options (one per line: name | stock | price)", type: "textarea", rows: 4, hint: "For example: Small | 5 | 18.00. Stock and price are optional; without a price an option costs the product price." },
       ...(sellsToBusinesses(business) ? [
         { type: "heading", label: "Selling to businesses (B2B)" },
@@ -737,6 +812,67 @@
   }
 
   // ------------------------------------------------------------------ settings
+  // Delivery zones (aira/suite/shop/delivery.py): where you deliver and what it costs. The most specific zone that
+  // covers the address wins (PIN codes, then states, then countries); everywhere else is the fee above.
+  const RATES = [["flat", "One fee"], ["weight", "By the order's weight"], ["free_over", "A fee, free over an amount"]];
+  const bandsText = (bands) => (bands || []).map((b) => `${b.up_to_grams} | ${S.fromCents(b.cents)}`).join("\n");
+  function parseZoneBands(text) {
+    return String(text || "").split("\n").map((line) => line.trim()).filter(Boolean).map((line) => {
+      const [grams, price] = line.split("|").map((part) => part.trim());
+      const cents = S.toCents(price);
+      if (!grams || cents === null) throw new Error(`Write each band as: up to grams | price (for example 1000 | 60.00), not "${line}".`);
+      return { up_to_grams: Number(grams), cents };
+    });
+  }
+  async function zonesSection() {
+    const holder = h("div", {});
+    const draw = async () => {
+      const data = await call("/zones");
+      const edit = (zone) => S.edit({
+        title: zone ? `Edit ${zone.name}` : "Add a delivery zone",
+        wide: true,
+        fields: [
+          { name: "name", label: "Name", required: true, placeholder: "Hyderabad" },
+          { name: "countries", label: "Countries", placeholder: "IN", hint: "Codes or names, separated by commas. Empty: any country." },
+          { name: "regions", label: "States or regions", placeholder: "Telangana, Andhra Pradesh", hint: "Empty: any state." },
+          { name: "postcodes", label: "Postcode or PIN prefixes", type: "textarea", rows: 2, placeholder: "500, 501, 502001-502099", hint: "A PIN starting with one of these, or inside a range. Empty: any." },
+          { name: "rate_type", label: "Price", type: "select", options: RATES },
+          { name: "fee_cents", label: "Fee", type: "money", hint: "One fee, or the fee below the free amount." },
+          { name: "free_over_cents", label: "Free on orders over", type: "money", hint: "For \"A fee, free over an amount\"." },
+          { name: "bands_text", label: "Weight bands (one per line: up to grams | price)", type: "textarea", rows: 3, placeholder: "500 | 40.00\n2000 | 90.00", hint: "For \"By the order's weight\". Heavier than the last band is not delivered there. Products need a weight." },
+          { name: "active", label: "In use", type: "checkbox" },
+        ],
+        values: zone ? { ...zone, countries: zone.countries.join(", "), regions: zone.regions.join(", "), postcodes: zone.postcodes.join(", "), bands_text: bandsText(zone.bands) } : { rate_type: "flat", active: true },
+        onSave: async (values) => {
+          const body = { ...values, bands: values.rate_type === "weight" ? parseZoneBands(values.bands_text) : [] };
+          delete body.bands_text;
+          await call(zone ? `/zones/${zone.id}` : "/zones", { method: zone ? "PATCH" : "POST", body });
+          await draw();
+        },
+      });
+      const where = (z) => [z.postcodes.length ? `PIN ${z.postcodes.join(", ")}` : "", z.regions.join(", "), z.countries.join(", ")].filter(Boolean).join(" · ");
+      holder.replaceChildren(
+        h("p", { class: "muted", text: "Charge by where an order goes. A zone can be a country, some states, or PIN code prefixes; the most specific one that covers the address prices it." }),
+        S.table({
+          columns: [
+            { key: "name", label: "Zone" },
+            { key: "where", label: "Covers", render: where },
+            { key: "rate_text", label: "Price" },
+            { key: "active", label: "", render: (z) => (z.active ? "" : S.pill("off", { off: "" })) },
+            { key: "x", label: "", render: (z) => S.button("Remove", async () => { if (await S.confirmDelete(z.name)) { await call(`/zones/${z.id}`, { method: "DELETE" }); await draw(); } }, { kind: "ghost sm" }) },
+          ],
+          rows: data.zones,
+          empty: Aira.ui.empty("No zones yet", "Every delivery costs the fee above. Add a zone to charge by country, state or PIN code."),
+          onRow: edit,
+        }),
+        h("p", { class: "muted", text: data.default.active ? `Everywhere else: ${data.default.rate_text}.` : "Everywhere else: not delivered (checkout says so)." }),
+        h("div", { class: "btn-row" }, S.button("Add a zone", () => edit(null), { kind: "secondary sm" })),
+      );
+    };
+    await draw();
+    return S.section("Delivery zones", holder);
+  }
+
   async function settingsTab(body) {
     const data = await call("/settings");
     const form = S.form([
@@ -748,11 +884,19 @@
       { name: "pickup_instructions", label: "Pickup instructions", type: "textarea", rows: 2, placeholder: "Collect from 12 Main St, Mon-Sat 10-6" },
       { type: "heading", label: "Delivery" },
       { name: "delivery_enabled", label: "Offer delivery", type: "checkbox" },
-      { name: "delivery_fee_cents", label: "Delivery fee", type: "money" },
+      { name: "deliver_elsewhere", label: "Deliver everywhere your zones do not cover", type: "checkbox", hint: "At the fee below. Off: checkout says you do not deliver there." },
+      { name: "delivery_fee_cents", label: "Delivery fee (everywhere else)", type: "money" },
       { name: "free_delivery_over_cents", label: "Free delivery on orders over", type: "money", hint: "0 for no free delivery." },
+      { name: "default_country", label: "Your country", placeholder: "IN", hint: "Checkout starts with it when a customer does not say. A code (IN) or a name (India)." },
+      { type: "heading", label: "Returns" },
+      { name: "return_window_days", label: "Days to ask for a return after delivery", type: "number", min: 0, max: 365, hint: "0: customers cannot ask for returns online." },
+      { name: "return_instructions", label: "What to do next (in the approval email)", type: "textarea", rows: 2, placeholder: "Pack it and drop it at our counter, or send it to 12 Main St." },
+      { type: "heading", label: "Tracking" },
+      { name: "custom_tracking_url", label: "Your carrier's tracking page (Other carrier)", type: "url", placeholder: "https://track.example.com/?awb={number}", hint: "{number} is where the tracking number goes. India Post, Delhivery, Blue Dart and DTDC links are made for you." },
     ], data.settings);
     body.append(
-      S.section("Shop settings", form.node, h("div", { class: "btn-row" }, S.button("Save", async () => { form.setError(""); try { await call("/settings", { method: "POST", body: form.read() }); Aira.toast("Saved.", "success"); } catch (error) { form.setError(error.message); } }))),
+      S.section("Shop settings", form.node, h("div", { class: "btn-row" }, S.button("Save", async () => { form.setError(""); try { const values = form.read(); if (values.return_window_days === null) values.return_window_days = 0; await call("/settings", { method: "POST", body: values }); Aira.toast("Saved.", "success"); } catch (error) { form.setError(error.message); } }))),
+      await zonesSection(),
       S.section("Business details", h("p", { class: "muted", text: `Your shop name, contact, currency (${data.business.currency}), tax and payment link are set once for every app.` }), h("a", { class: "btn secondary sm", href: "#/hub?tab=business", text: "Edit business details" })),
       S.section("Who you sell to", h("p", { class: "muted", text: `Now: ${(SELL_TO.find(([id]) => id === data.business.sell_to) || SELL_TO[0])[1]}. Selling to businesses adds trade accounts, trade prices and payment terms.` }), h("a", { class: "btn secondary sm", href: "#/shop?tab=business", text: "Business buyers" })),
     );
@@ -883,6 +1027,7 @@
       panel.replaceChildren(Aira.ui.skeleton(4));
       try {
         if (tab === "orders") await orders(holder, route, render);
+        else if (tab === "returns") await returnsTab(holder, route, render);
         else if (tab === "products") await productsTab(holder, route, render);
         else if (tab === "discounts") await discountsTab(holder, render);
         else if (tab === "customers") await customersTab(holder, route);

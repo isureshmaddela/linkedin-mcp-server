@@ -8,9 +8,13 @@
  *             account (trade_apply) or signs in with its email and trade code (trade_sign_in, kept for this browser
  *             session). Signed in, it sees trade prices, minimum quantities and price breaks, and checks out with a
  *             PO number on its payment terms. A shop for businesses only shows no prices until then.
- * order:      one order's status, items and totals, how to pay, "I have paid" (the shop confirms it) and, once
- *             paid, the customer's own share code ("Share and earn"). A business order is also its invoice: who
- *             sells and who buys, tax numbers, the PO number, terms and the due date, with Print.
+ *             Delivery is priced by the shop's delivery zones: checkout asks for the country, state and PIN code a
+ *             zone needs, and the quote says plainly when the shop does not deliver there.
+ * order:      one order's status, items and totals, how to pay, "I have paid" (the shop confirms it), the carrier
+ *             and tracking link once shipped, a return request within the shop's return window (request_return)
+ *             with each return's progress, and, once paid, the customer's own share code ("Share and earn"). A
+ *             business order is also its invoice: who sells and who buys, tax numbers, the PO number, terms and
+ *             the due date, with Print.
  * Built with ctx.h and text only; classes from public.css.
  */
 "use strict";
@@ -212,7 +216,7 @@
       clearTimeout(timer);
       if (!cart.length) { quote = null; renderTotals(); renderCartLines(); return; }
       timer = setTimeout(async () => {
-        try { quote = (await ctx.action("quote", { items: cart, discount_code: discount, delivery_method: method, customer_state: stateSelect ? stateSelect.value : "", ...trade() })).quote; totalsError.textContent = ""; }
+        try { quote = (await ctx.action("quote", { items: cart, discount_code: discount, delivery_method: method, customer_state: stateSelect ? stateSelect.value : "", ...where(), ...trade() })).quote; totalsError.textContent = ""; }
         catch (error) { quote = null; totalsError.textContent = error.message; }
         renderTotals();
         renderCartLines();
@@ -225,14 +229,18 @@
       totalsError.hidden = !totalsError.textContent;
       if (!quote) { totals.replaceChildren(); return; }
       const row = (label, value, strong) => h("tr", {}, h("td", { text: label }), h("td", { class: `num${strong ? " pub-total" : ""}`, text: value }));
-      totals.replaceChildren(h("table", { class: "pub-table" }, h("tbody", {},
+      const problem = quote.delivery_method === "delivery" ? quote.delivery_problem || "" : "";
+      // Native replaceChildren would print "null" for a missing part: keep only real nodes.
+      totals.replaceChildren(...[h("table", { class: "pub-table" }, h("tbody", {},
         row("Subtotal", money(quote.subtotal_cents)),
         quote.discount_cents ? row(`${quote.referral ? "Friend's code" : "Discount"} (${quote.discount_code})`, `-${money(quote.discount_cents)}`) : quote.referral ? row(`Friend's code (${quote.discount_code})`, "Added") : null,
-        quote.delivery_method === "delivery" ? row("Delivery", quote.delivery_cents ? money(quote.delivery_cents) : "Free") : null,
+        quote.delivery_method === "delivery" ? row(quote.delivery_zone ? `Delivery (${quote.delivery_zone})` : "Delivery", problem ? "Not available" : quote.delivery_cents ? money(quote.delivery_cents) : "Free") : null,
         ...taxRows(quote, row, money),
         row("Total", money(quote.total_cents), true),
         quote.buyer_type === "business" && quote.savings_cents ? row("You save on trade prices", money(quote.savings_cents)) : null,
-        quote.buyer_type === "business" ? row("Payment", quote.terms === "prepay" ? quote.terms_label : `${quote.terms_label}, due ${ctx.date(quote.due_on)}`) : null)));
+        quote.buyer_type === "business" ? row("Payment", quote.terms === "prepay" ? quote.terms_label : `${quote.terms_label}, due ${ctx.date(quote.due_on)}`) : null)),
+      // where the shop does not deliver (or an order too heavy for the zone), said plainly
+      problem ? h("p", { class: "pub-notice bad", role: "alert", text: problem }) : null].filter(Boolean));
     }
 
     // GST: the customer's state picks CGST + SGST (same state as the shop) or IGST (another state).
@@ -247,10 +255,20 @@
     const phone = h("input", { type: "tel", autocomplete: "tel" });
     const address = h("textarea", { autocomplete: "street-address", rows: 3 });
     if (account && account.address) address.value = account.address;
+    // The parts of the address a delivery zone is chosen by (only those the shop's zones use).
+    const asks = (page.delivery && page.delivery.asks) || {};
+    const zoneInput = (attrs) => { const node = h("input", attrs); node.addEventListener("change", () => requote()); return node; };
+    const country = zoneInput({ autocomplete: "country-name", value: (page.delivery && page.delivery.default_country) || "", maxlength: 60 });
+    const region = zoneInput({ autocomplete: "address-level1", maxlength: 60 });
+    const postcode = zoneInput({ autocomplete: "postal-code", inputmode: "text", maxlength: 20 });
+    const where = () => ({ country: asks.country ? country.value.trim() : "", region: asks.region && !stateSelect ? region.value.trim() : "", postcode: asks.postcode ? postcode.value.trim() : "" });
     const note = h("textarea", { rows: 2, placeholder: "Anything the shop should know" });
     const po = h("input", { autocomplete: "off", maxlength: 60 });
     const code = h("input", { placeholder: "Discount code", "aria-label": "Discount code", value: discount, style: { ...INPUT, flex: "1 1 160px", maxWidth: "240px" } });
-    const addressField = ctx.field("Delivery address", address);
+    const addressField = h("div", { class: "pub-form" }, ctx.field("Delivery address", address),
+      asks.country ? ctx.field("Country", country) : null,
+      asks.region && !stateSelect ? ctx.field("State or region", region) : null,
+      asks.postcode ? ctx.field("PIN or postcode", postcode, "Delivery costs depend on where it goes.") : null);
     const linesBody = h("tbody");
 
     // A line's total comes from the shop's quote when there is one (quantity price breaks change the price each).
@@ -293,14 +311,16 @@
       const apply = h("button", { type: "button", class: "pub-btn secondary", text: "Apply" });
       apply.addEventListener("click", () => { discount = code.value.trim(); requote(); });
       const place = ctx.button(page.open ? (account ? "Place business order" : "Place order") : "The shop is closed", async () => {
+        if (method === "delivery" && asks.postcode && !postcode.value.trim()) { postcode.focus(); throw new Error("Enter your PIN or postcode."); }
+        if (quote && quote.delivery_method === "delivery" && quote.delivery_problem) throw new Error(quote.delivery_problem);
         let payload;
         if (account) {
           if (buyers.require_po && !po.value.trim()) { po.focus(); throw new Error("Enter your purchase-order (PO) number."); }
-          payload = { items: cart, discount_code: discount, delivery_method: method, address: method === "delivery" ? address.value : "", note: note.value, po_number: po.value.trim(), ...trade() };
+          payload = { items: cart, discount_code: discount, delivery_method: method, address: method === "delivery" ? address.value : "", note: note.value, po_number: po.value.trim(), ...(method === "delivery" ? where() : {}), ...trade() };
         } else {
           if (!name.value.trim()) { name.focus(); throw new Error("Enter your name."); }
           if (!email.value.trim() && !phone.value.trim()) { email.focus(); throw new Error("Enter an email address or a phone number."); }
-          payload = { items: cart, discount_code: discount, delivery_method: method, name: name.value, email: email.value, phone: phone.value, address: method === "delivery" ? address.value : "", note: note.value };
+          payload = { items: cart, discount_code: discount, delivery_method: method, name: name.value, email: email.value, phone: phone.value, address: method === "delivery" ? address.value : "", note: note.value, ...(method === "delivery" ? where() : {}) };
         }
         Object.assign(payload, { website: trap.value, form_token: page.form_token || "", customer_state: stateSelect ? stateSelect.value : "" });
         const result = await ctx.action("place_order", payload);
@@ -375,6 +395,7 @@
         h("div", { class: "pub-btn-row" }, h("span", { class: `pub-badge ${payment[1]}`, text: payment[0] }), cancelled ? h("span", { class: "pub-badge bad", text: "Cancelled" }) : null),
         h("p", { class: "pub-muted", text: `Placed ${ctx.datetime(order.created_at)} · ${order.delivery_method === "delivery" ? `Delivery to ${order.address}` : "Pickup"}` }),
         !cancelled ? h("ol", { class: "pub-form", style: { listStyle: "none", padding: "0" } }, ...steps) : null,
+        order.tracking_number ? h("p", { class: "pub-muted", text: order.carrier ? `Sent with ${order.carrier} · tracking number ${order.tracking_number}` : `Tracking number ${order.tracking_number}` }) : null,
         order.tracking_url && /^https?:\/\//i.test(order.tracking_url) ? h("a", { class: "pub-btn secondary", href: order.tracking_url, target: "_blank", rel: "noopener noreferrer", text: "Track your parcel" }) : null),
       business ? invoiceCard(ctx, data.business || {}, order) : null,
       h("section", { class: "pub-card" },
@@ -395,8 +416,50 @@
       if (order.customer_says_paid) root.append(h("p", { class: "pub-notice", text: "Thanks! The shop will confirm your payment shortly." }));
       else root.append(h("section", { class: "pub-card" }, h("h2", { text: "Already paid?" }), h("p", { class: "pub-muted", text: "Let the shop know so they can check and confirm it." }), ctx.field("Reference", reference), h("div", { class: "pub-btn-row" }, ctx.button("I have paid", async () => { await ctx.action("notify_paid", { reference: reference.value }); await ctx.reload(); }))));
     }
+    const returnsBox = returnsCard(ctx, order);
+    if (returnsBox) root.append(returnsBox);
     if (order.referral) root.append(shareCard(ctx, order.referral));
   });
+
+  // Returns: what was asked for and where it stands, and (inside the shop's return window) a request form: which
+  // items, how many, and why. The shop approves it, the customer sends the items back, the refund follows.
+  const RETURN_STEPS = { requested: ["Waiting for the shop", ""], approved: ["Approved: send it back", "good"], rejected: ["Not accepted", "bad"], received: ["Received", "good"], refunded: ["Refunded", "good"] };
+  function returnsCard(ctx, order) {
+    const { h, money } = ctx;
+    const info = order.returns;
+    if (!info || (!info.open && !(info.returns || []).length)) return null;
+    const past = (info.returns || []).map((entry) => {
+      const [label, tone] = RETURN_STEPS[entry.status] || [entry.status, ""];
+      return h("div", { class: "pub-form" },
+        h("p", {}, h("strong", { text: `Return ${entry.label}` }), " ", h("span", { class: `pub-badge ${tone}`, text: label })),
+        h("p", { class: "pub-muted", text: entry.items.map((i) => `${i.quantity} × ${i.name}${i.option ? ` (${i.option})` : ""}`).join(", ") }),
+        entry.shop_note ? h("p", { class: "pub-notice", text: entry.shop_note }) : null,
+        entry.status === "refunded" && entry.refund_cents ? h("p", { text: `Refunded ${money(entry.refund_cents, order.currency)}.` }) : null);
+    });
+    const box = h("section", { class: "pub-card", "aria-label": "Returns" }, h("h2", { text: "Returns" }), ...past);
+    if (!info.open) return box;
+    const quantities = info.lines.map((line) => {
+      const input = h("input", { type: "number", min: 0, max: line.returnable, value: 0, style: { width: "80px" } });
+      return { line, input };
+    });
+    const reason = h("select", {}, ...info.reasons.map((r) => h("option", { value: r.id, text: r.label })));
+    const details = h("textarea", { rows: 2, maxlength: 1000 });
+    const form = h("div", { class: "pub-form", hidden: true },
+      h("p", { class: "pub-muted", text: `You can ask until ${ctx.datetime(info.until)}. The shop replies by email.` }),
+      ...quantities.map(({ line, input }) => ctx.field(`${line.name}${line.option ? ` (${line.option})` : ""} · up to ${line.returnable}`, input)),
+      ctx.field("Why are you returning it?", reason),
+      ctx.field("What happened (optional)", details),
+      h("div", { class: "pub-btn-row" }, ctx.button("Send the return request", async () => {
+        const items = quantities.map(({ line, input }) => ({ line: line.line, quantity: Math.max(0, Math.min(line.returnable, Number(input.value) || 0)) })).filter((item) => item.quantity);
+        if (!items.length) throw new Error("Choose how many of each item you are returning.");
+        await ctx.action("request_return", { items, reason: reason.value, details: details.value.trim() });
+        await ctx.reload();
+        ctx.notice("Your return request was sent. The shop will email you.", "good");
+      })));
+    const open = ctx.button("Return items", async () => { form.hidden = false; open.hidden = true; }, "secondary");
+    box.append(h("div", { class: "pub-btn-row" }, open), form);
+    return box;
+  }
 
   // Tax as the invoice prints it: one line, or CGST + SGST / IGST under GST; "included" when prices include it.
   function taxRows(quote, row, money) {
