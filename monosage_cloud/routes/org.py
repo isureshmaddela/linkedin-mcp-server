@@ -654,6 +654,118 @@ def org_model_provider_remove_key(req: Req):  # noqa: ANN201
     return 200, _model_status(req) | {"removed": removed}
 
 
+# ----------------------------------------------------------------------------- the organization's AI instructions
+# Standing instructions and skills every Careers AI call of the organization's members receives (aira/ai_instructions.py):
+# every member reads them (they shape their drafts and automatic replies); owners and admins write them.
+
+
+def _org_ai_profile(req: Req) -> dict[str, Any]:
+    from aira import ai_instructions
+
+    app, principal = req.app, req.principal
+    can_manage = app.authz.can(principal, "integrations.manage")
+    return {
+        "organization": ai_instructions.public(
+            app.models.org_ai_profile(principal.org_id), can_edit=can_manage
+        ),
+        "can_manage": can_manage,
+        **ai_instructions.catalog(),
+    }
+
+
+@cloud_route("GET", r"/api/org/ai-profile")
+def org_ai_profile_status(req: Req):  # noqa: ANN201
+    return 200, _org_ai_profile(req)
+
+
+@cloud_route("PUT", r"/api/org/ai-profile", writes=True)
+def org_ai_profile_save(req: Req):  # noqa: ANN201
+    app, principal = req.app, req.principal
+    app.authz.require(principal, "integrations.manage")
+    profile = app.models.save_org_ai_profile(principal.org_id, req.body())
+    app.audit.record(
+        principal.org_id,
+        "integrations.ai_profile",
+        actor=principal,
+        detail={
+            "instructions_chars": len(profile["instructions"]),
+            "skills": len(profile["skills"]),
+            "enabled": sum(1 for skill in profile["skills"] if skill["enabled"]),
+        },
+    )
+    return 200, _org_ai_profile(req)
+
+
+# ----------------------------------------------------------------------------- my own AI ("My Claude")
+# A member answers their own job applications with the organization's AI or their own Claude (their Anthropic key,
+# stored as an org secret for them alone, never returned; deleted when they leave). Owners and admins can turn this
+# off for the organization (policy personal_ai_allowed). Only the signed-in member's own setting is ever read.
+
+
+def _my_ai(req: Req) -> dict[str, Any]:
+    principal = req.principal
+    return req.app.models.member_ai_status(principal.org_id, principal.member_id)
+
+
+@cloud_route("GET", r"/api/me/ai")
+def my_ai_status(req: Req):  # noqa: ANN201
+    return 200, _my_ai(req)
+
+
+@cloud_route("POST", r"/api/me/ai", writes=True)
+def my_ai_save(req: Req):  # noqa: ANN201
+    """The choice (organization or claude), the Claude model and/or a new Anthropic key."""
+    app, principal = req.app, req.principal
+    body = req.body()
+    candidate = body.get("api_key")
+    if candidate not in (None, "") and not isinstance(candidate, str):
+        raise ValidationFailed("Send the Anthropic API key as api_key.")
+    choice = body.get("choice")
+    if choice is not None:
+        choice = str(choice).strip().lower()
+    model = body.get("model")
+    if choice is None and model in (None, "") and not candidate:
+        raise ValidationFailed("Send a choice, a Claude model or an Anthropic API key.")
+    changed = app.models.save_member_ai(
+        principal.org_id,
+        principal.member_id,
+        choice=choice,
+        claude_model=None if model in (None, "") else str(model),
+        claude_key=candidate or None,
+    )
+    status = _my_ai(req)
+    app.audit.record(
+        principal.org_id,
+        "member.ai_settings",
+        actor=principal,
+        target_type="member",
+        target_id=principal.member_id,
+        detail={"changed": sorted(set(changed)), "in_effect": status["in_effect"]},
+    )
+    return 200, status
+
+
+@cloud_route("POST", r"/api/me/ai/test", writes=True)
+def my_ai_test(req: Req):  # noqa: ANN201
+    principal = req.principal
+    return 200, req.app.models.test_member_ai(principal.org_id, principal.member_id)
+
+
+@cloud_route("DELETE", r"/api/me/ai/key", writes=True)
+def my_ai_remove_key(req: Req):  # noqa: ANN201
+    app, principal = req.app, req.principal
+    removed = app.models.clear_member_ai(principal.org_id, principal.member_id)
+    app.audit.record(
+        principal.org_id,
+        "member.ai_key_removed",
+        actor=principal,
+        target_type="member",
+        target_id=principal.member_id,
+        detail={"removed": removed},
+    )
+    return 200, _my_ai(req) | {"removed": removed}
+
+
 # ----------------------------------------------------------------------------- support access (owner)
 
 

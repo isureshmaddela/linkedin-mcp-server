@@ -231,6 +231,7 @@
     const linkedin = check("polLinkedin", "LinkedIn allowed", "Candidates may connect their own LinkedIn session. LinkedIn forbids automated access; each candidate must turn it on with the risk notice.", policy.linkedin_allowed, { disabled: !features.has("sources.linkedin"), lockedHint: upgrade("sources.linkedin") });
     const easy = check("polEasy", "LinkedIn Easy Apply allowed", "Candidates may enable Easy Apply in their own plans. Off by default.", policy.easy_apply_allowed, { disabled: !features.has("sources.linkedin"), lockedHint: upgrade("sources.linkedin") });
     const covers = check("polCovers", "AI cover letters", "Cover letters are drafted by the model gateway; sensitive profile fields are never sent.", policy.cover_letters, { disabled: !features.has("ai.cover_letters"), lockedHint: upgrade("ai.cover_letters") });
+    const personalAi = check("polPersonalAi", "Members may use their own Claude", "A member can answer their own job applications with their own Anthropic API key instead of the organization's AI. Their key is stored for them alone and removed when they leave.", policy.personal_ai_allowed !== false);
     const sensitive = check("polSensitive", "Coaches may see sensitive profile values", "Only for an assigned coach, and only for a candidate who consented at onboarding. Never editable by anyone but the candidate.", policy.coach_sees_sensitive);
     const mfa = check("polMfa", "Require MFA for all staff", "Owners and admins already need MFA on Team and Enterprise. This adds coaches, billing contacts and auditors.", policy.require_mfa_staff);
     const pooled = check("polPooled", "Use Monosage's pooled SerpApi searches", "A metered add-on for when you have no SerpApi key of your own.", policy.use_pooled_serpapi, { disabled: !features.has("pooled_serpapi"), lockedHint: upgrade("pooled_serpapi") });
@@ -248,6 +249,7 @@
       linkedin_allowed: linkedin.input.checked && !linkedin.input.disabled,
       easy_apply_allowed: easy.input.checked && !easy.input.disabled,
       cover_letters: covers.input.checked && !covers.input.disabled,
+      personal_ai_allowed: personalAi.input.checked,
       retention_days: Number(retention.value),
       candidate_data_policy: dataPolicy.org.checked ? "organization_keeps" : "candidate_keeps",
       coach_sees_sensitive: sensitive.input.checked,
@@ -272,7 +274,7 @@
       h("h3", { class: "adm-section-title", text: "Applications" }), modeBox,
       h("div", { class: "adm-fields" }, ui.field("Applications per candidate per day", daily, cap(limits.apps_per_candidate_day, "per candidate per day")), ui.field("Data retention (days)", retention, cap(limits.retention_days, "days of retention"))),
       h("h3", { class: "adm-section-title", text: "Job sources" }), h("div", {}, ...sources.map((s) => s.node)), linkedin.node, easy.node, pooled.node,
-      h("h3", { class: "adm-section-title", text: "AI" }), covers.node,
+      h("h3", { class: "adm-section-title", text: "AI" }), covers.node, personalAi.node,
       h("h3", { class: "adm-section-title", text: "Privacy and access" }), sensitive.node, ui.field("Coach access to a candidate's LinkedIn messages", messages), mfa.node,
       h("h3", { class: "adm-section-title", text: "When a member leaves" }), dpBox,
       h("h3", { class: "adm-section-title", text: "Human review" }), ui.field("Regions where every application needs human review", regions, "Matched against the candidate's location. Some markets regulate automated employment decisions."));

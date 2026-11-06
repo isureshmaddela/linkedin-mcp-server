@@ -267,8 +267,18 @@ def make_client(api_key: str) -> anthropic.Anthropic:
     )
 
 
+def system_prompt(system_extra: str = "") -> str:
+    """The fixed rule, then the standing instructions of one call (aira/ai_instructions.py), when there are any."""
+    extra = str(system_extra or "").strip()
+    return f"{SYSTEM_RULE}\n\n{extra}" if extra else SYSTEM_RULE
+
+
 def claude_json(
-    config: ProviderConfig, prompt: str, *, max_tokens: int = MAX_TOKENS
+    config: ProviderConfig,
+    prompt: str,
+    *,
+    max_tokens: int = MAX_TOKENS,
+    system_extra: str = "",
 ) -> dict[str, Any]:
     """Send one prompt to Claude with the shared system rule; return the JSON object it wrote."""
     key = config.key
@@ -281,7 +291,7 @@ def claude_json(
         response = make_client(key).beta.messages.create(
             model=model,
             max_tokens=max_tokens,
-            system=SYSTEM_RULE,
+            system=system_prompt(system_extra),
             messages=[{"role": "user", "content": prompt}],
             betas=[FALLBACK_BETA],
             fallbacks="default",

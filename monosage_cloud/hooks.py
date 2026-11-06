@@ -150,6 +150,8 @@ def install(app: CloudApp) -> None:
     )
     HOOKS.secret_key = lambda: app.secrets.key(ctx_org())
     HOOKS.model_json = app.models.complete_json
+    # The organization's AI instructions and skills reach every Careers call of its members (aira/ai_instructions.py).
+    HOOKS.org_ai_profile = lambda: app.models.org_ai_profile(ctx_org())
 
     def earnings_connection() -> Any:
         """What a member earns lives in their own space (when the organization gives each member one): the life

@@ -2,7 +2,7 @@
 "use strict";
 (() => {
   const { h, api, fmt, ui, toast, withBusy, router } = Aira;
-  const TABS = [["profile", "Profile"], ["resume", "Resume"], ["answers", "Standard answers"], ["integrations", "Integrations & sources"], ["automation", "Automation"], ["data", "Data & privacy"]];
+  const TABS = [["profile", "Profile"], ["resume", "Resume"], ["answers", "Standard answers"], ["ai", "AI instructions"], ["integrations", "Integrations & sources"], ["automation", "Automation"], ["data", "Data & privacy"]];
 
   Aira.views.settings = async (main, route) => {
     const tab = route.path[1] || "profile";
@@ -12,14 +12,14 @@
       h("nav", { class: "subnav", "aria-label": "Settings sections" }, ...TABS.map(([id, label]) => h("a", { href: `#/settings/${id}`, "aria-current": id === tab ? "page" : "false", text: label }))),
       content,
     );
-    const renderers = { profile: renderProfile, resume: renderResume, answers: renderAnswers, integrations: renderIntegrations, automation: renderAutomation, data: renderData };
+    const renderers = { profile: renderProfile, resume: renderResume, answers: renderAnswers, ai: renderAiProfile, integrations: renderIntegrations, automation: renderAutomation, data: renderData };
     const renderer = renderers[tab] || renderProfile;
     content.replaceChildren(ui.skeleton(5));
     try { await renderer(content); } catch (error) { content.replaceChildren(ui.error(error, () => router.render())); }
   };
 
   // Careers > Profile & resume: the parts of Settings a job search starts from, as folders in the Careers menu.
-  const MATERIALS = [{ id: "profile", label: "Profile", icon: "profile" }, { id: "resume", label: "Resume", icon: "documents" }, { id: "answers", label: "Standard answers", icon: "careers-check" }];
+  const MATERIALS = [{ id: "profile", label: "Profile", icon: "profile" }, { id: "resume", label: "Resume", icon: "documents" }, { id: "answers", label: "Standard answers", icon: "careers-check" }, { id: "ai", label: "AI instructions", icon: "ai" }];
   Aira.views.profile = async (main, route) => {
     const tab = MATERIALS.some((item) => item.id === route.query.tab) ? route.query.tab : "profile";
     Aira.careersFolders("profile", MATERIALS, tab);
@@ -29,7 +29,7 @@
       Aira.careersStrip(ui.tabs(MATERIALS, tab, (id) => router.go(["profile"], { tab: id }, { replace: true }))),
       content,
     );
-    const renderer = { profile: renderProfile, resume: renderResume, answers: renderAnswers }[tab];
+    const renderer = { profile: renderProfile, resume: renderResume, answers: renderAnswers, ai: renderAiProfile }[tab];
     content.replaceChildren(ui.skeleton(5));
     try { await renderer(content); } catch (error) { content.replaceChildren(ui.error(error, () => router.render())); }
   };
@@ -142,7 +142,7 @@
 
   // -------------------------------------------------------------------------
   async function renderIntegrations(content) {
-    const [sources, linkedin, status, settings, serp, resetMail, provider] = await Promise.all([api("/api/sources"), api("/api/linkedin/status"), api("/api/status"), api("/api/settings"), api("/api/airaapi/overview").catch(() => null), Aira.cloud ? null : api("/api/settings/reset-mail", { silent: true }).catch(() => null), api("/api/settings/model-provider", { silent: true }).catch(() => null)]);
+    const [sources, linkedin, status, settings, serp, resetMail, provider, myAi] = await Promise.all([api("/api/sources"), api("/api/linkedin/status"), api("/api/status"), api("/api/settings"), api("/api/airaapi/overview").catch(() => null), Aira.cloud ? null : api("/api/settings/reset-mail", { silent: true }).catch(() => null), api("/api/settings/model-provider", { silent: true }).catch(() => null), Aira.cloud ? api("/api/me/ai", { silent: true }).catch(() => null) : null]);
     const onClaude = status.model_provider === "claude";
     // The hosted build answers with the organization's model choice (scope "organization"): its card replaces the local model ones.
     const orgModel = provider && provider.scope === "organization";
@@ -187,6 +187,7 @@
       h("div", { class: "card" }, h("h3", { text: "LinkedIn" }), ...(linkedinBlocked() || [h("p", { class: "muted", text: linkedin.message }), h("div", { class: "btn-row" }, connectBtn, linkedin.state === "connected" ? restartBtn : null, freshBtn), browserRow]), h("p", { class: "muted", style: { fontSize: "12px", marginTop: "8px" }, text: "Monosage opens LinkedIn in an isolated browser profile for this account. Sign in there; Monosage never sees your LinkedIn password and never bypasses verification steps. Restart the session after updating Monosage so new features such as sending replies are available." })),
       orgModel ? orgModelCard(provider) : h("div", { class: "card" }, h("h3", { text: "Ollama (local AI)" }), h("p", { class: "muted", text: onClaude ? "Not in use: Claude writes fit reviews, drafts, and reply suggestions. Choose Local model in the Claude card to switch back." : status.ollama ? "Reachable. Fit reviews, drafts, and reply suggestions run locally." : "Not reachable. Start Ollama and pull a chat model (for example qwen3.5:4b), or use Claude with an Anthropic API key." }), h("div", { class: "btn-row" }, h("div", { class: "field", style: { minWidth: "220px" } }, h("label", { for: "defaultModel", text: "Default model" }), Object.assign(model, { id: "defaultModel" })), saveModel)),
       provider && !provider.hosted ? claudeCard(provider) : null,
+      myAi ? myAiCard(myAi) : null,
       googleCard(serp, status),
       h("div", { class: "card" }, h("h3", { text: "Email & calendar" }), h("p", { class: "muted", text: "Mailbox sync (Gmail/Outlook OAuth) is not connected in this build. Import emails by paste or .eml, and add interviews to any calendar with .ics downloads or one-click links. The connector interface is in place for a future provider." })),
       resetMail ? resetMailCard(resetMail) : null,
@@ -306,6 +307,7 @@
     const nodes = [h("p", { class: "muted", text: `Your organization chooses the model that writes fit reviews, tailored resumes and cover letters, and reply drafts for everyone in it. In use now: ${inUse}.` })];
     if (mp.chosen && mp.chosen !== mp.provider) nodes.push(h("p", { class: "muted", text: "The model chosen for the organization cannot be used right now, so Monosage's hosted model answers." }));
     if (mp.provider === "claude") nodes.push(h("p", { class: "muted", text: "The resume and job text of each request is sent to Anthropic; usage is billed to the organization's Anthropic account." }));
+    if (Aira.state.myAi && Aira.state.myAi.in_effect === "claude") nodes.push(h("p", { class: "muted", text: "Your own job applications use your own Claude instead (Your AI for job applications)." }));
     if (!mp.can_manage) { nodes.push(h("p", { class: "muted", style: { fontSize: "12px" }, text: "Only an owner or admin of the organization can change it." })); return nodes; }
     const plan = own.required_plan ? own.required_plan.charAt(0).toUpperCase() + own.required_plan.slice(1) : "Enterprise";
     const choices = [["platform", "Monosage hosted model"], ["claude", "Claude (the organization's Anthropic API key)"], ...(own.available ? [["openai", "Your own OpenAI-compatible endpoint"]] : [])];
@@ -350,6 +352,177 @@
     return nodes;
   }
   Aira.orgModelBody = orgModelBody;
+
+  // -------------------------------------------------------------------------
+  // AI instructions: how the AI writes and answers for the person. Their own instructions and skills (saved with
+  // their settings), and hosted the organization's (owners and admins edit them; everyone else reads them). The
+  // preview shows exactly what one task's model calls receive after the fixed rule.
+  async function renderAiProfile(content) {
+    const [data, orgData, myAi, provider] = await Promise.all([
+      api("/api/settings/ai-profile"),
+      Aira.cloud ? api("/api/org/ai-profile", { silent: true }).catch(() => null) : null,
+      Aira.cloud ? api("/api/me/ai", { silent: true }).catch(() => null) : null,
+      Aira.cloud ? null : api("/api/settings/model-provider", { silent: true }).catch(() => null),
+    ]);
+    const inUse = myAi ? `${myAi.label}: ${myAi.detail}` : provider && provider.provider === "claude" && provider.ready ? `Claude (${provider.claude.model_label})` : "the local model (Ollama)";
+    const intro = h("div", { class: "card" },
+      h("h3", { text: "How the AI writes and answers for you" }),
+      h("p", { class: "muted", text: "Tell the AI who you are, what you want and how you answer. It follows these instructions for fit reviews, tailored resumes and cover letters, application answers and recruiter replies, including automatic replies. It never invents facts, and replies about pay, visas, personal details, offers or money still wait for you." }),
+      h("p", { class: "muted", style: { fontSize: "13px" } }, `Answering now: ${inUse}. `, h("a", { href: "#/settings/integrations", text: "Change the AI" })));
+    const nodes = [intro];
+    nodes.push(aiProfileEditor(data.personal, data, {
+      title: "Your instructions and skills",
+      placeholder: "For example: I'm looking for remote senior cloud architect roles in the US. I prefer contract-to-hire. I'm available for calls on weekdays after 2 pm Eastern. Sign my replies as Hyma.",
+      hint: "Facts, preferences and tone the AI should use when it writes as you. Never put passwords or ID numbers here.",
+      save: async (profile) => { await api("/api/settings/ai-profile", { method: "PUT", body: profile }); toast("Saved. The AI uses your instructions from the next draft.", "success"); },
+    }));
+    const org = orgData ? orgData.organization : data.organization;
+    if (org && (orgData && orgData.can_manage)) {
+      nodes.push(aiProfileEditor(org, orgData, {
+        title: "Your organization's instructions and skills",
+        badge: "Organization setting",
+        placeholder: "For example: Represent our outplacement program professionally. Never mention a candidate's previous employer by name in replies.",
+        hint: "Every member's AI follows these, and they win over a member's own instructions when the two conflict.",
+        save: async (profile) => { await api("/api/org/ai-profile", { method: "PUT", body: profile }); toast("Saved for everyone in the organization.", "success"); },
+      }));
+    } else if (org && (org.instructions || org.skills.length)) {
+      nodes.push(h("div", { class: "card" },
+        h("div", { class: "btn-row", style: { justifyContent: "space-between" } }, h("h3", { text: "Your organization's instructions" }), h("span", { class: "badge", text: "Organization setting" })),
+        h("p", { class: "muted", text: "Your organization adds these to every AI draft and reply. Only an owner or admin can change them." }),
+        org.instructions ? h("div", { class: "ai-preview", text: org.instructions }) : null,
+        ...org.skills.filter((s) => s.enabled).map((s) => h("p", { class: "muted", style: { marginTop: "8px" } }, h("strong", { text: s.name }), ` · ${s.tasks.map((t) => (data.tasks.find((x) => x.id === t) || { label: t }).label).join(", ")}`))));
+    }
+    nodes.push(aiPreviewCard(data));
+    content.replaceChildren(h("div", { class: "grid" }, ...nodes));
+  }
+
+  function aiProfileEditor(profile, catalog, options) {
+    const limits = catalog.limits;
+    const state = { instructions: profile.instructions || "", skills: (profile.skills || []).map((s) => ({ ...s, tasks: [...s.tasks] })) };
+    const instructions = h("textarea", { rows: 6, maxlength: limits.instructions, placeholder: options.placeholder });
+    instructions.value = state.instructions;
+    const count = h("div", { class: "muted ai-count" });
+    const updateCount = () => { count.textContent = `${instructions.value.length.toLocaleString()} / ${limits.instructions.toLocaleString()}`; };
+    instructions.addEventListener("input", () => { state.instructions = instructions.value; updateCount(); });
+    updateCount();
+    const list = h("div", {});
+    const addBtn = h("button", { type: "button", class: "btn ghost sm", text: "+ Add a skill" });
+    const templates = ui.select([["", "Add a starter skill…"], ...catalog.templates.map((t, i) => [String(i), t.name])], "", { "aria-label": "Add a starter skill" });
+    const renderSkills = () => {
+      list.replaceChildren(...state.skills.map((skill, index) => skillRow(skill, index)));
+      addBtn.disabled = state.skills.length >= limits.skills;
+      templates.disabled = state.skills.length >= limits.skills;
+    };
+    const skillRow = (skill, index) => {
+      const name = h("input", { type: "text", maxlength: limits.name, value: skill.name, placeholder: "Skill name", "aria-label": "Skill name" });
+      name.addEventListener("input", () => { skill.name = name.value; });
+      const enabled = h("input", { type: "checkbox", checked: skill.enabled !== false });
+      const row = h("div", { class: `ai-skill${skill.enabled === false ? " off" : ""}` });
+      enabled.addEventListener("change", () => { skill.enabled = enabled.checked; row.classList.toggle("off", !enabled.checked); });
+      const remove = h("button", { type: "button", class: "btn ghost sm", text: "Remove" });
+      remove.addEventListener("click", () => { state.skills.splice(index, 1); renderSkills(); });
+      const tasks = h("div", { class: "ai-skill-tasks", role: "group", "aria-label": "Tasks this skill is for" }, ...catalog.tasks.map((task) => {
+        const box = h("input", { type: "checkbox", checked: skill.tasks.includes(task.id) });
+        box.addEventListener("change", () => { skill.tasks = box.checked ? [...new Set([...skill.tasks, task.id])] : skill.tasks.filter((t) => t !== task.id); });
+        return h("label", { class: "check" }, box, task.label);
+      }));
+      const text = h("textarea", { rows: 3, maxlength: limits.skill, placeholder: "What the AI should do for these tasks", "aria-label": "Skill instructions" });
+      text.value = skill.instructions || "";
+      text.addEventListener("input", () => { skill.instructions = text.value; });
+      row.append(h("div", { class: "ai-skill-head" }, h("div", { class: "field" }, name), h("label", { class: "check" }, enabled, "On"), remove), tasks, text);
+      return row;
+    };
+    addBtn.addEventListener("click", () => { state.skills.push({ name: "", tasks: [], instructions: "", enabled: true }); renderSkills(); const inputs = list.querySelectorAll(".ai-skill input[type=text]"); if (inputs.length) inputs[inputs.length - 1].focus(); });
+    templates.addEventListener("change", () => {
+      const template = catalog.templates[Number(templates.value)];
+      templates.value = "";
+      if (!template) return;
+      let name = template.name; let n = 2;
+      while (state.skills.some((s) => s.name.toLowerCase() === name.toLowerCase())) name = `${template.name} (${n++})`;
+      state.skills.push({ name, tasks: [...template.tasks], instructions: template.instructions, enabled: true });
+      renderSkills();
+    });
+    renderSkills();
+    const saveBtn = h("button", { type: "submit", class: "btn sm", text: "Save" });
+    const form = h("form", { novalidate: true },
+      ui.field("Instructions for every task", instructions, options.hint), count,
+      h("h4", { text: "Skills", style: { marginTop: "14px" } }),
+      h("p", { class: "muted", style: { fontSize: "13px" }, text: `Extra instructions for one kind of task, switched on or off. Up to ${limits.skills}.` }),
+      list,
+      h("div", { class: "btn-row", style: { marginTop: "10px" } }, addBtn, templates),
+      h("div", { class: "btn-row", style: { marginTop: "14px" } }, saveBtn));
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const missing = state.skills.findIndex((s) => !s.name.trim() || !s.instructions.trim() || !s.tasks.length);
+      if (missing >= 0) { toast(`Skill ${missing + 1} needs a name, at least one task and its instructions.`, "error"); return; }
+      withBusy(saveBtn, async () => { await options.save({ instructions: state.instructions, skills: state.skills }); router.render(); });
+    });
+    return h("div", { class: "card" },
+      h("div", { class: "btn-row", style: { justifyContent: "space-between" } }, h("h3", { text: options.title }), options.badge ? h("span", { class: "badge", text: options.badge }) : null),
+      form);
+  }
+
+  function aiPreviewCard(catalog) {
+    const task = ui.select(catalog.tasks.map((t) => [t.id, t.label]), "replies", { id: "aiPreviewTask" });
+    const out = h("div", {});
+    const show = h("button", { type: "button", class: "btn secondary sm", text: "Show what the AI receives" });
+    show.addEventListener("click", () => withBusy(show, async () => {
+      const data = await api("/api/settings/ai-profile/preview", { method: "POST", body: { task: task.value } });
+      out.replaceChildren(
+        h("p", { class: "muted", style: { fontSize: "13px", marginTop: "10px" }, text: data.text ? `${data.label}: the fixed rule, then ${data.chars.toLocaleString()} characters of your instructions.` : `${data.label}: only the fixed rule. Nothing you saved applies to this task yet.` }),
+        h("div", { class: "ai-preview", text: data.text ? `${data.rule}\n\n${data.text}` : data.rule }));
+    }));
+    return h("div", { class: "card" },
+      h("h3", { text: "Preview" }),
+      h("p", { class: "muted", text: "See the exact instructions one kind of task receives with what is saved now (nothing is sent to the AI)." }),
+      h("div", { class: "btn-row" }, h("div", { class: "field", style: { minWidth: "260px" } }, task), show),
+      out);
+  }
+
+  // Hosted: the member's own Claude for their own job applications, or the organization's AI (Aira.cloud only).
+  function myAiCard(mine) {
+    const claude = mine.claude;
+    const choice = ui.select([["organization", `Organization AI (${mine.organization.label})`], ["claude", "My Claude (my own Anthropic API key)"]], mine.choice, { id: "myAiChoice" });
+    const model = ui.select(claude.models.map((m) => [m.id, m.label]), claude.model, { id: "myClaudeModel" });
+    const key = h("input", { id: "myClaudeKey", type: "password", autocomplete: "off", spellcheck: "false", maxlength: 400, placeholder: claude.configured ? `Saved (ending ${claude.last4 || "····"}). Paste a new key to replace it.` : "sk-ant-…" });
+    const claudeBox = h("div", { class: "form-grid" }, ui.field("Claude model", model), ui.field("Anthropic API key", key, "Create one at console.anthropic.com > API keys. Stored encrypted for you alone and never shown again."));
+    const sync = () => { claudeBox.hidden = choice.value !== "claude"; };
+    choice.addEventListener("change", sync);
+    sync();
+    const badge = mine.in_effect === "claude" ? ["stage applied", "My Claude"] : ["", mine.organization.label];
+    const detail = !mine.allowed
+      ? "Your organization does not allow members to use their own Claude, so the organization's AI writes for you."
+      : mine.in_effect === "claude"
+      ? `${claude.model_label} writes your fit reviews, documents, application answers and replies with your key ending ${claude.last4 || "····"}. The resume and job text of each request go to Anthropic, billed to your Anthropic account.`
+      : claude.configured
+      ? `Your key ending ${claude.last4 || "····"} is saved, but the organization's AI is in use. Choose My Claude to switch.`
+      : "The organization's AI writes for you. Choose My Claude to use your own Anthropic API key instead; you can switch back at any time.";
+    const card = h("div", { class: "card" },
+      h("div", { class: "btn-row", style: { justifyContent: "space-between" } }, h("h3", { text: "Your AI for job applications" }), h("span", { class: `badge ${badge[0]}`, text: badge[1] })),
+      h("p", { class: "muted", text: detail }));
+    if (!mine.allowed) return card;
+    const saveBtn = h("button", { type: "submit", class: "btn secondary sm", text: "Save" });
+    const testBtn = h("button", { type: "button", class: "btn ghost sm", text: "Test my key", disabled: !claude.configured });
+    const removeBtn = claude.configured ? h("button", { type: "button", class: "btn ghost sm", text: "Remove key" }) : null;
+    const form = h("form", { novalidate: true }, h("div", { class: "form-grid" }, ui.field("Which AI writes for you", choice)), claudeBox, h("div", { class: "btn-row", style: { marginTop: "10px" } }, saveBtn, testBtn, removeBtn));
+    form.addEventListener("submit", (event) => {
+      event.preventDefault();
+      const body = { choice: choice.value };
+      const typed = key.value.trim();
+      if (choice.value === "claude") { body.model = model.value; if (typed) body.api_key = typed; }
+      if (choice.value === "claude" && !typed && !claude.configured) { toast("Paste your Anthropic API key to use your own Claude.", "error"); key.focus(); return; }
+      withBusy(saveBtn, async () => {
+        await api("/api/me/ai", { method: "POST", body });
+        key.value = "";
+        toast(choice.value === "claude" ? "Saved. Your own Claude now writes for you. Test your key to check it." : "Saved. The organization's AI writes for you.", "success");
+        Aira.refreshStatus(); router.render();
+      });
+    });
+    testBtn.addEventListener("click", () => withBusy(testBtn, async () => { const data = await api("/api/me/ai/test", { method: "POST", body: {} }); toast(`Connected: ${data.model_label} answered.`, "success"); }));
+    if (removeBtn) removeBtn.addEventListener("click", async () => { if (!(await Aira.confirm({ title: "Remove your Anthropic API key?", message: "Monosage forgets your key, and the organization's AI writes for you again.", confirmLabel: "Remove key", danger: true }))) return; await withBusy(removeBtn, async () => { await api("/api/me/ai/key", { method: "DELETE" }); toast("Key removed. The organization's AI writes for you.", "success"); Aira.refreshStatus(); router.render(); }); });
+    card.append(form);
+    return card;
+  }
 
   // The SerpApi key behind Google Jobs. Its state comes from the API overview (the key may live in the app or in
   // SERPAPI_API_KEY); the key itself is never shown. Managing it happens in API > Account.

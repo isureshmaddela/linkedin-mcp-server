@@ -685,10 +685,14 @@
       draft.addEventListener("input", updateCounter);
       draft.addEventListener("keydown", (event) => { if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) { event.preventDefault(); sendButton.click(); } });
 
+      // A one-off steer for this draft only; standing instructions and reply skills live in Profile & resume > AI instructions.
+      const note = h("input", { type: "text", class: "msgr-note", maxlength: 500, placeholder: "Tell the AI what to say (optional), e.g. I'm interested, ask about the team", "aria-label": "Note for the AI draft" });
       const draftButton = h("button", { type: "button", class: "btn secondary sm", text: "Draft with AI" });
       draftButton.addEventListener("click", () => withBusy(draftButton, async () => {
         draftButton.textContent = "Drafting…";
-        const result = await api(`/api/conversations/${enc(threadId)}/draft`, { method: "POST", body: { model: model() } });
+        const body = { model: model() };
+        if (note.value.trim()) body.note = note.value.trim();
+        const result = await api(`/api/conversations/${enc(threadId)}/draft`, { method: "POST", body });
         draft.value = result.draft ? result.draft.reply : "";
         updateCounter();
         draft.focus();
@@ -735,6 +739,7 @@
       });
       const composerHint = h("span", { class: "msgr-composer-hint" });
       const composer = h("div", { class: "msgr-composer" },
+        h("div", { class: "msgr-note-row" }, note, h("a", { href: "#/profile?tab=ai", class: "muted msgr-note-link", text: "Your AI instructions" })),
         draft,
         h("div", { class: "msgr-composer-bar" }, counter, composerHint, h("div", { class: "btn-row" }, draftButton, saveButton, sendButton)));
       updateCounter();

@@ -58,6 +58,9 @@ DEFAULT_POLICY: dict[str, Any] = {
     "require_mfa_staff": False,
     "review_required_regions": [],
     "use_pooled_serpapi": False,
+    # Members may answer their own job applications with their own Claude key instead of the organization's AI
+    # (monosage_cloud/models.py, "My Claude"); owners and admins can turn it off.
+    "personal_ai_allowed": True,
     "legal_hold": False,
     # How members use the business apps (Studio, Marketing, Service, Commerce, Courses & Events, Sites and the
     # Business hub): "personal" gives every member a space of their own (their business, their customers, what they
@@ -801,6 +804,8 @@ class Tenancy:
                 connection=connection,
             )
         self.app.secrets.delete(actor.org_id, f"mfa:{member_id}")
+        # their own Anthropic key ("My Claude") leaves with them
+        self.app.models.clear_member_ai(actor.org_id, member_id)
         from monosage_cloud.hooks import erase_social, erase_videos
 
         erase_social(

@@ -234,6 +234,7 @@ ROUTE_MODULES = (
     "aira.airaapi.careers_routes",
     "aira.airaapi.leads_routes",
     "aira.model_provider",  # Settings > Integrations > Claude (the model provider and its key)
+    "aira.ai_instructions_routes",  # Profile & resume > AI instructions (standing instructions and skills)
     "aira.workday_accounts",  # Settings > Integrations > Workday accounts
 )
 

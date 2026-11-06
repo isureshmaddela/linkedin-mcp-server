@@ -313,7 +313,8 @@
     const addJob = () => manualJobForm((job) => { if (Aira.state.views.jobsReload) Aira.state.views.jobsReload(); openJob(job.job_id); });
 
     const q = h("input", { type: "search", "data-search": "1", placeholder: "Filter by title, company, or location", value: filters.q });
-    const stage = ui.select([["", "Any status"], ...STAGES.map((s) => [s, fmt.title(fmt.stage(s))])], filters.stage);
+    // "Archived" lists only archived jobs (restore one from its panel); every other choice is a stage.
+    const stage = ui.select([["", "Any status"], ...STAGES.map((s) => [s, fmt.title(fmt.stage(s))]), ["archived", "Archived"]], filters.stage);
     const classification = ui.select([["", "Any match"], ...CLASSES.map((c) => [c, c])], filters.classification);
     const minScore = ui.select([["", "Any score"], ["85", "85+"], ["70", "70+"], ["55", "55+"], ["40", "40+"]], filters.min_score);
     const workplace = ui.select([["", "Any workplace"], ["remote", "Remote"], ["hybrid", "Hybrid"], ["on_site", "On-site"]], filters.workplace_type);
@@ -342,7 +343,8 @@
     async function load() {
       listBox.replaceChildren(ui.skeleton(6));
       try {
-        const params = { view: tab.view, source: filters.source, q: q.value, stage: stage.value, classification: classification.value, min_score: minScore.value, workplace_type: workplace.value, sort: sort.value, page: filters.page, page_size: "40" };
+        const archivedOnly = stage.value === "archived";
+        const params = { view: tab.view, source: filters.source, q: q.value, stage: archivedOnly ? "" : stage.value, archived: archivedOnly ? "only" : "", classification: classification.value, min_score: minScore.value, workplace_type: workplace.value, sort: sort.value, page: filters.page, page_size: "40" };
         const data = await api(`/api/jobs?${new URLSearchParams(Object.fromEntries(Object.entries(params).filter(([, v]) => v)))}`);
         // The Google Jobs tab explains a missing key instead of inviting a search that cannot run.
         const googleMissing = tab.id === "google" && !data.jobs.length && !(await sources().catch(() => [])).some((item) => item.source === "google_jobs" && item.connected);
@@ -453,7 +455,9 @@
     pane.append(
       h("div", { class: "grid sidebar-right" },
         h("div", {},
-          h("div", { class: "btn-row", style: { marginBottom: "12px" } }, h("div", { class: "field", style: { minWidth: "220px" } }, h("label", { for: "stageSelect", text: "Status" }), Object.assign(stageSelect, { id: "stageSelect" })), h("button", { type: "button", class: "btn", text: "Prepare application →", onclick: () => renderJob(panel_of(pane), job, "apply") }), byHand ? h("button", { type: "button", class: "btn secondary sm", text: "Edit job", onclick: editJob }) : null, h("button", { type: "button", class: "btn ghost sm danger", text: "Archive", onclick: async (event) => { if (await Aira.confirm({ title: "Archive this job?", message: "It disappears from lists and analytics. History is kept.", confirmLabel: "Archive", danger: true })) { await withBusy(event.currentTarget, async () => { await api(`/api/jobs/${encodeURIComponent(job.job_id)}/archive`, { method: "POST", body: {} }); toast("Job archived.", "success"); Aira.closeDrawer(); }); } } })),
+          h("div", { class: "btn-row", style: { marginBottom: "12px" } }, h("div", { class: "field", style: { minWidth: "220px" } }, h("label", { for: "stageSelect", text: "Status" }), Object.assign(stageSelect, { id: "stageSelect" })), h("button", { type: "button", class: "btn", text: "Prepare application →", onclick: () => renderJob(panel_of(pane), job, "apply") }), byHand ? h("button", { type: "button", class: "btn secondary sm", text: "Edit job", onclick: editJob }) : null,
+            ["accepted", "rejected", "withdrawn"].includes(job.stage) ? h("button", { type: "button", class: "btn secondary sm", text: "Reopen application", title: "Back to the stage it was closed from; the history keeps both moves", onclick: (event) => withBusy(event.currentTarget, async () => { const data = await api(`/api/jobs/${encodeURIComponent(job.job_id)}/reopen`, { method: "POST", body: {} }); toast(`Reopened as ${fmt.title(fmt.stage(data.job.stage))}.`, "success"); await reload("overview"); }) }) : null,
+            job.archived_at ? h("button", { type: "button", class: "btn secondary sm", text: "Restore", onclick: (event) => withBusy(event.currentTarget, async () => { const data = await api(`/api/jobs/${encodeURIComponent(job.job_id)}/restore`, { method: "POST", body: {} }); toast(data.restored ? "Job restored to your lists." : "This job is already in your lists.", "success"); await reload("overview"); }) }) : h("button", { type: "button", class: "btn ghost sm danger", text: "Archive", onclick: async (event) => { if (await Aira.confirm({ title: "Archive this job?", message: "It disappears from lists and analytics. History is kept.", confirmLabel: "Archive", danger: true })) { await withBusy(event.currentTarget, async () => { await api(`/api/jobs/${encodeURIComponent(job.job_id)}/archive`, { method: "POST", body: {} }); toast("Job archived.", "success"); Aira.closeDrawer(); }); } } })),
           h("h3", { text: "Job description" }), descriptionBox,
           required.length ? h("div", { style: { marginTop: "12px" } }, h("h3", { text: "Skills mentioned" }), h("div", { class: "chips" }, ...required.map((s) => h("span", { class: "chip on", text: fmt.stage(s) })), ...preferred.map((s) => h("span", { class: "chip", text: `${fmt.stage(s)} (preferred)` })))) : null,
         ),

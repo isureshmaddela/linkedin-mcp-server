@@ -73,8 +73,11 @@ class Hooks:
     serpapi_key: Callable[[], tuple[str | None, str]] | None = None
     # () -> Fernet key for secrets stored in the bound database
     secret_key: Callable[[], bytes | None] | None = None
-    # (model, prompt) -> parsed JSON object; replaces the local Ollama call
-    model_json: Callable[[str, str], dict[str, Any]] | None = None
+    # (model, prompt, system_extra="") -> parsed JSON object; replaces the local Ollama call. ``system_extra`` is
+    # the standing instructions and skills for one Careers call (aira/ai_instructions.py), added after the fixed rule.
+    model_json: Callable[..., dict[str, Any]] | None = None
+    # () -> the organization's AI instructions and skills for the bound tenant (aira/ai_instructions.py shape), or None
+    org_ai_profile: Callable[[], dict[str, Any] | None] | None = None
     # () -> a connection to where the signed-in person's earnings are kept, when that is not the bound database
     # (hosted: their own space while the request runs in the organization's life apps), or None
     earnings_connection: Callable[[], Any] | None = None
@@ -123,6 +126,7 @@ class Hooks:
         self.earnings_connection = None
         self.server_ollama_url = None
         self.model_json = None
+        self.org_ai_profile = None
         self.wrap_services = None
         self.start_background = None
         self.automation_status = None

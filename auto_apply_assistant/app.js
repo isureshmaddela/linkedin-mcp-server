@@ -851,15 +851,16 @@ Aira.renderAccount = renderAccount;
 async function refreshStatus() {
   const strip = $("statusStrip");
   try {
-    const [linkedin, status] = await Promise.all([api("/api/linkedin/status", { silent: true }), api("/api/status", { silent: true })]);
+    const [linkedin, status, myAi] = await Promise.all([api("/api/linkedin/status", { silent: true }), api("/api/status", { silent: true }), Aira.cloud ? api("/api/me/ai", { silent: true }).catch(() => null) : null]);
     Aira.state.linkedin = linkedin;
     Aira.state.status = status;
+    Aira.state.myAi = myAi;
     const pill = (ok, label, title, warn = false, href = "#/settings/integrations") => h("a", { class: "status-pill", href, title }, h("i", { class: ok ? "ok" : warn ? "warn" : "" }), h("span", { text: label }));
     strip.replaceChildren(
       pill(linkedin.state === "connected", linkedin.state === "connected" ? "LinkedIn connected" : linkedin.state === "login" || linkedin.state === "starting" ? "LinkedIn connecting" : "LinkedIn off", linkedin.message, linkedin.state === "login" || linkedin.state === "starting"),
-      // Hosted, the organization's chosen model answers (never this computer's Ollama).
+      // Hosted, the organization's chosen model answers (never this computer's Ollama), or the member's own Claude.
       Aira.cloud
-        ? pill(true, "Organization AI", "Your organization chooses the model that writes fit reviews and drafts (Settings > Integrations)")
+        ? pill(true, myAi ? myAi.label : "Organization AI", myAi ? `${myAi.detail} writes your fit reviews, drafts and replies (Settings > Integrations)` : "Your organization chooses the model that writes fit reviews and drafts (Settings > Integrations)")
         : status.model_provider === "claude"
         ? pill(true, "Claude ready", "Claude writes fit reviews and drafts with your Anthropic API key")
         : pill(status.ollama, status.ollama ? "Ollama ready" : "Ollama offline", status.ollama ? "Local model available for reviews and drafts" : "Start Ollama, or add an Anthropic API key in Settings > Integrations, to review fit and generate drafts"),

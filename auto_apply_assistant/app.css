@@ -629,6 +629,17 @@ body:has(.modal-backdrop) .toasts { bottom: auto; top: 18px; } /* never over a d
 .msgr-composer { padding: 10px 16px calc(10px + env(safe-area-inset-bottom)); border-top: 1px solid var(--line); background: var(--surface); }
 .msgr-composer textarea { min-height: 46px; max-height: 190px; padding: 10px 12px; border-radius: 12px; resize: none; background: var(--surface-2); }
 .msgr-composer-bar { display: flex; flex-wrap: wrap; align-items: center; gap: 6px 12px; margin-top: 8px; }
+.msgr-note-row { display: flex; align-items: center; gap: 10px; margin-bottom: 8px; }
+.msgr-note-row .msgr-note { flex: 1; min-width: 0; padding: 7px 10px; border-radius: 10px; font-size: 13px; }
+.msgr-note-link { font-size: 12px; white-space: nowrap; }
+/* Profile & resume > AI instructions */
+.ai-skill { border: 1px solid var(--line); border-radius: 12px; padding: 12px; margin-top: 10px; background: var(--surface-2); }
+.ai-skill.off { opacity: .7; }
+.ai-skill-head { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 12px; }
+.ai-skill-head .field { flex: 1; min-width: 200px; margin: 0; }
+.ai-skill-tasks { display: flex; flex-wrap: wrap; gap: 6px 14px; margin: 8px 0; }
+.ai-count { font-size: 12px; text-align: right; }
+.ai-preview { white-space: pre-wrap; word-break: break-word; max-height: 360px; overflow: auto; padding: 12px; border-radius: 10px; background: var(--surface-2); border: 1px solid var(--line); font-size: 12.5px; line-height: 1.5; }
 .msgr-composer-hint { flex: 1 1 140px; color: var(--muted); font-size: 12px; }
 .msgr-placeholder, .msgr-thread-empty { display: grid; align-content: center; justify-items: center; gap: 6px; flex: 1; padding: 40px 24px; text-align: center; color: var(--muted); }
 .msgr-placeholder strong, .msgr-thread-empty strong { color: var(--ink); font: 500 22px var(--font-display); }

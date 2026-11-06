@@ -100,6 +100,13 @@ POLICY: dict[str, Rule] = {
     "airaapi__model_provider__provider_save": DENY,
     "airaapi__model_provider__provider_test": DENY,
     "airaapi__model_provider__provider_remove_key": DENY,
+    # The person's own AI instructions and skills speak in their name (drafts, application answers, automatic
+    # replies), so only the candidate changes them, like sending messages; anyone who reads the workspace sees them.
+    "airaapi__ai_instructions_routes__ai_profile_status": read(),
+    "airaapi__ai_instructions_routes__ai_profile_save": write(
+        "messages.send", audit=True
+    ),
+    "airaapi__ai_instructions_routes__ai_profile_preview": read(),
     # Workday accounts (aira/workday_accounts.py) hold the candidate's own employer passwords, encrypted under the
     # organization's data key (HOOKS.secret_key); the worker's auto-apply reads them in the bound workspace. Only the
     # candidate (or an owner or admin in their personal workspace) may list or change them: never a coach, an
@@ -170,6 +177,8 @@ POLICY: dict[str, Rule] = {
     "api_notifications_read": write(),
     "api_job_save": write(),
     "api_job_archive": write(),
+    "api_job_restore": write(),
+    "api_job_reopen": write(),
     "api_job_stage": write(),
     "api_job_documents": write(),
     "api_job_notes": write(),
