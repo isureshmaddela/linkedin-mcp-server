@@ -26,6 +26,7 @@ from life_support import Household
 import test_careers
 from aira.suite import kit
 from aira.suite.marketing import service
+from form_support import quick_forms, started  # noqa: F401 - public forms need the page's ticket
 from test_suite_marketing import (  # noqa: F401 - fixtures
     _anonymous,
     db,
@@ -125,6 +126,7 @@ def test_anonymous_and_signed_in_requests_with_bad_amounts_get_400(
     api.post("/api/suite/business", {"name": "Glow", "email": "owner@glow.example"})
     api.post(f"{M}/media-kit", {"headline": "Videos", "open": True})
     shared = api.post(f"{M}/media-kit/share")["public"]
+    _, page = _anonymous(env, "GET", f"/api/public/{shared['token']}")
     for text in ("Infinity", "1e400", "sNaN", "NaN"):
         status, data = _anonymous(
             env,
@@ -135,6 +137,7 @@ def test_anonymous_and_signed_in_requests_with_bad_amounts_get_400(
                 "name": "Jo",
                 "email": "jo@acme.example",
                 "budget": text,
+                "started": started(page),
             },
         )
         assert status == 400, (text, status, data)
@@ -143,7 +146,13 @@ def test_anonymous_and_signed_in_requests_with_bad_amounts_get_400(
         env,
         "POST",
         f"/api/public/{shared['token']}/request",
-        {"company": "Acme", "name": "Jo", "email": "jo@acme.example", "budget": "300"},
+        {
+            "company": "Acme",
+            "name": "Jo",
+            "email": "jo@acme.example",
+            "budget": "300",
+            "started": started(page),
+        },
     )
     assert status == 201
     lead_id = api.get(f"{M}/submissions")["submissions"][0]["id"]
@@ -181,12 +190,13 @@ def test_a_child_profile_cannot_read_leads_or_mark_them_paid(
     api.post("/api/suite/business", {"name": "Glow", "email": "owner@glow.example"})
     form = api.post(f"{M}/forms", {"title": "Consult"}, expect=201)["form"]
     token = api.post(f"{M}/forms/{form['id']}/link")["public"]["token"]
+    _, page = _anonymous(env, "GET", f"/api/public/{token}")
     assert (
         _anonymous(
             env,
             "POST",
             f"/api/public/{token}/submit",
-            {"name": "Bea", "email": "bea@brand.example"},
+            {"name": "Bea", "email": "bea@brand.example", "started": started(page)},
         )[0]
         == 201
     )
@@ -292,11 +302,13 @@ def test_hosted_bad_amounts_are_a_400_not_a_server_error(cloud):
     status, shared = owner.call("POST", f"{M}/media-kit/share", {})
     token = shared["public"]["token"]
     visitor = Browser(cloud)
+    _, page = visitor.call("GET", f"/api/public/{token}")
     for text in ("Infinity", "1e400", "sNaN"):
         status, data = visitor.call(
             "POST",
             f"/api/public/{token}/request",
             {
+                "started": started(page),
                 "company": "Acme",
                 "name": "Jo",
                 "email": "jo@acme.example",
@@ -307,7 +319,13 @@ def test_hosted_bad_amounts_are_a_400_not_a_server_error(cloud):
     status, _ = visitor.call(
         "POST",
         f"/api/public/{token}/request",
-        {"company": "Acme", "name": "Jo", "email": "jo@acme.example", "budget": "250"},
+        {
+            "company": "Acme",
+            "name": "Jo",
+            "email": "jo@acme.example",
+            "budget": "250",
+            "started": started(page),
+        },
     )
     assert status == 201
     lead_id = owner.call("GET", f"{M}/submissions")[1]["submissions"][0]["id"]

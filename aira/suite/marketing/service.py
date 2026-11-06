@@ -82,9 +82,16 @@ CHANNELS: dict[str, dict[str, Any]] = {
 POST_STATUSES = ("idea", "draft", "scheduled", "published")
 CAMPAIGN_STATUSES = ("active", "paused", "ended")
 SUBMISSION_STATUSES = ("new", "contacted", "won", "lost")
-SUBSCRIBER_STATUSES = ("subscribed", "unsubscribed")
+# "pending": signed up on a public form and not confirmed yet (double opt-in); newsletters go to "subscribed" only.
+SUBSCRIBER_STATUSES = ("subscribed", "pending", "unsubscribed")
 FORM_FIELDS = ("name", "email", "phone", "company", "message", "custom")
 NEWSLETTER_CAP = 500
+# Room each newsletter email needs besides the newsletter itself: the greeting (a first name is at most 120
+# characters), the footer with the business name and the unsubscribe address. A newsletter is checked with it when
+# it is saved, so one that saves can always be queued.
+NEWSLETTER_GREETING_ROOM = len("Hi ,\n\n") + 120
+NEWSLETTER_LINK_ROOM = 400
+CONFIRM_AGAIN_AFTER = timedelta(hours=1)  # a sign-up sent again within this gets no second confirmation email
 MAX_CENTS = 10_000_000_00  # the kit's own ceiling for an amount
 PILLARS = (
     ("tip", "A practical tip"),
@@ -1116,9 +1123,16 @@ FIELD_LABELS = {
 
 
 def submit(
-    connection: sqlite3.Connection, form_id: str, payload: Mapping[str, Any]
+    connection: sqlite3.Connection,
+    form_id: str,
+    payload: Mapping[str, Any],
+    *,
+    origin: Any = None,
 ) -> dict[str, Any]:
-    """A visitor sends the form. Validates against the form's own fields; returns the thank-you message."""
+    """A visitor sends the form. Validates against the form's own fields; returns the thank-you message.
+
+    Asking for news (``consent``) is a sign-up with double opt-in: the address gets an email to confirm, and only a
+    confirmed address receives newsletters. ``origin`` is the visitor (the address links in that email use)."""
     form = store.get(connection, "mk_forms", form_id, "form")
     if form["status"] != "active":
         raise ValueError("This form is closed.")
@@ -1176,7 +1190,7 @@ def submit(
         "UPDATE mk_forms SET submissions = submissions + 1 WHERE id = ?", (form_id,)
     )
     if consent:
-        add_subscriber(
+        request_confirmation(
             connection,
             {
                 "email": values["email"],
@@ -1185,7 +1199,7 @@ def submit(
             },
             source=f"form:{form['title'][:40]}",
             campaign_id=form["campaign_id"],
-            consent=True,
+            origin=origin,
             commit=False,
         )
     who = values.get("name") or values.get("email") or values.get("phone") or "Someone"
@@ -1219,6 +1233,46 @@ def submit(
         )
     connection.commit()
     return {"thank_you": form["thank_you"], "stored": True}
+
+
+WEBSITE_FORM_SETTING = "website_form"
+
+
+def website_form(connection: sqlite3.Connection) -> dict[str, Any]:
+    """The contact form a website built in Sites links to, with its live public link: made on first use ("Contact
+    us": name, email, phone, message), so what visitors send arrives in the leads inbox. A form the business closed
+    or deleted is replaced by a new one."""
+    store.ensure(connection)
+    form_id = str(kit.get_setting(connection, APP, WEBSITE_FORM_SETTING, "") or "")
+    form = (
+        kit.fetch_one(
+            connection,
+            "SELECT * FROM mk_forms WHERE id = ? AND status = 'active'",
+            (form_id,),
+        )
+        if form_id
+        else None
+    )
+    if form is None:
+        created = create_form(
+            connection,
+            {
+                "title": "Contact us",
+                "intro": "Send us a message and we will get back to you.",
+                "fields": {
+                    "name": {"show": True, "required": True},
+                    "email": {"show": True, "required": True},
+                    "phone": {"show": True},
+                    "message": {"show": True, "required": True},
+                },
+                "tag": "website",
+            },
+        )
+        form_id = created["id"]
+        kit.set_setting(connection, APP, WEBSITE_FORM_SETTING, form_id)
+        connection.commit()
+    link = public.create_link(connection, APP, "form", form_id, title="Contact us")
+    return {**get_form(connection, form_id), "public": link}
 
 
 SUBMISSION_SOURCES = ("form", "media_kit")
@@ -1647,6 +1701,126 @@ def add_subscriber(
     return store.get(connection, "mk_subscribers", row_id, "subscriber")
 
 
+def request_confirmation(
+    connection: sqlite3.Connection,
+    raw: Mapping[str, Any],
+    *,
+    source: str,
+    campaign_id: str = "",
+    origin: Any = None,
+    commit: bool = True,
+) -> dict[str, Any]:
+    """A sign-up from a public form, with double opt-in. A new address waits (``pending``) and an address that
+    unsubscribed stays unsubscribed, until the person confirms from the email this sends; an address already
+    subscribed only gets its name and tags updated. At most one confirmation email an hour, so a form sent again
+    and again cannot flood someone's inbox."""
+    address = kit.email(raw.get("email"), "an email address", required=True)
+    name = kit.text(raw.get("name"), "the name", max_len=120)
+    tags = kit.tags(raw.get("tags"))
+    existing = kit.fetch_one(
+        connection, "SELECT * FROM mk_subscribers WHERE email = ?", (address,)
+    )
+    stamp = kit.now()
+    if existing:
+        current = store.decode(existing)
+        _update(
+            connection,
+            "mk_subscribers",
+            current["id"],
+            {
+                "name": name or current["name"],
+                "tags": sorted(set(current["tags"]) | set(tags)),
+            },
+        )
+        row_id = current["id"]
+        last = current.get("confirm_sent_at")
+        recent = bool(last) and kit.parse_time(last) > kit.utcnow() - CONFIRM_AGAIN_AFTER
+        if current["status"] == "subscribed" or recent:
+            if commit:
+                connection.commit()
+            return store.get(connection, "mk_subscribers", row_id, "subscriber")
+    else:
+        row_id = _insert(
+            connection,
+            "mk_subscribers",
+            {
+                "email": address,
+                "name": name,
+                "source": kit.text(source, "the source", max_len=60) or "form",
+                "tags": tags,
+                "campaign_id": campaign_id,
+                "status": "pending",
+                "consent_at": None,
+            },
+        )
+    link = public.create_link(
+        connection, APP, "confirm", row_id, title="Confirm your subscription"
+    )
+    business = kit.business(connection).get("name") or "our news"
+    first = name.split(" ")[0] if name else ""
+    kit.queue_email(
+        connection,
+        APP,
+        "newsletter_confirm",
+        to=address,
+        subject=f"Confirm your subscription to {business}"[:200],
+        body=(
+            f"{'Hi ' + first + ',' if first else 'Hello,'}\n\n"
+            f"Please confirm that you want news by email from {business}:\n"
+            f"{kit.public_url(link['path'], origin)}\n\n"
+            "If you did not ask for this, ignore this email: you will not hear from us."
+        ),
+        ref_type="subscriber",
+        ref_id=row_id,
+    )
+    _update(connection, "mk_subscribers", row_id, {"confirm_sent_at": stamp})
+    if commit:
+        connection.commit()
+    return store.get(connection, "mk_subscribers", row_id, "subscriber")
+
+
+def confirm_subscription(
+    connection: sqlite3.Connection, subscriber_id: str
+) -> dict[str, Any]:
+    """The person confirmed from their email (double opt-in): from now on they get newsletters."""
+    current = store.get(connection, "mk_subscribers", subscriber_id, "subscriber")
+    if current["status"] != "subscribed":
+        stamp = kit.now()
+        _update(
+            connection,
+            "mk_subscribers",
+            subscriber_id,
+            {
+                "status": "subscribed",
+                "consent_at": stamp,
+                "confirmed_at": stamp,
+                "unsubscribed_at": None,
+            },
+        )
+        kit.log(
+            connection,
+            APP,
+            "subscriber",
+            f"{current['name'] or current['email']} confirmed their subscription",
+            ref_type="subscriber",
+            ref_id=subscriber_id,
+            public=True,
+        )
+        connection.commit()
+    return store.get(connection, "mk_subscribers", subscriber_id, "subscriber")
+
+
+def _withdraw_newsletters(connection: sqlite3.Connection, address: str) -> int:
+    """An unsubscribe also stops newsletters already waiting in the outbox (approved or not)."""
+    return kit.cancel_queued(
+        connection,
+        address,
+        reason="Unsubscribed before it was sent.",
+        app=APP,
+        bulk_only=True,
+    )
+
+
 def update_subscriber(
     connection: sqlite3.Connection, subscriber_id: str, raw: Mapping[str, Any]
 ) -> dict[str, Any]:
@@ -1662,16 +1836,26 @@ def update_subscriber(
             raise ValueError(
                 "This person unsubscribed. Only they can subscribe again, through one of your forms."
             )
+        if status == "subscribed" and current["status"] == "pending":
+            raise ValueError(
+                "This person has not confirmed yet. They confirm from the email we sent them."
+            )
         if status == "unsubscribed" and current["status"] != "unsubscribed":
             values.update({"status": "unsubscribed", "unsubscribed_at": kit.now()})
     if values:
         _update(connection, "mk_subscribers", subscriber_id, values)
+        if values.get("status") == "unsubscribed":
+            _withdraw_newsletters(connection, current["email"])
         connection.commit()
     return store.get(connection, "mk_subscribers", subscriber_id, "subscriber")
 
 
 def unsubscribe(connection: sqlite3.Connection, subscriber_id: str) -> dict[str, Any]:
+    """The person unsubscribes (their unsubscribe page, a mail client's one-click button, or an "unsubscribe"
+    email). Newsletters already queued for them are withdrawn too, and the outbox checks again when it sends."""
     current = store.get(connection, "mk_subscribers", subscriber_id, "subscriber")
+    if _withdraw_newsletters(connection, current["email"]):
+        connection.commit()
     if current["status"] != "unsubscribed":
         _update(
             connection,
@@ -1690,6 +1874,41 @@ def unsubscribe(connection: sqlite3.Connection, subscriber_id: str) -> dict[str,
         )
         connection.commit()
     return store.get(connection, "mk_subscribers", subscriber_id, "subscriber")
+
+
+def unsubscribe_address(connection: sqlite3.Connection, address: str) -> bool:
+    """An "unsubscribe" email from ``address`` (the List-Unsubscribe mailto, read from the incoming mailbox).
+    Returns whether the address was on the list."""
+    row = kit.fetch_one(
+        connection,
+        "SELECT id FROM mk_subscribers WHERE email = ?",
+        (str(address or "").strip().lower(),),
+    )
+    if not row:
+        return False
+    unsubscribe(connection, row["id"])
+    return True
+
+
+@kit.suppression(APP)
+def _still_subscribed(
+    connection: sqlite3.Connection, message: Mapping[str, Any]
+) -> str:
+    """At send time, a newsletter goes only to an address that is still subscribed (and confirmed)."""
+    if message.get("app") != APP or not kit.bulk_mail(message):
+        return ""
+    row = kit.fetch_one(
+        connection,
+        "SELECT status FROM mk_subscribers WHERE email = ?",
+        (str(message.get("recipient") or "").lower(),),
+    )
+    if row is None:
+        return "No longer on your list."
+    if row["status"] == "unsubscribed":
+        return "Unsubscribed before it was sent."
+    if row["status"] != "subscribed":
+        return "Has not confirmed the subscription."
+    return ""
 
 
 def list_subscribers(
@@ -1930,22 +2149,54 @@ def public_bio(connection: sqlite3.Connection) -> dict[str, Any]:
 # ---------------------------------------------------------------------------
 
 
+def _newsletter_footer(profile: Mapping[str, Any], link: str) -> str:
+    return (
+        f"You are receiving this because you subscribed to {profile.get('name') or 'our news'}. "
+        f"Unsubscribe: {link}"
+    )
+
+
+def _newsletter_email(
+    subscriber: Mapping[str, Any], body: str, profile: Mapping[str, Any], link: str
+) -> str:
+    """The email one subscriber gets: a greeting, the newsletter and the footer with their unsubscribe link."""
+    name = str(subscriber.get("name") or "")
+    greeting = f"Hi {name.split(' ')[0]},\n\n" if name else ""
+    return f"{greeting}{body}\n\n{_newsletter_footer(profile, link)}"
+
+
+def newsletter_limit(connection: sqlite3.Connection) -> int:
+    """The longest newsletter that still fits in one email with its greeting and footer."""
+    footer = _newsletter_footer(kit.business(connection), "x" * NEWSLETTER_LINK_ROOM)
+    return kit.MAX_BODY - NEWSLETTER_GREETING_ROOM - len("\n\n") - len(footer)
+
+
 def clean_newsletter(
-    raw: Mapping[str, Any], current: Mapping[str, Any] | None = None
+    raw: Mapping[str, Any],
+    current: Mapping[str, Any] | None = None,
+    *,
+    limit: int = kit.MAX_BODY,
 ) -> dict[str, Any]:
+    """``limit``: the longest body (:func:`newsletter_limit`), so a newsletter that saves can always be queued."""
     merged = _apply(raw, current)
     tags = kit.tags(merged.get("audience_tag"))
+    body = kit.text(
+        merged.get("body"),
+        "the newsletter",
+        max_len=kit.MAX_BODY,
+        required=True,
+        multiline=True,
+    )
+    if len(body) > limit:
+        raise ValueError(
+            f"The newsletter is too long: at most {limit:,} characters, so the greeting and the unsubscribe "
+            f"footer still fit in the email (it has {len(body):,})."
+        )
     return {
         "subject": kit.text(
             merged.get("subject"), "the subject", max_len=200, required=True
         ),
-        "body": kit.text(
-            merged.get("body"),
-            "the newsletter",
-            max_len=20000,
-            required=True,
-            multiline=True,
-        ),
+        "body": body,
         "audience_tag": tags[0] if tags else "",
     }
 
@@ -1998,7 +2249,12 @@ def create_newsletter(
     connection: sqlite3.Connection, raw: Mapping[str, Any]
 ) -> dict[str, Any]:
     row_id = _insert(
-        connection, "mk_newsletters", {**clean_newsletter(raw), "status": "draft"}
+        connection,
+        "mk_newsletters",
+        {
+            **clean_newsletter(raw, limit=newsletter_limit(connection)),
+            "status": "draft",
+        },
     )
     connection.commit()
     return get_newsletter(connection, row_id)
@@ -2008,7 +2264,12 @@ def update_newsletter(
     connection: sqlite3.Connection, newsletter_id: str, raw: Mapping[str, Any]
 ) -> dict[str, Any]:
     current = store.get(connection, "mk_newsletters", newsletter_id, "newsletter")
-    _update(connection, "mk_newsletters", newsletter_id, clean_newsletter(raw, current))
+    _update(
+        connection,
+        "mk_newsletters",
+        newsletter_id,
+        clean_newsletter(raw, current, limit=newsletter_limit(connection)),
+    )
     connection.commit()
     return get_newsletter(connection, newsletter_id)
 
@@ -2036,18 +2297,15 @@ def queue_newsletter(
         )
     batch = pending[: max(1, min(cap, NEWSLETTER_CAP))]
     profile = kit.business(connection)
+    limit = newsletter_limit(connection)
+    if len(newsletter["body"]) > limit:
+        raise ValueError(
+            f"The newsletter is too long to send with its footer: shorten it to {limit:,} characters."
+        )
     queued = 0
     for subscriber in batch:
         link = public.create_link(
             connection, APP, "unsubscribe", subscriber["id"], title="Unsubscribe"
-        )
-        greeting = (
-            f"Hi {subscriber['name'].split(' ')[0]},\n\n" if subscriber["name"] else ""
-        )
-        body = (
-            f"{greeting}{newsletter['body']}\n\n"
-            f"You are receiving this because you subscribed to {profile.get('name') or 'our news'}. "
-            f"Unsubscribe: {kit.public_url(link['path'], source)}"
         )
         message = kit.queue_email(
             connection,
@@ -2055,9 +2313,18 @@ def queue_newsletter(
             "newsletter",
             to=subscriber["email"],
             subject=newsletter["subject"],
-            body=body,
+            body=_newsletter_email(
+                subscriber,
+                newsletter["body"],
+                profile,
+                kit.public_url(link["path"], source),
+            ),
             ref_type="newsletter",
             ref_id=newsletter_id,
+            # RFC 8058 one-click: a mail client POSTs here and the person is unsubscribed (the page's own action)
+            unsubscribe_url=kit.public_url(
+                f"/api/public/{link['token']}/unsubscribe", source
+            ),
         )
         connection.execute(
             "INSERT OR IGNORE INTO mk_newsletter_recipients (newsletter_id, subscriber_id, message_id, queued_at) VALUES (?, ?, ?, ?)",

@@ -1,8 +1,11 @@
 """Routes for Marketing (``/api/marketing/*``), its public pages and its Business hub numbers.
 
 Public pages: ``go`` (a tracked link: counts the click, the page sends the visitor on), ``form`` (a lead-capture
-form), ``bio`` (the link-in-bio page, one per business) and ``unsubscribe`` (one per subscriber, linked from
-every newsletter). Loaded by :func:`aira.suite.load_apps`.
+form), ``bio`` (the link-in-bio page, one per business), ``unsubscribe`` (one per subscriber, linked from every
+newsletter; its action is also the RFC 8058 one-click address in the List-Unsubscribe header) and ``confirm`` (one
+per sign-up: the double opt-in confirmation). Public forms carry a hidden field and a ticket from the page
+(``kit.check_form``): a bot that fills the field or never loaded the page is thanked and nothing is kept. Loaded by
+:func:`aira.suite.load_apps`.
 """
 
 from __future__ import annotations
@@ -723,7 +726,7 @@ def form_page(connection: Any, link: dict[str, Any]) -> dict[str, Any]:
     connection.execute(
         "UPDATE mk_forms SET views = views + 1 WHERE id = ?", (form["id"],)
     )
-    return service.public_form(form)
+    return {**service.public_form(form), "started": kit.form_ticket(connection)}
 
 
 @public.action(APP, "form", "submit")
@@ -734,7 +737,10 @@ def form_submit(
     visitor: dict[str, Any],
 ) -> tuple[int, dict[str, Any]]:
     store.ensure(connection)
-    return 201, service.submit(connection, link["ref_id"], payload)
+    if not kit.check_form(connection, payload):
+        form = store.get(connection, "mk_forms", link["ref_id"], "form")
+        return 201, {"thank_you": form["thank_you"], "stored": False}
+    return 201, service.submit(connection, link["ref_id"], payload, origin=visitor)
 
 
 @public.page(APP, "bio")
@@ -784,15 +790,54 @@ def unsubscribe_action(
     payload: dict[str, Any],
     visitor: dict[str, Any],
 ) -> tuple[int, dict[str, Any]]:
+    """The page's button, and the RFC 8058 one-click POST a mail client sends (body ``List-Unsubscribe=One-Click``)
+    to the address in the newsletter's List-Unsubscribe header. The link token is the subscriber's own."""
     store.ensure(connection)
     subscriber = service.unsubscribe(connection, link["ref_id"])
+    return 200, {"subscribed": subscriber["status"] == "subscribed"}
+
+
+@public.query(APP, "unsubscribe", "unsubscribe")
+def unsubscribe_status(
+    connection: Any, link: dict[str, Any], params: dict[str, Any]
+) -> tuple[int, dict[str, Any]]:
+    # A mail client (or a link checker) that opens the one-click address with GET changes nothing.
+    store.ensure(connection)
+    subscriber = store.get(connection, "mk_subscribers", link["ref_id"], "subscriber")
+    return 200, {"subscribed": subscriber["status"] == "subscribed"}
+
+
+@public.page(APP, "confirm")
+def confirm_page(connection: Any, link: dict[str, Any]) -> dict[str, Any]:
+    """Double opt-in: the link in the confirmation email. Opening it changes nothing (mail scanners open links);
+    the person presses Confirm."""
+    store.ensure(connection)
+    subscriber = store.get(connection, "mk_subscribers", link["ref_id"], "subscriber")
+    return {
+        "email": _mask(subscriber["email"]),
+        "subscribed": subscriber["status"] == "subscribed",
+    }
+
+
+@public.action(APP, "confirm", "confirm")
+def confirm_action(
+    connection: Any,
+    link: dict[str, Any],
+    payload: dict[str, Any],
+    visitor: dict[str, Any],
+) -> tuple[int, dict[str, Any]]:
+    store.ensure(connection)
+    subscriber = service.confirm_subscription(connection, link["ref_id"])
     return 200, {"subscribed": subscriber["status"] == "subscribed"}
 
 
 @public.page(APP, "media_kit")
 def media_kit_page(connection: Any, link: dict[str, Any]) -> dict[str, Any]:
     store.ensure(connection)
-    return service.public_media_kit(connection)
+    return {
+        **service.public_media_kit(connection),
+        "started": kit.form_ticket(connection),
+    }
 
 
 @public.action(APP, "media_kit", "request")
@@ -803,6 +848,8 @@ def media_kit_request(
     visitor: dict[str, Any],
 ) -> tuple[int, dict[str, Any]]:
     store.ensure(connection)
+    if not kit.check_form(connection, payload):
+        return 201, service.sponsorship_request(connection, {"website": "bot"})
     return 201, service.sponsorship_request(connection, payload)
 
 
@@ -812,9 +859,16 @@ def media_kit_request(
 
 
 @background.task(APP)
-def _tick(connection: Any) -> int:
+def _tick(connection: Any) -> dict[str, Any]:
+    """Post reminders, and the Leads follow-up sequences (Leads is part of Marketing): steps that are due go into
+    the Leads outbox, sequences to people who replied, unsubscribed or bounced stop."""
+    from aira.leads import sequences
+
     store.ensure(connection)
-    return service.remind_due_posts(connection)
+    return {
+        "reminders": service.remind_due_posts(connection),
+        "sequences": sequences.tick(connection),
+    }
 
 
 # ---------------------------------------------------------------------------
