@@ -315,7 +315,8 @@ def test_only_the_person_and_their_caregivers_see_their_health(db, people):
         service.add_caregiver(db, rosa, {"profile_id": pat["id"]})  # already
     with pytest.raises(ValueError):
         service.add_caregiver(db, rosa, {"profile_id": rosa["id"]})
-    assert [p["name"] for p in service.caring_for(db, pat)] == ["Rosa"]
+    # a parent also looks after their young child's health (care.manages)
+    assert [p["name"] for p in service.caring_for(db, pat)] == ["Rosa", "Mia"]
 
 
 def test_caregivers_hear_about_a_missed_dose_once(db, people):
@@ -341,7 +342,9 @@ def test_caregivers_hear_about_a_missed_dose_once(db, people):
         "nurse@clinic.example",
         "pat@home.example",
     ]
-    assert "Rosa has not taken Metformin" in mails[0]["subject"]
+    # an inbox others may read never names the medicine
+    assert mails[0]["subject"] == "Rosa has not taken a scheduled medicine"
+    assert "Metformin" not in mails[0]["body"] and "500 mg" not in mails[0]["body"]
     alert = next(
         a for a in service.alerts(db, pat, now) if a["id"].startswith("missed:")
     )
@@ -549,7 +552,8 @@ def test_a_household_on_the_local_build(env, api, local_index):
     assert (
         len(missed) == 1
         and missed[0]["recipient"] == "careers@example.com"
-        and "Statin" in missed[0]["subject"]
+        and "Statin" not in missed[0]["subject"]
+        and "a scheduled medicine" in missed[0]["subject"]
     )
     alerts = [
         a for a in pat.get("/api/life/pulse")["alerts"] if a["id"].startswith("missed:")

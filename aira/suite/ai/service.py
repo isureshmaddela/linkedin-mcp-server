@@ -26,6 +26,7 @@ from aira import suite
 from aira.suite import kit, life
 from aira.suite.ai import agents as registry
 from aira.suite.ai import memory
+from aira.suite.social import moderation
 
 OP_STATUSES = ("done", "failed", "blocked", "pending", "rejected", "undone")
 MAX_MESSAGE = 2000
@@ -1229,6 +1230,39 @@ def ratings(connection: sqlite3.Connection, me: dict[str, Any]) -> dict[str, Any
 # ---------------------------------------------------------------------------
 
 
+SAFETY_RULES = (
+    "Safety rules, for everyone:",
+    "- If the person talks about hurting or killing themselves, or seems to be in danger, do not give methods, "
+    "means or encouragement. Say you care, urge them to contact a crisis line now (in India Tele-MANAS 14416 or "
+    "1-800-891-4416; elsewhere their local emergency services) and to tell someone they trust.",
+    "- Never give instructions for violence, weapons, drugs, self-harm or anything illegal or dangerous.",
+    "- You are not a doctor, lawyer or financial adviser: for health, legal or money decisions, suggest a "
+    "qualified person.",
+)
+SAFETY_RULES_YOUNG = (
+    "This person is a child or a teenager. Also:",
+    "- Keep everything suitable for their age: no sexual content, no graphic violence, no gambling, no alcohol, "
+    "drugs or dating advice, no frightening detail.",
+    "- Never ask for or encourage sharing personal details (full name, address, school, phone number, photos) or "
+    "meeting people from the internet; never suggest keeping secrets from parents or carers.",
+    "- If they seem worried, hurt, bullied or unsafe, encourage them to talk to a parent, carer or teacher now.",
+)
+
+
+def safety_rules(me: dict[str, Any]) -> list[str]:
+    """The rules every answer follows: crisis and self-harm for everyone, stricter ones for a child or a teen."""
+    rules = list(SAFETY_RULES)
+    if me.get("age_group") in ("child", "teen"):
+        rules += ["", *SAFETY_RULES_YOUNG]
+    return rules
+
+
+YOUNG_FALLBACK = (
+    "I can't help with that one. Try asking about your day, your games, your lessons or your chores. "
+    "If something is worrying you, please talk to a parent, carer or teacher."
+)
+
+
 def _prompt(
     me: dict[str, Any],
     message: str,
@@ -1243,6 +1277,8 @@ def _prompt(
         "the apps they use. Be short, warm and concrete (at most about 120 words), in plain words for every age. "
         "If the facts do not answer the question, say so and suggest what they could ask or do. Never invent data.",
         f"The person is {me['name']} ({me.get('age_group') or 'adult'}). Today is {kit.today()}.",
+        "",
+        *safety_rules(me),
         "",
         "Facts from the agents:",
     ]
@@ -1428,6 +1464,29 @@ def chat(
         )
     ][::-1]
     asked = _save_message(connection, session_id, "user", message)
+    young = me.get("age_group") in ("child", "teen")
+    if moderation.self_harm_intent(message):
+        # Someone may be in danger: a fixed answer with helplines, never a model's words or an action.
+        answered = _save_message(
+            connection,
+            session_id,
+            "assistant",
+            moderation.crisis_reply(young),
+            agent="Master agent",
+            agents=[],
+            tokens=0,
+            duration_ms=round((time.monotonic() - started) * 1000),
+            source="safety",
+            actions=[],
+            reply=moderation.crisis_reply(young),
+        )
+        connection.commit()
+        return {
+            "session_id": session_id,
+            "question": asked,
+            "answer": answered,
+            "stats": _session_stats(connection, session_id),
+        }
 
     settings = _settings(connection, me)
     candidates = [
@@ -1501,6 +1560,9 @@ def chat(
         )
         source = answer.get("source", "template")
         reply = str(answer.get("reply") or "").strip() or fallback["reply"]
+        if young and source == "model" and not moderation.safe_for_young(reply):
+            # a child's or a teen's answer goes through the moderation lists before it is shown
+            reply, answer = YOUNG_FALLBACK, {**answer, "actions": []}
         to_do, refused = (
             _sort_actions(answer.get("actions"), usable)
             if source == "model"

@@ -21,8 +21,13 @@ AGENT = "([a-z]{2,20})"
 
 def _open(request: Request) -> tuple[Any, dict[str, Any]]:
     connection = request.connect()
-    store.ensure(connection)
-    me = life.current(request, connection)
+    try:
+        store.ensure(connection)
+        me = life.current(request, connection)
+        life.require_app(connection, me, "ai")  # a guardian may turn AI chat off for a child or a teen
+    except Exception:
+        connection.close()
+        raise
     return connection, me
 
 
