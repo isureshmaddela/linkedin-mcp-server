@@ -23,12 +23,13 @@ Hard rules, enforced here:
   ``needs_review``; popups are closed; downloads are refused.
 
 Locale note: ATS "already applied" notices and success wording are the only
-signals that exist for those states, so they are matched against the English
-phrase tables below (``_ALREADY_APPLIED_PHRASES``, ``_SUCCESS_PHRASES``) plus
-locale-independent URL patterns. Forms in other languages still fill (field
-mapping goes through adapter ``name``/``id`` hints first), but their
-confirmation is reported as ``failed`` with the page text as evidence rather
-than guessed.
+signals that exist for those states, so they are matched against the explicit
+per-language table :data:`CONFIRMATION_PHRASES` (English, Spanish, French,
+German, Portuguese, Italian and Dutch) plus locale-independent URL patterns.
+Forms in other languages still fill (field mapping goes through adapter
+``name``/``id`` hints first), but their confirmation is reported as ``failed``
+with the page text as evidence rather than guessed. Add a language by adding an
+entry to the table; nothing else changes.
 """
 
 from __future__ import annotations
@@ -56,6 +57,7 @@ if TYPE_CHECKING:
 
 __all__ = [
     "ATS_NAMES",
+    "CONFIRMATION_PHRASES",
     "OUTCOME_STATUSES",
     "QUESTION_KINDS",
     "QUESTION_STATUSES",
@@ -63,7 +65,9 @@ __all__ = [
     "ApplyEvidence",
     "ApplyOutcome",
     "ApplyRequest",
+    "ConfirmationPhrases",
     "FormQuestion",
+    "confirmation_language",
     "detect_ats",
     "extract_confirmation_number",
     "run",
@@ -355,30 +359,199 @@ _ADAPTERS: dict[str, _Adapter] = {
     ),
 }
 
-# Wording that any ATS may use once an application went through.
-_SUCCESS_PHRASES = (
-    "thank you for applying",
-    "thanks for applying",
-    "thank you for your application",
-    "thank you for submitting",
-    "application has been received",
-    "application received",
-    "application has been submitted",
-    "application submitted",
-    "application was submitted",
-    "we have received your application",
-    "we've received your application",
-    "we received your application",
-    "successfully submitted",
+
+@dataclass(frozen=True, slots=True)
+class ConfirmationPhrases:
+    """What an ATS says, in one language, once an application went through or when one already exists."""
+
+    success: tuple[str, ...]
+    already_applied: tuple[str, ...]
+
+
+# The only signal for "submitted" and "already applied" is the page's wording (see the module docstring), so it
+# is matched against this explicit table, one entry per language, lower case with straight apostrophes
+# (:func:`_phrase_text` folds the page the same way). "Already applied" phrases are whole statements, never a
+# bare "already applied?" question, because a match there skips the job before anything is filled.
+CONFIRMATION_PHRASES: dict[str, ConfirmationPhrases] = {
+    "en": ConfirmationPhrases(
+        success=(
+            "thank you for applying",
+            "thanks for applying",
+            "thank you for your application",
+            "thank you for submitting",
+            "application has been received",
+            "application received",
+            "application has been submitted",
+            "application submitted",
+            "application was submitted",
+            "we have received your application",
+            "we've received your application",
+            "we received your application",
+            "successfully submitted",
+        ),
+        already_applied=(
+            "already applied",
+            "already submitted an application",
+            "you've already submitted",
+            "you have already submitted",
+            "duplicate application",
+        ),
+    ),
+    "es": ConfirmationPhrases(
+        success=(
+            "gracias por postularte",
+            "gracias por postular",
+            "gracias por tu solicitud",
+            "gracias por su solicitud",
+            "gracias por tu candidatura",
+            "gracias por su candidatura",
+            "hemos recibido tu solicitud",
+            "hemos recibido su solicitud",
+            "hemos recibido tu candidatura",
+            "hemos recibido su candidatura",
+            "tu solicitud ha sido enviada",
+            "su solicitud ha sido enviada",
+            "solicitud enviada con éxito",
+            "candidatura enviada con éxito",
+        ),
+        already_applied=(
+            "ya te has postulado",
+            "ya se ha postulado",
+            "ya has enviado una solicitud",
+            "ya ha enviado una solicitud",
+            "ya has aplicado a esta",
+            "solicitud duplicada",
+        ),
+    ),
+    "fr": ConfirmationPhrases(
+        success=(
+            "merci pour votre candidature",
+            "merci d'avoir postulé",
+            "votre candidature a été envoyée",
+            "votre candidature a bien été envoyée",
+            "votre candidature a bien été reçue",
+            "nous avons bien reçu votre candidature",
+            "nous avons reçu votre candidature",
+            "candidature envoyée avec succès",
+        ),
+        already_applied=(
+            "vous avez déjà postulé",
+            "vous avez déjà envoyé une candidature",
+            "vous avez déjà soumis une candidature",
+            "candidature en double",
+        ),
+    ),
+    "de": ConfirmationPhrases(
+        success=(
+            "vielen dank für ihre bewerbung",
+            "danke für ihre bewerbung",
+            "vielen dank für deine bewerbung",
+            "danke für deine bewerbung",
+            "ihre bewerbung wurde erfolgreich übermittelt",
+            "ihre bewerbung wurde übermittelt",
+            "ihre bewerbung wurde erfolgreich versendet",
+            "ihre bewerbung ist bei uns eingegangen",
+            "wir haben ihre bewerbung erhalten",
+            "deine bewerbung wurde übermittelt",
+        ),
+        already_applied=(
+            "sie haben sich bereits beworben",
+            "sie haben sich bereits auf diese stelle beworben",
+            "du hast dich bereits beworben",
+            "du hast dich bereits auf diese stelle beworben",
+        ),
+    ),
+    "pt": ConfirmationPhrases(
+        success=(
+            "obrigado por se candidatar",
+            "obrigada por se candidatar",
+            "obrigado pela sua candidatura",
+            "agradecemos a sua candidatura",
+            "agradecemos sua candidatura",
+            "a sua candidatura foi enviada",
+            "sua candidatura foi enviada",
+            "recebemos a sua candidatura",
+            "recebemos sua candidatura",
+            "candidatura enviada com sucesso",
+        ),
+        already_applied=(
+            "você já se candidatou",
+            "voce ja se candidatou",
+            "já se candidatou a esta vaga",
+            "você já enviou uma candidatura",
+        ),
+    ),
+    "it": ConfirmationPhrases(
+        success=(
+            "grazie per la tua candidatura",
+            "grazie per la sua candidatura",
+            "grazie per esserti candidato",
+            "grazie per esserti candidata",
+            "abbiamo ricevuto la tua candidatura",
+            "abbiamo ricevuto la sua candidatura",
+            "la tua candidatura è stata inviata",
+            "la sua candidatura è stata inviata",
+            "candidatura inviata con successo",
+        ),
+        already_applied=(
+            "ti sei già candidato",
+            "ti sei già candidata",
+            "si è già candidato",
+            "hai già inviato una candidatura",
+        ),
+    ),
+    "nl": ConfirmationPhrases(
+        success=(
+            "bedankt voor je sollicitatie",
+            "bedankt voor uw sollicitatie",
+            "dank voor je sollicitatie",
+            "dank voor uw sollicitatie",
+            "we hebben je sollicitatie ontvangen",
+            "wij hebben je sollicitatie ontvangen",
+            "wij hebben uw sollicitatie ontvangen",
+            "je sollicitatie is verzonden",
+            "uw sollicitatie is verzonden",
+            "je sollicitatie is succesvol verstuurd",
+        ),
+        already_applied=(
+            "je hebt al gesolliciteerd",
+            "u heeft al gesolliciteerd",
+            "u hebt al gesolliciteerd",
+            "je hebt al op deze vacature gesolliciteerd",
+        ),
+    ),
+}
+# Every language's wording, as the engine matches it (an ATS's own phrases are added per adapter).
+_SUCCESS_PHRASES = tuple(
+    phrase for table in CONFIRMATION_PHRASES.values() for phrase in table.success
 )
-# Wording an ATS shows when this candidate already applied. English only; see the module docstring.
-_ALREADY_APPLIED_PHRASES = (
-    "already applied",
-    "already submitted an application",
-    "you've already submitted",
-    "you have already submitted",
-    "duplicate application",
+_ALREADY_APPLIED_PHRASES = tuple(
+    phrase
+    for table in CONFIRMATION_PHRASES.values()
+    for phrase in table.already_applied
 )
+_APOSTROPHES = str.maketrans({"’": "'", "‘": "'", "ʼ": "'", "`": "'"})
+
+
+def _phrase_text(text: str) -> str:
+    """Page text folded the way :data:`CONFIRMATION_PHRASES` is written: lower case, straight apostrophes,
+    single spaces (a non-breaking space between words still matches)."""
+    return " ".join(str(text or "").translate(_APOSTROPHES).casefold().split())
+
+
+def confirmation_language(text: str) -> tuple[str, str] | None:
+    """``(language, "success" | "already_applied")`` for the first phrase found in ``text``, or None."""
+    folded = _phrase_text(text)
+    for language, table in CONFIRMATION_PHRASES.items():
+        for phrase in table.already_applied:
+            if phrase in folded:
+                return language, "already_applied"
+        for phrase in table.success:
+            if phrase in folded:
+                return language, "success"
+    return None
+
+
 _CAPTCHA_SELECTORS = (
     "iframe[src*='recaptcha']",
     "iframe[src*='hcaptcha']",
@@ -417,9 +590,20 @@ _RESUME_RE = re.compile(r"resume|\bcv\b|curriculum", re.IGNORECASE)
 _COVER_RE = re.compile(r"cover", re.IGNORECASE)
 _YES = frozenset({"yes", "y", "true", "1", "agree", "accept", "checked"})
 _NO = frozenset({"no", "n", "false", "0"})
+# The label before a confirmation number, in the languages of CONFIRMATION_PHRASES (English first).
+_CONFIRMATION_LABELS = (
+    "reference|confirmation|application|tracking|ticket|case",
+    "referencia|confirmación|confirmacion|solicitud",  # es
+    "référence|reference|confirmation|candidature",  # fr
+    "referenznummer|referenz|bewerbungsnummer|vorgangsnummer|bestätigungsnummer",  # de
+    "referência|referencia|confirmação|confirmacao|protocolo",  # pt
+    "riferimento|conferma|candidatura",  # it
+    "referentienummer|referentie|kenmerk|bevestigingsnummer",  # nl
+)
 _CONFIRMATION_RE = re.compile(
-    r"(?:reference|confirmation|application|tracking|ticket|case)\s*"
-    r"(?:number|no\.?|id|code|#)?\s*(?:is|:|#)?\s*#?\s*([A-Za-z0-9][A-Za-z0-9-]{3,})",
+    rf"(?:{'|'.join(_CONFIRMATION_LABELS)})\s*"
+    r"(?:number|no\.?|id|code|#|número|numero|numéro|nummer|n\.?º|nº|n°)?\s*(?:is|:|#)?\s*#?\s*"
+    r"([A-Za-z0-9][A-Za-z0-9-]{3,})",
     re.IGNORECASE,
 )
 
@@ -916,7 +1100,7 @@ class _Runner:
             pass
         self.step(f"Opened the {self.adapter.name} form at {host}")
 
-        text = self.page_text().casefold()
+        text = _phrase_text(self.page_text())
         if any(phrase in text for phrase in _ALREADY_APPLIED_PHRASES):
             self.step("The page says this job was already applied to")
             return self.outcome(
@@ -1468,7 +1652,7 @@ class _Runner:
             except Exception:  # noqa: BLE001
                 url = ""
             text = self.page_text()
-            lowered = text.casefold()
+            lowered = _phrase_text(text)
             marker = next((p for p in success_phrases if p in lowered), "")
             if not marker:
                 marker = next(
