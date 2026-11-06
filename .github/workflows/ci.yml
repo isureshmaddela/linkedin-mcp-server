@@ -1,4 +1,7 @@
 # .github/workflows/ci.yml
+# Every push to main and every pull request: lint and type check, the quick test suite (no browser), the browser
+# suite (a real Chromium), the JavaScript tests, and the dependency audit. `checks-pass` passes only when all of them
+# pass, so it is the one status check branch protection needs to require.
 name: CI
 
 on:
@@ -7,9 +10,13 @@ on:
   pull_request:
     branches: [main]
 
+permissions:
+  contents: read
+
 jobs:
   lint-and-check:
-    runs-on: ubuntu-latest
+    # Pinned: ubuntu-latest moved to 26.04, which the browser tooling does not support yet.
+    runs-on: ubuntu-24.04
     steps:
       - name: Checkout code
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -20,9 +27,7 @@ jobs:
           enable-cache: true
 
       - name: Install dependencies
-        run: |
-          uv sync
-          uv sync --group dev
+        run: uv sync --locked --extra cloud --group dev
 
       - name: Run pre-commit hooks
         uses: pre-commit/action@2c7b3805fd2a0fd8c1884dcaebf91fc102a13ecd # v3.0.1
@@ -31,7 +36,9 @@ jobs:
         run: uv cache prune --ci
 
   test:
-    runs-on: ubuntu-latest
+    # The quick suite: every test not marked `browser` (tests/conftest.py marks the ones that drive Chromium).
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
@@ -39,12 +46,80 @@ jobs:
         with:
           enable-cache: true
 
-      - run: uv sync --group dev
+      - run: uv sync --locked --extra cloud --group dev
 
-      - name: Check dashboard scripts parse
-        run: for f in auto_apply_assistant/*.js; do node --check "$f"; done
-
-      - name: Run tests
-        run: uv run pytest --cov --cov-report=term-missing -n auto -v -s
+      - name: Run tests (no browser)
+        run: uv run pytest -m "not browser" --cov --cov-report=term-missing -n auto
 
       - run: uv cache prune --ci
+
+  test-browser:
+    # The tests that drive a real Chromium. patchright launches its own Chromium build, so install that one, with the
+    # system libraries it needs.
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+
+      - run: uv sync --locked --extra cloud --group dev
+
+      - name: Install Chromium and its system dependencies
+        run: uv run patchright install --with-deps chromium
+
+      - name: Run browser tests
+        run: uv run pytest -m browser -n auto
+
+      - run: uv cache prune --ci
+
+  js:
+    # The interface scripts parse, and their pure-logic tests pass (node:assert, no dependencies, no browser).
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - name: Interface scripts parse
+        run: for f in auto_apply_assistant/*.js; do node --check "$f"; done
+
+      - name: JavaScript tests
+        run: |
+          node --version
+          for f in tests/js/*.test.mjs; do
+            echo "::group::$f"
+            node "$f" || exit 1
+            echo "::endgroup::"
+          done
+
+  audit:
+    # Known vulnerabilities in the locked runtime dependencies (with the cloud extra) fail the build.
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
+
+      - uses: astral-sh/setup-uv@08807647e7069bb48b6ef5acd8ec9567f424441b # v8.1.0
+        with:
+          enable-cache: true
+
+      - name: Export the locked runtime dependencies
+        run: uv export --frozen --no-dev --extra cloud --no-hashes --no-emit-project -o "$RUNNER_TEMP/requirements.txt"
+
+      - name: Audit for known vulnerabilities
+        run: uvx pip-audit@2.10.1 --requirement "$RUNNER_TEMP/requirements.txt" --no-deps --disable-pip --progress-spinner off
+
+  checks-pass:
+    # The single required check: fails if any job above failed, was cancelled or was skipped.
+    if: always()
+    needs: [lint-and-check, test, test-browser, js, audit]
+    runs-on: ubuntu-24.04
+    steps:
+      - name: Every job passed
+        env:
+          RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "results: $RESULTS"
+          for result in $RESULTS; do
+            [ "$result" = "success" ] || exit 1
+          done

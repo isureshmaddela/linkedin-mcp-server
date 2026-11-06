@@ -85,3 +85,17 @@ dev = [
     "ruff>=0.11.11",
     "ty>=0.0.1a12",
 ]
+
+[tool.ruff.lint]
+# ruff's default rule set, stated so a ruff upgrade does not change what CI checks.
+select = ["E4", "E7", "E9", "F"]
+
+[tool.ty.src]
+# The shipped code only: the tests (about 1,700 diagnostics, mostly in fixtures and stubs) are not type-checked yet.
+include = [
+    "aira",
+    "aira_cloud",
+    "auto_apply_assistant.py",
+    "linkedin_mcp_server",
+    "monosage_cloud",
+]

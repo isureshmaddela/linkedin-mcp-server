@@ -1,7 +1,7 @@
 # .github/workflows/cloud.yml
 # The hosted (multi-tenant) build: lint, type check, its test suite, the interface scripts, and a dependency audit.
 # The existing ci.yml still runs the whole repository's suite (the local build must stay green); this workflow adds the
-# hosted-specific checks and a weekly dependency audit. The docker, kubernetes, terraform and integration jobs run what
+# hosted-specific checks and a weekly dependency audit (ci.yml audits every push and pull request). The docker, kubernetes, terraform and integration jobs run what
 # was run by hand (deploy/smoke.py, deploy/k8s_smoke.py, terraform validate + checkov + tflint, stripe-mock, Keycloak);
 # the workflow itself has not run on GitHub yet.
 name: Cloud
@@ -31,7 +31,7 @@ permissions:
 
 jobs:
   lint:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
@@ -39,7 +39,7 @@ jobs:
         with:
           enable-cache: true
 
-      - run: uv sync --group dev --extra cloud
+      - run: uv sync --locked --group dev --extra cloud
 
       - name: Ruff
         run: uv run ruff check monosage_cloud tests/test_cloud_*.py tests/cloud_support.py
@@ -54,7 +54,7 @@ jobs:
       - run: uv cache prune --ci
 
   test:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
@@ -62,7 +62,7 @@ jobs:
         with:
           enable-cache: true
 
-      - run: uv sync --group dev --extra cloud
+      - run: uv sync --locked --group dev --extra cloud
 
       - name: Interface scripts parse
         run: |
@@ -70,7 +70,8 @@ jobs:
           for f in auto_apply_assistant/cloud-*.js; do node --check "$f"; done
 
       - name: Hosted-build tests (isolation, roles, billing, SSO, legal)
-        run: uv run python -m pytest tests/test_cloud_*.py -n auto -v
+        # The browser ones run in ci.yml's test-browser job, which installs Chromium.
+        run: uv run python -m pytest tests/test_cloud_*.py -m "not browser" -n auto -v
 
       - name: Deployment files parse
         run: |
@@ -87,7 +88,7 @@ jobs:
   postgres:
     # The same hosted-build suite against a real PostgreSQL (row-level security, the application and platform roles),
     # plus the PostgreSQL-only tests. Each test gets its own database copied from a migrated template.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     services:
       postgres:
         image: postgres:16
@@ -109,15 +110,18 @@ jobs:
         with:
           enable-cache: true
 
-      - run: uv sync --group dev --extra cloud
+      - run: uv sync --locked --group dev --extra cloud
 
       - name: Hosted-build tests on PostgreSQL
-        run: uv run python -m pytest tests/test_cloud_*.py -n 4 -v
+        run: uv run python -m pytest tests/test_cloud_*.py -m "not browser" -n 4 -v
 
       - run: uv cache prune --ci
 
   audit:
-    runs-on: ubuntu-latest
+    # The weekly run catches advisories published since the last change; ci.yml runs the same audit on every push and
+    # pull request, where a finding fails the build.
+    if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
@@ -126,15 +130,15 @@ jobs:
           enable-cache: true
 
       - name: Export the locked runtime dependencies
-        run: uv export --frozen --no-dev --extra cloud --no-hashes --no-emit-project -o /tmp/aira-requirements.txt
+        run: uv export --frozen --no-dev --extra cloud --no-hashes --no-emit-project -o "$RUNNER_TEMP/requirements.txt"
 
       - name: Audit for known vulnerabilities
-        run: uvx pip-audit --requirement /tmp/aira-requirements.txt --no-deps --disable-pip --progress-spinner off
+        run: uvx pip-audit@2.10.1 --requirement "$RUNNER_TEMP/requirements.txt" --no-deps --disable-pip --progress-spinner off
 
   integration:
     # The Stripe adapter against stripe/stripe-mock (validates every request against Stripe's OpenAPI spec) and OIDC and
     # SAML against a real Keycloak driven by a real browser. Both skip themselves when Docker is missing.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
@@ -142,7 +146,7 @@ jobs:
         with:
           enable-cache: true
 
-      - run: uv sync --group dev --extra cloud
+      - run: uv sync --locked --group dev --extra cloud
 
       - run: uv run patchright install --with-deps chromium
 
@@ -154,7 +158,7 @@ jobs:
   docker:
     # Builds both images and runs the stack end to end: sign-up, MFA, documents in an S3-compatible store, a worker job,
     # backup and restore, and a restart (deploy/smoke.py). Also checks the image hygiene the deployment relies on.
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 40
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
@@ -174,7 +178,7 @@ jobs:
   kubernetes:
     # Applies deploy/k8s (through the kind overlay) to a real cluster and checks readiness under the restricted Pod
     # Security level, a rolling update, a pod kill, the worker and the tick CronJob (deploy/k8s_smoke.py).
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     timeout-minutes: 40
     env:
       KIND_VERSION: v0.33.0
@@ -199,7 +203,7 @@ jobs:
         run: python3 deploy/k8s_smoke.py
 
   terraform:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6
 
@@ -214,4 +218,3 @@ jobs:
 
       - name: tflint
         run: docker run --rm -v "$PWD/deploy/terraform:/data" -w /data --entrypoint /bin/sh ghcr.io/terraform-linters/tflint:latest -c "tflint --init && tflint"
-

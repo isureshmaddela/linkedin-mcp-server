@@ -6,9 +6,12 @@ on:
     branches: [main]
     paths: ['pyproject.toml']  # Only trigger when pyproject.toml changes
 
+# Publishing (PyPI, the MCP bundle, GitHub releases) belongs to the upstream project. A fork never publishes: both jobs
+# only run in stickerdaniel/linkedin-mcp-server.
 jobs:
   check-version-bump:
-    runs-on: ubuntu-latest
+    if: github.repository == 'stickerdaniel/linkedin-mcp-server'
+    runs-on: ubuntu-24.04
     outputs:
       should-release: ${{ steps.check.outputs.should-release }}
       new-version: ${{ steps.check.outputs.new-version }}
@@ -47,8 +50,8 @@ jobs:
 
   release:
     needs: check-version-bump
-    if: needs.check-version-bump.outputs.should-release == 'true'
-    runs-on: ubuntu-latest
+    if: github.repository == 'stickerdaniel/linkedin-mcp-server' && needs.check-version-bump.outputs.should-release == 'true'
+    runs-on: ubuntu-24.04
     env:
       VERSION: ${{ needs.check-version-bump.outputs.new-version }}
     permissions:

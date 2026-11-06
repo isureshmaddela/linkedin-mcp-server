@@ -127,19 +127,20 @@ class Identity:
                 ),
             )
             started = self.app.billing.start_subscription(org_id, connection)
+            actor_fields: dict[str, Any] = (
+                {"actor": audit_actor}
+                if audit_actor is not None
+                else {
+                    "actor_type": "member",
+                    "actor_id": member_id,
+                    "actor_label": f"owner:{email}",
+                    "actor_role": "owner",
+                }
+            )
             self.app.audit.record(
                 org_id,
                 "org.create",
-                **(
-                    {"actor": audit_actor}
-                    if audit_actor is not None
-                    else {
-                        "actor_type": "member",
-                        "actor_id": member_id,
-                        "actor_label": f"owner:{email}",
-                        "actor_role": "owner",
-                    }
-                ),
+                **actor_fields,
                 target_type="organization",
                 target_id=org_id,
                 detail={

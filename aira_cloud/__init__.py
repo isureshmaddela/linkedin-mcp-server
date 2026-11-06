@@ -10,6 +10,7 @@ import importlib
 import importlib.abc
 import importlib.util
 import sys
+from importlib.machinery import ModuleSpec
 from types import ModuleType
 
 import monosage_cloud as _new
@@ -21,7 +22,7 @@ class _Alias(importlib.abc.MetaPathFinder, importlib.abc.Loader):
     """Answers ``aira_cloud.<name>`` with ``monosage_cloud.<name>`` (importing it if needed)."""
 
     def __init__(self) -> None:
-        self._specs: dict[str, object] = {}
+        self._specs: dict[str, ModuleSpec | None] = {}
 
     def find_spec(self, fullname: str, path: object = None, target: object = None):  # noqa: ANN201
         if not fullname.startswith(f"{_OLD}.") or fullname == f"{_OLD}.__main__":
@@ -35,7 +36,9 @@ class _Alias(importlib.abc.MetaPathFinder, importlib.abc.Loader):
 
     def exec_module(self, module: ModuleType) -> None:
         # importlib gave the module the alias's spec; it keeps its own.
-        module.__spec__ = self._specs.pop(module.__spec__.name, module.__spec__)
+        spec = module.__spec__
+        if spec is not None:
+            module.__spec__ = self._specs.pop(spec.name, spec)
 
 
 if not any(isinstance(finder, _Alias) for finder in sys.meta_path):
