@@ -38,6 +38,9 @@ def make_app(tmp_path: Path, **overrides: Any) -> CloudApp:
         # Most hosted-shell tests were written for a sign-up that starts on the 14-day trial; the shipped default
         # (All access, every app and feature) is covered by tests/test_cloud_custom_plans.py.
         "signup_plan": "trial",
+        # The LinkedIn tests here cover the plan feature, the organization's policy and the candidate's opt-in, so
+        # the operator's switch is on for them; the shipped default (off) is covered by tests/test_cloud_linkedin_gate.py.
+        "linkedin_automation": True,
         **limits,
     }
     if pg_support.enabled() and "db_backend" not in overrides:

@@ -33,11 +33,15 @@ __all__ = [
     "SENIORITY_LEVELS",
     "SKILL_LEXICON",
     "ScoringWeights",
+    "candidate_skill_set",
     "classify",
     "detect_seniority",
     "extract_job_skills",
     "extract_required_years",
+    "find_skills",
+    "job_skill_requirements",
     "score_job",
+    "skill_label",
 ]
 
 SCORING_VERSION = "explainable-match-v2"
@@ -2626,3 +2630,86 @@ def score_job(
         "computed_at": moment.astimezone(timezone.utc).isoformat(),
         "inputs_fingerprint": _inputs_fingerprint(resume_text, profile, job),
     }
+
+
+# --------------------------------------------------------------------------- #
+# Public helpers for resume intelligence (aira/resume_intel.py)
+# --------------------------------------------------------------------------- #
+_SKILL_LABELS: dict[str, str] = {
+    "ci_cd": "CI/CD", "github_actions": "GitHub Actions", "gitlab_ci": "GitLab CI", "javascript": "JavaScript",
+    "typescript": "TypeScript", "postgresql": "PostgreSQL", "mysql": "MySQL", "mongodb": "MongoDB",
+    "dynamodb": "DynamoDB", "node": "Node.js", "dotnet": ".NET", "csharp": "C#", "cpp": "C++", "c_language": "C",
+    "go": "Go", "r_language": "R", "power_bi": "Power BI", "sql_server": "SQL Server", "oracle_db": "Oracle Database",
+    "pytorch": "PyTorch", "tensorflow": "TensorFlow", "scikit_learn": "scikit-learn", "numpy": "NumPy",
+    "llm": "LLMs", "nlp": "NLP", "mlops": "MLOps", "devops": "DevOps", "gitops": "GitOps", "finops": "FinOps",
+    "sre": "SRE", "iam": "IAM", "oauth": "OAuth", "appsec": "AppSec", "siem": "SIEM", "pmp": "PMP", "itil": "ITIL",
+    "okrs": "OKRs", "sdlc": "SDLC", "soc2_iso27001": "SOC 2 / ISO 27001", "pci_dss": "PCI DSS", "hipaa": "HIPAA",
+    "nist": "NIST", "html_css": "HTML/CSS", "graphql": "GraphQL", "grpc": "gRPC", "api_design": "API design",
+    "ai_agents": "AI agents", "rag": "RAG", "openai": "OpenAI", "hugging_face": "Hugging Face", "argo_cd": "Argo CD",
+    "vmware": "VMware", "servicenow": "ServiceNow", "hubspot": "HubSpot", "netsuite": "NetSuite", "sap": "SAP",
+    "erp": "ERP", "crm": "CRM", "sql": "SQL", "aws": "AWS", "gcp": "Google Cloud", "eks": "Amazon EKS",
+    "aks": "Azure AKS", "gke": "Google GKE", "ec2": "Amazon EC2", "s3": "Amazon S3", "vpc": "VPC", "etl": "ETL",
+    "dbt": "dbt", "togaf": "TOGAF", "uml": "UML", "iot": "IoT", "rpa": "RPA", "mcp": "MCP", "gpu_hpc": "GPU / HPC",
+    "sqs_sns": "SQS / SNS", "mqtt": "MQTT", "php": "PHP", "safe": "SAFe", "jira": "Jira", "qlik": "Qlik",
+    "bigquery": "BigQuery", "redshift": "Redshift", "fastapi": "FastAPI", "linux": "Linux", "kafka": "Kafka",
+    "ms_office": "Microsoft Office", "microsoft_365": "Microsoft 365", "dynamics_365": "Dynamics 365",
+    "power_platform": "Power Platform", "azure_devops": "Azure DevOps", "new_relic": "New Relic",
+    "data_factory": "Azure Data Factory", "vertex_ai": "Vertex AI", "azure_ml": "Azure ML", "cosmos_db": "Cosmos DB",
+    "neo4j": "Neo4j", "openshift": "OpenShift", "cloudformation": "CloudFormation", "aws_certified": "AWS certification",
+    "azure_certified": "Azure certification", "gcp_certified": "Google Cloud certification",
+    "kubernetes_certified": "Kubernetes certification", "terraform_certified": "Terraform certification",
+    "cisco_certified": "Cisco certification",
+}  # fmt: skip
+
+
+def skill_label(skill: str) -> str:
+    """How people write a canonical skill ("ci_cd" -> "CI/CD", "data_engineering" -> "Data engineering")."""
+    key = str(skill or "").strip()
+    if key in _SKILL_LABELS:
+        return _SKILL_LABELS[key]
+    text = key.replace("_", " ").strip()
+    return text[:1].upper() + text[1:] if text else key
+
+
+def find_skills(text: str) -> list[str]:
+    """Canonical skills mentioned in ``text``, in order of first mention."""
+    return _find_skills(_normalize_text(text))
+
+
+def job_skill_requirements(job: Mapping[str, Any]) -> tuple[list[str], list[str]]:
+    """``(required, preferred)`` canonical skills of a job, as :func:`score_job` reads them."""
+    required = [
+        skill
+        for raw in _str_list(job.get("required_skills"))
+        for skill in _canonicalize_skill(raw)
+    ]
+    preferred = [
+        skill
+        for raw in _str_list(job.get("preferred_skills"))
+        for skill in _canonicalize_skill(raw)
+    ]
+    description = str(job.get("description") or "")
+    if not required and not preferred:
+        extracted_required, extracted_preferred = extract_job_skills(description)
+        required, preferred = list(extracted_required), list(extracted_preferred)
+    elif not required:
+        required = list(extract_job_skills(description)[0])
+    required = list(dict.fromkeys(required))
+    preferred = [skill for skill in dict.fromkeys(preferred) if skill not in required]
+    return required, preferred
+
+
+def candidate_skill_set(profile: Mapping[str, Any], resume_text: str) -> set[str]:
+    """Canonical skills the person evidences: verified skills and skills named in the resume."""
+    resume_norm = _normalize_text(resume_text)
+    found = set(_candidate_skills(profile, resume_norm))
+    for raw in _str_list(profile.get("verified_skills")):
+        found.add(_normalize_text(raw))
+    return found
+
+
+def skill_evidenced(skill: str, skills: set[str], resume_text: str) -> bool:
+    """Whether a job's skill is evidenced (also free-form skills outside the lexicon, by phrase)."""
+    if skill in skills:
+        return True
+    return skill not in SKILL_LEXICON and _phrase_in_text(skill, _normalize_text(resume_text))

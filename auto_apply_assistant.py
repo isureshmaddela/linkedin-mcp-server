@@ -162,7 +162,13 @@ from aira.apply_engine import ApplyRequest, detect_ats
 from aira.apply_engine import run as run_apply_engine
 from aira import workday_accounts
 from aira.field_mapping import CANONICAL_FIELDS, map_field, prefill_fields
-from aira.resume_file import cover_letter_for_upload, resume_for_upload
+from aira import interview_prep, resume_intel, resume_render
+from aira.resume_file import (
+    UPLOAD_FORMATS,
+    cover_letter_for_upload,
+    master_docx_template,
+    resume_for_upload,
+)
 from aira.interviews import (
     INTERVIEW_STAGE_FOR_TYPE,
     INTERVIEW_TYPES,
@@ -198,7 +204,7 @@ from aira.schema import LATEST_VERSION
 from aira.schema import describe as describe_migrations
 from aira.schema import migrate as migrate_schema
 from aira.schema import schema_version
-from aira.scoring import detect_seniority, extract_job_skills, score_job
+from aira.scoring import detect_seniority, extract_job_skills, score_job, skill_label
 from aira.security import (
     SECURITY_HEADERS,
     RateLimiter,
@@ -2730,6 +2736,7 @@ def _version_entry(record: Mapping[str, Any], current_sha: str) -> dict[str, Any
         "approved_at": metadata.get("approved_at") or None,
         "source": metadata.get("source") or "snapshot",
         "notes": metadata.get("notes") or "",
+        "upload_format": metadata.get("upload_format") or "pdf",
         "current": record["sha256"] == current_sha,
         "size": record.get("size"),
     }
@@ -2777,13 +2784,19 @@ def _save_document_versions(
     approved: bool,
     source: str = "edit",
     notes: str = "",
+    upload_format: str = "pdf",
 ) -> dict[str, Any]:
     """Make the given texts the job's drafts and store each as a new version when it changed.
+
+    ``upload_format`` is how an approved resume is sent: "pdf" (Monosage's layout) or "docx" (the person's own
+    Word master resume as the template); approving the same text in another format stores a new version.
 
     A text equal to the newest version is not stored again, unless this save approves it and that
     version was not approved: approving creates the approved version (versions are immutable).
     """
     resume, cover_letter = str(resume or ""), str(cover_letter or "")
+    if upload_format not in UPLOAD_FORMATS:
+        raise ValueError("Choose PDF or Word as the resume format.")
     current_resume = _profile_settings()["resume"]
     # Like a manual edit, the drafts are reviewed against the resume saved right now.
     job = _save_documents(
@@ -2807,12 +2820,14 @@ def _save_document_versions(
             ).fetchone()
             if latest is not None and latest["sha256"] == digest:
                 try:
-                    was_approved = bool(
-                        json.loads(latest["metadata"] or "{}").get("approved")
-                    )
+                    latest_meta = json.loads(latest["metadata"] or "{}")
                 except ValueError:
-                    was_approved = False
-                if was_approved or not approved:
+                    latest_meta = {}
+                was_approved = bool(latest_meta.get("approved"))
+                same_format = key != "resume" or (
+                    latest_meta.get("upload_format") or "pdf"
+                ) == (upload_format if approved else "pdf")
+                if (was_approved and same_format) or not approved:
                     saved[key] = {"document_id": latest["document_id"], "new": False}
                     continue
             record = store.store(
@@ -2830,6 +2845,9 @@ def _save_document_versions(
                     "notes": notes[:600],
                     "resume_hash": job.get("resume_hash") or "",
                     "company": job.get("company") or "",
+                    "upload_format": upload_format
+                    if (approved and key == "resume")
+                    else "pdf",
                 },
                 parent_document_id=latest["document_id"] if latest else None,
                 actor=_actor(),
@@ -2911,6 +2929,10 @@ def _approved_document_texts(job_id: str) -> dict[str, str]:
                 text = data.decode("utf-8", errors="replace").strip()
                 if text:
                     found[key] = text
+                    if key == "resume":
+                        found["resume_format"] = str(
+                            (record.get("metadata") or {}).get("upload_format") or "pdf"
+                        )
                     break
     return found
 
@@ -2932,9 +2954,385 @@ def _with_approved_documents(job: dict[str, Any]) -> dict[str, Any]:
     if approved.get("resume"):
         out["resume_draft"] = approved["resume"]
         out["approved_resume"] = approved["resume"]
+        out["approved_resume_format"] = approved.get("resume_format") or "pdf"
     if approved.get("cover_letter"):
         out["cover_letter"] = approved["cover_letter"]
     return out
+
+
+# -- Formatted documents (aira/resume_render.py) ---------------------------------------------
+# What employers receive: the tailored text laid out as a resume (or letter) under the person's name and
+# contact header. The editor previews the same pages before anything is uploaded.
+DOCUMENT_PREVIEW_LIMIT = 60_000  # characters of one document sent for a preview
+
+
+def _document_contact() -> dict[str, Any]:
+    """The name and contact header of formatted resumes and cover letters, from the profile."""
+    state = _profile_state()
+    candidate = state.get("candidate_profile") or {}
+    application = state.get("application_profile") or {}
+    name = str(
+        application.get("full_name")
+        or candidate.get("full_name")
+        or " ".join(
+            str(part)
+            for part in (candidate.get("first_name"), candidate.get("last_name"))
+            if part
+        )
+    ).strip()
+    location = str(
+        application.get("location")
+        or ", ".join(
+            str(part)
+            for part in (candidate.get("city"), candidate.get("country"))
+            if part
+        )
+    ).strip()
+    links = [
+        str(candidate.get(key) or "").strip()
+        for key in ("linkedin_url", "github_url", "portfolio_url")
+    ]
+    return {
+        "name": name,
+        "email": str(application.get("email") or candidate.get("email") or "").strip(),
+        "phone": str(application.get("phone") or candidate.get("phone") or "").strip(),
+        "location": location,
+        "links": [link for link in links if link],
+    }
+
+
+def _preview_inputs(job_id: str, kind: str, text: str) -> tuple[dict[str, Any], str]:
+    job = _job_row(job_id)
+    if job is None:
+        raise LookupError("Job not found.")
+    if kind not in DOCUMENT_VERSION_KINDS:
+        raise ValueError("Choose the resume or the cover letter.")
+    text = str(text or "")
+    if len(text) > DOCUMENT_PREVIEW_LIMIT:
+        raise ValueError(
+            f"Keep the document under {DOCUMENT_PREVIEW_LIMIT:,} characters."
+        )
+    return job, text
+
+
+def _document_title(job: Mapping[str, Any], kind: str) -> str:
+    company = re.sub(r"\s+", " ", str(job.get("company") or "")).strip()
+    base = "Resume" if kind == "resume" else "Cover Letter"
+    return f"{base} - {company}"[:80] if company else base
+
+
+def _document_layout(job: Mapping[str, Any], kind: str, text: str) -> Any:
+    title = _document_title(job, kind)
+    if kind == "resume":
+        return resume_render.layout_resume(text, contact=_document_contact(), title=title)
+    return resume_render.layout_cover_letter(
+        text, contact=_document_contact(), title=title
+    )
+
+
+def _word_template() -> tuple[bytes | None, str]:
+    with _connect() as connection:
+        return master_docx_template(
+            connection, _document_store(), _owner_id(), actor=_actor()
+        )
+
+
+def _document_preview(job_id: str, kind: str, text: str) -> dict[str, Any]:
+    """The pages an employer would receive for this text, as positioned text for the editor to draw."""
+    job, text = _preview_inputs(job_id, kind, text)
+    out = resume_render.preview_pages(_document_layout(job, kind, text))
+    if kind == "resume":
+        doc = resume_render.parse_resume(text)
+        out["outline"] = {
+            "name": doc.name,
+            "contact": len(doc.contact),
+            "sections": [
+                {"title": s.title, "kind": s.kind, "blocks": len(s.blocks)}
+                for s in doc.sections
+            ],
+        }
+        try:
+            template, reason = _word_template()
+        except Exception:  # noqa: BLE001 - the store being unavailable only hides the Word option
+            logger.warning("Word template check failed", exc_info=True)
+            template, reason = None, "Your Word resume could not be read."
+        out["templates"] = {
+            "docx": {"available": template is not None, "reason": reason}
+        }
+    return out
+
+
+def _document_file(
+    job_id: str, kind: str, text: str, upload_format: str = "pdf"
+) -> tuple[bytes, str, str]:
+    """``(bytes, content type, file name)`` of the file an application would upload for this text."""
+    job, text = _preview_inputs(job_id, kind, text)
+    stem = re.sub(r"[^A-Za-z0-9 ._-]+", "_", _document_title(job, kind)).strip(" .")
+    if upload_format not in UPLOAD_FORMATS:
+        raise ValueError("Choose PDF or Word as the format.")
+    if kind == "resume" and upload_format == "docx":
+        template, reason = _word_template()
+        if template is None:
+            raise ValueError(reason)
+        data = resume_render.render_docx(template, text, contact=_document_contact())
+        return (
+            data,
+            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            f"{stem}.docx",
+        )
+    pdf = resume_render.render_pdf(_document_layout(job, kind, text))
+    return pdf, "application/pdf", f"{stem}.pdf"
+
+
+# -- Resume intelligence (aira/resume_intel.py) -------------------------------------------------
+SKILL_GAP_JOBS = 300  # the newest jobs read for the skill-gap view
+SKILL_GAP_SCOPES = {
+    "active": "archived_at IS NULL AND description != '' AND stage NOT IN ('accepted', 'rejected', 'withdrawn')",
+    "saved": "archived_at IS NULL AND description != '' AND saved = 1",
+    "all": "archived_at IS NULL AND description != ''",
+}
+_SKILL_KEY_RE = re.compile(r"[a-z0-9][a-z0-9_ .+#/-]{0,59}")
+
+
+def _careers_ai_available() -> bool:
+    """Whether a Careers model can answer: the hosted organization's AI, Claude with a key, or a local Ollama."""
+    return HOSTING.model_json is not None or _ollama_available()
+
+
+def _intel_profile() -> dict[str, Any]:
+    state = _profile_state()
+    preferences = state.get("matching_preferences") or {}
+    return {
+        "verified_skills": preferences.get("verified_skills") or [],
+        "location": (state.get("application_profile") or {}).get("location") or "",
+    }
+
+
+def _document_check(job_id: str, text: str) -> dict[str, Any]:
+    """ATS readiness, the job's missing keywords and the changes against the master resume, for the editor's text."""
+    job, text = _preview_inputs(job_id, "resume", text)
+    job = _decode_job(dict(job))
+    master = str(_profile_settings()["resume"] or "")
+    profile = _intel_profile()
+    return {
+        "ats": resume_intel.ats_readiness(text, job=job, profile=profile),
+        "keywords": resume_intel.missing_keywords(
+            text, job, master_text=master, profile=profile
+        ),
+        "changes": resume_intel.change_summary(master, text),
+    }
+
+
+def _skill_gaps(scope: str) -> dict[str, Any]:
+    """The skills most often missing across the jobs in Monosage, and which jobs each would unlock."""
+    scope = scope if scope in SKILL_GAP_SCOPES else "active"
+    with _connect() as connection:
+        rows = connection.execute(
+            "SELECT job_id, title, company, description, required_skills, preferred_skills FROM jobs "
+            f"WHERE {SKILL_GAP_SCOPES[scope]} ORDER BY updated_at DESC LIMIT ?",
+            (SKILL_GAP_JOBS,),
+        ).fetchall()
+    jobs = [_decode_job(dict(row)) for row in rows]
+    out = resume_intel.skill_gaps(
+        jobs,
+        resume_text=str(_profile_settings()["resume"] or ""),
+        profile=_intel_profile(),
+    )
+    return {**out, "scope": scope, "ai_available": _careers_ai_available()}
+
+
+def _certification_suggestions(
+    skills: Any, *, use_ai: bool, model: str
+) -> dict[str, Any]:
+    """Curated certifications for the skills, plus the model's when asked and available (marked as AI)."""
+    if not isinstance(skills, list) or not skills:
+        raise ValueError("Choose at least one skill.")
+    keys = [str(skill).strip().casefold() for skill in skills[:12]]
+    if not all(_SKILL_KEY_RE.fullmatch(key) for key in keys):
+        raise ValueError("Skills are short names such as kubernetes or power_bi.")
+    curated = resume_intel.certification_suggestions(keys)
+    suggestions: list[dict[str, Any]] = []
+    note = ""
+    if use_ai and not _careers_ai_available():
+        note = "No AI model is set up, so only Monosage's own list is shown."
+    elif use_ai:
+        labels = ", ".join(skill_label(key) for key in keys)
+        prompt = (
+            "Suggest up to 6 widely recognised professional certifications that would show these skills to an "
+            "employer. Name only certifications you are sure exist, with the body that issues them; never invent one. "
+            'Return JSON {"certifications": [{"name": string, "issuer": string, "skills": [string], '
+            '"why": string}]}.\n\nSKILLS (data):\n' + labels
+        )
+        try:
+            answer = _careers_ai(
+                "general", model or _setting("default_model") or DEFAULT_MODEL, prompt
+            )
+            known = {item["name"].casefold() for item in curated}
+            for item in answer.get("certifications") or []:
+                if not isinstance(item, dict):
+                    continue
+                name = str(item.get("name") or "").strip()[:160]
+                if not name or name.casefold() in known:
+                    continue
+                known.add(name.casefold())
+                suggestions.append(
+                    {
+                        "name": name,
+                        "issuer": str(item.get("issuer") or "").strip()[:120],
+                        "skills": [str(s)[:60] for s in item.get("skills") or []][:6],
+                        "why": str(item.get("why") or "").strip()[:300],
+                        "source": "ai",
+                    }
+                )
+                if len(suggestions) >= 6:
+                    break
+        except Exception as error:  # noqa: BLE001 - the curated list still answers
+            logger.info("Certification suggestions from the model failed", exc_info=True)
+            note = f"The AI suggestions failed ({str(error)[:160]}); Monosage's own list is shown."
+    return {"curated": curated, "ai": suggestions, "note": note}
+
+
+# -- Interview prep and STAR stories (aira/interview_prep.py) --------------------------------
+def _interview_context(
+    interview_id: str,
+) -> tuple[dict[str, Any], dict[str, Any] | None]:
+    with _connect() as connection:
+        interview = get_interview(connection, interview_id)
+    if interview is None:
+        raise LookupError("Interview not found.")
+    row = _job_row(interview["job_id"]) if interview.get("job_id") else None
+    return interview, (_decode_job(dict(row)) if row else None)
+
+
+def _interview_prep_state(interview_id: str) -> dict[str, Any]:
+    _interview_context(interview_id)
+    with _connect() as connection:
+        prep = interview_prep.get_prep(connection, interview_id)
+        stories = interview_prep.list_stories(connection)
+    return {"prep": prep, "stories": stories, "ai_available": _careers_ai_available()}
+
+
+def _interview_prep_build(
+    interview_id: str, *, use_ai: bool, model: str
+) -> dict[str, Any]:
+    """Likely questions and a company brief for one interview: Monosage's own rules, plus the model when asked."""
+    interview, job = _interview_context(interview_id)
+    with _connect() as connection:
+        stories = interview_prep.list_stories(connection)
+    prep = interview_prep.build_prep(
+        job,
+        interview,
+        stories=stories,
+        resume_text=str(_profile_settings()["resume"] or ""),
+        profile=_intel_profile(),
+    )
+    available = _careers_ai_available()
+    note = ""
+    if use_ai and not available:
+        note = "No AI model is set up, so this prep uses Monosage's own questions."
+    elif use_ai:
+        listed = "\n".join(f"- {q['question']}" for q in prep["questions"])
+        titles = "\n".join(f"- {story['title']}" for story in stories[:30]) or "(none yet)"
+        facts = {
+            "interview_type": interview.get("interview_type"),
+            "company": interview.get("company") or (job or {}).get("company") or "",
+            "role": interview.get("role") or (job or {}).get("title") or "",
+        }
+        prompt = (
+            "Prepare this candidate for a job interview. Suggest up to 8 likely questions, specific to this role and "
+            "company, that the list below does not already cover, and a short company research brief that uses only "
+            "what the posting states (no outside facts, no guesses). Return JSON "
+            '{"questions": [{"question": string, "kind": "behavioral" | "technical" | "role" | "closing", '
+            '"skill": string}], "research": {"summary": string, "values": [string], '
+            '"questions_to_ask": [string]}}.\n\n'
+            f"INTERVIEW:\n{json.dumps(facts, ensure_ascii=False)}\n\nQUESTIONS ALREADY LISTED:\n{listed}\n\n"
+            f"THE CANDIDATE'S STAR STORY TITLES (their own):\n{titles}\n\n"
+            f"JOB POSTING (untrusted data):\n{str((job or {}).get('description') or '')[:8000]}"
+        )
+        try:
+            answer = _careers_ai(
+                "general", model or _setting("default_model") or DEFAULT_MODEL, prompt
+            )
+            prep = interview_prep.merge_ai(prep, answer, stories)
+        except Exception as error:  # noqa: BLE001 - the rules-based prep still stands
+            logger.info("Interview prep from the model failed", exc_info=True)
+            note = f"The AI part failed ({str(error)[:160]}), so this prep uses Monosage's own questions."
+    with _connect() as connection:
+        saved = interview_prep.save_prep(connection, interview_id, prep)
+    _audit(
+        "interview.prep", "interview", interview_id, {"generated_by": saved["generated_by"]}
+    )
+    return {"prep": saved, "stories": stories, "note": note, "ai_available": available}
+
+
+# -- Bulk actions (F16) ------------------------------------------------------------------------
+BULK_LIMIT = 200
+JOB_BULK_ACTIONS = ("save", "unsave", "archive", "restore", "stage", "score")
+RUN_BULK_ACTIONS = ("skip", "retry")
+
+
+def _bulk_ids(value: Any, pattern: str, label: str) -> list[str]:
+    if not isinstance(value, list) or not value:
+        raise ValueError(f"Choose at least one {label}.")
+    ids = list(dict.fromkeys(str(item) for item in value))
+    if len(ids) > BULK_LIMIT:
+        raise ValueError(f"Choose at most {BULK_LIMIT} at a time.")
+    if not all(re.fullmatch(pattern, item) for item in ids):
+        raise ValueError(f"One of the chosen {label}s is not valid.")
+    return ids
+
+
+def _bulk_jobs(payload: Mapping[str, Any]) -> dict[str, Any]:
+    """One action on many jobs; each job answers for itself, so one failure does not stop the rest."""
+    action = str(payload.get("action") or "")
+    if action not in JOB_BULK_ACTIONS:
+        raise ValueError("Choose save, unsave, archive, restore, stage or score.")
+    ids = _bulk_ids(payload.get("job_ids"), JOB_KEY_PATTERN, "job")
+    stage = str(payload.get("stage") or "")
+    if action == "stage" and stage not in STAGES:
+        raise ValueError("Choose the status to move the jobs to.")
+    reason = str(payload.get("reason") or "").strip()[:200] or "Changed for several jobs at once"
+    results: list[dict[str, Any]] = []
+    for job_id in ids:
+        try:
+            if _job_row(job_id) is None:
+                raise LookupError("Job not found.")
+            if action in {"save", "unsave"}:
+                _set_saved(job_id, action == "save")
+            elif action == "archive":
+                _archive_job(job_id)
+            elif action == "restore":
+                _restore_archived(job_id)
+            elif action == "stage":
+                _set_stage(job_id, stage, reason=reason)
+            elif _score_job_record(job_id, force=True) is None:
+                raise ValueError("Load the job description before scoring.")
+            results.append({"job_id": job_id, "ok": True})
+        except (LookupError, ValueError, PermissionError) as error:
+            results.append({"job_id": job_id, "ok": False, "error": str(error)})
+    done = sum(1 for item in results if item["ok"])
+    _audit("jobs.bulk", "job", ids[0], {"action": action, "count": len(ids), "done": done, "stage": stage})
+    return {"action": action, "results": results, "done": done, "failed": len(results) - done}
+
+
+def _bulk_runs(user: dict[str, Any], payload: Mapping[str, Any]) -> dict[str, Any]:
+    """Skip or try again several Needs you items at once."""
+    action = str(payload.get("action") or "")
+    if action not in RUN_BULK_ACTIONS:
+        raise ValueError("Choose skip or retry.")
+    ids = _bulk_ids(payload.get("run_ids"), r"[0-9a-f]{32}", "application")
+    results: list[dict[str, Any]] = []
+    for run_id in ids:
+        try:
+            if action == "skip":
+                _autopilot_skip(run_id)
+            else:
+                _autopilot_retry(user, run_id)
+            results.append({"run_id": run_id, "ok": True})
+        except (LookupError, ValueError, PermissionError) as error:
+            results.append({"run_id": run_id, "ok": False, "error": str(error)})
+    done = sum(1 for item in results if item["ok"])
+    return {"action": action, "results": results, "done": done, "failed": len(results) - done}
 
 
 def _draft_thread_reply(
@@ -5047,7 +5445,14 @@ aira_notify.configure(
 # Career Copilot services (database-bound wrappers over the aira domain modules)
 # ---------------------------------------------------------------------------
 
-ATS_SOURCES = ("greenhouse", "lever", "ashby", "smartrecruiters")
+ATS_SOURCES = (
+    "greenhouse",
+    "lever",
+    "ashby",
+    "smartrecruiters",
+    "workable",
+    "recruitee",
+)
 JOB_VIEWS = (
     "all",
     "linkedin",
@@ -6106,7 +6511,7 @@ def _import_job_from_url(url: str) -> dict[str, Any]:
     portal = detect_portal(url)
     if portal is None:
         raise ValueError(
-            "This URL is not a supported company portal yet. Supported: Greenhouse, Lever, Ashby, SmartRecruiters, LinkedIn."
+            "This URL is not a supported company portal yet. Supported: Greenhouse, Lever, Ashby, SmartRecruiters, Workable, Recruitee, LinkedIn."
         )
     if portal.external_id is None:
         raise ValueError(
@@ -6816,6 +7221,7 @@ def _apply_with_engine(
                 job,
                 state["resume"],
                 actor=_actor(),
+                contact=_document_contact(),
             )
         except LookupError as error:
             return {
@@ -6827,7 +7233,9 @@ def _apply_with_engine(
     letter_path, letter_cleanup = None, (lambda: None)
     if job.get("cover_letter"):
         try:
-            letter_path, letter_cleanup = cover_letter_for_upload(job)
+            letter_path, letter_cleanup = cover_letter_for_upload(
+                job, contact=_document_contact()
+            )
         except LookupError:
             pass
     packet_fields = _engine_packet_fields(job)
@@ -6993,12 +7401,15 @@ def _email_attachments(
             job,
             state["resume"],
             actor=_actor(),
+            contact=_document_contact(),
         )
     items = [email_apply.Attachment(str(resume_path), "resume")]
     cleanups = [resume_cleanup]
     if job.get("cover_letter"):
         try:
-            letter_path, letter_cleanup = cover_letter_for_upload(job)
+            letter_path, letter_cleanup = cover_letter_for_upload(
+                job, contact=_document_contact()
+            )
         except LookupError:
             pass
         else:
@@ -7325,6 +7736,7 @@ def _apply_with_linkedin(
                 job,
                 state["resume"],
                 actor=_actor(),
+                contact=_document_contact(),
             )
         except LookupError:
             resume_path, resume_cleanup = None, (lambda: None)
@@ -10620,15 +11032,174 @@ class RequestHandler(BaseHTTPRequestHandler):
         query: dict[str, list[str]],
         user: dict[str, Any] | None,
     ) -> None:
-        # {resume, cover_letter, approve}: approve true means "I reviewed this", and saving approves it.
+        # {resume, cover_letter, approve, format}: approve true means "I reviewed this", and saving approves it;
+        # format "docx" sends the resume in the person's own Word design (their master resume must allow it).
+        upload_format = str(payload.get("format") or "pdf")
+        if payload.get("approve") is True and upload_format == "docx":
+            template, reason = _word_template()
+            if template is None:
+                raise ValueError(reason)
         result = _save_document_versions(
             match.group(1),
             str(payload.get("resume", "")),
             str(payload.get("cover_letter", "")),
             approved=payload.get("approve") is True,
             source="edit",
+            upload_format=upload_format,
         )
         self._send_json(201, {**result, "job": _decode_job(result["job"])})
+
+    @route("POST", rf"/api/jobs/({JOB_KEY_PATTERN})/documents/preview")
+    def api_job_document_preview(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        # {doc: "resume" | "cover_letter", text}: the formatted pages of the editor's text, before upload.
+        self._send_json(
+            200,
+            _document_preview(
+                match.group(1),
+                str(payload.get("doc") or "resume"),
+                str(payload.get("text") or ""),
+            ),
+        )
+
+    @route("POST", rf"/api/jobs/({JOB_KEY_PATTERN})/documents/file")
+    def api_job_document_file(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        # {doc, text, format: "pdf" | "docx"}: the exact file an application would upload, to open or download.
+        data, content_type, filename = _document_file(
+            match.group(1),
+            str(payload.get("doc") or "resume"),
+            str(payload.get("text") or ""),
+            str(payload.get("format") or "pdf"),
+        )
+        self._send_bytes(200, data, content_type, filename=filename)
+
+    @route("POST", rf"/api/jobs/({JOB_KEY_PATTERN})/documents/check")
+    def api_job_document_check(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        # {text}: ATS readiness, missing keywords for this job and the changes against the master resume.
+        self._send_json(
+            200, _document_check(match.group(1), str(payload.get("text") or ""))
+        )
+
+    @route("POST", r"/api/jobs/bulk")
+    def api_jobs_bulk(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        # {action: save|unsave|archive|restore|stage|score, job_ids: [...], stage?}: per-job results.
+        self._send_json(200, _bulk_jobs(payload))
+
+    @route("GET", r"/api/resume-intel/skill-gaps")
+    def api_skill_gaps(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        self._send_json(200, _skill_gaps(_query_str(query, "scope", "active")))
+
+    @route("POST", r"/api/resume-intel/certifications")
+    def api_certifications(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        # {skills: [canonical skill], use_ai, model}: curated certifications, plus the model's when asked.
+        self._send_json(
+            200,
+            _certification_suggestions(
+                payload.get("skills"),
+                use_ai=payload.get("use_ai") is True,
+                model=str(payload.get("model") or ""),
+            ),
+        )
+
+    @route("GET", r"/api/star-stories")
+    def api_star_stories(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        with _connect() as connection:
+            stories = interview_prep.list_stories(connection)
+        self._send_json(200, {"stories": stories})
+
+    @route("POST", r"/api/star-stories")
+    def api_star_story_create(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        with _connect() as connection:
+            story = interview_prep.save_story(connection, payload)
+        self._send_json(201, {"story": story})
+
+    @route("POST", r"/api/star-stories/drafts")
+    def api_star_story_drafts(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        # {skills?: [...]}: drafts from the resume's bullets; nothing is saved until the person saves one.
+        skills = payload.get("skills") if isinstance(payload.get("skills"), list) else []
+        drafts = interview_prep.story_drafts(
+            str(_profile_settings()["resume"] or ""),
+            [str(skill)[:60] for skill in skills[:12]],
+        )
+        self._send_json(200, {"drafts": drafts})
+
+    @route("PATCH", r"/api/star-stories/([0-9a-f]{32})")
+    def api_star_story_update(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        with _connect() as connection:
+            story = interview_prep.save_story(connection, payload, match.group(1))
+        self._send_json(200, {"story": story})
+
+    @route("DELETE", r"/api/star-stories/([0-9a-f]{32})")
+    def api_star_story_delete(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        with _connect() as connection:
+            if not interview_prep.delete_story(connection, match.group(1)):
+                raise LookupError("Story not found.")
+        self._send_json(200, {"ok": True})
 
     @route("GET", rf"/api/jobs/({JOB_KEY_PATTERN})/documents/versions/([0-9a-f]{{32}})")
     def api_job_document_version_text(
@@ -10910,6 +11481,18 @@ class RequestHandler(BaseHTTPRequestHandler):
     ) -> None:
         self._send_json(200, _autopilot_mark_applied(match.group(1), payload))
 
+    @route("POST", r"/api/autopilot/runs/bulk")
+    def api_autopilot_runs_bulk(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        # {action: skip|retry, run_ids: [...]}: several Needs you items at once, each answering for itself.
+        assert user is not None
+        self._send_json(200, _bulk_runs(user, payload))
+
     @route("DELETE", r"/api/autopilot/answers/([a-z0-9%]{1,720})")
     def api_autopilot_answer_delete(
         self,
@@ -11059,6 +11642,50 @@ class RequestHandler(BaseHTTPRequestHandler):
         self._send_json(
             200, {"interview": interview, "calendar": calendar_payload(interview)}
         )
+
+    @route("GET", r"/api/interviews/([0-9a-f]{32})/prep")
+    def api_interview_prep(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        self._send_json(200, _interview_prep_state(match.group(1)))
+
+    @route("POST", r"/api/interviews/([0-9a-f]{32})/prep")
+    def api_interview_prep_build(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        # {use_ai, model}: (re)build the questions and the brief; practice notes on kept questions stay.
+        self._send_json(
+            200,
+            _interview_prep_build(
+                match.group(1),
+                use_ai=payload.get("use_ai") is True,
+                model=str(payload.get("model") or ""),
+            ),
+        )
+
+    @route("PATCH", r"/api/interviews/([0-9a-f]{32})/prep")
+    def api_interview_prep_notes(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        notes = payload.get("notes")
+        if not isinstance(notes, dict):
+            raise ValueError("Send notes as {question id: text}.")
+        _interview_context(match.group(1))
+        with _connect() as connection:
+            prep = interview_prep.save_question_notes(connection, match.group(1), notes)
+        self._send_json(200, {"prep": prep})
 
     @route("PATCH", r"/api/interviews/([0-9a-f]{32})")
     def api_interview_update(

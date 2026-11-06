@@ -78,3 +78,57 @@ body[data-app="careers"] #primaryNav a.shell-has-subnav:not([aria-current="page"
 @media (min-width: 901px) {
   body[data-app="careers"] .careers-tabstrip { display: none; }
 }
+
+/* Resume editor: the formatted preview, the ATS check and the upload format */
+.cre-preview { display: flex; flex-direction: column; gap: 10px; }
+.cre-pages { display: flex; flex-direction: column; align-items: center; gap: 14px; max-height: 70vh; overflow: auto; padding: 12px; background: var(--surface-2); border-radius: var(--radius-sm); }
+.cre-page { width: 100%; max-width: 640px; height: auto; background: #fff; box-shadow: var(--shadow); border-radius: 2px; flex: 0 0 auto; }
+.cre-page text { white-space: pre; }
+.cre-format { margin: 0; }
+.cre-format select { max-width: 320px; }
+.cre-check { display: flex; flex-direction: column; gap: 8px; }
+.cre-check h4 { margin: 8px 0 0; font-size: 13px; }
+.cre-check-head { display: flex; align-items: center; gap: 12px; }
+.cre-check-head > div { flex: 1; }
+.cre-score { display: inline-grid; place-items: center; width: 46px; height: 46px; border-radius: 50%; font-weight: 800; font-size: 16px; background: var(--surface-2); }
+.cre-score.good { background: color-mix(in srgb, var(--good) 18%, transparent); }
+.cre-score.ok { background: var(--warning-soft); }
+.cre-score.low { background: var(--danger-soft); }
+.cre-checks { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; font-size: 13px; }
+.cre-checks li { padding-left: 18px; position: relative; }
+.cre-checks li::before { position: absolute; left: 0; content: "\2713"; color: var(--good); font-weight: 800; }
+.cre-checks li.fail::before { content: "!"; color: var(--warning); }
+.cre-fix { color: var(--ink-2); margin-top: 2px; }
+.cre-advice { font-size: 12.5px; }
+.cre-chip-master { border-style: dashed; }
+
+/* Skill gaps across saved jobs */
+.skg-list { display: flex; flex-direction: column; gap: 10px; }
+.skg-item { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 6px 12px; padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.skg-item h4 { margin: 0; font-size: 14px; }
+.skg-bar { height: 6px; border-radius: 3px; background: var(--surface-2); overflow: hidden; grid-column: 1 / -1; }
+.skg-bar i { display: block; height: 100%; background: var(--brand); }
+.skg-jobs, .skg-certs { grid-column: 1 / -1; font-size: 12.5px; }
+
+/* Interview prep and STAR stories */
+.ivp-group { margin-top: 10px; }
+.ivp-group h4 { margin: 0 0 6px; font-size: 13px; }
+.ivp-question { padding: 8px 0; border-bottom: 1px solid var(--line); display: flex; flex-direction: column; gap: 6px; }
+.ivp-question:last-child { border-bottom: 0; }
+.ivp-question textarea { min-height: 54px; font-size: 13px; }
+.ivp-brief dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 12px; margin: 0; font-size: 13px; }
+.ivp-brief dt { font-weight: 700; }
+.ivp-brief dd { margin: 0; }
+.star-list { display: flex; flex-direction: column; gap: 10px; }
+.star-card { padding: 12px; border: 1px solid var(--line); border-radius: var(--radius-sm); }
+.star-card dl { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: 4px 10px; margin: 8px 0 0; font-size: 13px; }
+.star-card dt { font-weight: 700; }
+.star-card dd { margin: 0; white-space: pre-wrap; }
+
+/* Bulk actions: the bar that appears when rows are selected */
+.bulk-bar { position: sticky; top: 0; z-index: 3; display: flex; flex-wrap: wrap; align-items: center; gap: 8px; padding: 8px 12px; margin-bottom: 8px; border-radius: var(--radius-sm); background: var(--surface); box-shadow: var(--shadow); }
+.bulk-bar strong { margin-right: auto; }
+.bulk-bar select { width: auto; min-width: 160px; }
+.bulk-pick { display: inline-flex; align-items: center; padding: 0 6px; }
+.bulk-row { display: flex; align-items: stretch; gap: 4px; }
+.bulk-row > :last-child { flex: 1; min-width: 0; }

@@ -239,6 +239,14 @@ class CloudConfig:
         default_factory=lambda: _env("AIRA_CLOUD_REMOTE_LOGIN_URL")
     )
     remote_login_ttl: int = 600
+    # LinkedIn automation in the hosted build (sign-in, LinkedIn search and job details, the inbox and replies,
+    # schedules, Easy Apply, Sales Navigator): off unless the operator turns it on, for a supervised pilot only.
+    # LinkedIn's User Agreement forbids automated access, and many candidates' sessions run from data-centre
+    # addresses risk account restrictions (docs/multitenant.md, "LinkedIn in the hosted build"). When it is on, the
+    # plan feature, the organization's policy and each candidate's own opt-in still apply.
+    linkedin_automation: bool = field(
+        default_factory=lambda: _bool("AIRA_CLOUD_LINKEDIN_AUTOMATION")
+    )
     # a local installation of the apps (the single-user build) that this account can open
     local_app_url: str = field(default_factory=lambda: _env("AIRA_CLOUD_LOCAL_APP_URL"))
     # shared with that installation as AIRA_ACCOUNT_SECRET: signs launch-token validation (32+ characters)

@@ -117,7 +117,52 @@
     { id: "all", label: "All jobs", view: "all", icon: "careers-list" },
     { id: "recommended", label: "Recommended", view: "recommended", icon: "careers-sparkle" },
     { id: "saved", label: "Saved", view: "saved", icon: "careers-star" },
+    { id: "skills", label: "Skill gaps", view: "skills", icon: "careers-sparkle" },
   ];
+
+  // Bulk actions (F16): a checkbox per row, "Select all" for the page and a bar of actions for the selection.
+  // Each action answers per item, so one job that cannot change does not stop the others.
+  Aira.bulkSelection = ({ noun = "job", actions = [] } = {}) => {
+    const picked = new Set();
+    const boxes = new Set();
+    const count = h("strong");
+    const bar = h("div", { class: "bulk-bar", hidden: true, role: "region", "aria-label": "Actions for the selected items" });
+    const paint = () => {
+      bar.hidden = !picked.size;
+      count.textContent = `${picked.size} ${noun}${picked.size === 1 ? "" : "s"} selected`;
+      for (const box of boxes) box.checked = picked.has(box.dataset.id);
+    };
+    const clear = () => { picked.clear(); paint(); };
+    bar.append(count, ...actions.map((action) => action.node || h("button", { type: "button", class: `btn ${action.kind || "secondary"} sm`, text: action.label, onclick: (event) => withBusy(event.currentTarget, () => action.run([...picked], clear)) })), h("button", { type: "button", class: "btn ghost sm", text: "Clear", onclick: clear }));
+    const box = (id, label) => {
+      const input = h("input", { type: "checkbox", "aria-label": `Select ${label}` });
+      input.dataset.id = id;
+      input.checked = picked.has(id);
+      input.addEventListener("click", (event) => event.stopPropagation());
+      input.addEventListener("change", () => { if (input.checked) picked.add(id); else picked.delete(id); paint(); });
+      boxes.add(input);
+      return h("label", { class: "bulk-pick" }, input);
+    };
+    const all = (ids) => {
+      const input = h("input", { type: "checkbox", "aria-label": "Select all on this page" });
+      input.addEventListener("change", () => { for (const id of ids) { if (input.checked) picked.add(id); else picked.delete(id); } paint(); });
+      return h("label", { class: "check bulk-all" }, input, "Select all");
+    };
+    return { bar, box, all, picked, clear, paint, reset: () => { boxes.clear(); picked.clear(); paint(); } };
+  };
+  // A toast for a bulk result: how many changed, and why the others did not.
+  Aira.bulkReport = (out, done) => {
+    if (!out.failed) return toast(done(out.done), "success");
+    const reasons = [...new Set(out.results.filter((r) => !r.ok).map((r) => r.error))].slice(0, 2).join(" ");
+    return toast(`${done(out.done)} ${out.failed} could not be changed: ${reasons}`, "error", { timeout: 9000 });
+  };
+  const STAGE_CHOICES = () => [["", "Move to…"], ...STAGES.filter((stage) => !["applying", "failed"].includes(stage)).map((stage) => [stage, fmt.title(fmt.stage(stage))])];
+  Aira.bulkStageSelect = (onPick) => {
+    const select = ui.select(STAGE_CHOICES(), "", { "aria-label": "Move the selected jobs to" });
+    select.addEventListener("change", async () => { const stage = select.value; select.value = ""; if (stage) await onPick(stage); });
+    return select;
+  };
+  Aira.bulkJobs = async (body) => api("/api/jobs/bulk", { method: "POST", body });
   // The source chips on All jobs (#/jobs/all?from=<id>): each narrows the search form and the list to its source.
   const JOB_SOURCES = [
     { id: "all", label: "Every source", view: "all", icon: "careers-list" },
@@ -207,7 +252,7 @@
     const w2 = h("input", { type: "checkbox" });
     const hint = h("p", { class: "muted", style: { margin: "8px 0 0", fontSize: "12px" } });
     const submit = h("button", { type: "submit", class: "btn" }, "Find roles");
-    const importUrl = h("input", { type: "url", placeholder: "Paste a LinkedIn, Greenhouse, Lever, Ashby, or SmartRecruiters job URL", maxlength: 500 });
+    const importUrl = h("input", { type: "url", placeholder: "Paste a LinkedIn, Greenhouse, Lever, Ashby, SmartRecruiters, Workable or Recruitee job URL", maxlength: 500 });
     const importBtn = h("button", { type: "button", class: "btn secondary" }, "Import job");
 
     const grid = h("div", { class: "form-grid" }, ui.field("Role or keywords", keywords), ui.field("Location", location), ui.field("Source", sourceSelect), identifierField, ui.field("Arrangement", workType), ui.field("Employment type", jobType), ui.field("Depth", pages), h("div", { class: "field" }, h("span", { class: "label", text: "Pay wording" }), h("label", { class: "check" }, w2, "Search W-2 wording")));
@@ -223,7 +268,7 @@
       identifier.required = Boolean(chosen.identifier_label);
       identifier.placeholder = chosen.identifier_label || "";
       pages.parentElement.hidden = !["linkedin", "google_jobs"].includes(chosen.source);
-      const structured = ["linkedin", "google_jobs", "aira_jobs", "lever", "ashby", "smartrecruiters"].includes(chosen.source);
+      const structured = ["linkedin", "google_jobs", "aira_jobs", "lever", "ashby", "smartrecruiters", "workable", "recruitee"].includes(chosen.source);
       workType.disabled = !structured;
       jobType.disabled = !structured;
       if (chosen.source === "google_jobs" && !chosen.connected) hint.replaceChildren(`${chosen.label}: `, h("a", { href: KEY_PAGE, text: "connect a SerpApi key in API > Account" }), " (or set SERPAPI_API_KEY in .env), or search the ", h("a", { href: FREE_BOARDS, text: "free job boards" }), " without a key.");
@@ -298,6 +343,7 @@
     // On All jobs, ?from=<source> is the source chip.
     const { tab: tabQuery, from, ...asked } = route.query;
     const folder = JOB_FOLDERS.find((item) => item.id === (route.path[1] || tabQuery || "all")) || JOB_FOLDERS[0];
+    if (folder.id === "skills") { await renderSkillGaps(main, route); return; }
     const tab = folder.id === "all" ? JOB_SOURCES.find((item) => item.id === from) || JOB_SOURCES[0] : folder;
     const fromQuery = folder.id === "all" && tab.id !== "all" ? { from: tab.id } : {};
     const goHere = (query) => router.go(["jobs", folder.id], { ...query, ...fromQuery }, { replace: true });
@@ -351,8 +397,24 @@
         renderList(data, googleMissing);
       } catch (error) { listBox.replaceChildren(ui.error(error, load)); }
     }
+    const plural = (n) => `${n} ${n === 1 ? "job" : "jobs"}`;
+    const archivedView = () => stage.value === "archived";
+    const bulk = Aira.bulkSelection({ noun: "job", actions: [
+      { label: "Save", run: async (ids, clear) => { Aira.bulkReport(await Aira.bulkJobs({ action: "save", job_ids: ids }), (n) => `Saved ${plural(n)}.`); clear(); load(); } },
+      { label: "Score", run: async (ids, clear) => { Aira.bulkReport(await Aira.bulkJobs({ action: "score", job_ids: ids }), (n) => `Scored ${plural(n)}.`); clear(); load(); } },
+      { node: Aira.bulkStageSelect(async (next) => { const ids = [...bulk.picked]; Aira.bulkReport(await Aira.bulkJobs({ action: "stage", stage: next, job_ids: ids }), (n) => `Moved ${plural(n)} to ${fmt.stage(next)}.`); bulk.clear(); load(); }) },
+      { label: "Archive or restore", kind: "ghost", run: async (ids, clear) => {
+        if (archivedView()) { Aira.bulkReport(await Aira.bulkJobs({ action: "restore", job_ids: ids }), (n) => `Restored ${plural(n)}.`); clear(); load(); return; }
+        const out = await Aira.bulkJobs({ action: "archive", job_ids: ids });
+        const note = Aira.bulkReport(out, (n) => `Archived ${plural(n)}.`);
+        const done = out.results.filter((r) => r.ok).map((r) => r.job_id);
+        if (done.length && note) note.insertBefore(h("button", { type: "button", class: "btn ghost sm", text: "Undo", onclick: async () => { note.remove(); Aira.bulkReport(await Aira.bulkJobs({ action: "restore", job_ids: done }), (n) => `Restored ${plural(n)}.`); load(); } }), note.lastElementChild);
+        clear(); load();
+      } },
+    ] });
     function renderList(data, googleMissing = false) {
       const list = h("div", { class: "list", "data-roving": "1", role: "list" });
+      bulk.reset();
       const selectedId = route.path[3];
       const narrowed = Boolean(q.value || stage.value || classification.value || minScore.value || workplace.value || filters.source);
       if (googleMissing) {
@@ -363,17 +425,60 @@
         const message = tab.id === "recommended" ? "Score jobs to see recommendations here: add a job description and complete your profile." : tab.id === "saved" ? "Star a job in any list to keep it here." : "Search above, import a posting by URL, or add a job you heard about yourself.";
         list.append(ui.empty("No jobs yet", message, tab.id === "recommended" || tab.id === "saved" ? h("a", { class: "btn", href: "#/jobs/all", text: "See all jobs" }) : h("button", { type: "button", class: "btn", text: "+ Add a job", onclick: addJob })));
       }
-      for (const job of data.jobs) list.append(jobRow(job, { selected: job.job_id === selectedId, onSelect: (item) => openJob(item.job_id, { loadDetails: !item.has_description }) }));
+      for (const job of data.jobs) list.append(h("div", { class: "bulk-row", role: "listitem" }, bulk.box(job.job_id, job.title || job.job_id), jobRow(job, { selected: job.job_id === selectedId, onSelect: (item) => openJob(item.job_id, { loadDetails: !item.has_description }) })));
       const turn = (page) => { filters.page = String(page); goHere(current(filters.page)); };
       const pager = h("div", { class: "pager" }, h("span", { text: `${data.total} ${data.total === 1 ? "job" : "jobs"} · page ${data.page} of ${data.pages}` }), h("div", { class: "btn-row" }, h("button", { type: "button", class: "btn ghost sm", text: "Previous", disabled: data.page <= 1, onclick: () => turn(data.page - 1) }), h("button", { type: "button", class: "btn ghost sm", text: "Next", disabled: data.page >= data.pages, onclick: () => turn(data.page + 1) })));
       const heading = q.value ? `${tab.id === "all" ? "Jobs" : tab.label} matching “${q.value}”` : tab.id === "all" ? "All jobs" : tab.label;
-      listBox.replaceChildren(h("div", { class: "panel-head" }, h("h3", { text: heading }), h("small", { class: "muted", text: data.facets && data.facets.sources.length ? data.facets.sources.map((s) => `${s.source === "manual" ? "added by you" : Aira.fmt.source(s.source)} ${s.count}`).join(" · ") : "" })), list, pager);
+      listBox.replaceChildren(h("div", { class: "panel-head" }, h("h3", { text: heading }), data.jobs.length ? bulk.all(data.jobs.map((job) => job.job_id)) : null, h("small", { class: "muted", text: data.facets && data.facets.sources.length ? data.facets.sources.map((s) => `${s.source === "manual" ? "added by you" : Aira.fmt.source(s.source)} ${s.count}`).join(" · ") : "" })), bulk.bar, list, pager);
     }
     Aira.state.views.jobsReload = load;
     if (making === "job") addJob();
     await load();
     if (route.path[2] === "job" && route.path[3]) openJob(route.path[3]);
   };
+
+  // -------------------------------------------------------------------------
+  // Skill gaps: the skills most often missing across your jobs, the jobs each would unlock, and certifications
+  // -------------------------------------------------------------------------
+  async function renderSkillGaps(main, route) {
+    Aira.careersFolders("jobs", JOB_FOLDERS.map(({ id, label, icon }) => ({ id, label, icon, href: `#/jobs/${id}` })), "skills");
+    const scope = ["active", "saved", "all"].includes(route.query.scope) ? route.query.scope : "active";
+    const box = h("div", { class: "panel" }, ui.skeleton(5));
+    const scopes = h("nav", { class: "chips", "aria-label": "Which jobs" }, ...[["active", "Jobs in progress"], ["saved", "Saved (starred)"], ["all", "Every job"]].map(([id, label]) => h("a", { class: `chip${id === scope ? " on" : ""}`, href: `#/jobs/skills?scope=${id}`, "aria-current": id === scope ? "true" : "false", text: label })));
+    main.replaceChildren(
+      h("div", { class: "page-head" }, h("div", {}, h("h1", { text: "Skill gaps" }), h("p", { text: "The skills your jobs ask for that your resume and verified skills do not show yet, how many jobs ask for each, and which jobs one skill would unlock." }))),
+      h("nav", { class: "subnav careers-tabstrip", "aria-label": "Job folders" }, ...JOB_FOLDERS.map((item) => h("a", { href: `#/jobs/${item.id}`, "aria-current": item.id === "skills" ? "page" : "false", text: item.label }))),
+      scopes, box,
+    );
+    let data;
+    try { data = await api(`/api/resume-intel/skill-gaps?scope=${scope}`); } catch (error) { box.replaceChildren(ui.error(error, () => router.render())); return; }
+    if (!data.jobs_considered) { box.replaceChildren(ui.empty("No jobs to compare yet", "Save or import jobs with a description, then come back: Monosage compares their skills with your resume.", h("a", { class: "btn", href: "#/jobs/all", text: "Find jobs" }))); return; }
+    const top = Math.max(1, ...data.skills.map((s) => s.required * 2 + s.preferred));
+    const certBox = h("div", { class: "card", style: { marginTop: "12px" } });
+    const list = h("div", { class: "skg-list" }, ...data.skills.map((item) => h("div", { class: "skg-item" },
+      h("div", {}, h("h4", { text: item.label }), h("span", { class: "muted", text: `Required by ${item.required}, preferred by ${item.preferred}${item.unlocks.length ? ` · unlocks ${item.unlocks.length}` : ""}` })),
+      h("div", { class: "btn-row" }, h("a", { class: "btn ghost sm", href: `#/interviews?tab=stories`, text: "Have it? Add a story" })),
+      h("div", { class: "skg-bar", "aria-hidden": "true" }, h("i", { style: { width: `${Math.round(100 * (item.required * 2 + item.preferred) / top)}%` } })),
+      item.unlocks.length ? h("div", { class: "skg-jobs" }, h("span", { class: "muted", text: "The only missing required skill for: " }), ...item.unlocks.slice(0, 6).map((job, n) => h("span", {}, n ? ", " : "", h("a", { href: "#", text: [job.title, job.company].filter(Boolean).join(" at "), onclick: (event) => { event.preventDefault(); openJob(job.job_id, { tab: "fit" }); } })))) : h("div", { class: "skg-jobs muted", text: `Asked for by: ${item.jobs.slice(0, 4).map((job) => job.title).join(", ")}${item.jobs.length > 4 ? "…" : ""}` }),
+      item.certifications.length ? h("div", { class: "skg-certs" }, h("span", { class: "muted", text: "Certifications that show it: " }), item.certifications.map((c) => `${c.name} (${c.issuer})`).join(" · ")) : null,
+    )));
+    const useAi = h("input", { type: "checkbox", checked: Boolean(data.ai_available), disabled: !data.ai_available });
+    const suggest = h("button", { type: "button", class: "btn secondary sm", text: "Suggest certifications", disabled: !data.skills.length });
+    suggest.addEventListener("click", () => withBusy(suggest, async () => {
+      const out = await api("/api/resume-intel/certifications", { method: "POST", body: { skills: data.skills.slice(0, 8).map((s) => s.skill), use_ai: useAi.checked, model: (Aira.state.settings && Aira.state.settings.default_model) || "" } });
+      const line = (c) => h("li", {}, h("strong", { text: c.name }), h("span", { class: "muted", text: ` · ${c.issuer || "issuer unknown"}${c.skills && c.skills.length ? ` · ${c.skills.join(", ")}` : ""}` }), c.why ? h("div", { class: "muted", text: c.why }) : null);
+      certBox.replaceChildren(...[h("h3", { text: "Certifications for your top gaps" }), out.note ? h("p", { class: "note warn", text: out.note }) : null,
+        h("ul", { class: "inline-list" }, ...out.curated.map(line)),
+        out.ai.length ? h("div", {}, h("h4", { text: "Also suggested by your AI model (check each with the issuer)" }), h("ul", { class: "inline-list" }, ...out.ai.map(line))) : null].filter(Boolean));
+    }));
+    certBox.append(h("h3", { text: "Certifications" }), h("p", { class: "muted", text: "Monosage keeps a short list of well-known certifications per skill. Your AI model can suggest more; check every suggestion with the issuer before you spend money." }), h("div", { class: "btn-row" }, suggest, h("label", { class: "check" }, useAi, "Ask my AI model too")));
+    box.replaceChildren(...[
+      h("div", { class: "panel-head" }, h("h3", { text: `${data.skills.length ? `${data.skills.length} skills to build` : "No gaps"} across ${data.jobs_considered} jobs` }), h("small", { class: "muted", text: `${data.jobs_without_gaps} jobs need no new required skill` })),
+      data.skills.length ? list : h("p", { class: "muted", text: "Your resume shows every required skill these jobs name." }),
+      data.your_skills.length ? h("p", { class: "muted cre-hint", text: `Skills Monosage sees in your resume and verified skills: ${data.your_skills.join(", ")}.` }) : null,
+      certBox,
+    ].filter(Boolean));
+  }
 
   // -------------------------------------------------------------------------
   // Job detail drawer

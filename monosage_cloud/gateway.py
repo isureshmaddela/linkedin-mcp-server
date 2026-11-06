@@ -45,7 +45,7 @@ from monosage_cloud.errors import (
     Unauthorized,
     ValidationFailed,
 )
-from monosage_cloud.gate import policy_source
+from monosage_cloud.gate import linkedin_operator_block, policy_source
 from monosage_cloud.agent import request_spec
 from monosage_cloud.policy import (
     LINKEDIN_NOTICE,
@@ -81,6 +81,8 @@ KNOWN_SOURCES = {
     "lever",
     "ashby",
     "smartrecruiters",
+    "workable",
+    "recruitee",
 }
 
 
@@ -923,6 +925,10 @@ class Gateway:
             )
 
     def require_linkedin(self, org_id: str, candidate_id: str, audience: str) -> None:
+        # The operator's switch comes first: without it no plan, policy or opt-in turns LinkedIn on here.
+        operator = linkedin_operator_block(self.app)
+        if operator:
+            raise Forbidden(operator, code="linkedin_off")
         self.app.entitlements.require_feature(
             org_id, "sources.linkedin", audience=audience, label="LinkedIn"
         )
@@ -937,6 +943,10 @@ class Gateway:
         if source not in KNOWN_SOURCES:
             return  # the local code answers "Unknown job source." itself
         name = policy_source(source)
+        if name == "linkedin":
+            operator = linkedin_operator_block(self.app)
+            if operator:
+                raise Forbidden(operator, code="linkedin_off")
         self.app.entitlements.require_feature(
             org_id,
             f"sources.{name}",

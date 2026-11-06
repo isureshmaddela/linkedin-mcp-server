@@ -226,7 +226,7 @@
 
     const daily = h("input", { type: "number", min: "1", max: String(dailyMax), value: String(policy.daily_cap_per_candidate), id: "polDaily" });
     const retention = h("input", { type: "number", min: "30", max: String(retentionMax), value: String(policy.retention_days), id: "polRetention" });
-    const sourceDefs = [["aira_jobs", "Jobs", "Free job boards"], ["company_boards", "Company boards", "Greenhouse, Lever, Ashby, SmartRecruiters"], ["google_jobs", "Google Jobs", "Needs your organization's SerpApi key"], ["linkedin", "LinkedIn", "The candidate's own session, with the User Agreement warning"]];
+    const sourceDefs = [["aira_jobs", "Jobs", "Free job boards"], ["company_boards", "Company boards", "Greenhouse, Lever, Ashby, SmartRecruiters, Workable, Recruitee"], ["google_jobs", "Google Jobs", "Needs your organization's SerpApi key"], ["linkedin", "LinkedIn", "The candidate's own session, with the User Agreement warning"]];
     const sources = sourceDefs.map(([key, label, hint]) => check(`polSrc-${key}`, label, hint, policy.allowed_sources.includes(key), { disabled: !features.has(`sources.${key}`), lockedHint: upgrade(`sources.${key}`) }));
     const linkedin = check("polLinkedin", "LinkedIn allowed", "Candidates may connect their own LinkedIn session. LinkedIn forbids automated access; each candidate must turn it on with the risk notice.", policy.linkedin_allowed, { disabled: !features.has("sources.linkedin"), lockedHint: upgrade("sources.linkedin") });
     const easy = check("polEasy", "LinkedIn Easy Apply allowed", "Candidates may enable Easy Apply in their own plans. Off by default.", policy.easy_apply_allowed, { disabled: !features.has("sources.linkedin"), lockedHint: upgrade("sources.linkedin") });

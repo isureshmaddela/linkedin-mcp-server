@@ -16,7 +16,7 @@ Constraints to plan around:
 
 - The control plane is one SQLite file in WAL mode: one writer at a time. Size workers and replicas for short write transactions; do not put `control.sqlite3` on a network file system whose locks are not reliable.
 - Workspaces are SQLite files under `tenants/`; workers and web replicas that serve the same organization must share that tree.
-- LinkedIn automation uses the candidate's browser profile on the host that runs the process which starts it. Sign-in can be streamed to the candidate from the worker host that holds the profile ([the sign-in broker](#the-sign-in-broker), `python -m monosage_cloud broker`), but LinkedIn requests are not forwarded to the worker holding a session. Keep LinkedIn off (the default), or run web and worker as one process or on one host and volume.
+- LinkedIn automation uses the candidate's browser profile on the host that runs the process which starts it. Sign-in can be streamed to the candidate from the worker host that holds the profile ([the sign-in broker](#the-sign-in-broker), `python -m monosage_cloud broker`), but LinkedIn requests are not forwarded to the worker holding a session. Keep LinkedIn off (the default, `AIRA_CLOUD_LINKEDIN_AUTOMATION` unset), or run web and worker as one process or on one host and volume.
 - TLS: either terminate at a proxy (set `AIRA_CLOUD_TRUST_PROXY=1`, `AIRA_CLOUD_BASE_URL=https://...`) or set `AIRA_CLOUD_TLS_CERT` and `AIRA_CLOUD_TLS_KEY` (the server then speaks TLS 1.2 or later itself). The app sends `Strict-Transport-Security: max-age=31536000; includeSubDomains` when cookies are secure (an https base URL) or when a trusted proxy reports `X-Forwarded-Proto: https` (`gateway.py`).
 
 ## 2. Configuration reference
@@ -54,6 +54,7 @@ Read once at start (`monosage_cloud/config.py`; a few more are read by `__main__
 | `AIRA_CLOUD_KMS_VAULT_ADDR`, `AIRA_CLOUD_KMS_VAULT_TOKEN`, `AIRA_CLOUD_KMS_VAULT_MOUNT`, `AIRA_CLOUD_KMS_VAULT_NAMESPACE` | Vault address, token (policy: `update` on `<mount>/encrypt/<key>`, `<mount>/decrypt/<key>` and `<mount>/datakey/plaintext/<key>`), transit mount (default `transit`) and optional enterprise namespace |
 | `AIRA_CLOUD_KMS_CACHE_SECONDS` | how long an unwrapped organization key stays in memory before the KMS is asked again (default 300; memory only, nothing is written to disk) |
 | `AIRA_CLOUD_OPERATOR_EMAIL`, `AIRA_CLOUD_OPERATOR_PASSWORD` | create the first platform admin on start if no operator exists. Remove them after the first start |
+| `AIRA_CLOUD_LINKEDIN_AUTOMATION` | off (default). LinkedIn automation (sign-in, LinkedIn search and job details, the inbox and replies, schedules, Easy Apply, Sales Navigator) runs only when this is `1`; with it off every LinkedIn route answers `403 linkedin_off` whatever an organization's policy, plan or candidates' opt-ins say, and those stored grants are kept unchanged. Turn it on only for a supervised pilot (see "LinkedIn in the hosted build" in [multitenant.md](multitenant.md)) |
 | `AIRA_POOLED_SERPAPI_KEY` | the platform's own SerpApi key, offered to Team and Enterprise organizations that enable "pooled" searches. Never set `SERPAPI_API_KEY` on a hosted deployment: the process removes it from its environment at start (unless `AIRA_CLOUD_KEEP_ENV_SERPAPI` is set) so a tenant cannot inherit a host key |
 
 ### Billing

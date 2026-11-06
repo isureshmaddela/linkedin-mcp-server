@@ -1,6 +1,7 @@
 # Careers: maturity scope
 
-Status: round 1 built and tested (2026-11-06, R1.1 to R1.8); round 2 next. This document records what the Careers app is missing, why it
+Status: round 1 built and tested (2026-11-06, R1.1 to R1.8); round 2 partly built (R2.1 to R2.4: formatted
+documents, resume intelligence, F16 bulk actions, F18 interview prep); F14, F15 and F17 next. This document records what the Careers app is missing, why it
 matters, and what each round builds. Every item lists the evidence it came from (file:line at the time of the review)
 and how it is accepted.
 
@@ -46,9 +47,9 @@ and how it is accepted.
 | F13 | Accepted, rejected and withdrawn have no way back; archived jobs cannot be restored from the UI | `auto_apply_assistant.py:296-298,5559` | 1 |
 | F14 | Holds without questions (CAPTCHA, sign-in, Workday email check) close the browser; the person redoes the form elsewhere | `aira/apply_engine.py:873-879`; `views-autopilot.js:116-147` | 2 |
 | F15 | The generic form engine handles one page only (no Next/Continue) and native controls only | `aira/apply_engine.py:1239-1245` | 2 |
-| F16 | No bulk actions in Jobs, Applications or Needs you | `views-jobs.js:277`; `views-applications.js` | 2 |
+| F16 | No bulk actions in Jobs, Applications or Needs you (built: R2.3) | `views-jobs.js:277`; `views-applications.js` | 2 |
 | F17 | Reminders and follow-ups are in-app only (no email or browser notification); no installable app | `auto_apply_assistant.py:7825`; `app.js` | 2 |
-| F18 | Research and interview prep have no AI synthesis | `aira/airaapi/careers_intel.py:233,1349`; `views-crm.js:62` | 2 |
+| F18 | Research and interview prep have no AI synthesis (built: R2.4) | `aira/airaapi/careers_intel.py:233,1349`; `views-crm.js:62` | 2 |
 | F19 | No mailbox sync for Email updates (paste or .eml only) | `views-settings.js:191` | 3 |
 
 ## Round 1 (built)
@@ -108,8 +109,54 @@ and how it is accepted.
 ### R1.8 Recover from mistakes (F13)
 - Reopen an accepted, rejected or withdrawn application (recorded in the history); restore an archived job.
 
+## Round 2 (partly built)
+
+Added by the platform review (`platform-review.md` section 3) alongside the round 2 findings.
+
+### R2.1 What employers receive is a formatted resume
+- Evidence: an approved tailored resume was uploaded as a plain Helvetica text PDF (`aira/resume_file.py:86-91`,
+  `aira/pdf_text.py`).
+- Built: `aira/resume_render.py` parses the tailored text (Markdown-like marks, ALL CAPS and the usual heading
+  words, role lines with dates) and lays it out: name and contact header, headings with a rule, bold role lines with
+  dates on the right, hanging bullets, page breaks that keep a heading or role with what follows. The PDF uses the
+  four Helvetica faces in WinAnsi; other characters are transliterated, the rest shown as "?" and named in a
+  warning (no TrueType font is embedded: none with a redistributable licence ships with the project). Cover letters
+  share the header. A simple one-column Word master resume can carry the tailored content in its own styles (stdlib
+  zip and XML; tables, text boxes, content controls, pictures and columns fall back to the PDF). The resume editor
+  previews the exact pages (drawn from the same layout) before approval, and the approval records the format.
+- Accepted: `tests/test_resume_render.py` (parsing, fonts, extractable text, page breaks, transliteration, Word).
+
+### R2.2 Resume intelligence (requirements.md "Resume intelligence")
+- Built: `aira/resume_intel.py`: an ATS-readiness score (structure, standard headings, contact details, the job's
+  keywords, length) with a fix per failed check; missing keywords per job, marking the ones the master resume
+  already has; a change summary of each tailored version against the master that flags new skills and figures to
+  check; a skill-gap view across jobs (Jobs > Skill gaps) with the jobs each skill would unlock; certification
+  suggestions from a curated list, plus the model's (marked) when asked.
+- Accepted: `tests/test_resume_intel.py`.
+
+### R2.3 Bulk actions (F16)
+- Built: Jobs (save, score, move to a status, archive with Undo, restore), Applications > Pipeline (move, archive)
+  and Needs you (skip, try again). `POST /api/jobs/bulk` and `POST /api/autopilot/runs/bulk` answer per item, so one
+  that cannot change does not stop the rest; at most 200 at a time.
+- Accepted: `tests/test_careers_bulk.py`.
+
+### R2.4 Interview prep (F18)
+- Built: migration 23 (`star_stories`, `interview_prep`) and `aira/interview_prep.py`. STAR stories linked to
+  skills, with drafts from resume bullets; per interview, likely questions (openers, behavioural and technical
+  questions from the job's skills, gaps, interview-type questions) linked to the stories, practice notes, and a
+  company brief from the posting. Deterministic without a model; `_careers_ai("general", ...)` adds questions and a
+  brief, marked as AI, when asked. It replaces the free-text Preparation box (kept as "Your own prep notes").
+- Accepted: `tests/test_interview_prep.py`.
+
+### Next in round 2
+- F14 Finish in browser: when a run is held for a CAPTCHA, a sign-in or an email check, the local build opens a
+  visible browser on that step and resumes after it. Hosted, the sign-in broker (`monosage_cloud/streaming.py`:
+  a private Chromium streamed over a WebSocket with CDP screencast, input replay, allowlisted navigation and audit)
+  can carry the same single step: the worker hands the held page's state (cookies and URL) to a broker session
+  whose allowlist is the employer's apply host, the person finishes the step, and the broker returns the session
+  state for the worker to resume the run. Not built yet.
+- F15 multi-step generic forms; F17 email and browser notifications (the platform notification service).
+
 ## Later rounds
 
-- Round 2: Finish in browser (F14), multi-step generic forms (F15), bulk actions (F16), email and browser
-  notifications and an installable app (F17), AI research and interview prep (F18).
 - Round 3: mailbox sync (F19), then the same review for every other app.

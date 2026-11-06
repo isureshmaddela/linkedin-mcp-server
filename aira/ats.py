@@ -1,7 +1,8 @@
 """Applicant-tracking-system (ATS) job sources for the Career Copilot.
 
 This module adds read-only adapters for the public, documented posting APIs of
-Lever, Ashby and SmartRecruiters, a catalog describing every job source the
+Lever, Ashby, SmartRecruiters, Workable (the account jobs feed for careers
+pages) and Recruitee (the Careers Site API), a catalog describing every job source the
 copilot knows about (available or planned), a factory that builds the right
 adapter for a source id, careers-URL detection for company portals, a
 single-posting importer, and a Greenhouse application-question reader. It
@@ -44,9 +45,11 @@ __all__ = [
     "DETAIL_FETCH_LIMIT",
     "LeverJobAdapter",
     "PortalReference",
+    "RecruiteeJobAdapter",
     "SOURCE_CATALOG",
     "SmartRecruitersJobAdapter",
     "SourceDescriptor",
+    "WorkableJobAdapter",
     "build_adapter",
     "catalog_as_dicts",
     "detect_portal",
@@ -910,7 +913,400 @@ class SmartRecruitersJobAdapter:
         return _health_report(self.source_name, probe)
 
 
-AtsAdapter = LeverJobAdapter | AshbyJobAdapter | SmartRecruitersJobAdapter
+# --------------------------------------------------------------------------- #
+# Workable
+# --------------------------------------------------------------------------- #
+
+
+def _place(*parts: Any) -> str:
+    """Join the non-empty location parts ("Austin, Texas, United States")."""
+    cleaned = _unique([_clean_text(part, 100) for part in parts])
+    return ", ".join(part for part in cleaned if part)[:_LOCATION_LIMIT]
+
+
+class WorkableJobAdapter:
+    """Read-only adapter for Workable's public jobs feed for one account.
+
+    Workable documents an unauthenticated JSON feed of an account's published
+    jobs for careers pages: ``https://www.workable.com/api/accounts/<subdomain>``
+    (``details=true`` adds each job's description, requirements and benefits;
+    Workable's own embeddable job widget reads the same feed). The whole board
+    comes back in one response, so searching, importing one job and health
+    checks all use it, and keyword and location matching happen locally.
+    ``company`` is the account name from the feed, else the subdomain. A job is
+    identified by its ``shortcode``, the code in
+    ``https://apply.workable.com/<subdomain>/j/<shortcode>``.
+    """
+
+    source_name = "workable"
+    _account_re = re.compile(r"^[A-Za-z0-9][A-Za-z0-9-]{0,99}$")
+    _shortcode_re = re.compile(r"^[A-Za-z0-9]{4,40}$")
+
+    def __init__(self, account: str, json_getter: JsonGetter | None = None) -> None:
+        account = account.strip().lower()
+        if not self._account_re.fullmatch(account):
+            raise ValueError("Enter a valid Workable account subdomain.")
+        self.account = account
+        self._json_getter: JsonGetter = json_getter or _get_json
+        self._account_name = ""
+
+    @property
+    def capabilities(self) -> JobSourceCapabilities:
+        return _ATS_CAPABILITIES
+
+    def _feed_url(self) -> str:
+        return (
+            "https://www.workable.com/api/accounts/"
+            f"{quote(self.account, safe='')}?details=true"
+        )
+
+    def _public_url(self, shortcode: str) -> str:
+        return (
+            "https://apply.workable.com/"
+            f"{quote(self.account, safe='')}/j/{quote(shortcode, safe='')}/"
+        )
+
+    @staticmethod
+    def _location_values(record: Mapping[str, Any]) -> list[str]:
+        values = [
+            _place(record.get("city"), record.get("state"), record.get("country"))
+        ]
+        for item in _as_list(record.get("locations")):
+            if not isinstance(item, Mapping) or item.get("hidden") is True:
+                continue
+            values.append(
+                _place(item.get("city"), item.get("region"), item.get("country"))
+            )
+        return _unique(values)
+
+    @staticmethod
+    def _description(record: Mapping[str, Any]) -> str:
+        parts = [html_to_text(str(record.get("description") or ""))]
+        for key, heading in (
+            ("requirements", "Requirements"),
+            ("benefits", "Benefits"),
+        ):
+            body = html_to_text(str(record.get(key) or ""))
+            if body:
+                parts.append(f"## {heading}\n{body}")
+        return "\n\n".join(part for part in parts if part)[:_DESCRIPTION_LIMIT]
+
+    @staticmethod
+    def _workplace(record: Mapping[str, Any]) -> str | None:
+        explicit = _workplace_type(record.get("workplace"))
+        if explicit:
+            return explicit
+        return "remote" if record.get("telecommuting") is True else None
+
+    def normalize(self, record: Mapping[str, Any]) -> JobPosting:
+        shortcode = _clean_text(record.get("shortcode"), _ID_LIMIT)
+        if not shortcode:
+            raise ValueError("Workable job has no shortcode.")
+        public_url = self._public_url(shortcode)
+        source_url = (
+            _optional_url(record.get("url"))
+            or _optional_url(record.get("shortlink"))
+            or public_url
+        )
+        salary = _as_mapping(record.get("salary"))
+        salary_min, salary_max = _salary_bounds(
+            salary.get("salary_from"), salary.get("salary_to")
+        )
+        locations = self._location_values(record)
+        return JobPosting(
+            source=self.source_name,
+            external_id=shortcode,
+            source_url=source_url,
+            application_url=_optional_url(record.get("application_url")) or source_url,
+            title=_clean_text(record.get("title"), _TITLE_LIMIT),
+            company=(self._account_name or self.account)[:_COMPANY_LIMIT],
+            location=locations[0] if locations else "",
+            workplace_type=self._workplace(record),
+            employment_type=_employment_type(record.get("employment_type")),
+            salary_min=salary_min,
+            salary_max=salary_max,
+            currency=_currency(salary.get("salary_currency")),
+            description=self._description(record),
+            seniority=_seniority(record.get("experience")),
+            posted_at=parse_timestamp(record.get("published_on"))
+            or parse_timestamp(record.get("created_at")),
+            application_method="workable_jobs_feed",
+        )
+
+    def _load_jobs(self) -> list[Any]:
+        payload = self._json_getter(self._feed_url())
+        if not isinstance(payload, Mapping):
+            raise RuntimeError("Workable returned an invalid jobs feed.")
+        jobs = payload.get("jobs")
+        if not isinstance(jobs, list):
+            raise RuntimeError("Workable returned an invalid jobs list.")
+        self._account_name = _clean_text(payload.get("name"), _COMPANY_LIMIT)
+        return jobs
+
+    def search(self, query: JobSearchQuery) -> JobSearchResult:
+        work_type, job_type = _validated_filters(query, "Workable")
+        jobs: list[JobPosting] = []
+        seen: set[str] = set()
+        for record in self._load_jobs():
+            if not isinstance(record, Mapping):
+                continue
+            try:
+                job = self.normalize(record)
+            except ValueError:
+                continue
+            if job.external_id in seen:
+                continue
+            keyword_text = " ".join(
+                _clean_text(record.get(key), 200)
+                for key in ("department", "function", "industry")
+            )
+            if not _matches_locally(
+                query,
+                job,
+                work_type,
+                job_type,
+                keyword_text=keyword_text,
+                location_text=" | ".join(self._location_values(record)),
+            ):
+                continue
+            jobs.append(job)
+            seen.add(job.external_id)
+        return JobSearchResult(tuple(jobs))
+
+    def fetch_job(self, shortcode: str) -> JobPosting:
+        """Load the account's feed and return the job with ``shortcode``."""
+        shortcode = str(shortcode or "").strip()
+        if not self._shortcode_re.fullmatch(shortcode):
+            raise ValueError("Enter a valid Workable job shortcode.")
+        wanted = shortcode.casefold()
+        for record in self._load_jobs():
+            if (
+                isinstance(record, Mapping)
+                and _clean_text(record.get("shortcode"), _ID_LIMIT).casefold() == wanted
+            ):
+                return self.normalize(record)
+        raise RuntimeError(
+            f"Job {shortcode} is not on the Workable account '{self.account}'; "
+            "it may have closed."
+        )
+
+    def health(self) -> dict[str, Any]:
+        def probe() -> str:
+            count = sum(
+                1 for record in self._load_jobs() if isinstance(record, Mapping)
+            )
+            return (
+                f"Workable account '{self.account}' responded with "
+                f"{count} published job(s)."
+            )
+
+        return _health_report(self.source_name, probe)
+
+
+# --------------------------------------------------------------------------- #
+# Recruitee
+# --------------------------------------------------------------------------- #
+
+
+def _recruitee_timestamp(value: Any) -> datetime | None:
+    """Recruitee writes ``2026-01-15 10:00:00 UTC``; ISO-8601 is accepted as well."""
+    if isinstance(value, str) and value.strip().upper().endswith(" UTC"):
+        value = value.strip()[:-4] + "+00:00"
+    return parse_timestamp(value)
+
+
+def _recruitee_employment(value: Any) -> str | None:
+    """Map ``fulltime_permanent``/``parttime_fixed_term``/``freelance``... to the shared vocabulary."""
+    key = _token_key(value)
+    if key.startswith("fulltime"):
+        return "full_time"
+    if key.startswith("parttime"):
+        return "part_time"
+    if key == "freelance":
+        return "contract"
+    return _employment_type(key)
+
+
+class RecruiteeJobAdapter:
+    """Read-only adapter for Recruitee's public Careers Site API.
+
+    ``GET https://<company>.recruitee.com/api/offers/`` lists a company's
+    published offers with their descriptions and ``/api/offers/<id or slug>``
+    returns one offer; neither needs a key. The offers list is matched locally
+    on keywords (title, description, department and tags), location and the
+    ``work_type``/``job_type`` filters. ``external_id`` is the offer's numeric
+    id (stable when the title, and with it the slug, changes); the careers URL
+    ``https://<company>.recruitee.com/o/<slug>`` names the slug, and both are
+    accepted by ``fetch_job``.
+    """
+
+    source_name = "recruitee"
+    _company_re = re.compile(r"^[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?$")
+    _offer_re = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,199}$")
+
+    def __init__(self, company: str, json_getter: JsonGetter | None = None) -> None:
+        company = company.strip().lower()
+        if not self._company_re.fullmatch(company):
+            raise ValueError("Enter a valid Recruitee company subdomain.")
+        self.company = company
+        self._json_getter: JsonGetter = json_getter or _get_json
+
+    @property
+    def capabilities(self) -> JobSourceCapabilities:
+        return _ATS_CAPABILITIES
+
+    def _base_url(self) -> str:
+        return f"https://{self.company}.recruitee.com/api/offers/"
+
+    def _offer_url(self, offer: str) -> str:
+        return f"{self._base_url()}{quote(offer, safe='')}"
+
+    def _public_url(self, slug: str) -> str:
+        return f"https://{self.company}.recruitee.com/o/{quote(slug, safe='')}"
+
+    @staticmethod
+    def _location_values(record: Mapping[str, Any]) -> list[str]:
+        values = [
+            _clean_text(record.get("location"), _LOCATION_LIMIT),
+            _place(record.get("city"), record.get("state_name"), record.get("country")),
+        ]
+        for item in _as_list(record.get("locations")):
+            if isinstance(item, Mapping):
+                values.append(
+                    _clean_text(item.get("name"), _LOCATION_LIMIT)
+                    or _place(item.get("city"), item.get("state"), item.get("country"))
+                )
+        return _unique(values)
+
+    @staticmethod
+    def _description(record: Mapping[str, Any]) -> str:
+        parts = [html_to_text(str(record.get("description") or ""))]
+        requirements = html_to_text(str(record.get("requirements") or ""))
+        if requirements:
+            parts.append(f"## Requirements\n{requirements}")
+        return "\n\n".join(part for part in parts if part)[:_DESCRIPTION_LIMIT]
+
+    @staticmethod
+    def _workplace(record: Mapping[str, Any]) -> str | None:
+        if record.get("hybrid") is True:
+            return "hybrid"
+        if record.get("remote") is True:
+            return "remote"
+        if record.get("on_site") is True:
+            return "on_site"
+        return None
+
+    def normalize(self, record: Mapping[str, Any]) -> JobPosting:
+        offer_id = _clean_text(record.get("id"), _ID_LIMIT)
+        slug = _clean_text(record.get("slug"), _ID_LIMIT)
+        if not offer_id and not slug:
+            raise ValueError("Recruitee offer has no ID.")
+        source_url = _optional_url(record.get("careers_url")) or (
+            self._public_url(slug or offer_id)
+        )
+        salary = _as_mapping(record.get("salary"))
+        salary_min, salary_max = _salary_bounds(salary.get("min"), salary.get("max"))
+        locations = self._location_values(record)
+        experience = _clean_text(record.get("experience_code"), 100).replace("_", " ")
+        return JobPosting(
+            source=self.source_name,
+            external_id=offer_id or slug,
+            source_url=source_url,
+            application_url=_optional_url(record.get("careers_apply_url"))
+            or source_url,
+            title=_clean_text(record.get("title"), _TITLE_LIMIT),
+            company=_clean_text(record.get("company_name"), _COMPANY_LIMIT)
+            or self.company[:_COMPANY_LIMIT],
+            location=locations[0] if locations else "",
+            workplace_type=self._workplace(record),
+            employment_type=_recruitee_employment(record.get("employment_type_code")),
+            salary_min=salary_min,
+            salary_max=salary_max,
+            currency=_currency(salary.get("currency")),
+            description=self._description(record),
+            seniority=_seniority(experience),
+            posted_at=_recruitee_timestamp(record.get("published_at"))
+            or _recruitee_timestamp(record.get("created_at")),
+            application_method="recruitee_careers_site_api",
+        )
+
+    def _load_offers(self) -> list[Any]:
+        payload = self._json_getter(self._base_url())
+        if not isinstance(payload, Mapping):
+            raise RuntimeError("Recruitee returned an invalid offers response.")
+        offers = payload.get("offers")
+        if not isinstance(offers, list):
+            raise RuntimeError("Recruitee returned an invalid offers list.")
+        return offers
+
+    def search(self, query: JobSearchQuery) -> JobSearchResult:
+        work_type, job_type = _validated_filters(query, "Recruitee")
+        jobs: list[JobPosting] = []
+        seen: set[str] = set()
+        for record in self._load_offers():
+            if not isinstance(record, Mapping):
+                continue
+            status = _clean_text(record.get("status"), 40).casefold()
+            if status and status != "published":
+                continue
+            try:
+                job = self.normalize(record)
+            except ValueError:
+                continue
+            if job.external_id in seen:
+                continue
+            tags = " ".join(
+                _clean_text(tag, 100)
+                for tag in _as_list(record.get("tags"))
+                if isinstance(tag, str)
+            )
+            keyword_text = f"{_clean_text(record.get('department'), 200)} {tags}"
+            if not _matches_locally(
+                query,
+                job,
+                work_type,
+                job_type,
+                keyword_text=keyword_text,
+                location_text=" | ".join(self._location_values(record)),
+            ):
+                continue
+            jobs.append(job)
+            seen.add(job.external_id)
+        return JobSearchResult(tuple(jobs))
+
+    def fetch_job(self, offer: str) -> JobPosting:
+        """Fetch one offer by its numeric id or its slug (the part after ``/o/``)."""
+        offer = str(offer or "").strip()
+        if not self._offer_re.fullmatch(offer):
+            raise ValueError("Enter a valid Recruitee offer ID or slug.")
+        payload = self._json_getter(self._offer_url(offer))
+        record = (
+            _as_mapping(payload).get("offer") if isinstance(payload, Mapping) else None
+        )
+        if not isinstance(record, Mapping):
+            raise RuntimeError("Recruitee returned an invalid offer response.")
+        return self.normalize(record)
+
+    def health(self) -> dict[str, Any]:
+        def probe() -> str:
+            count = sum(
+                1 for record in self._load_offers() if isinstance(record, Mapping)
+            )
+            return (
+                f"Recruitee company '{self.company}' responded with "
+                f"{count} published offer(s)."
+            )
+
+        return _health_report(self.source_name, probe)
+
+
+AtsAdapter = (
+    LeverJobAdapter
+    | AshbyJobAdapter
+    | SmartRecruitersJobAdapter
+    | WorkableJobAdapter
+    | RecruiteeJobAdapter
+)
 
 
 # --------------------------------------------------------------------------- #
@@ -1061,6 +1457,32 @@ SOURCE_CATALOG: tuple[SourceDescriptor, ...] = (
         ),
         capabilities=_ATS_CAPABILITIES,
     ),
+    SourceDescriptor(
+        source="workable",
+        label="Workable",
+        group="ats",
+        status="available",
+        access_method="Official public jobs feed for careers pages (GET)",
+        identifier_label="Account subdomain",
+        identifier_help=(
+            "The account subdomain is the first path segment of a careers URL such as "
+            "https://apply.workable.com/<account>/j/<shortcode>."
+        ),
+        capabilities=_ATS_CAPABILITIES,
+    ),
+    SourceDescriptor(
+        source="recruitee",
+        label="Recruitee",
+        group="ats",
+        status="available",
+        access_method="Official public Careers Site API (GET)",
+        identifier_label="Company subdomain",
+        identifier_help=(
+            "The company subdomain is the first part of a careers URL such as "
+            "https://<company>.recruitee.com/o/<offer>."
+        ),
+        capabilities=_ATS_CAPABILITIES,
+    ),
     _planned(
         "workday",
         "Workday",
@@ -1139,7 +1561,16 @@ def _build_ats_adapter(
         return AshbyJobAdapter(identifier, json_getter)
     if source == "smartrecruiters":
         return SmartRecruitersJobAdapter(identifier, json_getter)
+    if source == "workable":
+        return WorkableJobAdapter(identifier, json_getter)
+    if source == "recruitee":
+        return RecruiteeJobAdapter(identifier, json_getter)
     raise ValueError(f"Source {source} has no ATS adapter.")
+
+
+_ATS_ADAPTER_SOURCES = frozenset(
+    {"lever", "ashby", "smartrecruiters", "workable", "recruitee"}
+)
 
 
 def build_adapter(
@@ -1160,11 +1591,11 @@ def build_adapter(
         raise ValueError(f"Source {descriptor.label} is not available yet.")
     if key == "greenhouse":
         return GreenhouseJobAdapter(identifier, json_getter)
-    if key in {"lever", "ashby", "smartrecruiters"}:
+    if key in _ATS_ADAPTER_SOURCES:
         return _build_ats_adapter(key, identifier, json_getter)
     raise ValueError(
         f"Source {descriptor.label} is configured elsewhere; build_adapter supports "
-        "greenhouse, lever, ashby and smartrecruiters."
+        "greenhouse, lever, ashby, smartrecruiters, workable and recruitee."
     )
 
 
@@ -1197,6 +1628,18 @@ _SMARTRECRUITERS_HOSTS = frozenset(
 )
 _WORKDAY_HOST_RE = re.compile(r"^([a-z0-9-]{1,100})\.wd\d{1,3}\.myworkdayjobs\.com$")
 _SMARTRECRUITERS_POSTING_RE = re.compile(r"^(\d{1,30})(?:-.*)?$")
+_WORKABLE_APPLY_HOST = "apply.workable.com"
+# <account>.workable.com is the older careers address; these subdomains are Workable's own sites.
+_WORKABLE_HOST_RE = re.compile(r"^([a-z0-9][a-z0-9-]{0,99})\.workable\.com$")
+_WORKABLE_RESERVED = frozenset(
+    {"apply", "jobs", "www", "help", "resources", "api", "app", "blog", "status"}
+)
+_RECRUITEE_HOST_RE = re.compile(
+    r"^([a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?)\.recruitee\.com$"
+)
+_RECRUITEE_RESERVED = frozenset(
+    {"www", "app", "api", "blog", "support", "help", "status", "careers"}
+)
 
 
 def _greenhouse_reference(segments: list[str], query: str) -> PortalReference | None:
@@ -1247,8 +1690,51 @@ def _smartrecruiters_reference(segments: list[str]) -> PortalReference | None:
     return None
 
 
+def _workable_job(account: str, rest: list[str]) -> PortalReference | None:
+    """``[]`` is the account's board, ``["j", <shortcode>, ...]`` one job; anything else is unknown."""
+    if not WorkableJobAdapter._account_re.fullmatch(account):
+        return None
+    if not rest:
+        return PortalReference("workable", account, None)
+    if (
+        len(rest) >= 2
+        and rest[0] == "j"
+        and WorkableJobAdapter._shortcode_re.fullmatch(rest[1])
+    ):
+        return PortalReference("workable", account, rest[1].upper())
+    return None
+
+
+def _workable_reference(host: str, segments: list[str]) -> PortalReference | None:
+    if host == _WORKABLE_APPLY_HOST:
+        # apply.workable.com/j/<shortcode> names no account, so it cannot be read from the feed.
+        if not segments or segments[0] == "j":
+            return None
+        return _workable_job(segments[0].lower(), segments[1:])
+    match = _WORKABLE_HOST_RE.fullmatch(host)
+    if match is None or match.group(1) in _WORKABLE_RESERVED:
+        return None
+    return _workable_job(match.group(1), segments)
+
+
+def _recruitee_reference(host: str, segments: list[str]) -> PortalReference | None:
+    match = _RECRUITEE_HOST_RE.fullmatch(host)
+    if match is None or match.group(1) in _RECRUITEE_RESERVED:
+        return None
+    company = match.group(1)
+    if not segments:
+        return PortalReference("recruitee", company, None)
+    if (
+        len(segments) >= 2
+        and segments[0] == "o"
+        and RecruiteeJobAdapter._offer_re.fullmatch(segments[1])
+    ):
+        return PortalReference("recruitee", company, segments[1])
+    return None
+
+
 def detect_portal(url: str) -> PortalReference | None:
-    """Recognise Greenhouse, Lever, Ashby, SmartRecruiters and Workday careers URLs.
+    """Recognise Greenhouse, Lever, Ashby, SmartRecruiters, Workable, Recruitee and Workday careers URLs.
 
     Returns a :class:`PortalReference` whose ``external_id`` is set only for a
     single-posting URL, ``None`` for any other URL, and raises ``ValueError``
@@ -1266,6 +1752,10 @@ def detect_portal(url: str) -> PortalReference | None:
         return _uuid_portal_reference("ashby", AshbyJobAdapter._name_re, segments)
     if host in _SMARTRECRUITERS_HOSTS:
         return _smartrecruiters_reference(segments)
+    if host.endswith(".workable.com"):
+        return _workable_reference(host, segments)
+    if host.endswith(".recruitee.com"):
+        return _recruitee_reference(host, segments)
     workday = _WORKDAY_HOST_RE.fullmatch(host)
     if workday:
         return PortalReference("workday", workday.group(1), None)
@@ -1299,12 +1789,12 @@ def _get_greenhouse_job(
 def import_job_from_url(
     url: str, *, json_getter: JsonGetter | None = None
 ) -> JobPosting:
-    """Import one posting from a Greenhouse, Lever, Ashby or SmartRecruiters job URL."""
+    """Import one posting from a Greenhouse, Lever, Ashby, SmartRecruiters, Workable or Recruitee job URL."""
     reference = detect_portal(url)
     if reference is None:
         raise ValueError(
             "This link is not a supported job posting URL. Paste a Greenhouse, Lever, "
-            "Ashby or SmartRecruiters job page link."
+            "Ashby, SmartRecruiters, Workable or Recruitee job page link."
         )
     descriptor = find_source(reference.source)
     if descriptor is None or descriptor.status != "available":

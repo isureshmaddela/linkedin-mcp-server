@@ -498,7 +498,9 @@ class Dashboard:
                     if f"sources.{s}" in entitlements.features
                 ],
                 "linkedin_allowed": bool(
-                    policy["linkedin_allowed"] and entitlements.has("sources.linkedin")
+                    self.app.config.linkedin_automation
+                    and policy["linkedin_allowed"]
+                    and entitlements.has("sources.linkedin")
                 ),
                 "cover_letters": bool(
                     policy["cover_letters"] and entitlements.has("ai.cover_letters")

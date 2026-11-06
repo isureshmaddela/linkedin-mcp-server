@@ -1054,6 +1054,8 @@ EXPECTED_SOURCES = {
     "lever",
     "ashby",
     "smartrecruiters",
+    "workable",
+    "recruitee",
     "workday",
     "icims",
     "taleo",

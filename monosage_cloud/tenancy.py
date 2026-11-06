@@ -207,6 +207,18 @@ class Tenancy:
         self.invalidate_policy(actor.org_id)
         return updated
 
+    def _require_linkedin_operator(self, org_id: str, key: str) -> None:
+        """Turning a LinkedIn switch on needs the operator's switch (AIRA_CLOUD_LINKEDIN_AUTOMATION).
+
+        A switch that is already on stays stored as it is, so saving the rest of the policy keeps working; with the
+        operator's switch off it is simply not honoured (monosage_cloud/gate.py).
+        """
+        if self.app.config.linkedin_automation or self.org(org_id)["policy"].get(key):
+            return
+        from monosage_cloud.gate import LINKEDIN_OPERATOR_OFF
+
+        raise Forbidden(LINKEDIN_OPERATOR_OFF, code="linkedin_off")
+
     def _validate_policy(self, org_id: str, patch: dict[str, Any]) -> dict[str, Any]:
         entitlements = self.app.entitlements.resolve(org_id)
         unknown = sorted(set(patch) - set(DEFAULT_POLICY))
@@ -254,11 +266,13 @@ class Tenancy:
             elif key == "linkedin_allowed":
                 flag = self._bool(value, key)
                 if flag:
+                    self._require_linkedin_operator(org_id, key)
                     ent.require_feature(org_id, "sources.linkedin", label="LinkedIn")
                 cleaned[key] = flag
             elif key == "easy_apply_allowed":
                 flag = self._bool(value, key)
                 if flag:
+                    self._require_linkedin_operator(org_id, key)
                     ent.require_feature(org_id, "sources.linkedin", label="LinkedIn")
                     if self.app.flags.killed("linkedin.easy_apply"):
                         raise PlanRequired(
@@ -1194,8 +1208,10 @@ class Tenancy:
                 (org_id, candidate_id),
             )
         entitlements = self.app.entitlements.resolve(org_id)
-        linkedin_expected = bool(policy["linkedin_allowed"]) and entitlements.has(
-            "sources.linkedin"
+        linkedin_expected = (
+            self.app.config.linkedin_automation
+            and bool(policy["linkedin_allowed"])
+            and entitlements.has("sources.linkedin")
         )
         items = [
             {
@@ -1399,9 +1415,11 @@ class Tenancy:
     ) -> list[dict[str, Any]]:
         out: list[dict[str, Any]] = []
         policy = self.policy(org_id)
-        linkedin_expected = bool(
-            policy["linkedin_allowed"]
-        ) and self.app.entitlements.resolve(org_id).has("sources.linkedin")
+        linkedin_expected = (
+            self.app.config.linkedin_automation
+            and bool(policy["linkedin_allowed"])
+            and self.app.entitlements.resolve(org_id).has("sources.linkedin")
+        )
         for row, snapshot, has_coach in snapshots:
             issues = self.attention_for(row, snapshot, has_coach)
             if linkedin_expected and not row.get("linkedin_port"):
