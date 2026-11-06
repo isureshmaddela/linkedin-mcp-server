@@ -2,6 +2,48 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+## Monosage (aira)
+
+This repository is a fork of the LinkedIn MCP server; most of it is now Monosage (code name aira). The sections after
+this one are upstream's and apply to `linkedin_mcp_server/`.
+
+Layout:
+
+- `auto_apply_assistant.py`: the single-user app, a standard-library `ThreadingHTTPServer` on `127.0.0.1:8765`
+  (`uv run python auto_apply_assistant.py`). Its interface is static HTML, CSS and JS in `auto_apply_assistant/`
+  (no build step), with translations in `auto_apply_assistant/i18n/`.
+- `aira/`: domain modules (Careers: scoring, apply engine, email, documents, schema) and the suite apps under
+  `aira/suite/<app>` (Shop, Sites, Social, Videos, Life, Planner, Stocks and the rest), with `aira/suite/kit.py` as
+  their shared kit.
+- `monosage_cloud/`: the hosted, multi-tenant build (`uv run python -m monosage_cloud serve`, port 8780). It imports
+  `auto_apply_assistant` and uses `_connect` and `_request_context`, so keep their signatures. `aira_cloud` is its
+  old name, kept as an alias.
+- `linkedin_mcp_server/`: the upstream MCP server.
+- `tests/`: pytest (`tests/conftest.py`, stubs such as `serpapi_stub.py`, `cloud_support.py`) and `tests/js/*.test.mjs`
+  (plain node).
+
+Commands:
+
+- Install: `uv sync --extra cloud --group dev`; Chromium for browser tests: `uv run patchright install chromium`.
+- Quick tests (no browser): `uv run pytest -m "not browser" -n 4`. Browser tests: `uv run pytest -m browser -n 4`.
+  The whole suite takes about 50 minutes, so run the files you changed: `uv run pytest tests/test_x.py -q -n 4`.
+- JS tests: `for f in tests/js/*.test.mjs; do node "$f"; done`.
+- Lint and types: `uv run ruff check .`, `uv run ruff format .`, `uv run ty check` (checks the shipped packages,
+  configured in `[tool.ty.src]`).
+- Dependency audit (as CI runs it): `uv export --frozen --no-dev --extra cloud --no-hashes --no-emit-project -o
+  req.txt` then `uvx pip-audit --requirement req.txt --no-deps --disable-pip`.
+
+Test markers: `browser` is applied automatically by `tests/conftest.py` to every test that drives a real Chromium (the
+test, a fixture or a module helper calls the patchright launcher); do not add it by hand. `slow` is registered for
+tests to opt in to. `--strict-markers` is on, so register any new marker in `tests/conftest.py`.
+
+Schema rules: suite apps create their tables with `kit.ensure(connection, "<app>.vN", statements)` (idempotent
+`CREATE TABLE IF NOT EXISTS`, run once per database file; a new table or column is a new key). Careers tables change
+only through the versioned migrations in `aira/schema.py` (`MIGRATIONS`, applied by `migrate`); add a new migration
+rather than editing an old one.
+
+Never call live paid services from tests (`.env` may hold a real SerpApi key); use the stubs.
+
 ## Development Commands
 
 - Use `uv` for dependency management: `uv sync` (dev: `uv sync --group dev`)

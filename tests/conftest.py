@@ -1,4 +1,8 @@
+import inspect
 import os
+import re
+import sys
+from functools import cache
 
 import pytest
 
@@ -10,6 +14,97 @@ os.environ.setdefault(
 )  # Stocks: seeded offline prices; no test reaches Yahoo Finance
 
 from cloud_support import cloud  # noqa: F401  (the hosted-shell fixture, available to every test module)
+
+# --- markers -------------------------------------------------------------------------------------------------------
+# `browser` is applied automatically to every test that drives a real Chromium, so `pytest -m "not browser"` is the
+# quick run that needs no browser install, and CI runs the two halves as separate jobs. A test drives Chromium when it,
+# one of its fixtures, or a plain helper function in its module calls the patchright launcher
+# (`sync_playwright()`, `async_playwright()`, `.chromium.launch...`) from a module that imports the real launcher.
+# Upstream tests that only mock patchright never import the launcher, so they stay in the quick run.
+
+_LAUNCHER_IMPORT = re.compile(
+    r"importorskip\(\s*[\"'](?:patchright|playwright)\.(?:sync|async)_api"
+    r"|from (?:patchright|playwright)\.(?:sync|async)_api import [^\n#]*\b(?:sync|async)_playwright\b"
+)
+_LAUNCH_CALL = re.compile(r"\b(?:sync|async)_playwright\(\)|\.chromium\.launch")
+
+
+def pytest_configure(config):
+    config.addinivalue_line(
+        "markers",
+        "browser: drives a real Chromium through patchright (applied automatically; deselect with -m 'not browser')",
+    )
+    config.addinivalue_line(
+        "markers",
+        "slow: takes long enough to leave out of a quick run (deselect with -m 'not slow')",
+    )
+
+
+@cache
+def _module_imports_launcher(module_name: str) -> bool:
+    module = sys.modules.get(module_name)
+    if module is None:
+        return False
+    try:
+        source = inspect.getsource(module)
+    except (OSError, TypeError):
+        return False
+    return bool(_LAUNCHER_IMPORT.search(source))
+
+
+@cache
+def _code_launches(code, module_name: str) -> bool:
+    if not _module_imports_launcher(module_name):
+        return False
+    try:
+        source = inspect.getsource(code)
+    except (OSError, TypeError):
+        return False
+    return bool(_LAUNCH_CALL.search(source))
+
+
+def _launches(function) -> bool:
+    function = inspect.unwrap(function)
+    code = getattr(function, "__code__", None)
+    module_name = getattr(function, "__module__", None)
+    return bool(code and module_name) and _code_launches(code, module_name)
+
+
+@cache
+def _module_has_launch_helper(module_name: str) -> bool:
+    """A plain (non-test, non-fixture) function in the module's namespace launches Chromium, so any test there may."""
+    module = sys.modules.get(module_name)
+    if module is None:
+        return False
+    return any(
+        inspect.isfunction(value) and not name.startswith("test") and _launches(value)
+        for name, value in vars(module).items()
+    )
+
+
+def _drives_browser(item) -> bool:
+    function = getattr(item, "function", None)
+    if function is None:
+        return False
+    if _launches(function):
+        return True
+    module = getattr(item, "module", None)
+    if module is not None and _module_has_launch_helper(module.__name__):
+        return True
+    fixture_info = getattr(item, "_fixtureinfo", None)
+    if fixture_info is None:
+        return False
+    return any(
+        _launches(fixturedef.func)
+        for name in item.fixturenames
+        for fixturedef in fixture_info.name2fixturedefs.get(name, ())
+    )
+
+
+def pytest_collection_modifyitems(config, items):  # noqa: ARG001
+    for item in items:
+        if item.get_closest_marker("browser") is None and _drives_browser(item):
+            item.add_marker(pytest.mark.browser)
 
 
 @pytest.fixture(autouse=True)

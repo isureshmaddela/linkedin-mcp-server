@@ -12,10 +12,9 @@ from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 from fastmcp import FastMCP
-from fastmcp.exceptions import ToolError
+from fastmcp.exceptions import ToolError, ValidationError
 from linkedin_sales_nav_stub import PAGE_SIZE, SalesNavStub, make_leads
 from patchright.async_api import async_playwright
-from pydantic import ValidationError
 from test_tools import get_tool_fn
 
 from linkedin_mcp_server.core.exceptions import (

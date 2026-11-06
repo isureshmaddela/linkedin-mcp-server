@@ -306,7 +306,7 @@ def test_follow_up_fixture():
     result = classify_email(
         FOLLOW_UP_SUBJECT,
         FOLLOW_UP_BODY,
-        sender="suresh@gmail.com",
+        sender="candidate@gmail.test",
         received_at=RECEIVED,
     )
     assert result.category == "follow_up"
@@ -652,10 +652,10 @@ def test_interview_type_is_not_reported_for_other_categories():
 def test_known_companies_take_precedence_and_canonical_casing_is_returned():
     body = "We loved chatting about acme robotics and your experience."
     with_known = classify_email(
-        "Catching up", body, sender="jane@gmail.com", known_companies=["Acme Robotics"]
+        "Catching up", body, sender="jane@gmail.test", known_companies=["Acme Robotics"]
     )
     assert with_known.details.company == "Acme Robotics"
-    without_known = classify_email("Catching up", body, sender="jane@gmail.com")
+    without_known = classify_email("Catching up", body, sender="jane@gmail.test")
     assert without_known.details.company is None
 
 
@@ -664,7 +664,7 @@ def test_known_companies_take_precedence_and_canonical_casing_is_returned():
     [
         ("recruiting@nimbus-cloud.co.uk", "Nimbus Cloud"),
         ("no-reply@greenhouse-mail.io", None),
-        ("jane@gmail.com", None),
+        ("jane@gmail.test", None),
         ("jobs@acme.lever.co", None),
     ],
 )
@@ -853,7 +853,7 @@ def test_html_to_text_strips_script_and_style_and_keeps_breaks():
 def _build_multipart_message(pdf_bytes: bytes) -> EmailMessage:
     message = EmailMessage()
     message["From"] = "Jane Smith <jane@acme.com>"
-    message["To"] = "Suresh <suresh@gmail.com>"
+    message["To"] = "Suresh <candidate@example.com>"
     message["Cc"] = "coord@acme.com"
     message["Subject"] = "Interview – Acme Robotics"
     message["Date"] = format_datetime(
@@ -878,7 +878,7 @@ def test_parse_eml_multipart_prefers_plain_text_and_never_exposes_attachment_byt
     assert parsed.subject == "Interview – Acme Robotics"
     assert parsed.sender_name == "Jane Smith"
     assert parsed.sender_email == "jane@acme.com"
-    assert parsed.recipients == ("suresh@gmail.com", "coord@acme.com")
+    assert parsed.recipients == ("candidate@example.com", "coord@acme.com")
     assert parsed.received_at == "2026-03-03T10:00:00-08:00"
     assert parsed.message_id == "<abc123@acme.com>"
     assert parsed.text == "Plain text body.\nJoin: https://zoom.us/j/123456789"

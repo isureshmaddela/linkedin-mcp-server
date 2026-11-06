@@ -34,16 +34,19 @@ classifiers = [
 ]
 dependencies = [
     "anthropic>=2.3.0",
-    "fastmcp>=3.0.0",
+    "cryptography>=50.0.0",  # aira/documents.py, aira/airaapi/store.py (Fernet); >=50 for the audited fixes
+    "fastmcp>=3.4.10",
     "inquirer>=3.4.0",
     "patchright>=1.40.0",
-    "pypdf>=6.21.2",
+    "pypdf>=6.21.4",  # parses uploaded resumes; >=6.21.4 for the audited fixes
     "python-dotenv>=1.1.1",
+    "tzdata>=2024.1; sys_platform == 'win32'",  # zoneinfo has no system database on Windows
 ]
 
 [project.optional-dependencies]
 cloud = [
     "psycopg[binary,pool]>=3.3.6",
+    "pyjwt[crypto]>=2.15.0",  # monosage_cloud/sso.py (OIDC ID tokens, JWKS keys)
     "signxml>=4",
     "websockets>=14",
 ]
@@ -63,13 +66,29 @@ linkedin-scraper-mcp = "linkedin_mcp_server.cli_main:main"
 requires = ["setuptools>=68.0", "wheel"]
 build-backend = "setuptools.build_meta"
 
+[tool.setuptools]
+# The single-user app is a top-level module; Monosage Cloud imports it (monosage_cloud/gateway.py, worker.py, ...).
+py-modules = ["auto_apply_assistant"]
+
 [tool.setuptools.packages.find]
-include = ["linkedin_mcp_server*", "aira*", "monosage_cloud*"]
-exclude = ["assets*", "docs*", "tests*"]
+# auto_apply_assistant/ (the app's interface files) and docs/legal (the legal pages Monosage Cloud serves) are data
+# directories that the code finds next to itself, so they are shipped as namespace packages at the same place.
+include = [
+    "linkedin_mcp_server*",
+    "aira*",
+    "monosage_cloud*",
+    "auto_apply_assistant",
+    "auto_apply_assistant.i18n",
+    "docs.legal",
+]
+exclude = ["assets*", "tests*"]
 
 [tool.setuptools.package-data]
 linkedin_mcp_server = ["py.typed"]
 "aira.airaapi" = ["catalog/*.json"]
+auto_apply_assistant = ["*.html", "*.css", "*.js"]
+"auto_apply_assistant.i18n" = ["*.json"]
+"docs.legal" = ["*.md"]
 
 [dependency-groups]
 dev = [
@@ -81,4 +100,18 @@ dev = [
     "pytest-xdist>=3.8.0",
     "ruff>=0.11.11",
     "ty>=0.0.1a12",
+]
+
+[tool.ruff.lint]
+# ruff's default rule set, stated so a ruff upgrade does not change what CI checks.
+select = ["E4", "E7", "E9", "F"]
+
+[tool.ty.src]
+# The shipped code only: the tests (about 1,700 diagnostics, mostly in fixtures and stubs) are not type-checked yet.
+include = [
+    "aira",
+    "aira_cloud",
+    "auto_apply_assistant.py",
+    "linkedin_mcp_server",
+    "monosage_cloud",
 ]

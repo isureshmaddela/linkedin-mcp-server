@@ -9,7 +9,7 @@ Aira is a local-first AI Career Copilot layered beside the existing LinkedIn MCP
 | Layer | Technology | Why |
 |---|---|---|
 | API and scheduler | Python 3.12+, `http.server` (threaded), stdlib `sqlite3` | The repository already used this stack; no framework migration was justified. |
-| Domain modules | `aira/` package (pure functions, connection injection) | Testable in isolation; the server module only wires routes. |
+| Domain modules | `aira/` package (pure functions, connection injection) | Testable in isolation. The server module still holds whole domains of its own (see Server below); moving them into `aira/` is open work. |
 | LinkedIn | Existing FastMCP + Patchright server, one isolated worker per account | Preserves the upstream integration unchanged. |
 | SerpApi (API and Careers) | `aira/airaapi/` (catalog of 136 engines, client, store, service, `/v1` compatibility layer, Careers) | One validated key, one recorded and cached call path for the console, Careers, the Jobs-tab Google source and scripts. `urllib` only. |
 | ATS and Google Jobs | `linkedin_mcp_server/job_sources.py` (contracts, LinkedIn, Greenhouse, Google/SerpApi) and `aira/ats.py` (Lever, Ashby, SmartRecruiters, catalog, portal detection) | Official public APIs only, injected transports for tests. |
@@ -49,6 +49,7 @@ service + store + client]
 - **Request context** (`threading.local`): data path, user ID, LinkedIn worker port, actor email, correlation ID, and source (`user` or `schedule`).
 - **Services**: thin database-bound wrappers (`_query_jobs`, `_score_job_record`, `_unified_search`, `_import_job_from_url`, `_prepare_application`, `_submit_application`, `_import_email`, `_apply_email_action`, `_dashboard`, `_export_account`, `_delete_account`) that call `aira.*` with an explicit connection.
 - **Scheduler**: unchanged in-process loop that runs LinkedIn job/inbox schedules per connected account with backoff.
+- **Domains still in the server module**: it is not only route wiring. About 12,500 lines hold local accounts and sessions (`accounts.sqlite3`), the per-account LinkedIn login and worker processes, the inbox cache and replies, email apply (about 2,000 lines), password reset mail, and the 160-odd `RequestHandler` routes. `monosage_cloud` imports its internals (`_connect`, `_request_context`), so their signatures are kept stable.
 
 ### Domain modules (`aira/`)
 

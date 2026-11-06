@@ -494,7 +494,7 @@ class _ConnectedLinkedIn:
                     "company": "Northwind Cloud",
                     "location": "Austin, Texas",
                     "profile_url": "https://www.linkedin.com/sales/lead/ACwAAA111,NAME_SEARCH",
-                    "linkedin_url": "https://www.linkedin.com/in/maria-lopez-77",
+                    "linkedin_url": "https://www.linkedin.com/in/maria-lopez-example",
                     "degree": "2nd",
                     "tenure_in_role": "2 years",
                 },

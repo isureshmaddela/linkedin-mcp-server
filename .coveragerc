@@ -1,5 +1,12 @@
 [run]
-source = linkedin_mcp_server
+# Importable names, not directories: auto_apply_assistant is both a module (the single-user app) and a folder of
+# interface files next to it, and only the module is code.
+source_pkgs =
+    linkedin_mcp_server
+    aira
+    aira_cloud
+    monosage_cloud
+    auto_apply_assistant
 branch = true
 omit = linkedin_mcp_server/__main__.py
 

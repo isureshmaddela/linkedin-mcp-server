@@ -23,10 +23,11 @@ account menu (that is where they agree to automation on their own behalf), so th
 from __future__ import annotations
 
 import os
+import re
 import sqlite3
 import tempfile
 from dataclasses import dataclass, field
-from pathlib import Path
+from pathlib import Path, PurePosixPath, PureWindowsPath
 from typing import TYPE_CHECKING, Any
 
 from cryptography.fernet import Fernet, InvalidToken
@@ -96,6 +97,20 @@ def _read_only(path: Path) -> sqlite3.Connection:
     return connection
 
 
+_WINDOWS_DRIVE = re.compile(r"^[A-Za-z]:")
+
+
+def stored_file_name(stored: str) -> str:
+    """The file name in a path the single-user build stored, whichever system wrote it.
+
+    A Windows installation stores ``D:\\...`` or ``D:/...``; read on Linux, ``Path`` would treat the whole string as
+    one name. Backslashes or a drive letter mean a Windows path; anything else is a POSIX one.
+    """
+    if "\\" in stored or _WINDOWS_DRIVE.match(stored):
+        return PureWindowsPath(stored).name
+    return PurePosixPath(stored).name
+
+
 def _local_account(source: Path, email: str) -> tuple[str, Path]:
     """The local account's id and database. The path is taken under ``source`` so a moved folder still works."""
     accounts = source / "accounts.sqlite3"
@@ -113,7 +128,7 @@ def _local_account(source: Path, email: str) -> tuple[str, Path]:
         connection.close()
     if row is None:
         raise NotFound(f"No local account for {email} at {source}.")
-    name = Path(str(row["data_path"])).name
+    name = stored_file_name(str(row["data_path"]))
     path = (
         source / name if name == "applications.sqlite3" else source / "accounts" / name
     )
