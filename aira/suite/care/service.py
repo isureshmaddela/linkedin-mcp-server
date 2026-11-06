@@ -1132,17 +1132,35 @@ def notify_missed(
             ).rowcount
             if not claimed:
                 continue
+            # A notice may show on a lock screen or in a shared inbox: it never names the medicine.
             for caregiver in caregivers(connection, person["id"]):
                 if not caregiver["notify_missed"]:
                     continue
-                address = caregiver["email"]
-                if caregiver["caregiver_id"] and not address:
+                if caregiver["caregiver_id"]:
+                    # someone in the household: their notification centre, their browsers and (their choice,
+                    # on by default for medicines) email (aira/notify)
                     try:
-                        address = life.get(connection, caregiver["caregiver_id"])[
-                            "email"
-                        ]
+                        them = life.get(connection, caregiver["caregiver_id"])
                     except LookupError:
-                        address = ""
+                        continue
+                    from aira import notify as aira_notify
+
+                    aira_notify.notify(
+                        connection,
+                        them,
+                        "medicine",
+                        f"{person['name']} missed a scheduled medicine",
+                        f"It was due at {slot['time']}. You may want to check in with them.",
+                        "/#/care",
+                        urgency="high",
+                        detail=f"{slot['name']} {slot['dose']}".strip(),
+                        key=f"missed:{slot['medicine_id']}:{slot['date']}:{slot['time']}:{them['id']}",
+                        email_to=caregiver["email"],
+                        kind="missed_dose",
+                    )
+                    sent += 1
+                    continue
+                address = caregiver["email"]
                 if not address:
                     continue
                 kit.queue_email(
@@ -1150,10 +1168,10 @@ def notify_missed(
                     APP,
                     "missed_dose",
                     to=address,
-                    subject=f"{person['name']} has not taken {slot['name']}",
+                    subject=f"{person['name']} has not taken a scheduled medicine",
                     body=(
                         f"Hello {caregiver['name'] or ''},\n\n"
-                        f"{person['name']} has not marked {slot['name']} {slot['dose']} as taken. It was due at "
+                        f"{person['name']} has not marked a scheduled medicine as taken. It was due at "
                         f"{slot['time']} on {slot['date']}.\n\nYou may want to check in with them.\n\n"
                         f"Open Monosage: {kit.public_url('/#/care', origin)}\n\n"
                         f"You receive this because {person['name']} made you their caregiver in Monosage Health."

@@ -341,7 +341,9 @@ def test_caregivers_hear_about_a_missed_dose_once(db, people):
         "nurse@clinic.example",
         "pat@home.example",
     ]
-    assert "Rosa has not taken Metformin" in mails[0]["subject"]
+    # a notice may show on a lock screen or in a shared inbox: it never names the medicine
+    assert all("scheduled medicine" in m["subject"] for m in mails)
+    assert not [m for m in mails if "Metformin" in m["subject"] + m["body"]]
     alert = next(
         a for a in service.alerts(db, pat, now) if a["id"].startswith("missed:")
     )
@@ -549,7 +551,8 @@ def test_a_household_on_the_local_build(env, api, local_index):
     assert (
         len(missed) == 1
         and missed[0]["recipient"] == "careers@example.com"
-        and "Statin" in missed[0]["subject"]
+        and "scheduled medicine" in missed[0]["subject"]
+        and "Statin" not in missed[0]["subject"] + missed[0]["body"]
     )
     alerts = [
         a for a in pat.get("/api/life/pulse")["alerts"] if a["id"].startswith("missed:")
