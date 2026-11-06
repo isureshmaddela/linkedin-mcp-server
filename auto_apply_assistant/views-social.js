@@ -953,6 +953,7 @@
       thread.replaceChildren(...(state.messages.length ? state.messages.map((item) => {
         const bubble = h("div", { style: { maxWidth: "100%", padding: "10px 14px", borderRadius: "18px", background: item.mine ? "var(--brand)" : "var(--surface-2)", color: item.mine ? "var(--on-brand)" : "var(--ink)", fontSize: "16px", whiteSpace: "pre-wrap", overflowWrap: "anywhere" } },
           item.deleted ? h("em", { text: "This message was deleted." }) : null,
+          item.held ? h("em", { text: "Waiting for a safety check: not delivered yet." }) : null,
           item.text ? h("div", { text: item.text }) : null,
           item.photo ? h("a", { href: item.photo, target: "_blank", rel: "noopener noreferrer" }, h("img", { src: item.photo, alt: `Photo from ${item.author.name}`, loading: "lazy", referrerpolicy: "no-referrer", style: { maxWidth: "100%", borderRadius: "10px", marginTop: "6px" } })) : null);
         return h("div", { style: { display: "flex", gap: "8px", alignItems: "flex-end", justifyContent: item.mine ? "flex-end" : "flex-start" } },
@@ -994,8 +995,11 @@
     const send = async () => {
       const text = input.value.trim();
       if (!text) { input.focus(); return; }
-      await api(`/chats/${chatId}/messages`, { method: "POST", body: { text } });
+      const sent = await api(`/chats/${chatId}/messages`, { method: "POST", body: { text } });
       input.value = "";
+      if (sent && sent.held) Aira.toast(sent.notice || "This message is waiting for a safety check.", "info");
+      // Someone who writes about hurting themselves sees where to get help at once.
+      if (sent && sent.support) Aira.modal({ title: "You are not alone", body: h("p", { style: { whiteSpace: "pre-wrap" }, text: sent.support }), actions: [{ label: "Close", kind: "primary" }] });
       await poll(true);
       input.focus();
     };
@@ -1024,7 +1028,7 @@
       await api(`/chats/${chatId}/messages`, { method: "POST", body: { photo: photo.ref } });
       await poll(true);
     }, { kind: "ghost", icon: "soPhoto" });
-    const linkButton = S.button("Photo link", () => S.edit({ title: "Send a photo", fields: [{ name: "photo", label: "Photo link (https://…)", type: "url", required: true }], onSave: async (values) => { await api(`/chats/${chatId}/messages`, { method: "POST", body: { photo: values.photo } }); await poll(true); } }), { kind: "ghost sm" });
+    const linkButton = null; // photos come from the device only: a link could tell its website who looks at it
     const sendButton = h("button", { type: "button", class: "btn", disabled: closed, style: { minHeight: "52px", minWidth: "110px", fontSize: "17px" }, text: "Send", onclick: (event) => Aira.withBusy(event.currentTarget, send) });
     const about = chat.listing_id ? h("p", { class: "muted small", style: { margin: 0 } }, h("span", { text: "This chat is about something on the Marketplace. " }), h("a", { href: `#/social?tab=market&listing=${chat.listing_id}`, text: "See the listing" })) : null;
     const threadCard = h("section", { class: "card suite-section", style: { minWidth: "0" } }, ...kids(head, about, thread,
@@ -1050,6 +1054,20 @@
     }, { kind: "secondary sm" })];
   };
   // A grown-up's answer to a child's new friend.
+  // A guardian's list of the adults outside the family who may contact this child or teen.
+  const approvedContacts = async (child) => {
+    const box = h("div", { class: "suite-form" });
+    const draw = async () => {
+      const data = await api(`/guardian/${child.id}/contacts`);
+      const handle = h("input", { type: "text", placeholder: "@name", "aria-label": "Their Social name" });
+      box.replaceChildren(
+        data.contacts.length ? h("ul", { class: "life-people" }, ...data.contacts.map((person) => personRow(person, S.button("Remove", async () => { await api(`/guardian/${child.id}/contacts/${person.id}`, { method: "DELETE" }); await draw(); }, { kind: "ghost sm" })))) : h("p", { class: "muted", text: "Nobody yet." }),
+        data.can_change ? h("div", { class: "btn-row" }, handle, S.button("Approve", async () => { try { await api(`/guardian/${child.id}/contacts`, { method: "POST", body: { handle: handle.value } }); await draw(); } catch (error) { Aira.reportError(error); } }, { kind: "sm" })) : null);
+    };
+    await draw();
+    Aira.modal({ title: `Approved contacts of ${child.name}`, body: box, actions: [{ label: "Done", kind: "primary" }] });
+  };
+
   const guardianRow = (item, after) => h("li", { class: "life-person", style: { display: "flex", gap: "10px", alignItems: "center", flexWrap: "wrap" } },
     face(item.other, 40),
     h("div", { style: { flex: "1 1 220px", minWidth: "0" } },
@@ -1083,6 +1101,7 @@
       const closeIds = new Set(close.people.map((person) => person.id));
       panel.replaceChildren(...kids(
         data.children_asking && data.children_asking.length ? S.section(`Your children's new friends (${data.children_asking.length})`, h("p", { class: "muted", text: "A child's new friend from outside your family waits for a grown-up to say yes." }), h("ul", { class: "life-people" }, ...data.children_asking.map((item) => guardianRow(item, draw)))) : null,
+        data.young_in_household && data.young_in_household.length ? S.section("Who may contact your children", h("p", { class: "muted", text: "Adults outside your family can befriend and message a child or a teen only if you approve them here. Teens can always talk to each other." }), h("ul", { class: "life-people" }, ...data.young_in_household.map((child) => personRow(child, S.button("Approved contacts", () => approvedContacts(child), { kind: "secondary sm" }))))) : null,
         data.incoming.length ? S.section(`Friend requests (${data.incoming.length})`, h("ul", { class: "life-people" }, ...data.incoming.map((person) => personRow(person, relationButtons(person, "request_received", draw))))) : null,
         data.awaiting_parent && data.awaiting_parent.length ? S.section("Waiting for a grown-up", h("ul", { class: "life-people" }, ...data.awaiting_parent.map((person) => personRow(person, relationButtons(person, "awaiting_parent", draw))))) : null,
         S.section(`Your friends (${data.friends.length})`, data.friends.length ? h("ul", { class: "life-people" }, ...data.friends.map((person) => personRow(person, S.button(`Message ${person.name}`, () => message(person), { kind: "secondary sm" }), closeToggle(person, closeIds.has(person.id), draw), S.button("Unfriend", async () => { if (await Aira.confirm({ title: `Unfriend ${person.name}?`, message: "You can send a new request later.", confirmLabel: "Unfriend" })) { await api(`/friends/${person.id}`, { method: "DELETE" }); await draw(); } }, { kind: "ghost sm" })))) : Aira.ui.empty("No friends yet", "Search for people you know above, or accept a request.")),
@@ -1200,7 +1219,7 @@
     { name: "condition", label: "Condition", type: "select", options: Object.entries(CONDITION_LABELS) },
     { name: "about", label: "Description", type: "textarea", rows: 4, placeholder: "Size, colour, what is included, why you are selling" },
     { name: "place", label: "Where to pick it up (town or area)", placeholder: "Riverside" },
-    { name: "photos", label: "Photo links (https://…), one per line (or add photos from your device below)", type: "textarea", rows: 2 },
+    { name: "photos", label: "Photos already added (add photos from your device below)", type: "textarea", rows: 2 },
     { name: "audience", label: "Who can see it", type: "select", options: [["public", "Everyone on Social"], ["friends", "Only my friends"]] },
     { name: "payment_link", label: "Your payment link (optional, https://…)", type: "url", hint: "Buyers pay you there or in person. Monosage never handles the money." },
     setup.business ? { name: "for_business", label: `Sell it for ${setup.business.name}`, type: "checkbox", hint: `The sale counts in the Business hub.${setup.business.has_payment_link ? " Buyers see the business's payment link if you leave yours empty." : ""}` } : null,
@@ -1381,7 +1400,7 @@
         { name: "handle", label: "Your @name", required: true, hint: "3 to 30 letters, numbers, dots or underscores." },
         { name: "bio", label: "About you", type: "textarea", rows: 3 },
         { name: "links", label: "Links in your bio: one per line, as Label | https://…", type: "textarea", rows: 3, placeholder: "My shop | https://example.com" },
-        { name: "avatar", label: "Picture: an emoji or an https:// photo link (or tap the camera on your picture)" },
+        { name: "avatar", label: "Picture: an emoji (or tap the camera on your picture to upload a photo)" },
         young(me) ? null : { name: "visibility", label: "Who can see your profile and public posts", type: "select", options: [["public", "Everyone"], ["private", "Only my friends"]] },
         young(me) ? null : { name: "open_messages", label: "Let people who are not my friends message me", type: "checkbox" },
       ].filter(Boolean),
@@ -1528,6 +1547,19 @@
     for (const [label, items] of groups) body.append(h("section", { class: "card so-notes" }, h("h2", { class: "suite-h2", text: label }), h("ul", { class: "so-note-list" }, ...items.map(row))));
   }
 
+  // What was copied with a report when it was filed: the chat (and, for Dating, both profiles), for moderators only.
+  const transcriptLines = (lines) => h("ol", { class: "muted small", style: { margin: "4px 0", paddingLeft: "18px" } }, ...(lines || []).slice(-30).map((m) => h("li", { text: `${when(m.at)} ${m.by ? `[${m.by}]` : ""} ${m.deleted ? "(deleted) " : ""}${m.hidden ? "(hidden) " : ""}${m.text || (m.photo ? "📷" : "")}` })));
+  const evidenceNode = (item) => {
+    if (item.withheld) return h("p", { class: "muted small", text: "Dating evidence is kept for Monosage's moderators." });
+    const data = item.data || {};
+    const profiles = data.profiles ? Object.entries(data.profiles).map(([side, p]) => p && p.dating_profile ? h("p", { class: "muted small", text: `[${side}] ${p.dating_profile.first_name}: ${p.dating_profile.bio || ""}` }) : null) : [];
+    return h("details", { class: "so-evidence" }, h("summary", { text: item.kind === "dating" ? "Dating evidence (chat and profiles)" : "The chat around it" }),
+      ...profiles,
+      data.transcript ? transcriptLines(data.transcript) : null,
+      data.live_chat ? transcriptLines(data.live_chat) : null,
+      ...(data.ended_chats || []).map((chat) => h("div", {}, h("p", { class: "muted small", text: `A match that ended (${chat.reason}) ${when(chat.ended_at)}` }), transcriptLines(chat.transcript))));
+  };
+
   async function moderationTab(body) {
     const draw = async () => {
       const data = await api("/moderation");
@@ -1538,10 +1570,11 @@
           h("div", { style: { flex: "1 1 260px", minWidth: "0" } },
             h("span", { class: "life-line-text", text: `A ${REPORT_LABELS[item.target_type]}${item.author ? ` by ${item.author.name} (@${item.author.handle})` : ""}` }),
             item.preview ? h("span", { class: "life-line-sub", style: { whiteSpace: "pre-wrap" }, text: `“${item.preview}”` }) : null,
-            h("span", { class: "muted life-line-sub", text: `Reported by ${item.reporter ? item.reporter.name : "someone"} ${when(item.created_at)}: ${item.reason}` })),
+            h("span", { class: "muted life-line-sub", text: item.automatic ? `Held by the automatic check ${when(item.created_at)}: ${item.reason}` : `Reported by ${item.reporter ? item.reporter.name : "someone"} ${when(item.created_at)}: ${item.reason}` }),
+            ...(item.evidence || []).map(evidenceNode)),
           item.target_type === "account" ? null : S.button("Hide it", async () => { await api(`/moderation/${item.id}`, { method: "POST", body: { action: "hide" } }); await draw(); }, { kind: "sm" }),
           item.can_suspend ? S.button("Suspend the person", async () => { if (await Aira.confirm({ title: "Suspend this person?", message: "Their posts, comments and stories disappear and they cannot post or message.", confirmLabel: "Suspend", danger: true })) { await api(`/moderation/${item.id}`, { method: "POST", body: { action: "suspend" } }); await draw(); } }, { kind: "ghost sm" }) : null,
-          S.button("Nothing wrong", async () => { await api(`/moderation/${item.id}`, { method: "POST", body: { action: "dismiss" } }); await draw(); }, { kind: "ghost sm" })))) : Aira.ui.empty("Nothing to review", "Reports from your household, or about your household's people, appear here.")),
+          S.button(item.held ? "Deliver it" : "Nothing wrong", async () => { await api(`/moderation/${item.id}`, { method: "POST", body: { action: item.held ? "release" : "dismiss" } }); await draw(); }, { kind: "ghost sm" })))) : Aira.ui.empty("Nothing to review", "Reports from your household, or about your household's people, appear here.")),
         S.section("Blocked words", h("p", { class: "muted", text: "These words are hidden with stars in posts, comments and messages. Separate them with commas." }), words,
           h("div", { class: "btn-row" }, S.button("Save words", async () => { await api("/moderation/words", { method: "PUT", body: { words: words.value.split(",").map((w) => w.trim()).filter(Boolean) } }); Aira.toast("Saved.", "success"); }))));
     };
@@ -1640,7 +1673,7 @@
     const form = S.form([
       { name: "display_name", label: "Your name", required: true },
       { name: "handle", label: "Your @name (people find you by it)", required: true, hint: "3 to 30 letters, numbers, dots or underscores." },
-      { name: "avatar", label: "Picture: an emoji or an https:// photo link" },
+      { name: "avatar", label: "Picture: an emoji (you can upload a photo later)" },
       { name: "bio", label: "About you (optional)", type: "textarea", rows: 2 },
       young ? null : { name: "visibility", label: "Who can see your profile", type: "select", options: [["public", "Everyone"], ["private", "Only my friends"]] },
     ].filter(Boolean), { display_name: info.name, handle: info.suggested_handle, avatar: info.avatar, visibility: "public" });

@@ -966,6 +966,17 @@ def friends_overview(sc: sqlite3.Connection, me_: dict[str, Any]) -> dict[str, A
         "outgoing": outgoing,
         "awaiting_parent": waiting,
         "children_asking": guardian_requests(sc, me_),
+        # the household's children and teens whose approved contacts this grown-up keeps
+        "young_in_household": [
+            mini(_account(r) or {})
+            for r in rows(
+                sc,
+                "SELECT * FROM so_accounts WHERE home = ? AND id != ? AND age_group IN ('child', 'teen') ORDER BY display_name",
+                (me_.get("home") or "", me_["id"]),
+            )
+        ]
+        if me_["age_group"] in ("adult", "senior") and me_.get("home")
+        else [],
         "suggestions": suggestions(sc, me_),
     }
 

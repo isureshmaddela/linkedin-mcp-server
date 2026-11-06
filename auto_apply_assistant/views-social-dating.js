@@ -222,21 +222,10 @@
           safePhoto(src) ? h("img", { src, alt: `Your photo ${i + 1}`, referrerpolicy: "no-referrer" }) : h("span", { class: "sd-thumb-empty", text: "📷" }),
           i === 0 ? h("figcaption", { text: "Main" }) : null,
           h("button", { type: "button", class: "sd-thumb-remove", "aria-label": `Remove photo ${i + 1}`, text: "✕", onclick: () => { draft.photos.splice(i, 1); drawGrid(); } }))),
-        // empty places fill the row; each opens the upload (or the link box)
-        ...Array.from({ length: draft.photos.length >= options.max_photos ? 0 : (3 - (draft.photos.length % 3)) % 3 || 3 }, () => h("button", { type: "button", class: "sd-thumb sd-thumb-slot", "aria-label": "Add a photo", onclick: () => (upload ? upload.click() : link.focus()) }, h("span", { "aria-hidden": "true", text: "+" }))));
+        // empty places fill the row; each opens the upload
+        ...Array.from({ length: draft.photos.length >= options.max_photos ? 0 : (3 - (draft.photos.length % 3)) % 3 || 3 }, () => h("button", { type: "button", class: "sd-thumb sd-thumb-slot", "aria-label": "Add a photo", onclick: () => { if (upload) upload.click(); } }, h("span", { "aria-hidden": "true", text: "+" }))));
       drawGrid();
-      const link = h("input", { type: "url", placeholder: "https://…", "aria-label": "Photo link" });
-      const addLink = () => {
-        const value = link.value.trim();
-        if (!value) { link.focus(); return; }
-        if (!/^https:\/\//i.test(value)) { fail("Photo links must start with https://."); return; }
-        if (draft.photos.length >= options.max_photos) { fail(`Add up to ${options.max_photos} photos.`); return; }
-        fail("");
-        draft.photos.push(value);
-        link.value = "";
-        drawGrid();
-      };
-      link.addEventListener("keydown", (event) => { if (event.key === "Enter") { event.preventDefault(); addLink(); } });
+      // Only photos from the device: a link to a picture elsewhere could tell that website who looks at it.
       // Photos from the device (Social's upload: shrunk in the browser, metadata taken out, kept as the person's own).
       const kit = Aira.socialKit;
       const canUpload = !!(kit && kit.uploadPhoto && kit.choosePhotos);
@@ -254,7 +243,7 @@
       const counter = h("span", { class: "muted small sd-counter", text: `${draft.bio.length}/300` });
       return [
         grid,
-        h("div", { class: "sd-add-photo" }, upload, h("div", { class: "sd-grow" }, field(canUpload ? "Or add a photo link" : "Add a photo link", link)), S.button("Add", addLink, { kind: "secondary" })),
+        h("div", { class: "sd-add-photo" }, upload),
         h("p", { class: "muted small", text: "Profiles with at least two photos are liked far more often. The first photo is your main one." }),
         field("A few words about you (optional)", bio), counter,
       ];
