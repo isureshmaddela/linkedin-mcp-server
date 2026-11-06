@@ -11,6 +11,9 @@ from typing import Any
 
 from aira import apps as app_catalog
 from aira.airaapi.http import Raw, Request, aira_route
+from aira.payments import apps as _payment_apps  # noqa: F401 - registers what each app lets customers pay
+from aira.payments import razorpay
+from aira.payments import service as payments
 from aira.suite import kit, life, public
 
 BASE = "/api/suite"
@@ -121,6 +124,9 @@ def home(request: Request) -> tuple[int, dict[str, Any]]:
             "outbox": kit.outbox_counts(connection),
             "email_ready": bool(kit.email_settings(connection)["smtp_host"])
             or kit.lent_mail() is not None,
+            # payments that need the business (a different amount arrived, an order cancelled meanwhile)
+            "payments_attention": payments.counts(connection)["attention"],
+            "public_links": _reachability(request),
         }
         data["goal"] = _goal(connection, data["revenue"]["this_month_cents"])
     return 200, data
@@ -163,6 +169,12 @@ def business_get(request: Request) -> tuple[int, dict[str, Any]]:
         return 200, {
             "business": kit.business(connection),
             "currencies": list(kit.CURRENCIES),
+            "tax_modes": list(kit.TAX_MODES),
+            "gst_states": [
+                {"code": code, "name": name} for code, name in kit.GST_STATES.items()
+            ],
+            "public_address": kit.public_address(connection),
+            "public_links": _reachability(request),
         }
 
 
@@ -171,6 +183,8 @@ def business_save(request: Request) -> tuple[int, dict[str, Any]]:
     _grown_up(request)
     with request.connect() as connection:
         saved = kit.save_business(connection, request.payload)
+        if "public_address" in request.payload:
+            kit.save_public_address(connection, request.payload.get("public_address"))
         kit.log(
             connection,
             "core",
@@ -179,8 +193,201 @@ def business_save(request: Request) -> tuple[int, dict[str, Any]]:
             actor=_actor(request),
         )
         connection.commit()
+        address = kit.public_address(connection)
     request.audit("suite.business_update", "suite", "business")
-    return 200, {"business": saved}
+    return 200, {
+        "business": saved,
+        "public_address": address,
+        "public_links": _reachability(request),
+    }
+
+
+def _reachability(request: Request) -> dict[str, Any]:
+    """Where customers' links point, and whether someone elsewhere can open them (a loopback address cannot)."""
+    sample = kit.public_url("/p/", request)
+    loopback = kit.is_loopback_url(sample)
+    return {
+        "origin": sample.removesuffix("/p/"),
+        "loopback": loopback,
+        "warning": "Links you send customers point to this computer (127.0.0.1), so nobody else can open them. "
+        "Set a public address: run a tunnel (Cloudflare Tunnel or ngrok) to this computer and enter its https address."
+        if loopback
+        else "",
+    }
+
+
+# ---------------------------------------------------------------------------
+# payments (Business hub > Business profile > Payments; aira/payments)
+# ---------------------------------------------------------------------------
+
+
+def _payments_view(request: Request, connection: Any) -> dict[str, Any]:
+    settings = kit.payment_settings(connection)
+    has_secret = bool(payments.key_secret(connection, request.secret_store))
+    has_webhook = bool(payments.webhook_secret(connection, request.secret_store))
+    path = payments.webhook_path(connection) if settings["provider"] == "razorpay" else ""
+    webhook_url = kit.public_url(path, request) if path else ""
+    return {
+        "settings": {
+            key: settings[key]
+            for key in (
+                "provider",
+                "razorpay_key_id",
+                "notify_customer",
+                "link_expiry_hours",
+                "upi_id",
+                "upi_name",
+            )
+        },
+        "providers": list(kit.PAYMENT_PROVIDERS),
+        "mode": kit.payment_mode(settings),
+        # secrets are never sent to the browser: only whether they are saved
+        "has_key_secret": has_secret,
+        "has_webhook_secret": has_webhook,
+        "ready": kit.online_ready(settings) and has_secret,
+        "webhook_url": webhook_url,
+        "webhook_events": list(payments.WEBHOOK_EVENTS),
+        "webhook_reachable": bool(webhook_url) and not kit.is_loopback_url(webhook_url),
+        "counts": payments.counts(connection),
+        "attention": payments.list_requests(connection, status="attention", limit=20),
+        "business_currency": kit.business(connection)["currency"],
+    }
+
+
+@aira_route("GET", f"{BASE}/payments")
+def payments_get(request: Request) -> tuple[int, dict[str, Any]]:
+    _grown_up(request)
+    with request.connect() as connection:
+        payments.ensure(connection)
+        return 200, _payments_view(request, connection)
+
+
+@aira_route("POST", f"{BASE}/payments")
+def payments_save(request: Request) -> tuple[int, dict[str, Any]]:
+    """Save how customers pay. ``key_secret`` and ``webhook_secret`` go to the secret store (encrypted) and are
+    never sent back; ``clear_key_secret`` / ``clear_webhook_secret`` remove them."""
+    _grown_up(request)
+    payload = request.payload
+    from aira.airaapi import store as airastore
+
+    with request.connect() as connection:
+        payments.ensure(connection)
+        for field, name, clear in (
+            ("key_secret", kit.RAZORPAY_KEY_SECRET, "clear_key_secret"),
+            ("webhook_secret", kit.RAZORPAY_WEBHOOK_SECRET, "clear_webhook_secret"),
+        ):
+            value = payload.get(field)
+            if isinstance(value, str) and value.strip():
+                secret = value.strip()
+                if len(secret) > 200 or any(ch.isspace() for ch in secret):
+                    raise ValueError("That secret does not look right: paste it again from the Razorpay dashboard.")
+                request.secret_store.put(connection, name, secret, airastore.now_utc())
+            elif payload.get(clear):
+                request.secret_store.delete(connection, name)
+        raw = dict(payload)
+        raw["key_secret_saved"] = bool(payments.key_secret(connection, request.secret_store))
+        raw["webhook_secret_saved"] = bool(payments.webhook_secret(connection, request.secret_store))
+        kit.save_payment_settings(connection, raw)
+        kit.log(connection, "core", "payments", "Payment settings updated", actor=_actor(request))
+        connection.commit()
+        view = _payments_view(request, connection)
+    request.audit("suite.payment_settings", "suite", "payments", {"provider": view["settings"]["provider"], "mode": view["mode"]})
+    return 200, view
+
+
+@aira_route("POST", f"{BASE}/payments/test")
+def payments_test(request: Request) -> tuple[int, dict[str, Any]]:
+    """Test connection: one small read with the saved key id and key secret."""
+    _grown_up(request)
+    with request.connect() as connection:
+        result = payments.client(connection, request.secret_store).check()
+    return 200, {"ok": True, "mode": result["mode"]}
+
+
+@aira_route("GET", f"{BASE}/payments/requests")
+def payment_requests(request: Request) -> tuple[int, dict[str, Any]]:
+    _grown_up(request)
+    with request.connect() as connection:
+        return 200, {
+            "requests": payments.list_requests(
+                connection,
+                status=request.q("status"),
+                app=request.q("app"),
+                limit=request.qint("limit", 100, 1, 500),
+            ),
+            "counts": payments.counts(connection),
+        }
+
+
+@aira_route("POST", f"{BASE}/payments/requests")
+def payment_request_create(request: Request) -> tuple[int, dict[str, Any]]:
+    """Create (or reuse) a payment link for an order, an invoice, a booking...: ``{app, object_type, object_id}``."""
+    _grown_up(request)
+    payload = request.payload
+    app = kit.text(payload.get("app"), "the app", max_len=40, required=True)
+    object_type = kit.text(payload.get("object_type"), "what to pay", max_len=40, required=True)
+    object_id = kit.text(payload.get("object_id"), "the item", max_len=64, required=True)
+    with request.connect() as connection, kit.origin_of(request):
+        made = payments.create_request(
+            connection,
+            app,
+            object_type,
+            object_id,
+            secret_store=request.secret_store,
+            actor=_actor(request),
+        )
+    request.audit("suite.payment_link", app, object_id, {"amount_cents": made["amount_cents"]})
+    return 201, {"request": made}
+
+
+@aira_route("POST", f"{BASE}/payments/requests/([0-9a-f]{{32}})/refund")
+def payment_request_refund(request: Request) -> tuple[int, dict[str, Any]]:
+    """Refund a paid request, all of it or ``amount_cents`` of it."""
+    _grown_up(request)
+    payload = request.payload
+    with request.connect() as connection:
+        made = payments.refund(
+            connection,
+            request.match.group(1),
+            amount_cents=payload.get("amount_cents"),
+            note=kit.text(payload.get("note"), "a note", max_len=300),
+            secret_store=request.secret_store,
+            actor=_actor(request),
+        )
+    request.audit("suite.payment_refund", made["app"], made["object_id"], {"refunded_cents": made["refunded_cents"]})
+    return 200, {"request": made}
+
+
+@aira_route("POST", f"{BASE}/payments/requests/([0-9a-f]{{32}})/cancel")
+def payment_request_cancel(request: Request) -> tuple[int, dict[str, Any]]:
+    _grown_up(request)
+    with request.connect() as connection:
+        made = payments.cancel_request(connection, request.match.group(1), secret_store=request.secret_store)
+    return 200, {"request": made}
+
+
+@aira_route("POST", rf"/api/payments/razorpay/webhook/{TOKEN}", auth="public_link")
+def razorpay_webhook(request: Request) -> tuple[int, dict[str, Any]]:
+    """Razorpay's webhook for one business (the token names its database). The signature over the raw body is
+    checked before anything else; a body over the size limit is refused unread by the server."""
+    body = bytes(request.body or b"")
+    if len(body) > payments.MAX_WEBHOOK_BYTES:
+        raise ValueError("The webhook body is too large.")
+    with request.connect() as connection:
+        link = public.resolve(connection, request.match.group(1))
+        if not payments.is_webhook_link(link):
+            raise LookupError("Not found.")
+        try:
+            result = payments.handle_webhook(
+                connection,
+                body,
+                signature=request.header("X-Razorpay-Signature"),
+                event_id=request.header("X-Razorpay-Event-Id"),
+                secret_store=request.secret_store,
+            )
+        except razorpay.RazorpayError as error:
+            raise RuntimeError(str(error)) from None
+    return 200, result
 
 
 @aira_route("GET", f"{BASE}/activity")
@@ -217,6 +424,7 @@ def revenue(request: Request) -> tuple[int, dict[str, Any]] | Raw:
                         "source_type",
                         "source_id",
                         "voided_at",
+                        "kind",
                     ),
                 ),
                 "text/csv; charset=utf-8",
@@ -380,7 +588,12 @@ def public_action(request: Request) -> tuple[int, dict[str, Any]]:
         "user_agent": request.header("User-Agent")[:200],
         "base_url": request.base_url(),  # for links in emails: see kit.public_url
     }
-    with request.connect() as connection:
+    # a "Pay online" button makes a payment link with the business's key secret (aira/payments)
+    with (
+        request.connect() as connection,
+        payments.secrets(request.secret_store),
+        kit.origin_of(request),  # a payment link brings the customer back to the address they used
+    ):
         return public.act(
             connection,
             request.match.group(1),

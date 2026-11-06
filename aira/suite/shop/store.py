@@ -158,12 +158,24 @@ ADDED_COLUMNS = (
     ("sh_orders", "po_number", "TEXT NOT NULL DEFAULT ''"),
     ("sh_orders", "terms", "TEXT NOT NULL DEFAULT 'prepay'"),
     ("sh_orders", "due_on", "TEXT NOT NULL DEFAULT ''"),
+    # Online payments (aira.payments) and anonymous orders: when an unpaid storefront order lapses and gives its
+    # stock back, whether it was sent to pay online, a hash of the visitor's address (order caps), when it lapsed.
+    ("sh_orders", "expires_at", "TEXT NOT NULL DEFAULT ''"),
+    ("sh_orders", "pay_online", "INTEGER NOT NULL DEFAULT 0"),
+    ("sh_orders", "client_key", "TEXT NOT NULL DEFAULT ''"),
+    ("sh_orders", "expired_at", "TEXT NOT NULL DEFAULT ''"),
+    ("sh_orders", "refunded_cents", "INTEGER NOT NULL DEFAULT 0"),
+    # GST: the customer's state (CGST + SGST or IGST), the tax lines as printed, and whether prices included tax.
+    ("sh_orders", "customer_state", "TEXT NOT NULL DEFAULT ''"),
+    ("sh_orders", "tax_lines", "TEXT NOT NULL DEFAULT '[]'"),
+    ("sh_orders", "prices_include_tax", "INTEGER NOT NULL DEFAULT 0"),
+    ("sh_products", "hsn_sac", "TEXT NOT NULL DEFAULT ''"),  # HSN (goods) or SAC (services) code on invoices
 )
 
 
 def _add_columns(connection: sqlite3.Connection) -> None:
     """Add the business columns to a database made by an older Shop (safe to run any number of times)."""
-    marker = (kit._db_file(connection), "shop.columns.v3")  # noqa: SLF001 - kit.ensure's own marker,
+    marker = (kit._db_file(connection), "shop.columns.v4")  # noqa: SLF001 - kit.ensure's own marker,
     if marker in kit._ensured:  # noqa: SLF001 - so kit.forget_schema() resets it too
         return
     tables: dict[str, set[str]] = {}
@@ -177,6 +189,9 @@ def _add_columns(connection: sqlite3.Connection) -> None:
             tables[table].add(column)
     connection.execute(
         "CREATE INDEX IF NOT EXISTS sh_orders_trade ON sh_orders (trade_account_id, payment_status)"
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS sh_orders_expiry ON sh_orders (payment_status, expires_at)"
     )
     connection.commit()
     kit._ensured.add(marker)  # noqa: SLF001
@@ -290,6 +305,9 @@ def decode_order(row: Mapping[str, Any]) -> dict[str, Any]:
     order["items"] = kit.loads(order.get("items"), []) or []
     order["history"] = kit.loads(order.get("history"), []) or []
     order["restocked"] = bool(order.get("restocked"))
+    order["tax_lines"] = kit.loads(order.get("tax_lines"), []) or []
+    order["prices_include_tax"] = bool(order.get("prices_include_tax"))
+    order["pay_online"] = bool(order.get("pay_online"))
     return order
 
 
@@ -435,6 +453,12 @@ SETTINGS_DEFAULTS: dict[str, Any] = {
     "trade_min_order_cents": 0,  # the least a business order may come to before tax and delivery (0 = none)
     "trade_require_po": False,  # business orders must carry a purchase-order number
     "trade_intro": "",  # shown to businesses on the storefront: "Wholesale for cafes and shops. Net 30 available."
+    # Anonymous storefront orders: an unpaid one lapses and gives its stock back (0 = never), and one email, phone
+    # or visitor address may place only so many an hour (stock hoarding, and a spam relay through confirmations).
+    "unpaid_expiry_online_minutes": 30,  # sent to pay online (Razorpay)
+    "unpaid_expiry_manual_hours": 48,  # paying by the business's own link, a transfer or at pickup
+    "max_orders_per_contact_hour": 5,
+    "max_orders_per_visitor_hour": 20,
 }
 TRADE_APPROVALS = ("manual", "auto")
 
@@ -524,6 +548,42 @@ def save_settings(
             ),
         }
     )
+    clean.update(
+        {
+            "unpaid_expiry_online_minutes": kit.integer(
+                merged["unpaid_expiry_online_minutes"],
+                "how long an online order waits for payment (minutes)",
+                default=30,
+                minimum=0,
+                maximum=24 * 60,
+            ),
+            "unpaid_expiry_manual_hours": kit.integer(
+                merged["unpaid_expiry_manual_hours"],
+                "how long an order waits for payment (hours)",
+                default=48,
+                minimum=0,
+                maximum=24 * 60,
+            ),
+            "max_orders_per_contact_hour": kit.integer(
+                merged["max_orders_per_contact_hour"],
+                "orders per email or phone an hour",
+                default=5,
+                minimum=1,
+                maximum=1000,
+            ),
+            "max_orders_per_visitor_hour": kit.integer(
+                merged["max_orders_per_visitor_hour"],
+                "orders per visitor an hour",
+                default=20,
+                minimum=1,
+                maximum=10000,
+            ),
+        }
+    )
+    if 0 < clean["unpaid_expiry_online_minutes"] < 16:
+        raise ValueError(
+            "An online order waits at least 16 minutes for payment (Razorpay keeps a link open at least 15)."
+        )
     if clean["referrals_enabled"] and not (
         clean["referral_friend_percent"] or clean["referral_reward_cents"]
     ):

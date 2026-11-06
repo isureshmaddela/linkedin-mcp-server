@@ -212,7 +212,7 @@
       clearTimeout(timer);
       if (!cart.length) { quote = null; renderTotals(); renderCartLines(); return; }
       timer = setTimeout(async () => {
-        try { quote = (await ctx.action("quote", { items: cart, discount_code: discount, delivery_method: method, ...trade() })).quote; totalsError.textContent = ""; }
+        try { quote = (await ctx.action("quote", { items: cart, discount_code: discount, delivery_method: method, customer_state: stateSelect ? stateSelect.value : "", ...trade() })).quote; totalsError.textContent = ""; }
         catch (error) { quote = null; totalsError.textContent = error.message; }
         renderTotals();
         renderCartLines();
@@ -229,12 +229,19 @@
         row("Subtotal", money(quote.subtotal_cents)),
         quote.discount_cents ? row(`${quote.referral ? "Friend's code" : "Discount"} (${quote.discount_code})`, `-${money(quote.discount_cents)}`) : quote.referral ? row(`Friend's code (${quote.discount_code})`, "Added") : null,
         quote.delivery_method === "delivery" ? row("Delivery", quote.delivery_cents ? money(quote.delivery_cents) : "Free") : null,
-        quote.tax_cents ? row(quote.tax_label, money(quote.tax_cents)) : null,
+        ...taxRows(quote, row, money),
         row("Total", money(quote.total_cents), true),
         quote.buyer_type === "business" && quote.savings_cents ? row("You save on trade prices", money(quote.savings_cents)) : null,
         quote.buyer_type === "business" ? row("Payment", quote.terms === "prepay" ? quote.terms_label : `${quote.terms_label}, due ${ctx.date(quote.due_on)}`) : null)));
     }
 
+    // GST: the customer's state picks CGST + SGST (same state as the shop) or IGST (another state).
+    const stateSelect = (page.gst_states || []).length
+      ? h("select", { "aria-label": "Your state", onchange: () => requote() }, ...page.gst_states.map((s) => h("option", { value: s.code, text: s.name, selected: s.code === page.home_state })))
+      : null;
+    // Bot checks: a field people never see (bots fill it in) and the form's signed start time.
+    const trap = h("input", { type: "text", name: "website", tabindex: "-1", autocomplete: "off" });
+    const trapField = h("div", { "aria-hidden": "true", style: { position: "absolute", left: "-10000px", top: "auto", width: "1px", height: "1px", overflow: "hidden" } }, h("label", { text: "Leave this empty" }), trap);
     const name = h("input", { autocomplete: "name", required: true });
     const email = h("input", { type: "email", autocomplete: "email" });
     const phone = h("input", { type: "tel", autocomplete: "tel" });
@@ -295,15 +302,20 @@
           if (!email.value.trim() && !phone.value.trim()) { email.focus(); throw new Error("Enter an email address or a phone number."); }
           payload = { items: cart, discount_code: discount, delivery_method: method, name: name.value, email: email.value, phone: phone.value, address: method === "delivery" ? address.value : "", note: note.value };
         }
+        Object.assign(payload, { website: trap.value, form_token: page.form_token || "", customer_state: stateSelect ? stateSelect.value : "" });
         const result = await ctx.action("place_order", payload);
         cart = [];
         saveCart(ctx.token, account, cart);
         confirmation(result);
+        // paying online: straight to Razorpay's page, which brings the customer back to their order
+        if (result.pay_url && /^https:\/\//i.test(result.pay_url)) location.assign(result.pay_url);
       });
       place.disabled = !page.open;
       const details = account
         ? h("div", { class: "pub-form" }, ctx.field(`PO number${buyers.require_po ? "" : " (optional)"}`, po, `Ordering as ${account.company} (${account.email}).`), addressField, ctx.field("Note", note))
-        : h("div", { class: "pub-form" }, ctx.field("Your name", name), ctx.field("Email", email, "For your order confirmation"), ctx.field("Phone", phone), addressField, ctx.field("Note", note));
+        : h("div", { class: "pub-form" }, ctx.field("Your name", name), ctx.field("Email", email, "For your order confirmation"), ctx.field("Phone", phone), addressField, stateSelect ? ctx.field("Your state", stateSelect, "For GST on your invoice") : null, ctx.field("Note", note));
+      if (account && stateSelect) details.append(ctx.field("Your state", stateSelect, "For GST on your invoice"));
+      details.append(trapField);
       // Native replaceChildren would print "null" for a missing part: keep only real nodes.
       cartBox.replaceChildren(...[
         h("h2", { text: `Your cart (${cart.reduce((sum, line) => sum + line.quantity, 0).toLocaleString()})` }),
@@ -328,9 +340,10 @@
           h("h1", { text: business ? `Thank you, ${order.company}!` : `Thank you, ${order.customer_name.split(" ")[0]}!` }),
           h("p", { text: `Your order number is #${order.number}${order.po_number ? ` (PO ${order.po_number})` : ""}. Total ${money(order.total_cents, order.currency)}.` }),
           later ? h("p", { class: "pub-notice", text: `${order.terms_label}: please pay by ${ctx.date(order.due_on)}. Your invoice is on your order page.` }) : null,
+          result.pay_url ? h("p", { class: "pub-notice", role: "status", text: "Taking you to the secure payment page…" }) : order.pay_by ? h("p", { class: "pub-muted", text: `Please pay by ${ctx.datetime(order.pay_by)}: an unpaid order is cancelled after that.` }) : null,
           h("p", { class: "pub-muted", text: order.delivery_method === "delivery" ? "We will let you know when it ships." : "We will let you know when it is ready to pick up." }),
           h("div", { class: "pub-btn-row" }, h("a", { class: "pub-btn secondary", href: result.link, text: business ? "See your order and invoice" : "See your order" }), ctx.button("Copy order link", () => ctx.copy(`${location.origin}${result.link}`), "ghost"))),
-        order.total_cents ? ctx.paymentBox(order.total_cents, `#${order.number}`) : null,
+        order.total_cents ? ctx.paymentBox(order.total_cents, `#${order.number}`, result.pay_url) : null,
       ].filter(Boolean));
       window.scrollTo({ top: 0, behavior: "smooth" });
     }
@@ -355,7 +368,8 @@
     const payment = { unpaid: [business && order.due_on ? `Due ${ctx.date(order.due_on)}` : "Waiting for payment", ""], paid: ["Paid", "good"], refunded: ["Refunded", "bad"] }[order.payment_status] || [order.payment_status, ""];
     const row = (label, value, strong) => h("tr", {}, h("td", { text: label }), h("td", { class: `num${strong ? " pub-total" : ""}`, text: value }));
     const reference = h("input", { placeholder: "Payment reference (optional)", "aria-label": "Payment reference" });
-    root.append(
+    // Native append prints "null" for a missing part (a consumer order has no invoice card): keep only real nodes.
+    root.append(...[
       h("section", { class: "pub-card" },
         h("h1", { text: business ? `Invoice for order #${order.number}` : `Order #${order.number}` }),
         h("div", { class: "pub-btn-row" }, h("span", { class: `pub-badge ${payment[1]}`, text: payment[0] }), cancelled ? h("span", { class: "pub-badge bad", text: "Cancelled" }) : null),
@@ -366,13 +380,15 @@
       h("section", { class: "pub-card" },
         h("h2", { text: "Items" }),
         h("table", { class: "pub-table" }, h("tbody", {},
-          ...order.items.map((line) => row(`${line.quantity.toLocaleString()} × ${line.name}${line.option ? ` (${line.option})` : ""}${business ? ` @ ${money(line.unit_cents, order.currency)}` : ""}`, money(line.line_cents, order.currency))),
+          ...order.items.map((line) => row(`${line.quantity.toLocaleString()} × ${line.name}${line.option ? ` (${line.option})` : ""}${line.hsn_sac ? ` · HSN/SAC ${line.hsn_sac}` : ""}${business ? ` @ ${money(line.unit_cents, order.currency)}` : ""}`, money(line.line_cents, order.currency))),
           row("Subtotal", money(order.subtotal_cents, order.currency)),
           order.discount_cents ? row(`Discount (${order.discount_code})`, `-${money(order.discount_cents, order.currency)}`) : null,
           order.delivery_method === "delivery" ? row("Delivery", order.delivery_cents ? money(order.delivery_cents, order.currency) : "Free") : null,
-          order.tax_cents ? row("Tax", money(order.tax_cents, order.currency)) : null,
-          row("Total", money(order.total_cents, order.currency), true)))),
-    );
+          ...taxRows({ ...order, tax_label: "Tax" }, row, (cents) => money(cents, order.currency)),
+          row("Total", money(order.total_cents, order.currency), true),
+          order.refunded_cents ? row("Refunded", `-${money(order.refunded_cents, order.currency)}`) : null))),
+    ].filter(Boolean));
+    if (order.payment_status === "unpaid" && !cancelled && order.pay_by) root.append(h("p", { class: "pub-muted", text: `Please pay by ${ctx.datetime(order.pay_by)}: an unpaid order is cancelled after that and its items go back on sale.` }));
     if (order.payment_status === "unpaid" && !cancelled) {
       const box = ctx.paymentBox(order.total_cents, `#${order.number}`);
       if (box) root.append(box);
@@ -381,6 +397,13 @@
     }
     if (order.referral) root.append(shareCard(ctx, order.referral));
   });
+
+  // Tax as the invoice prints it: one line, or CGST + SGST / IGST under GST; "included" when prices include it.
+  function taxRows(quote, row, money) {
+    const lines = Array.isArray(quote.tax_lines) && quote.tax_lines.length ? quote.tax_lines : quote.tax_cents ? [{ label: quote.tax_label || "Tax", cents: quote.tax_cents, rate_bp: 0 }] : [];
+    const incl = quote.prices_include_tax ? " (included)" : "";
+    return lines.map((line) => row(`${line.label}${line.rate_bp ? ` ${Number(line.rate_bp) / 100}%` : ""}${incl}`, money(line.cents)));
+  }
 
   // A business order is its invoice: who sells, who buys, the tax numbers, the PO number and when it is due.
   function invoiceCard(ctx, seller, order) {

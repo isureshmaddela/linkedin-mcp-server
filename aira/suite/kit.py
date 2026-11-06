@@ -530,8 +530,14 @@ BUSINESS_DEFAULTS: dict[str, Any] = {
     # Who the business sells to: consumers (B2C), other businesses (B2B) or both. The apps read it: the shop offers
     # trade accounts, wholesale prices and payment terms to businesses; Sites writes for the right buyer.
     "sell_to": "consumers",
+    # Tax: "flat" adds tax_rate_bp to every invoice and order; "gst" (an Indian business with a GSTIN in tax_id,
+    # selling in INR) splits it into CGST + SGST inside its own state and IGST to other states (tax_breakdown).
+    "tax_mode": "flat",
+    "prices_include_tax": False,  # True: prices already include the tax (shown as "incl."), nothing is added
+    "state_code": "",  # the business's GST state code ("29" Karnataka); read from the GSTIN when empty
 }
 SELL_TO = ("consumers", "businesses", "both")
+TAX_MODES = ("flat", "gst")
 
 
 def business(connection: sqlite3.Connection) -> dict[str, Any]:
@@ -573,16 +579,30 @@ def save_business(
         "sell_to": choice(
             merged["sell_to"], "who you sell to", SELL_TO, default="consumers"
         ),
+        "tax_mode": choice(merged["tax_mode"], "the tax mode", TAX_MODES, default="flat"),
+        "prices_include_tax": flag(merged["prices_include_tax"]),
+        "state_code": text(merged["state_code"], "the state code", max_len=2),
     }
+    if clean["tax_mode"] == "gst":
+        clean["tax_id"] = clean["tax_id"].upper().replace(" ", "")
+        if clean["currency"] != "INR":
+            raise ValueError("GST is for prices in Indian rupees: set the currency to INR first.")
+        if not valid_gstin(clean["tax_id"]):
+            raise ValueError(
+                "Enter your 15-character GSTIN as your tax number (for example 29ABCDE1234F1Z5) to charge GST."
+            )
+        clean["state_code"] = clean["state_code"] or clean["tax_id"][:2]
+    if clean["state_code"] and clean["state_code"] not in GST_STATES:
+        raise ValueError("Pick your state from the list (its GST state code).")
     set_setting(connection, "core", "business", clean)
     connection.commit()
     return clean
 
 
 def public_business(connection: sqlite3.Connection) -> dict[str, Any]:
-    """What customers see on a public page (never the internal settings)."""
+    """What customers see on a public page (never the internal settings, never a key or a secret)."""
     profile = business(connection)
-    return {
+    shown = {
         key: profile[key]
         for key in (
             "name",
@@ -597,8 +617,368 @@ def public_business(connection: sqlite3.Connection) -> dict[str, Any]:
             "payment_link",
             "payment_instructions",
             "tax_id",
+            "prices_include_tax",
         )
     }
+    pay = payment_settings(connection)
+    provider = pay["provider"]
+    if provider != "manual":
+        shown["payment_link"] = ""  # "none" and Razorpay do not send customers to a fixed page
+    shown["payment_provider"] = provider
+    shown["online_payments"] = online_ready(pay)
+    shown["upi_id"] = pay["upi_id"] if profile["currency"] == "INR" else ""
+    shown["upi_name"] = (pay["upi_name"] or profile["name"]) if shown["upi_id"] else ""
+    return shown
+
+
+# ---------------------------------------------------------------------------
+# taxes: a flat rate, or GST (CGST + SGST inside the state, IGST between states)
+# ---------------------------------------------------------------------------
+
+# GST state and union territory codes (the first two digits of a GSTIN).
+GST_STATES: dict[str, str] = {
+    "01": "Jammu and Kashmir",
+    "02": "Himachal Pradesh",
+    "03": "Punjab",
+    "04": "Chandigarh",
+    "05": "Uttarakhand",
+    "06": "Haryana",
+    "07": "Delhi",
+    "08": "Rajasthan",
+    "09": "Uttar Pradesh",
+    "10": "Bihar",
+    "11": "Sikkim",
+    "12": "Arunachal Pradesh",
+    "13": "Nagaland",
+    "14": "Manipur",
+    "15": "Mizoram",
+    "16": "Tripura",
+    "17": "Meghalaya",
+    "18": "Assam",
+    "19": "West Bengal",
+    "20": "Jharkhand",
+    "21": "Odisha",
+    "22": "Chhattisgarh",
+    "23": "Madhya Pradesh",
+    "24": "Gujarat",
+    "26": "Dadra and Nagar Haveli and Daman and Diu",
+    "27": "Maharashtra",
+    "29": "Karnataka",
+    "30": "Goa",
+    "31": "Lakshadweep",
+    "32": "Kerala",
+    "33": "Tamil Nadu",
+    "34": "Puducherry",
+    "35": "Andaman and Nicobar Islands",
+    "36": "Telangana",
+    "37": "Andhra Pradesh",
+    "38": "Ladakh",
+    "97": "Other Territory",
+}
+_GSTIN = re.compile(r"^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][1-9A-Z]Z[0-9A-Z]$")
+_GSTIN_CHARS = "0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+_HSN = re.compile(r"^[0-9]{4,8}$")
+
+
+def valid_gstin(value: Any) -> bool:
+    """A 15-character GSTIN with a known state code and a correct check character."""
+    code = str(value or "").strip().upper()
+    if not _GSTIN.match(code) or code[:2] not in GST_STATES:
+        return False
+    total = 0
+    for index, character in enumerate(code[:14]):
+        product = _GSTIN_CHARS.index(character) * (1 if index % 2 == 0 else 2)
+        total += product // 36 + product % 36
+    return _GSTIN_CHARS[(36 - total % 36) % 36] == code[14]
+
+
+def hsn_code(value: Any) -> str:
+    """An HSN (goods) or SAC (services) code: 4 to 8 digits, or empty."""
+    cleaned = text(value, "the HSN/SAC code", max_len=8).replace(" ", "")
+    if cleaned and not _HSN.match(cleaned):
+        raise ValueError("An HSN or SAC code is 4 to 8 digits.")
+    return cleaned
+
+
+def state_code(value: Any) -> str:
+    """A customer's state as a GST state code: the code itself ("29"), or the state's name."""
+    cleaned = text(value, "the state", max_len=60)
+    if not cleaned:
+        return ""
+    if cleaned.zfill(2) in GST_STATES and cleaned.isdigit():
+        return cleaned.zfill(2)
+    for code, name in GST_STATES.items():
+        if name.lower() == cleaned.lower():
+            return code
+    raise ValueError(f"{cleaned} is not an Indian state or union territory.")
+
+
+def gst_applies(profile: Mapping[str, Any]) -> bool:
+    return (
+        profile.get("tax_mode") == "gst"
+        and profile.get("currency") == "INR"
+        and valid_gstin(profile.get("tax_id"))
+    )
+
+
+def tax_breakdown(
+    profile: Mapping[str, Any],
+    taxable_cents: int,
+    *,
+    customer_state: str = "",
+    rate_bp: int | None = None,
+    exempt: bool = False,
+) -> dict[str, Any]:
+    """The tax on ``taxable_cents`` (goods after discounts) under the business's settings.
+
+    ``added_cents`` is what goes on top of the price (0 when prices include the tax); ``tax_cents`` is the tax
+    either way; ``lines`` are the lines an invoice prints: one flat line, or CGST + SGST (half the rate each) when
+    the customer is in the business's own state, or IGST when they are in another one. A customer whose state is
+    not known is taken to be in the business's state."""
+    rate = int(profile.get("tax_rate_bp") or 0) if rate_bp is None else int(rate_bp)
+    inclusive = bool(profile.get("prices_include_tax"))
+    amount = max(0, int(taxable_cents))
+    if exempt or rate <= 0 or amount <= 0:
+        tax = 0
+    elif inclusive:
+        tax = int(
+            (Decimal(amount) * Decimal(rate) / Decimal(10000 + rate)).quantize(
+                Decimal("1"), rounding=ROUND_HALF_UP
+            )
+        )
+    else:
+        tax = percent_of(amount, rate)
+    result: dict[str, Any] = {
+        "rate_bp": rate,
+        "inclusive": inclusive,
+        "tax_cents": tax,
+        "added_cents": 0 if inclusive else tax,
+        "net_cents": amount - tax if inclusive else amount,
+        "gst": False,
+        "supply": "",
+        "place_of_supply": "",
+        "lines": [],
+    }
+    if gst_applies(profile):
+        home = str(profile.get("state_code") or str(profile.get("tax_id"))[:2])
+        place = customer_state or home
+        result.update(gst=True, place_of_supply=place)
+        if place == home:
+            central = tax // 2 + (tax % 2)
+            result["supply"] = "intra"
+            result["lines"] = [
+                {"label": "CGST", "rate_bp": rate / 2, "cents": central},
+                {"label": "SGST", "rate_bp": rate / 2, "cents": tax - central},
+            ] if tax else []
+        else:
+            result["supply"] = "inter"
+            result["lines"] = [{"label": "IGST", "rate_bp": rate, "cents": tax}] if tax else []
+    elif tax:
+        result["lines"] = [
+            {"label": str(profile.get("tax_label") or "Tax"), "rate_bp": rate, "cents": tax}
+        ]
+    return result
+
+
+# ---------------------------------------------------------------------------
+# how customers pay online (Business hub > Business profile > Payments)
+# ---------------------------------------------------------------------------
+
+PAYMENT_PROVIDERS = ("none", "manual", "razorpay")
+PAYMENT_DEFAULTS: dict[str, Any] = {
+    # "none": customers see the payment instructions only; "manual": the payment_link page; "razorpay": a payment
+    # link for the exact amount of each order, invoice or booking. '' (never saved) reads as "manual" when the
+    # business has a payment_link, else "none".
+    "provider": "",
+    "razorpay_key_id": "",  # rzp_test_... or rzp_live_...: test or live mode
+    "key_secret_saved": False,  # the key secret is in the secret store (never here)
+    "webhook_secret_saved": False,
+    "notify_customer": False,  # Razorpay also emails and texts the link to the customer
+    "link_expiry_hours": 72,  # how long a payment link for an invoice or a booking stays open
+    "upi_id": "",  # the business's own UPI ID (VPA): a "Pay by UPI app" button the business confirms by hand
+    "upi_name": "",  # the payee name in the UPI app (the business name when empty)
+}
+RAZORPAY_KEY_SECRET = "suite_razorpay_key_secret"
+RAZORPAY_WEBHOOK_SECRET = "suite_razorpay_webhook_secret"
+_VPA = re.compile(r"^[A-Za-z0-9._-]{2,256}@[A-Za-z][A-Za-z0-9.-]{1,63}$")
+
+
+def payment_settings(connection: sqlite3.Connection) -> dict[str, Any]:
+    stored = get_setting(connection, "core", "payments", {}) or {}
+    merged = {
+        **PAYMENT_DEFAULTS,
+        **{k: v for k, v in stored.items() if k in PAYMENT_DEFAULTS},
+    }
+    if not merged["provider"]:
+        merged["provider"] = "manual" if business(connection)["payment_link"] else "none"
+    return merged
+
+
+def save_payment_settings(
+    connection: sqlite3.Connection, raw: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Save the plain settings (the key id, the UPI ID...). Secrets go to the secret store through the route;
+    ``key_secret_saved`` and ``webhook_secret_saved`` only record that they are there."""
+    merged = {
+        **payment_settings(connection),
+        **{k: v for k, v in raw.items() if k in PAYMENT_DEFAULTS},
+    }
+    clean = {
+        "provider": choice(merged["provider"], "the payment provider", PAYMENT_PROVIDERS, default="none"),
+        "razorpay_key_id": text(merged["razorpay_key_id"], "the Razorpay key id", max_len=60),
+        "key_secret_saved": flag(merged["key_secret_saved"]),
+        "webhook_secret_saved": flag(merged["webhook_secret_saved"]),
+        "notify_customer": flag(merged["notify_customer"]),
+        "link_expiry_hours": integer(
+            merged["link_expiry_hours"], "how long a payment link stays open (hours)",
+            default=72, minimum=1, maximum=24 * 180,
+        ),
+        "upi_id": text(merged["upi_id"], "the UPI ID", max_len=300).replace(" ", ""),
+        "upi_name": text(merged["upi_name"], "the UPI payee name", max_len=60),
+    }
+    key_id = clean["razorpay_key_id"]
+    if key_id and not re.match(r"^rzp_(test|live)_[A-Za-z0-9]{6,40}$", key_id):
+        raise ValueError(
+            "The Razorpay key id starts with rzp_test_ or rzp_live_ (Razorpay dashboard > Account & Settings > API keys)."
+        )
+    if clean["upi_id"] and not _VPA.match(clean["upi_id"]):
+        raise ValueError("A UPI ID looks like yourname@okbank.")
+    if clean["provider"] == "manual" and not business(connection)["payment_link"]:
+        raise ValueError("Add your payment link to the business profile first, or pick another way to be paid.")
+    if clean["provider"] == "razorpay" and not key_id:
+        raise ValueError("Enter your Razorpay key id to take payments with Razorpay.")
+    set_setting(connection, "core", "payments", clean)
+    connection.commit()
+    return clean
+
+
+def payment_mode(settings: Mapping[str, Any]) -> str:
+    """``test`` or ``live`` from the Razorpay key id, '' when there is none."""
+    found = re.match(r"^rzp_(test|live)_", str(settings.get("razorpay_key_id") or ""))
+    return found.group(1) if found else ""
+
+
+def online_ready(settings: Mapping[str, Any]) -> bool:
+    """Customers can pay online: Razorpay is picked and its key id and key secret are saved."""
+    return bool(
+        settings.get("provider") == "razorpay"
+        and payment_mode(settings)
+        and settings.get("key_secret_saved")
+    )
+
+
+# ---------------------------------------------------------------------------
+# time zones (months in the ledger are the business's months)
+# ---------------------------------------------------------------------------
+
+# Zones without daylight saving that should work even where the system has no time-zone database (Windows without
+# the tzdata package): India's businesses bucket their months correctly either way.
+_FIXED_ZONES = {
+    "Asia/Kolkata": 330,
+    "Asia/Calcutta": 330,
+    "Asia/Dubai": 240,
+    "Asia/Singapore": 480,
+    "Asia/Tokyo": 540,
+    "Asia/Kathmandu": 345,
+    "Asia/Dhaka": 360,
+    "Asia/Karachi": 300,
+    "Asia/Shanghai": 480,
+    "Asia/Hong_Kong": 480,
+    "UTC": 0,
+    "Etc/UTC": 0,
+}
+_OFFSET = re.compile(r"^(?:UTC|GMT)?\s*([+-])(\d{1,2})(?::?(\d{2}))?$", re.IGNORECASE)
+
+
+def zone_info(name: str) -> Any:
+    """A tzinfo for an IANA name ("Asia/Kolkata") or an offset ("UTC+05:30"); UTC when it is not known."""
+    from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+    label = str(name or "").strip() or "UTC"
+    offset = _OFFSET.match(label)
+    if offset:
+        minutes = int(offset.group(2)) * 60 + int(offset.group(3) or 0)
+        if minutes <= 14 * 60:
+            sign = -1 if offset.group(1) == "-" else 1
+            return timezone(timedelta(minutes=sign * minutes))
+    try:
+        return ZoneInfo(label)
+    except (ZoneInfoNotFoundError, ValueError):
+        if label in _FIXED_ZONES:
+            return timezone(timedelta(minutes=_FIXED_ZONES[label]))
+        return timezone.utc
+
+
+def business_zone(connection: sqlite3.Connection) -> Any:
+    return zone_info(business(connection)["timezone"])
+
+
+# ---------------------------------------------------------------------------
+# the public address (single-user build: the business's own tunnel to this computer)
+# ---------------------------------------------------------------------------
+
+# () -> the public address of the account bound to this request ('' for none); the single-user server installs it.
+_address_source: Callable[[], str] | None = None
+# (address) -> None: tell the server this account answers customers at ``address`` ('' when it no longer does),
+# so its Host check lets that address reach the public pages.
+_public_host_hook: Callable[[str], None] | None = None
+
+
+def set_address_source(source: Callable[[], str] | None) -> None:
+    global _address_source
+    _address_source = source
+
+
+def set_public_host_hook(hook: Callable[[str], None] | None) -> None:
+    global _public_host_hook
+    _public_host_hook = hook
+
+
+def public_address(connection: sqlite3.Connection) -> str:
+    """The https address customers use to reach this computer (a Cloudflare Tunnel or ngrok address), or ''."""
+    return str(get_setting(connection, "core", "public_address", "") or "")
+
+
+def save_public_address(connection: sqlite3.Connection, value: Any) -> str:
+    """Save the public address: ``https://`` and a host name only (no path, no IP address, not this computer)."""
+    from urllib.parse import urlsplit
+
+    cleaned = text(value, "the public address", max_len=200).rstrip("/")
+    if cleaned:
+        parts = urlsplit(cleaned)
+        host = (parts.hostname or "").lower()
+        if parts.scheme != "https" or not host:
+            raise ValueError("The public address starts with https:// (your tunnel's address).")
+        if parts.path not in ("", "/") or parts.query or parts.fragment or parts.username:
+            raise ValueError("Enter only the address, like https://shop.example.com (no path).")
+        if (
+            host in ("localhost",)
+            or host.endswith(".localhost")
+            or re.fullmatch(r"[0-9.]+|\[?[0-9a-f:]+\]?", host)
+            or "." not in host
+        ):
+            raise ValueError("The public address is a name on the internet, not this computer or an IP address.")
+        cleaned = f"https://{host}" + (f":{parts.port}" if parts.port else "")
+    set_setting(connection, "core", "public_address", cleaned)
+    connection.commit()
+    if _public_host_hook is not None:
+        try:
+            _public_host_hook(cleaned)
+        except Exception:  # noqa: BLE001 - the address is saved; the server learns it on its next reload
+            suite.logger.exception("Could not register the public address")
+    return cleaned
+
+
+def is_loopback_url(link: str) -> bool:
+    """Whether a link points at this computer (127.x, localhost, ::1): customers elsewhere cannot open it."""
+    from urllib.parse import urlsplit
+
+    host = (urlsplit(str(link or "")).hostname or "").lower()
+    return (
+        host in ("localhost", "::1", "0.0.0.0")
+        or host.endswith(".localhost")
+        or host.startswith("127.")
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -703,7 +1083,7 @@ def record_revenue(
 ) -> None:
     """Money the business received (an invoice paid, an order paid, a ticket sold). Recording the same source
     again updates it, so a payment is never counted twice."""
-    ensure_core(connection)
+    _ensure_ledger(connection)
     code = currency_code or business(connection)["currency"]
     connection.execute(
         """INSERT INTO suite_revenue (id, app, source_type, source_id, label, customer, amount_cents, currency, at, voided_at)
@@ -728,14 +1108,122 @@ def record_revenue(
 
 
 def void_revenue(
-    connection: sqlite3.Connection, app: str, source_type: str, source_id: str
+    connection: sqlite3.Connection,
+    app: str,
+    source_type: str,
+    source_id: str,
+    *,
+    refund_cents: int | None = None,
+    refund_id: str = "",
+    at: str = "",
 ) -> None:
-    """A refund or a payment marked by mistake: the line stays for the record and stops counting."""
-    ensure_core(connection)
+    """A payment marked by mistake: the line stays for the record and stops counting.
+
+    With ``refund_cents`` it is a refund instead: the payment keeps counting in its own month and a negative line
+    for the refunded amount is dated now (or ``at``), in the refund's month (:func:`record_refund`)."""
+    _ensure_ledger(connection)
+    if refund_cents is not None:
+        line = fetch_one(
+            connection,
+            "SELECT * FROM suite_revenue WHERE app = ? AND source_type = ? AND source_id = ? AND kind = 'payment'",
+            (app, source_type, source_id),
+        )
+        if line is None or line["voided_at"]:
+            return
+        record_refund(
+            connection,
+            app,
+            source_type=source_type,
+            source_id=source_id,
+            amount_cents=int(refund_cents),
+            currency_code=str(line["currency"]),
+            label=str(line["label"]),
+            customer=str(line["customer"]),
+            refund_id=refund_id,
+            at=at,
+        )
+        return
     connection.execute(
         "UPDATE suite_revenue SET voided_at = ? WHERE app = ? AND source_type = ? AND source_id = ? AND voided_at IS NULL",
         (now(), app, source_type, source_id),
     )
+
+
+def record_refund(
+    connection: sqlite3.Connection,
+    app: str,
+    *,
+    source_type: str,
+    source_id: str,
+    amount_cents: int,
+    currency_code: str = "",
+    label: str = "",
+    customer: str = "",
+    refund_id: str = "",
+    at: str = "",
+) -> str:
+    """Money given back: a negative line dated in the refund's month, next to the payment (which keeps counting
+    in its own month). ``refund_id`` names this refund, so recording it again changes nothing; without one, each
+    call is a further refund of the same source. Returns the line's id."""
+    _ensure_ledger(connection)
+    amount = abs(int(amount_cents))
+    if amount <= 0:
+        raise ValueError("A refund needs an amount.")
+    code = currency_code or business(connection)["currency"]
+    key = f"{source_id}~refund~{refund_id or new_id()}"[:96]
+    line_id = new_id()
+    connection.execute(
+        """INSERT INTO suite_revenue (id, app, source_type, source_id, label, customer, amount_cents, currency, at, voided_at, kind, refund_of)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, 'refund', ?)
+        ON CONFLICT(app, source_type, source_id) DO NOTHING""",
+        (
+            line_id,
+            app,
+            source_type[:40],
+            key,
+            f"Refund: {label}"[:200] if label else "Refund",
+            customer[:200],
+            -amount,
+            code,
+            at or now(),
+            source_id[:64],
+        ),
+    )
+    return line_id
+
+
+def refunded_cents(
+    connection: sqlite3.Connection, app: str, source_type: str, source_id: str
+) -> int:
+    """How much of this source was refunded so far (a positive number)."""
+    _ensure_ledger(connection)
+    row = connection.execute(
+        "SELECT COALESCE(SUM(amount_cents), 0) FROM suite_revenue WHERE app = ? AND source_type = ? AND refund_of = ? AND kind = 'refund' AND voided_at IS NULL",
+        (app, source_type, source_id),
+    ).fetchone()
+    return -int(row[0] or 0)
+
+
+def _ensure_ledger(connection: sqlite3.Connection) -> None:
+    """The ledger's later columns: ``kind`` ('payment' or 'refund') and ``refund_of`` (the refunded source)."""
+    ensure_core(connection)
+    marker = (_db_file(connection), "suite.ledger.v2")
+    if marker in _ensured:
+        return
+    columns = {row[1] for row in connection.execute("PRAGMA table_info(suite_revenue)")}
+    if "kind" not in columns:
+        connection.execute(
+            "ALTER TABLE suite_revenue ADD COLUMN kind TEXT NOT NULL DEFAULT 'payment'"
+        )
+    if "refund_of" not in columns:
+        connection.execute(
+            "ALTER TABLE suite_revenue ADD COLUMN refund_of TEXT NOT NULL DEFAULT ''"
+        )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS suite_revenue_refund ON suite_revenue (app, source_type, refund_of)"
+    )
+    connection.commit()
+    _ensured.add(marker)
 
 
 @contextmanager
@@ -761,9 +1249,16 @@ def revenue(
     months: int = 6,
     moment: datetime | None = None,
 ) -> dict[str, Any]:
-    """Totals for the Business hub: this month, last month, all time, by app and by month."""
-    ensure_core(connection)
-    current = (moment or utcnow()).date().replace(day=1)
+    """Totals for the Business hub: this month, last month, all time, by app and by month.
+
+    Money in different currencies is never added together: the top-level numbers are the business's own currency,
+    and ``by_currency`` has the same numbers for every currency that has a line (``currencies`` lists them, the
+    business's first). Months are the business's months (its time zone), and refunds count, as negative lines, in
+    the month they were made."""
+    _ensure_ledger(connection)
+    profile = business(connection)
+    zone = zone_info(profile["timezone"])
+    current = (moment or utcnow()).astimezone(zone).date().replace(day=1)
     keys = []
     cursor = current
     for _ in range(max(1, min(months, 24))):
@@ -774,41 +1269,79 @@ def revenue(
     if app:
         where += " AND app = ?"
         params.append(app)
-    rows = fetch_all(
-        connection,
-        f"SELECT app, substr(at, 1, 7) AS month, SUM(amount_cents) AS total, COUNT(*) AS n FROM suite_revenue {where} GROUP BY app, month",  # noqa: S608
+    rows = connection.execute(
+        f"SELECT app, at, amount_cents, currency, kind FROM suite_revenue {where}",  # noqa: S608
         params,
-    )
-    by_month = {key: 0 for key in keys}
-    by_app: dict[str, int] = {}
-    total = count = 0
+    ).fetchall()
+    sums: dict[str, dict[str, Any]] = {}
+
+    def bucket(code: str) -> dict[str, Any]:
+        if code not in sums:
+            sums[code] = {
+                "by_month": {key: 0 for key in keys},
+                "by_app": {},
+                "total": 0,
+                "count": 0,
+                "refunds": 0,
+            }
+        return sums[code]
+
+    home = profile["currency"]
+    bucket(home)
     for row in rows:
-        amount = int(row["total"] or 0)
-        total += amount
-        count += int(row["n"] or 0)
-        by_app[row["app"]] = by_app.get(row["app"], 0) + amount
-        if row["month"] in by_month:
-            by_month[row["month"]] += amount
-    this_month = by_month.get(keys[-1], 0)
-    last_month = by_month.get(keys[-2], 0) if len(keys) > 1 else 0
+        code = str(row[3] or home)
+        entry = bucket(code)
+        amount = int(row[2] or 0)
+        entry["total"] += amount
+        if str(row[4] or "payment") == "refund":
+            entry["refunds"] += -amount
+        else:
+            entry["count"] += 1
+        entry["by_app"][row[0]] = entry["by_app"].get(row[0], 0) + amount
+        try:
+            month = parse_time(row[1]).astimezone(zone).strftime("%Y-%m")
+        except ValueError:
+            month = str(row[1] or "")[:7]
+        if month in entry["by_month"]:
+            entry["by_month"][month] += amount
+
+    def view(entry: dict[str, Any]) -> dict[str, Any]:
+        this_month = entry["by_month"].get(keys[-1], 0)
+        last_month = entry["by_month"].get(keys[-2], 0) if len(keys) > 1 else 0
+        return {
+            "this_month_cents": this_month,
+            "last_month_cents": last_month,
+            "change_percent": (
+                round((this_month - last_month) * 100 / last_month)
+                if last_month
+                else None
+            ),
+            "total_cents": entry["total"],
+            "refunded_cents": entry["refunds"],
+            "payments": entry["count"],
+            "by_app": entry["by_app"],
+            "by_month": [
+                {"month": key, "cents": entry["by_month"][key]} for key in keys
+            ],
+        }
+
+    by_currency = {code: view(entry) for code, entry in sums.items()}
+    others = sorted(
+        code for code in by_currency if code != home and sums[code]["count"] + abs(sums[code]["total"])
+    )
     return {
-        "currency": business(connection)["currency"],
-        "this_month_cents": this_month,
-        "last_month_cents": last_month,
-        "change_percent": (
-            round((this_month - last_month) * 100 / last_month) if last_month else None
-        ),
-        "total_cents": total,
-        "payments": count,
-        "by_app": by_app,
-        "by_month": [{"month": key, "cents": by_month[key]} for key in keys],
+        "currency": home,
+        **by_currency[home],
+        "timezone": profile["timezone"],
+        "currencies": [home, *others],
+        "by_currency": {code: by_currency[code] for code in (home, *others)},
     }
 
 
 def revenue_lines(
     connection: sqlite3.Connection, *, app: str = "", limit: int = 500
 ) -> list[dict[str, Any]]:
-    ensure_core(connection)
+    _ensure_ledger(connection)
     where, params = "", []
     if app:
         where, params = "WHERE app = ?", [app]
@@ -1191,8 +1724,15 @@ def public_url(path: str, source: Any = None) -> str:
     """A full address for ``path`` (for example a public link's ``/p/<token>``) to put in an email.
 
     ``source`` is the route's ``request`` or a public action's ``visitor``: the address they used. The hosted
-    build's configured public address wins over both (it is https behind a proxy)."""
+    build's configured public address wins over both (it is https behind a proxy), and so does the single-user
+    build's public address (Business hub > Business profile: the business's own tunnel to this computer)."""
     origin = suite.public_origin()
+    if not origin and _address_source is not None:
+        try:
+            origin = str(_address_source() or "").rstrip("/")
+        except Exception:  # noqa: BLE001 - a link falls back to the request's address
+            suite.logger.debug("No public address for this account", exc_info=True)
+            origin = ""
     if not origin and isinstance(source, Mapping):
         origin = str(source.get("base_url") or "")
     elif not origin and source is not None and hasattr(source, "base_url"):

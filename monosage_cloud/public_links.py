@@ -28,6 +28,15 @@ if TYPE_CHECKING:
 NOT_FOUND = {"error": "This link is no longer available.", "code": "not_found"}
 
 
+def _webhook_limiter() -> Any:
+    from aira.security import RateLimiter
+
+    return RateLimiter(limit=600, window_seconds=60)
+
+
+_WEBHOOK_LIMITER = _webhook_limiter()
+
+
 class HostedPublicIndex:
     """aira.suite.public's index: token hash -> the organization bound to the request that made the link."""
 
@@ -96,6 +105,13 @@ def run_public_link(
         gw.public_view_limiter if request.method == "GET" else gw.public_action_limiter
     )
     key = f"public:{request.client_ip}"
+    if request.path.startswith("/api/payments/"):
+        # a payment provider's signed webhooks (aira/payments): their own, larger limit, not the customers'
+        limiter, key = _WEBHOOK_LIMITER, f"webhook:{request.client_ip}"
+        if len(request.body or b"") > 256_000:
+            return Reply(
+                413, {"error": "The webhook body is too large.", "code": "too_large"}
+            ).to_response(), ""
     allowed, retry = limiter.check(key)
     if not allowed:
         return (
@@ -151,6 +167,7 @@ def run_public_link(
                 secret_store=local._airaapi_secret_store(),
                 key_index=app.hosting_key_index(org_id),
                 audit=local._audit,
+                body=bytes(request.body or b""),  # a webhook's signature is over these bytes
             )
             outcome = entry.handler(request_object)
     except LookupError as error:

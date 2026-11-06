@@ -34,6 +34,14 @@ def no_model():
     suite.set_gateway(previous)
 
 
+@pytest.fixture(autouse=True)
+def quick_forms(monkeypatch):
+    """A test browser fills the order form faster than any person: the storefront's minimum fill time is off."""
+    from aira.suite.shop import service
+
+    monkeypatch.setattr(service, "MIN_FILL_SECONDS", 0)
+
+
 def caller(context, env):
     headers = {
         "Content-Type": "application/json",

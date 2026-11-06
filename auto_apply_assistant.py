@@ -142,6 +142,7 @@ from aira import suite as aira_suite
 from aira.suite import kit as suite_kit
 from aira.suite import life as suite_life
 from aira.suite import public as suite_public
+from aira.payments import service as suite_payments
 from aira.suite.social import db as social_db
 from aira.suite.videos import db as videos_db
 from aira.suite.videos import media as videos_media
@@ -8984,8 +8985,10 @@ class RequestHandler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", "0"))
         if length < 1 or length > 20_000_000:
             raise ValueError("Request body must be between 1 byte and 20 MB.")
+        raw = self.rfile.read(length)
+        self._raw_body = raw  # a payment webhook checks its signature over these exact bytes
         try:
-            value = json.loads(self.rfile.read(length))
+            value = json.loads(raw)
         except RecursionError:
             raise ValueError("Request body is nested too deeply.") from None
         if not isinstance(value, dict):
@@ -9008,6 +9011,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         )
         self._started = time.monotonic()
         self._status = 200
+        self._raw_body = b""
 
     def _finish_request(self, route_name: str) -> None:
         duration = (
@@ -9070,16 +9074,21 @@ class RequestHandler(BaseHTTPRequestHandler):
         route_name = "unmatched"
         try:
             # Aira binds 127.0.0.1; a Host naming anything else came through DNS
-            # rebinding, which same-origin checks cannot catch.
+            # rebinding, which same-origin checks cannot catch. The one exception is a
+            # business's own public address (its tunnel, Business hub > Business profile):
+            # it reaches the customer-facing pages and the payment webhook, nothing else.
             headers = getattr(self, "headers", None)
             host = headers.get("Host", "") if headers is not None else ""
+            public_host = False
             if not airaapi_http.host_is_local(host):
-                self._reject(
-                    403,
-                    "This request did not address Monosage by a loopback name "
-                    "(127.0.0.1 or localhost). Set AIRA_ALLOWED_HOSTS to allow another.",
-                )
-                return
+                public_host = _public_hosts.allows(host)
+                if not public_host:
+                    self._reject(
+                        403,
+                        "This request did not address Monosage by a loopback name "
+                        "(127.0.0.1 or localhost). Set AIRA_ALLOWED_HOSTS to allow another.",
+                    )
+                    return
             for route_method, pattern, name, auth in ROUTES:
                 if route_method != method:
                     continue
@@ -9087,6 +9096,25 @@ class RequestHandler(BaseHTTPRequestHandler):
                 if not match:
                     continue
                 route_name = name
+                if public_host and not _customer_route(name, unquote(path)):
+                    self._reject(
+                        403,
+                        "Only the pages you share with customers are served at your public address.",
+                    )
+                    return
+                if name in _WEBHOOK_ROUTES:
+                    try:
+                        length = int(self.headers.get("Content-Length", "0") or 0)
+                    except ValueError:
+                        length = 0
+                    if length > suite_payments.MAX_WEBHOOK_BYTES:
+                        # never parsed; a body up to a few MB is drained so the answer arrives (Windows resets a
+                        # socket closed with unread bytes), anything larger just closes the connection
+                        if length <= 4_000_000:
+                            self._discard_body()
+                        self.close_connection = True
+                        self._send_json(413, {"error": "The webhook body is too large."})
+                        return
                 # The page and its files are not counted: one page is about 90 files, and each app has its own
                 # address (/stocks) that a person may open in several tabs at once.
                 if name not in PAGE_ROUTES:
@@ -12109,6 +12137,118 @@ _public_link_index = _PublicLinkIndex()
 # Customers on a public page: generous for reading, tight for actions (a booking, an order, a sign-up).
 _public_view_limiter = RateLimiter(limit=300, window_seconds=60)
 _public_action_limiter = RateLimiter(limit=60, window_seconds=60)
+# A payment provider's webhooks are signed machine calls, often in bursts: their own limit, not the customers'.
+_webhook_limiter = RateLimiter(limit=600, window_seconds=60)
+
+
+class _PublicHosts:
+    """The public addresses businesses on this computer set (Business hub > Business profile: their tunnel), in
+    the accounts database. A request to one of these hosts reaches only the customer-facing routes
+    (:func:`_customer_route`); every other route stays loopback-only."""
+
+    def __init__(self) -> None:
+        self._cache: tuple[float, frozenset[str]] = (0.0, frozenset())
+        self._lock = threading.Lock()
+
+    @staticmethod
+    def _ensure(connection: sqlite3.Connection) -> None:
+        connection.execute(
+            """CREATE TABLE IF NOT EXISTS suite_public_hosts (
+                user_id TEXT PRIMARY KEY,
+                host TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )"""
+        )
+
+    def register(self, address: str) -> None:
+        """The bound account answers customers at ``address`` (https://name[:port])."""
+        user_id = getattr(_request_context, "user_id", None)
+        if not user_id:
+            return
+        host = (urlsplit(address).netloc or "").lower()
+        with _auth_connect() as connection:
+            self._ensure(connection)
+            if host:
+                connection.execute(
+                    "INSERT OR REPLACE INTO suite_public_hosts (user_id, host, updated_at) VALUES (?, ?, ?)",
+                    (user_id, host, datetime.now(timezone.utc).isoformat()),
+                )
+            else:
+                connection.execute(
+                    "DELETE FROM suite_public_hosts WHERE user_id = ?", (user_id,)
+                )
+        self._cache = (0.0, frozenset())
+        _address_cache.clear()  # links use the new address at once
+
+    def hosts(self) -> frozenset[str]:
+        loaded_at, hosts = self._cache
+        if time.monotonic() - loaded_at < 30:
+            return hosts
+        with self._lock:
+            try:
+                with _auth_connect() as connection:
+                    self._ensure(connection)
+                    rows = connection.execute(
+                        "SELECT host FROM suite_public_hosts"
+                    ).fetchall()
+                hosts = frozenset(str(row[0]).lower() for row in rows if row[0])
+            except sqlite3.Error:
+                logger.warning("Could not read the public addresses", exc_info=True)
+                hosts = frozenset()
+            self._cache = (time.monotonic(), hosts)
+        return hosts
+
+    def allows(self, host: str) -> bool:
+        name = str(host or "").strip().lower().rstrip(".")
+        if not name:
+            return False
+        hosts = self.hosts()
+        # a tunnel may or may not pass the port on: "shop.example.com" matches "shop.example.com:443"
+        return name in hosts or name.split(":")[0] in {h.split(":")[0] for h in hosts}
+
+    def forget(self) -> None:
+        self._cache = (0.0, frozenset())
+        _address_cache.clear()
+
+
+_public_hosts = _PublicHosts()
+# What a public address reaches: the public page and the files it loads, the public link API (whose routes are
+# auth="public_link") and the payment webhook. Nothing that needs a session.
+_CUSTOMER_PAGE_ROUTES = frozenset({"ui_public", "ui_i18n"})
+_CUSTOMER_STATIC = re.compile(
+    r"/static/(?:public[A-Za-z0-9_-]*\.(?:js|css)|app-[a-z-]+\.css|i18n\.js|favicon\.(?:ico|svg))"
+)
+_CUSTOMER_API_ROUTES: set[str] = set()
+_WEBHOOK_ROUTES: set[str] = set()
+
+
+def _customer_route(name: str, path: str) -> bool:
+    if name in _CUSTOMER_PAGE_ROUTES or name in _CUSTOMER_API_ROUTES:
+        return True
+    return name == "ui_static" and bool(_CUSTOMER_STATIC.fullmatch(path))
+
+
+_address_cache: dict[str, tuple[float, str]] = {}
+
+
+def _bound_public_address() -> str:
+    """kit.public_url's address for the bound account: its public address, '' when it set none (read at most every
+    few seconds: a newsletter builds one link per reader)."""
+    data_path = str(getattr(_request_context, "data_path", "") or "")
+    if not data_path and not getattr(_request_context, "user_id", None):
+        return ""
+    cached = _address_cache.get(data_path)
+    if cached and time.monotonic() - cached[0] < 5:
+        return cached[1]
+    with _connect() as connection:
+        if not connection.execute(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'suite_settings'"
+        ).fetchone():
+            address = ""
+        else:
+            address = suite_kit.public_address(connection)
+    _address_cache[data_path] = (time.monotonic(), address)
+    return address
 
 
 def _bind_public_link(handler: RequestHandler, token: str) -> dict[str, Any]:
@@ -12116,6 +12256,8 @@ def _bind_public_link(handler: RequestHandler, token: str) -> dict[str, Any]:
     limiter = (
         _public_view_limiter if handler.command == "GET" else _public_action_limiter
     )
+    if urlsplit(getattr(handler, "path", "")).path.startswith("/api/payments/"):
+        limiter = _webhook_limiter
     key = f"public:{handler._client_key()}"
     allowed, retry_after = limiter.check(key)
     if not allowed:
@@ -12201,7 +12343,10 @@ def _airaapi_handler(
         query: dict[str, list[str]],
         user: dict[str, Any] | None,
     ) -> None:
-        if not airaapi_http.host_is_local(self.headers.get("Host", "")):
+        host = self.headers.get("Host", "")
+        if not airaapi_http.host_is_local(host) and not (
+            entry.auth == "public_link" and _public_hosts.allows(host)
+        ):
             self._send_json(
                 403,
                 {
@@ -12236,6 +12381,7 @@ def _airaapi_handler(
                 ),
                 api_key=key_row,
                 audit=_audit,
+                body=bytes(getattr(self, "_raw_body", b"") or b""),
             )
             outcome = entry.handler(request)
         except SerpApiError as error:
@@ -12273,6 +12419,10 @@ def _install_airaapi_routes() -> None:
             (entry.method, entry.pattern, entry.attr, entry.auth == "session")
         )
         setattr(RequestHandler, entry.attr, _airaapi_handler(entry))
+        if entry.auth == "public_link":
+            _CUSTOMER_API_ROUTES.add(entry.attr)
+            if entry.pattern.pattern.startswith("/api/payments/"):
+                _WEBHOOK_ROUTES.add(entry.attr)
 
 
 _install_airaapi_routes()
@@ -12482,6 +12632,8 @@ aira_suite.set_gateway(_LeadsGateway())  # the industry apps share the writing m
 suite_public.set_default_index(
     _public_link_index
 )  # the hosted build installs its own (organization) index
+suite_kit.set_address_source(_bound_public_address)  # customers' links use the business's public address
+suite_kit.set_public_host_hook(_public_hosts.register)  # and the Host check lets that address reach them
 social_db.set_default_path(
     lambda: DB_PATH.parent / "social.sqlite3"
 )  # one Social network for every account on this computer

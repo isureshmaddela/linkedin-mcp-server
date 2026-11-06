@@ -67,6 +67,8 @@ class Request:
     key_index: KeyIndex
     api_key: Mapping[str, Any] | None = None
     audit: Callable[..., None] = _no_audit
+    # the request body as it arrived, for a route that checks a signature over it (a payment webhook)
+    body: bytes = b""
 
     def q(self, name: str, default: str = "") -> str:
         values = self.query.get(name)
