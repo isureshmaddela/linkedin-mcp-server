@@ -390,7 +390,12 @@ def test_the_left_menu_follows_a_job_search_and_old_links_still_work(browser, en
 
     # Profile & resume: the parts of Settings an application is filled from, as Careers folders.
     page.click("#primaryNav a[data-section='profile']")
-    assert folders(page, "profile") == ["Profile", "Resume", "Standard answers"]
+    assert folders(page, "profile") == [
+        "Profile",
+        "Resume",
+        "Standard answers",
+        "AI instructions",
+    ]
     page.wait_for_selector("#main h1:has-text('Profile & resume')")
     page.locator(".shell-subnav[data-section='profile'] a", has_text="Resume").click()
     page.wait_for_url(re.compile(r"#/profile\?tab=resume"))

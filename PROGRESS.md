@@ -1,6 +1,6 @@
 # Career Copilot Progress
 
-Last updated: 2026-10-28.
+Last updated: 2026-11-06.
 
 ## Completed
 
@@ -705,3 +705,35 @@ separate piece (`aira/suite/social/dating.py`, `views-social-dating.js`); this p
   (life.read / life.manage); no new path groups beyond hex ids and the public-link token.
 - Tests: `tests/test_suite_social_plus.py` (server and HTTP), `tests/test_suite_social_ui_plus.py` (browser, desktop and
   phone light/dark, screenshots in `D:/aira-test-tmp/social-shots`); the shell test follows the new names.
+
+## Careers maturity, round 1 (2026-11-06)
+Request: review Careers end to end (automatic and manual) as an enterprise architect, scope what is missing, build and
+test it, then repeat for every app; apply automatically with and without a browser; let the organization's AI take
+instructions and skills so it answers like the person. Findings and rounds: `docs/careers-maturity-scope.md`.
+Built on `feature/careers-ai` (three branches merged: main session, reliability fork, coverage fork).
+- **AI instructions and skills** (`aira/ai_instructions.py`, `aira/ai_instructions_routes.py`, `docs/ai-instructions.md`):
+  the person's own instructions and task skills (Profile & resume > AI instructions, also Settings), the organization's
+  (hosted; owners and admins write, every member reads; they win on conflict), starter skills, a preview of the exact
+  text. Every Careers call goes through `_careers_ai(purpose, ...)`, which adds them after the one shared system rule
+  for Claude, Ollama and the hosted gateway; `_ollama_json(model, prompt)` keeps its signature (tests patch it), and
+  Leads and suite calls get nothing. Messages: a one-off note for a reply draft. Only the candidate saves their own
+  (hosted policy `messages.send`).
+- **My Claude** (hosted, `/api/me/ai`): a member's own Anthropic key and model for their own workspace's calls
+  (including background runs), switch back any time, test, remove; org secret `claude:<member_id>`, deleted on removal;
+  policy `personal_ai_allowed` (on by default, Policy > AI). The status pill says My Claude, Claude or Organization AI.
+- **Fixes**: hosted Auto-apply now writes cover letters with the organization's AI; scheduled reviews use the chosen
+  model.
+- **Auto-apply reliability** (fork, `docs/auto-apply-spec.md` section 7, migration 21): compare-and-set claim of a run,
+  `interrupted` state for lost runs and failures after Submit (never resent on their own), retries after 15 minutes and
+  2 hours only when Submit was never clicked, Try again and I applied routes, Needs you lists interrupted and
+  unsupported runs. The hosted held queue and snapshot count the same runs (`autopilot.needs_you_run_ids_sql`).
+- **Apply without a browser** (fork, `aira/email_apply.py`, `docs/apply-by-email.md`, migration 22): apply-by-email
+  detection, preview and send from the Apply tab, plan option (off by default), resume and cover letter attached, one
+  email per job ever, method `email` with the Message-ID; hosted through the organization's mail.
+- **Coverage** (fork): confirmation wording in seven languages, Google Jobs prefers direct employer/ATS links, automatic
+  runs use the approved packet and Greenhouse questions.
+- **Recover**: reopen an accepted, rejected or withdrawn application at the stage it left; Jobs status filter
+  "Archived" and Restore in the job panel.
+- **Translations**: Hindi and Telugu complete (19,303 strings).
+- **Open (round 2)**: Finish in browser for CAPTCHA/sign-in holds, multi-step generic forms, bulk actions, email and
+  browser notifications, AI research and interview prep; Workday and Easy Apply success wording is still English only.

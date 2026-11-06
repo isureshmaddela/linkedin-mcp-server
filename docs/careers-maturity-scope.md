@@ -1,6 +1,6 @@
 # Careers: maturity scope
 
-Status: round 1 in progress (started 2026-11-06). This document records what the Careers app is missing, why it
+Status: round 1 built and tested (2026-11-06, R1.1 to R1.8); round 2 next. This document records what the Careers app is missing, why it
 matters, and what each round builds. Every item lists the evidence it came from (file:line at the time of the review)
 and how it is accepted.
 
@@ -51,7 +51,7 @@ and how it is accepted.
 | F18 | Research and interview prep have no AI synthesis | `aira/airaapi/careers_intel.py:233,1349`; `views-crm.js:62` | 2 |
 | F19 | No mailbox sync for Email updates (paste or .eml only) | `views-settings.js:191` | 3 |
 
-## Round 1 (this round)
+## Round 1 (built)
 
 ### R1.1 One submission per application (F1, F2)
 - A run moves `queued -> running` with a compare-and-set; a second worker, or a redelivered job, that finds it

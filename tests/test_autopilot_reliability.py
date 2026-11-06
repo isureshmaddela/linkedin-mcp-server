@@ -527,7 +527,10 @@ def test_migration_21_adds_the_retry_columns_to_an_existing_database(tmp_path):
         (NOW.isoformat(),),
     )
     connection.commit()
-    assert schema.migrate(connection) == [21]
+    applied = schema.migrate(connection)
+    assert applied[0] == 21 and applied == sorted(
+        applied
+    )  # 21 first; later migrations may follow
     columns = {
         row[1] for row in connection.execute("PRAGMA table_info(application_runs)")
     }
