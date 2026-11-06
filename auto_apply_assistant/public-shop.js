@@ -368,7 +368,8 @@
     const payment = { unpaid: [business && order.due_on ? `Due ${ctx.date(order.due_on)}` : "Waiting for payment", ""], paid: ["Paid", "good"], refunded: ["Refunded", "bad"] }[order.payment_status] || [order.payment_status, ""];
     const row = (label, value, strong) => h("tr", {}, h("td", { text: label }), h("td", { class: `num${strong ? " pub-total" : ""}`, text: value }));
     const reference = h("input", { placeholder: "Payment reference (optional)", "aria-label": "Payment reference" });
-    root.append(
+    // Native append prints "null" for a missing part (a consumer order has no invoice card): keep only real nodes.
+    root.append(...[
       h("section", { class: "pub-card" },
         h("h1", { text: business ? `Invoice for order #${order.number}` : `Order #${order.number}` }),
         h("div", { class: "pub-btn-row" }, h("span", { class: `pub-badge ${payment[1]}`, text: payment[0] }), cancelled ? h("span", { class: "pub-badge bad", text: "Cancelled" }) : null),
@@ -386,7 +387,7 @@
           ...taxRows({ ...order, tax_label: "Tax" }, row, (cents) => money(cents, order.currency)),
           row("Total", money(order.total_cents, order.currency), true),
           order.refunded_cents ? row("Refunded", `-${money(order.refunded_cents, order.currency)}`) : null))),
-    );
+    ].filter(Boolean));
     if (order.payment_status === "unpaid" && !cancelled && order.pay_by) root.append(h("p", { class: "pub-muted", text: `Please pay by ${ctx.datetime(order.pay_by)}: an unpaid order is cancelled after that and its items go back on sale.` }));
     if (order.payment_status === "unpaid" && !cancelled) {
       const box = ctx.paymentBox(order.total_cents, `#${order.number}`);
