@@ -161,3 +161,32 @@ assets/*
 .claude
 .github
 .docker
+
+# Local data, secrets and personal files: never part of a build context. (Unlike .gitignore, a pattern here is
+# anchored at the context root, so nested matches need **/.)
+.aira-cloud/
+.aira-shots/
+.aira-test*/
+.aira-run*.txt
+.env
+.env.*
+!.env.example
+**/*.pdf
+**/*.sqlite3
+**/*.sqlite3-*
+**/*.db
+cookies.json
+.debug/
+scripts/snapshot_dumps/
+.agents/
+.gemini/
+.opencode/
+.venv/
+**/__pycache__
+**/*.py[cod]
+**/.pytest_cache
+**/.ruff_cache
+.mypy_cache/
+.coverage*
+htmlcov/
+node_modules/
