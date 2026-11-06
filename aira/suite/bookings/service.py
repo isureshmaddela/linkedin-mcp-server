@@ -766,6 +766,10 @@ def cancel(
         _message(connection, updated, "booking_cancelled", None, None)
     _offer_opening(connection, booking, origin, now=now)
     connection.commit()
+    from aira.payments import service as payments
+
+    # an open deposit link stops here (Razorpay closes it at its own expiry; a late payment is shown as a mismatch)
+    payments.close_open(connection, APP, "booking", booking_id)
     return updated
 
 

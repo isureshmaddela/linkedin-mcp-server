@@ -13,7 +13,7 @@ from __future__ import annotations
 from typing import Any
 
 from aira.airaapi.http import Raw, Request, aira_route
-from aira.suite import kit, public
+from aira.suite import background, kit, public
 from aira.suite.shop import access, service, store, trade
 from aira.suite.shop.store import APP
 
@@ -133,7 +133,14 @@ def _csv(rows: list[dict[str, Any]], columns: tuple[str, ...], filename: str) ->
 
 
 def _order_view(connection: Any, order: dict[str, Any]) -> dict[str, Any]:
-    return {**order, "link": public.link_for(connection, APP, "order", order["id"])}
+    from aira.payments import service as payments
+
+    return {
+        **order,
+        "link": public.link_for(connection, APP, "order", order["id"]),
+        # its payment links (Razorpay): open, paid, refunded, or a mismatch the shop must look at
+        "payments": payments.requests_for(connection, APP, "order", order["id"]),
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -398,7 +405,14 @@ def _order_action(request: Request, action: str) -> tuple[int, dict[str, Any]]:
         elif action == "unpaid":
             order = service.mark_unpaid(connection, order_id)
         elif action == "refund":
-            order = service.refund(connection, order_id, note=note)
+            order = service.refund(
+                connection,
+                order_id,
+                note=note,
+                amount_cents=payload.get("amount_cents"),
+                secret_store=request.secret_store,
+                actor=_actor(request),
+            )
         elif action == "cancel":
             order = service.cancel(connection, order_id, note=note)
         else:
@@ -764,6 +778,7 @@ def storefront_quote(
         code=str(payload.get("discount_code") or "")[:30],
         delivery_method=str(payload.get("delivery_method") or "pickup"),
         account=service.storefront_buyer(connection, payload),
+        customer_state=str(payload.get("customer_state") or "")[:60],
     )
     return 200, {"quote": _quote_view(quote_data)}
 
@@ -776,6 +791,7 @@ def storefront_order(
     visitor: dict[str, Any],
 ) -> tuple[int, dict[str, Any]]:
     store.ensure(connection)
+    service.check_form(connection, payload)  # the hidden field is empty, the form was not filled by a bot
     allowed = {
         "items",
         "discount_code",
@@ -786,6 +802,7 @@ def storefront_order(
         "address",
         "note",
         "po_number",
+        "customer_state",
     }
     order = service.place_order(
         connection,
@@ -793,8 +810,21 @@ def storefront_order(
         source="storefront",
         origin=str(visitor.get("base_url") or ""),
         account=service.storefront_buyer(connection, payload),
+        visitor=visitor,
     )
-    return 201, {"order": service.public_order(order), "link": order["link"]["path"]}
+    from aira.payments import service as payments
+
+    # paying online: the customer goes straight to the payment page, and comes back to the order page
+    pay_url = (
+        payments.link_on_checkout(connection, APP, "order", order["id"])
+        if order["pay_online"]
+        else ""
+    )
+    return 201, {
+        "order": service.public_order(order),
+        "link": order["link"]["path"],
+        "pay_url": pay_url,
+    }
 
 
 @public.action(APP, "storefront", "notify_me")
@@ -930,6 +960,16 @@ def _summary(connection: Any) -> dict[str, Any]:
             {"label": "Waiting for stock", "value": waiting, "tone": "warn"}
         )
     return summary
+
+
+@background.task(APP)
+def _tick(connection: Any) -> dict[str, Any]:
+    """Unpaid storefront orders past their time lapse and give their stock back (P0-13)."""
+    if not connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'sh_orders'"
+    ).fetchone():
+        return {"lapsed": 0}
+    return {"lapsed": service.expire_unpaid(connection)}
 
 
 def _actor(request: Request) -> str:

@@ -185,6 +185,8 @@ def product_values(raw: Mapping[str, Any], *, partial: bool = False) -> dict[str
         )
     if has("price_breaks"):
         values["price_breaks"] = _price_breaks(raw.get("price_breaks"))
+    if has("hsn_sac"):
+        values["hsn_sac"] = kit.hsn_code(raw.get("hsn_sac"))
     if (
         values.get("compare_at_cents")
         and values.get("price_cents") is not None
@@ -536,11 +538,14 @@ def price(
     include_drafts: bool = False,
     today: str = "",
     account: Mapping[str, Any] | None = None,
+    customer_state: str = "",
 ) -> dict[str, Any]:
     """The order as the shop prices it. Raises ValueError for anything that cannot be bought.
 
     ``account`` is the business buyer's approved trade account: trade prices, minimum quantities, the business
-    minimum order, its terms and (for a reseller) no tax. Without it the order is a consumer's."""
+    minimum order, its terms and (for a reseller) no tax. Without it the order is a consumer's.
+    ``customer_state`` (a GST state code or name) picks CGST + SGST or IGST for a business that charges GST; a
+    trade account's GSTIN gives its state."""
     shop = settings if settings is not None else store.settings(connection)
     profile = business if business is not None else kit.business(connection)
     method = kit.choice(
@@ -604,6 +609,7 @@ def price(
                 "name": product["name"],
                 "option": option_name,
                 "sku": product["sku"],
+                "hsn_sac": str(product.get("hsn_sac") or ""),
                 "unit_cents": unit,
                 "quantity": quantity,
                 "line_cents": line_cents,
@@ -643,9 +649,16 @@ def price(
         if free_over and goods >= free_over:
             delivery_cents = 0
     tax_exempt = account is not None and bool(account.get("tax_exempt"))
-    tax_cents = (
-        0 if tax_exempt else kit.percent_of(goods, int(profile.get("tax_rate_bp") or 0))
-    )
+    state = ""
+    if kit.gst_applies(profile):
+        buyer_gstin = str((account or {}).get("tax_id") or "").upper()
+        state = (
+            buyer_gstin[:2]
+            if kit.valid_gstin(buyer_gstin)
+            else kit.state_code(customer_state)
+        )
+    tax = kit.tax_breakdown(profile, goods, customer_state=state, exempt=tax_exempt)
+    tax_cents = tax["tax_cents"]
     terms = str((account or {}).get("terms") or "prepay")
     buyer: dict[str, Any] = {"buyer_type": "consumer"}
     if account is not None:
@@ -672,7 +685,11 @@ def price(
         "free_delivery_over_cents": free_over,
         "tax_label": profile.get("tax_label") or "Tax",
         "tax_cents": tax_cents,
-        "total_cents": goods + delivery_cents + tax_cents,
+        "tax_lines": tax["lines"],
+        "prices_include_tax": tax["inclusive"],
+        "gst": tax["gst"],
+        "customer_state": tax["place_of_supply"] if tax["gst"] else "",
+        "total_cents": goods + delivery_cents + tax["added_cents"],
         "currency": profile.get("currency") or "USD",
     }
 
@@ -794,12 +811,19 @@ def place_order(
     include_drafts: bool = False,
     origin: str = "",
     account: Mapping[str, Any] | None = None,
+    visitor: Mapping[str, Any] | None = None,
 ) -> dict[str, Any]:
     """Price, take stock, count the discount use and number the order in one transaction.
 
     ``origin`` is the address the request used, for the order link in the confirmation (kit.public_url).
     ``account`` makes it a business order: the trade account's contact details, a purchase-order number, its terms
-    and due date, checked against its credit limit."""
+    and due date, checked against its credit limit. ``visitor`` (a public storefront's: ``{"client"}``) caps how
+    many orders one email, phone or visitor address places an hour.
+
+    An unpaid storefront order lapses (its stock comes back, :func:`expire_unpaid`): after
+    ``unpaid_expiry_online_minutes`` when the customer is sent to pay online, after ``unpaid_expiry_manual_hours``
+    otherwise. Its confirmation email goes out when it is paid; one paid by hand gets its confirmation (with how to
+    pay) at once, at most :data:`CONFIRMATIONS_PER_ADDRESS_DAY` a day to one address."""
     store.ensure(connection)
     shop = store.settings(connection)
     profile = kit.business(connection)
@@ -817,6 +841,16 @@ def place_order(
             raise ValueError("Enter your purchase-order (PO) number.")
     else:
         customer = customer_values(raw, method)
+    client_key = ""
+    if visitor is not None:
+        client_key = _client_key(str(visitor.get("client") or ""))
+        _check_order_caps(connection, shop, customer, client_key)
+    online = (
+        source == "storefront"
+        and (account is None or str(account.get("terms") or "prepay") == "prepay")
+        and kit.online_ready(kit.payment_settings(connection))
+    )
+    expires_at = _expiry(shop, source=source, online=online, account=account)
     connection.commit()
     connection.execute("BEGIN IMMEDIATE")
     try:
@@ -829,6 +863,7 @@ def place_order(
             business=profile,
             include_drafts=include_drafts,
             account=account,
+            customer_state=str(raw.get("customer_state") or ""),
         )
         if account is not None:
             trade.check_credit(connection, account, quote["total_cents"])
@@ -890,6 +925,19 @@ def place_order(
                 quote.get("due_on", ""),
             ),
         )
+        connection.execute(
+            """UPDATE sh_orders SET expires_at = ?, pay_online = ?, client_key = ?, customer_state = ?, tax_lines = ?,
+            prices_include_tax = ? WHERE id = ?""",
+            (
+                expires_at if quote["total_cents"] > 0 else "",
+                1 if online and quote["total_cents"] > 0 else 0,
+                client_key,
+                quote["customer_state"],
+                kit.dumps(quote["tax_lines"]),
+                1 if quote["prices_include_tax"] else 0,
+                order_id,
+            ),
+        )
         connection.commit()
     except BaseException:
         connection.rollback()
@@ -910,11 +958,164 @@ def place_order(
     link = public.create_link(
         connection, APP, "order", order_id, title=f"Order #{number}"
     )
-    queue_message(
-        connection, order, "order_confirmation", link_path=link["path"], origin=origin
-    )
+    if not order["pay_online"] and _may_confirm(connection, order):
+        queue_message(
+            connection,
+            order,
+            "order_confirmation",
+            link_path=link["path"],
+            origin=origin,
+        )
     connection.commit()
     return {**order, "link": link}
+
+
+# ---------------------------------------------------------------------------
+# anonymous orders: bot checks, caps, lapsing unpaid orders
+# ---------------------------------------------------------------------------
+
+MIN_FILL_SECONDS = 3  # a person takes longer than this to fill in the order form
+FORM_TOKEN_HOURS = 24
+CONFIRMATIONS_PER_ADDRESS_DAY = 3
+ONLINE_GRACE_MINUTES = 10  # a payment started just before the link closed still lands
+
+
+def form_token(connection: sqlite3.Connection, *, moment: Any = None) -> str:
+    """A signed timestamp the storefront hands its order form: the order must come back with it, and not sooner
+    than :data:`MIN_FILL_SECONDS` later (a bot posting at once, or without the page, is refused)."""
+    import hashlib
+    import hmac
+
+    key = kit.get_setting(connection, APP, "form_key", "")
+    if not key:
+        key = secrets.token_hex(32)
+        kit.set_setting(connection, APP, "form_key", key)
+        connection.commit()
+    stamp = str(int((moment or kit.utcnow()).timestamp()))
+    mac = hmac.new(key.encode(), stamp.encode(), hashlib.sha256).hexdigest()[:24]
+    return f"{stamp}.{mac}"
+
+
+def check_form(connection: sqlite3.Connection, payload: Mapping[str, Any]) -> None:
+    """The storefront's bot checks: the hidden ``website`` field is empty and the form token is ours and old enough."""
+    import hashlib
+    import hmac
+
+    if str(payload.get("website") or "").strip():
+        raise ValueError("We could not take this order. Please try again.")
+    token = str(payload.get("form_token") or "")
+    stamp, _, mac = token.partition(".")
+    key = str(kit.get_setting(connection, APP, "form_key", "") or "")
+    expected = (
+        hmac.new(key.encode(), stamp.encode(), hashlib.sha256).hexdigest()[:24]
+        if key and stamp.isdigit()
+        else ""
+    )
+    if not expected or not hmac.compare_digest(expected, mac):
+        raise ValueError("This page has expired. Reload it and place your order again.")
+    age = kit.utcnow().timestamp() - int(stamp)
+    if age < MIN_FILL_SECONDS:
+        raise ValueError("That was quick! Check your order and press the button again.")
+    if age > FORM_TOKEN_HOURS * 3600:
+        raise ValueError("This page has expired. Reload it and place your order again.")
+
+
+def _client_key(client: str) -> str:
+    import hashlib
+
+    return hashlib.sha256(f"shop-visitor:{client}".encode()).hexdigest()[:24] if client else ""
+
+
+def _check_order_caps(
+    connection: sqlite3.Connection,
+    shop: Mapping[str, Any],
+    customer: Mapping[str, Any],
+    client_key: str,
+) -> None:
+    since = kit.iso(kit.utcnow() - timedelta(hours=1))
+    per_contact = int(shop["max_orders_per_contact_hour"])
+    for column in ("customer_email", "customer_phone"):
+        value = str(customer.get(column) or "")
+        if value and kit.count(
+            connection,
+            f"SELECT COUNT(*) FROM sh_orders WHERE {column} = ? AND source = 'storefront' AND created_at >= ?",  # noqa: S608 - fixed names
+            (value, since),
+        ) >= per_contact:
+            raise PermissionError(
+                "Too many orders with these contact details in the last hour. Please try again later or contact the shop."
+            )
+    if client_key and kit.count(
+        connection,
+        "SELECT COUNT(*) FROM sh_orders WHERE client_key = ? AND created_at >= ?",
+        (client_key, since),
+    ) >= int(shop["max_orders_per_visitor_hour"]):
+        raise PermissionError(
+            "Too many orders from this connection in the last hour. Please try again later or contact the shop."
+        )
+
+
+def _expiry(
+    shop: Mapping[str, Any],
+    *,
+    source: str,
+    online: bool,
+    account: Mapping[str, Any] | None,
+) -> str:
+    """When an unpaid storefront order lapses ('' = never: entered by the shop, or a business on credit terms)."""
+    if source != "storefront":
+        return ""
+    if account is not None and str(account.get("terms") or "prepay") != "prepay":
+        return ""
+    if online:
+        minutes = int(shop["unpaid_expiry_online_minutes"])
+        return kit.iso(kit.utcnow() + timedelta(minutes=minutes)) if minutes else ""
+    hours = int(shop["unpaid_expiry_manual_hours"])
+    return kit.iso(kit.utcnow() + timedelta(hours=hours)) if hours else ""
+
+
+def _may_confirm(connection: sqlite3.Connection, order: Mapping[str, Any]) -> bool:
+    """A confirmation for an order paid by hand goes to one address at most a few times a day (an order form is
+    otherwise a way to email anyone)."""
+    address = str(order.get("customer_email") or "")
+    if not address or order.get("source") != "storefront":
+        return True
+    since = kit.iso(kit.utcnow() - timedelta(days=1))
+    sent = kit.count(
+        connection,
+        "SELECT COUNT(*) FROM suite_outbox WHERE app = ? AND kind = 'order_confirmation' AND recipient = ? AND created_at >= ?",
+        (APP, address, since),
+    )
+    return sent < CONFIRMATIONS_PER_ADDRESS_DAY
+
+
+def expire_unpaid(connection: sqlite3.Connection, *, moment: Any = None) -> int:
+    """Lapse unpaid storefront orders past their time: they are cancelled and their stock and discount use come
+    back. One sent to pay online gets a few more minutes (a payment started at the last moment still lands); one
+    whose customer says they paid waits for the shop to check. Run by the background task."""
+    store.ensure(connection)
+    now = moment or kit.utcnow()
+    rows = kit.fetch_all(
+        connection,
+        """SELECT id, pay_online, expires_at FROM sh_orders WHERE payment_status = 'unpaid' AND fulfilment_status != 'cancelled'
+        AND expires_at != '' AND expires_at <= ? AND customer_says_paid_at IS NULL LIMIT 200""",
+        (kit.iso(now),),
+    )
+    lapsed = 0
+    for row in rows:
+        if row["pay_online"] and kit.parse_time(row["expires_at"]) > now - timedelta(minutes=ONLINE_GRACE_MINUTES):
+            continue
+        order = cancel(
+            connection,
+            row["id"],
+            note="Not paid in time: the stock was put back",
+            link_status="expired",
+        )
+        connection.execute(
+            "UPDATE sh_orders SET expired_at = ? WHERE id = ?", (kit.now(), order["id"])
+        )
+        connection.commit()
+        lapsed += 1
+    return lapsed
 
 
 def order_link(
@@ -941,7 +1142,7 @@ def mark_paid(
         )
     stamp = kit.now()
     connection.execute(
-        "UPDATE sh_orders SET payment_status = 'paid', paid_at = ?, history = ?, updated_at = ? WHERE id = ?",
+        "UPDATE sh_orders SET payment_status = 'paid', paid_at = ?, expires_at = '', history = ?, updated_at = ? WHERE id = ?",
         (stamp, _history(order, "paid", note or "Payment received"), stamp, order_id),
     )
     kit.record_revenue(
@@ -978,28 +1179,149 @@ def mark_paid(
     return updated
 
 
-def refund(
-    connection: sqlite3.Connection, order_id: str, *, note: str = ""
+def paid_online(
+    connection: sqlite3.Connection, order_id: str, paid: Mapping[str, Any]
 ) -> dict[str, Any]:
+    """A payment came in through a payment link (aira.payments). An order that lapsed meanwhile takes its stock
+    again and goes on; when the stock has gone, ValueError (the business sees it, and refunds the customer)."""
+    order = store.get_order(connection, order_id)
+    if order["fulfilment_status"] == "cancelled" and order["expired_at"]:
+        connection.commit()
+        connection.execute("BEGIN IMMEDIATE")
+        try:
+            for line in order["items"]:
+                _take_stock(connection, line, -1)
+            connection.execute(
+                "UPDATE sh_orders SET fulfilment_status = 'placed', restocked = 0, expired_at = '', history = ?, updated_at = ? WHERE id = ?",
+                (
+                    _history(order, "placed", "Paid after it lapsed: back in the queue"),
+                    kit.now(),
+                    order_id,
+                ),
+            )
+            connection.commit()
+        except ValueError as error:
+            connection.rollback()
+            raise ValueError(f"order #{order['number']} lapsed and {error}") from None
+        except BaseException:
+            connection.rollback()
+            raise
+    mark_paid(connection, order_id, note=str(paid.get("note") or ""))
+    return {"source_type": "order", "source_id": order_id}
+
+
+def refund(
+    connection: sqlite3.Connection,
+    order_id: str,
+    *,
+    note: str = "",
+    amount_cents: Any = None,
+    secret_store: Any = None,
+    actor: str = "",
+) -> dict[str, Any]:
+    """Give money back for a paid order: all of it (``amount_cents`` empty) or part.
+
+    Paid online, the refund goes through the payment provider (and :func:`refunded_online` follows when it is
+    processed). Paid by hand, the shop has given the money back itself. Either way the ledger gets a negative line
+    in this month, and a full refund puts the stock back (an order not yet shipped is cancelled too)."""
     order = store.get_order(connection, order_id)
     if order["payment_status"] != "paid":
         raise ValueError("Only a paid order can be refunded.")
-    stamp = kit.now()
-    connection.execute(
-        "UPDATE sh_orders SET payment_status = 'refunded', history = ?, updated_at = ? WHERE id = ?",
-        (_history(order, "refunded", note or "Refunded"), stamp, order_id),
+    from aira.payments import service as payments
+
+    online = next(
+        (
+            request
+            for request in payments.requests_for(connection, APP, "order", order_id)
+            if request["status"] in ("paid", "partially_refunded")
+        ),
+        None,
     )
-    kit.void_revenue(connection, APP, "order", order_id)
-    void_referral_reward(connection, order_id)
+    if online is not None:
+        payments.refund(
+            connection,
+            online["id"],
+            amount_cents=amount_cents,
+            note=note,
+            secret_store=secret_store,
+            actor=actor,
+        )
+        return store.get_order(connection, order_id)
+    left = int(order["total_cents"]) - int(order["refunded_cents"] or 0)
+    amount = kit.integer(
+        amount_cents, "the refund amount (in cents)", default=left, minimum=1
+    )
+    if amount > left:
+        raise ValueError(f"At most {kit.fmt_money(left, order['currency'])} can be refunded.")
+    kit.void_revenue(connection, APP, "order", order_id, refund_cents=amount)
     kit.log(
         connection,
         APP,
         "refund",
-        f"Order #{order['number']} refunded",
+        f"Order #{order['number']} {'refunded' if amount >= left else 'partly refunded'}",
         ref_type="order",
         ref_id=order_id,
-        amount_cents=-int(order["total_cents"]),
+        amount_cents=-amount,
+        actor=actor,
     )
+    connection.commit()
+    return refunded_online(
+        connection,
+        order_id,
+        {"amount_cents": amount, "full": amount >= left, "note": note},
+    )
+
+
+def refunded_online(
+    connection: sqlite3.Connection, order_id: str, refund_info: Mapping[str, Any]
+) -> dict[str, Any]:
+    """Money went back (the ledger line is written by the caller): the order's refund total, and on a full refund
+    the stock, the discount use and the referral reward (an order not yet shipped is also cancelled)."""
+    order = store.get_order(connection, order_id)
+    amount = int(refund_info.get("amount_cents") or 0)
+    refunded = min(int(order["total_cents"]), int(order["refunded_cents"] or 0) + amount)
+    full = bool(refund_info.get("full")) or refunded >= int(order["total_cents"])
+    note = str(refund_info.get("note") or "")
+    label = f"Refunded {kit.fmt_money(amount, order['currency'])}" + (f": {note}" if note else "")
+    connection.execute(
+        "UPDATE sh_orders SET refunded_cents = ?, payment_status = ?, history = ?, updated_at = ? WHERE id = ?",
+        (
+            refunded,
+            "refunded" if full else "paid",
+            _history(order, "refunded" if full else "partly_refunded", label),
+            kit.now(),
+            order_id,
+        ),
+    )
+    connection.commit()
+    if full:
+        void_referral_reward(connection, order_id)
+        connection.commit()
+        if not order["restocked"]:
+            connection.execute("BEGIN IMMEDIATE")
+            try:
+                for line in order["items"]:
+                    _take_stock(connection, line, +1)
+                if order["discount_code"]:
+                    connection.execute(
+                        "UPDATE sh_discounts SET uses = MAX(0, uses - 1) WHERE code = ?",
+                        (order["discount_code"],),
+                    )
+                cancelled = order["fulfilment_status"] in ("placed", "packed")
+                connection.execute(
+                    "UPDATE sh_orders SET restocked = 1, fulfilment_status = CASE WHEN ? THEN 'cancelled' ELSE fulfilment_status END WHERE id = ?",
+                    (1 if cancelled else 0, order_id),
+                )
+                connection.commit()
+            except BaseException:
+                connection.rollback()
+                raise
+            for product_id in {line["product_id"] for line in order["items"]}:
+                row = kit.fetch_one(
+                    connection, "SELECT * FROM sh_products WHERE id = ?", (product_id,)
+                )
+                if row:
+                    notify_restocked(connection, store.decode_product(row))
     connection.commit()
     return store.get_order(connection, order_id)
 
@@ -1021,7 +1343,11 @@ def mark_unpaid(connection: sqlite3.Connection, order_id: str) -> dict[str, Any]
 
 
 def cancel(
-    connection: sqlite3.Connection, order_id: str, *, note: str = ""
+    connection: sqlite3.Connection,
+    order_id: str,
+    *,
+    note: str = "",
+    link_status: str = "cancelled",
 ) -> dict[str, Any]:
     """Cancel an order: its stock and discount use come back. A paid order stays paid until you refund it."""
     order = store.get_order(connection, order_id)
@@ -1058,6 +1384,11 @@ def cancel(
         ref_id=order_id,
     )
     connection.commit()
+    if order["payment_status"] == "unpaid":
+        from aira.payments import service as payments
+
+        # its payment link stops here (Razorpay closes it at its own expiry; a late payment shows as a mismatch)
+        payments.close_open(connection, APP, "order", order_id, status=link_status)
     if not order["restocked"]:
         # The stock that came back may be what someone is waiting for.
         for product_id in {line["product_id"] for line in order["items"]}:
@@ -1683,6 +2014,12 @@ def queue_message(
     link = kit.public_url(link_path, {"base_url": origin}) if link_path else ""
     first = str(order["customer_name"]).split(" ")[0] or "there"
     number = order["number"]
+    paying = kit.payment_settings(connection)
+    if paying["provider"] != "manual":
+        # no fixed payment page: Razorpay customers pay on their order page, others by the instructions
+        profile = {**profile, "payment_link": ""}
+        if kit.online_ready(paying) and link:
+            profile["payment_link"] = f"{link} (UPI, cards or netbanking)"
     if kind == "order_confirmation":
         pay = []
         if profile.get("payment_link"):
@@ -1735,6 +2072,8 @@ def queue_message(
             for part in (
                 f"Hi {first},",
                 f"We received your payment of {kit.fmt_money(int(order['total_cents']), order['currency'])} for order #{number}. Thank you!",
+                # paid online, this is the order's only confirmation: say what was ordered
+                f"Your order:\n{_items_text(order)}" if order.get("pay_online") else "",
                 share_text,
                 f"Your order: {link}" if link else "",
                 f"Thanks,\n{name}",
@@ -2052,7 +2391,8 @@ def storefront(
 ) -> dict[str, Any]:
     """The storefront page: for a consumer, or for a signed-in business (``account``) with its trade prices."""
     shop = store.settings(connection)
-    sell_to = kit.business(connection)["sell_to"]
+    profile = kit.business(connection)
+    sell_to = profile["sell_to"]
     hide = account is None and sell_to == "businesses"
     products = [
         public_product(p, account, hide_prices=hide)
@@ -2094,6 +2434,20 @@ def storefront(
         else 0,
         # a ?ref= link counts even when friends get 0% off: the sharer still earns their reward
         "referrals": bool(shop["referrals_enabled"]) and account is None,
+        # the order form comes back with this (a bot check: see check_form)
+        "form_token": form_token(connection),
+        "online_payments": kit.online_ready(kit.payment_settings(connection)),
+        "pay_within_minutes": int(shop["unpaid_expiry_online_minutes"] or 0),
+        "prices_include_tax": bool(profile["prices_include_tax"]),
+        # a business that charges GST asks where the customer is (CGST + SGST, or IGST)
+        "gst_states": [
+            {"code": code, "name": name} for code, name in kit.GST_STATES.items()
+        ]
+        if kit.gst_applies(profile)
+        else [],
+        "home_state": str(profile.get("state_code") or "")
+        if kit.gst_applies(profile)
+        else "",
     }
 
 
@@ -2128,11 +2482,22 @@ def public_order(
         "address": order["address"],
         "items": [
             {
-                k: line[k]
-                for k in ("name", "option", "unit_cents", "quantity", "line_cents")
+                **{
+                    k: line[k]
+                    for k in ("name", "option", "unit_cents", "quantity", "line_cents")
+                },
+                "hsn_sac": line.get("hsn_sac") or "",
             }
             for line in order["items"]
         ],
+        "tax_lines": list(order.get("tax_lines") or []),
+        "prices_include_tax": bool(order.get("prices_include_tax")),
+        "customer_state": order.get("customer_state") or "",
+        "refunded_cents": int(order.get("refunded_cents") or 0),
+        # an unpaid storefront order lapses (its stock goes back): the customer sees by when to pay
+        "pay_by": (order.get("expires_at") or "")
+        if order["payment_status"] == "unpaid"
+        else "",
         "subtotal_cents": order["subtotal_cents"],
         "discount_code": order["discount_code"],
         "discount_cents": order["discount_cents"],

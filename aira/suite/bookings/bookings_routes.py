@@ -731,9 +731,18 @@ def booking_page_book(
         source="public",
         origin=visitor,
     )
+    from aira.payments import service as payments
+
+    # a deposit (or the price) can be paid online at once: the customer comes back to their booking's page
+    pay_url = (
+        payments.link_on_checkout(connection, APP, "booking", booking["id"])
+        if int(booking["deposit_cents"] or 0) or int(booking["price_cents"] or 0)
+        else ""
+    )
     return 201, {
         "booking": service.public_booking(connection, booking),
         "manage_path": booking["manage_path"],
+        "pay_url": pay_url,
     }
 
 
