@@ -72,12 +72,16 @@ def member_deleted(
 ) -> dict[str, Any]:
     """The member deleted their own account, or a data subject request deletes them (before their row is
     anonymised: the email is read from it)."""
-    with app.db.read() as connection:
-        row = one(
-            connection,
-            "SELECT email, name FROM members WHERE org_id = ? AND member_id = ?",
-            (org_id, member_id),
-        )
+    try:
+        with app.db.read() as connection:
+            row = one(
+                connection,
+                "SELECT email, name FROM members WHERE org_id = ? AND member_id = ?",
+                (org_id, member_id),
+            )
+    except Exception:  # noqa: BLE001 - the deletion it belongs to goes on (Social and Videos are still erased)
+        logger.exception("Could not read the member being deleted in %s", org_id)
+        row = None
     return _erase(
         app,
         org_id,
