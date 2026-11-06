@@ -592,6 +592,12 @@ def _email_apply(connection: sqlite3.Connection) -> None:
     ensure_schema(connection)
 
 
+def _interview_prep(connection: sqlite3.Connection) -> None:
+    from aira.interview_prep import ensure_schema
+
+    ensure_schema(connection)
+
+
 def _normalize_stages(connection: sqlite3.Connection) -> None:
     """Rename the old stage names again.
 
@@ -746,6 +752,13 @@ MIGRATIONS: tuple[Migration, ...] = (
         "Applying by email: one ledger row per job emailed (recipient, Message-ID, status) so a job is emailed "
         "once ever, and the Auto-apply plan switch 'Apply by email when the posting asks for it'.",
         _email_apply,
+    ),
+    Migration(
+        23,
+        "interview_prep",
+        "Structured interview preparation: the person's STAR stories linked to skills, and per interview the "
+        "likely questions (with linked stories and practice notes) and a company research brief.",
+        _interview_prep,
     ),
 )
 
