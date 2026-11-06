@@ -104,8 +104,102 @@
     const syncDirty = () => { dirtyNote.textContent = isDirty() ? "Unsaved changes" : ""; };
     for (const [key] of DOC_KEYS) areas[key].addEventListener("input", syncDirty);
 
+    // The pages an employer receives, drawn from the same layout the PDF is written from.
+    async function openPreview(key) {
+      const pages = h("div", { class: "cre-pages" }, ui.skeleton(4));
+      const notes = h("div", {});
+      const formatNote = h("p", { class: "muted cre-hint" });
+      const body = h("div", { class: "cre-preview" }, notes, formatNote, pages);
+      const fileOf = async (format) => {
+        const response = await api(`/api/jobs/${id}/documents/file`, { method: "POST", raw: true, body: { doc: key, text: areas[key].value, format } });
+        return response.blob();
+      };
+      Aira.modal({ title: key === "resume" ? "Preview: your resume as employers receive it" : "Preview: your cover letter", wide: true, body, actions: [
+        { label: "Close", kind: "ghost" },
+        { label: "Download", kind: "secondary", onClick: async () => {
+          const format = key === "resume" ? formatSelect.value : "pdf";
+          try {
+            const blob = await fileOf(format);
+            const url = URL.createObjectURL(blob);
+            const link = h("a", { href: url, download: `${key === "resume" ? "Resume" : "Cover Letter"}${job.company ? ` - ${job.company}` : ""}.${format}` });
+            document.body.append(link); link.click(); link.remove();
+            setTimeout(() => URL.revokeObjectURL(url), 2000);
+          } catch (error) { Aira.reportError(error); }
+          return false;
+        } },
+        { label: "Open the PDF", kind: "", onClick: async () => {
+          try {
+            const url = URL.createObjectURL(await fileOf("pdf"));
+            window.open(url, "_blank", "noopener");
+            setTimeout(() => URL.revokeObjectURL(url), 60000);
+          } catch (error) { Aira.reportError(error); }
+          return false;
+        } },
+      ] });
+      try {
+        const data = await api(`/api/jobs/${id}/documents/preview`, { method: "POST", body: { doc: key, text: areas[key].value } });
+        notes.replaceChildren(...(data.warnings || []).map((warning) => h("p", { class: "note warn", text: warning })));
+        const word = data.templates && data.templates.docx;
+        if (key === "resume") formatNote.textContent = formatSelect.value === "docx" ? (word && word.available ? "You chose Word: employers get your own resume's design with this text. The pages below show the PDF layout, which is used if the Word file cannot be built." : `Word is not available: ${(word && word.reason) || "upload a Word resume"}`) : `${data.page_count} page${data.page_count === 1 ? "" : "s"} in Monosage's PDF layout.`;
+        pages.replaceChildren(...drawPages(data));
+      } catch (error) { pages.replaceChildren(ui.error(error)); }
+    }
+    function drawPages(data) {
+      const NS = "http://www.w3.org/2000/svg";
+      const make = (name, attrs) => { const node = document.createElementNS(NS, name); for (const [k, v] of Object.entries(attrs)) node.setAttribute(k, String(v)); return node; };
+      const shade = (gray) => { const v = Math.round(255 * (gray || 0)); return `rgb(${v},${v},${v})`; };
+      return data.pages.map((items, index) => {
+        const svg = make("svg", { viewBox: `0 0 ${data.width} ${data.height}`, class: "cre-page", role: "img", "aria-label": `Page ${index + 1} of ${data.page_count}` });
+        svg.append(make("rect", { x: 0, y: 0, width: data.width, height: data.height, fill: "#fff" }));
+        for (const item of items) {
+          if (item.t === "rule") { svg.append(make("line", { x1: item.x1, x2: item.x2, y1: item.y, y2: item.y, stroke: shade(item.gray), "stroke-width": item.w })); continue; }
+          const text = make("text", { x: item.x, y: item.y, "font-size": item.size, "font-family": "Helvetica, Arial, sans-serif", fill: shade(item.gray), "font-weight": item.font.startsWith("bold") ? "700" : "400", "font-style": item.font.endsWith("italic") ? "italic" : "normal" });
+          // Runs start or end with their spaces ("running" + " Kubernetes"): SVG must keep them.
+          text.setAttributeNS("http://www.w3.org/XML/1998/namespace", "xml:space", "preserve");
+          text.textContent = item.text;
+          svg.append(text);
+        }
+        return svg;
+      });
+    }
+
+    // ATS readiness, the job's missing keywords and the changes against the master resume, for the editor's text.
+    async function runCheck() {
+      checkBox.hidden = false;
+      checkBox.replaceChildren(ui.skeleton(3));
+      try {
+        const data = await api(`/api/jobs/${id}/documents/check`, { method: "POST", body: { text: areas.resume.value } });
+        paintCheck(data);
+      } catch (error) { checkBox.replaceChildren(ui.error(error, runCheck)); }
+    }
+    function paintCheck({ ats, keywords, changes }) {
+      const tone = ats.score >= 85 ? "good" : ats.score >= 70 ? "ok" : "low";
+      const checks = h("ul", { class: "cre-checks" }, ...ats.checks.map((c) => h("li", { class: c.passed ? "pass" : "fail" }, h("strong", { text: `${c.label}: ${Math.round(c.points)}/${c.max}` }), h("span", { class: "muted", text: ` ${c.detail}` }), c.fix ? h("div", { class: "cre-fix", text: c.fix }) : null)));
+      const chip = (item) => h("span", { class: `chip${item.in_master ? " cre-chip-master" : ""}`, title: item.advice, text: `${item.label}${item.in_master ? " (in your master resume)" : ""}` });
+      const missing = [...keywords.required, ...keywords.preferred];
+      const claims = [...changes.skills.new, ...changes.new_figures];
+      checkBox.replaceChildren(...[
+        h("div", { class: "cre-check-head" }, h("span", { class: `cre-score ${tone}`, text: String(ats.score) }), h("div", {}, h("strong", { text: `ATS readiness: ${ats.grade}` }), h("div", { class: "muted", text: `${ats.stats.words} words · ${ats.stats.pages} page${ats.stats.pages === 1 ? "" : "s"} · ${ats.stats.sections} sections · ${ats.stats.bullets} bullets` })), h("button", { type: "button", class: "btn ghost sm", text: "Check again", onclick: runCheck })),
+        checks,
+        ats.advice.length ? h("ul", { class: "inline-list cre-advice" }, ...ats.advice.map((a) => h("li", { text: a }))) : null,
+        h("h4", { text: "Missing keywords for this job" }),
+        missing.length ? h("div", {}, keywords.required.length ? h("div", { class: "chips" }, h("span", { class: "muted", text: "Required: " }), ...keywords.required.map(chip)) : null, keywords.preferred.length ? h("div", { class: "chips" }, h("span", { class: "muted", text: "Preferred: " }), ...keywords.preferred.map(chip)) : null, h("p", { class: "muted cre-hint", text: "Bring back the ones your master resume has. Add the others only if they are true; otherwise they are gaps (see Jobs > Skill gaps)." })) : h("p", { class: "muted", text: keywords.counts.required + keywords.counts.preferred ? "Every skill the posting names appears in this version." : "The posting names no skills Monosage recognises." }),
+        h("h4", { text: "What changed against your master resume" }),
+        changes.has_master ? h("div", {},
+          h("p", { text: `${changes.lines.reworded} lines reworded, ${changes.lines.added} added, ${changes.lines.removed} removed · ${changes.words.master} → ${changes.words.tailored} words${changes.sections.reordered ? " · sections reordered" : ""}${changes.sections.added.length ? ` · new sections: ${changes.sections.added.join(", ")}` : ""}${changes.sections.removed.length ? ` · dropped: ${changes.sections.removed.join(", ")}` : ""}` }),
+          claims.length ? h("p", { class: "note warn", text: `Not in your master resume: ${claims.join(", ")}. Check each one is true before you approve.` }) : h("p", { class: "muted", text: "No skills or figures that your master resume does not have." }),
+          changes.skills.dropped.length ? h("p", { class: "muted", text: `Left out from the master: ${changes.skills.dropped.join(", ")}.` }) : null,
+        ) : h("p", { class: "muted", text: "Save your master resume in Profile to compare versions against it." }),
+      ].filter(Boolean));
+    }
+
     const switchButtons = DOC_KEYS.map(([key, label]) => h("button", { type: "button", role: "tab", class: "cre-switch-btn", "data-doc": key, "aria-controls": areas[key].id, text: label, onclick: () => show(key) }));
     const copyBtn = h("button", { type: "button", class: "btn ghost sm", text: "Copy", onclick: async () => { await navigator.clipboard.writeText(areas[active].value); toast(`${active === "resume" ? "Resume" : "Cover letter"} copied.`, "success"); } });
+    // How an approved resume is sent: Monosage's PDF layout, or the person's own Word resume as the template.
+    const formatSelect = ui.select([["pdf", "PDF in Monosage's layout"], ["docx", "Word, in my own resume's design"]], "pdf", { id: "creFormat", "aria-label": "Send my resume as" });
+    const previewBtn = h("button", { type: "button", class: "btn secondary sm", text: "Preview", title: "See the pages employers receive", onclick: () => openPreview(active) });
+    const checkBtn = h("button", { type: "button", class: "btn ghost sm", text: "ATS check", title: "ATS readiness, missing keywords and what changed against your master resume", onclick: () => runCheck() });
+    const checkBox = h("div", { class: "card cre-check", hidden: true, "aria-live": "polite" });
     const history = h("div", { class: "cre-history", "aria-label": "Saved versions" }, ui.skeleton(2));
     const inUse = h("div", { class: "cre-in-use", role: "status" });
     function show(key) {
@@ -154,7 +248,7 @@
     const approve = h("button", { type: "button", class: "btn", text: "Approve and save" });
     approve.addEventListener("click", () => withBusy(approve, async () => {
       if (!reviewed.checked) { toast("Tick “I reviewed both” first: approving says every claim is true.", "error"); reviewed.focus(); return; }
-      await api(`/api/jobs/${id}/documents/versions`, { method: "POST", body: { ...body(), approve: true } });
+      await api(`/api/jobs/${id}/documents/versions`, { method: "POST", body: { ...body(), approve: true, format: formatSelect.value } });
       const canMove = (job.allowed_stages || []).includes("ready_to_apply");
       if (canMove) {
         try { await api(`/api/jobs/${id}/stage`, { method: "PATCH", body: { stage: "ready_to_apply", reason: "Drafts approved" } }); }
@@ -170,9 +264,11 @@
       inUse,
       h("div", { class: "cre-editor" },
         h("div", { class: "cre-docs" },
-          h("div", { class: "cre-toolbar" }, h("div", { class: "cre-switch", role: "tablist", "aria-label": "Document" }, ...switchButtons), dirtyNote, copyBtn),
+          h("div", { class: "cre-toolbar" }, h("div", { class: "cre-switch", role: "tablist", "aria-label": "Document" }, ...switchButtons), dirtyNote, checkBtn, previewBtn, copyBtn),
           areas.resume, areas.cover_letter,
+          checkBox,
           h("div", { class: "cre-approve" },
+            h("div", { class: "field cre-format" }, h("label", { for: "creFormat", text: "Send my resume as" }), formatSelect),
             h("label", { class: "check" }, reviewed, "I reviewed both and every claim is true."),
             h("p", { class: "muted cre-hint", text: "Approving saves a version and makes it the one your applications upload, also when Auto-apply sends them." }),
             h("div", { class: "btn-row" }, approve, saveDraft),
@@ -191,7 +287,9 @@
         const use = versions.in_use[key] || { kind: "none" };
         const list = versions.versions[key] || [];
         const currentApproved = list.some((v) => v.current && v.approved);
-        const text = use.kind === "approved" ? `${label}: version ${use.version}, approved` : use.kind === "draft" ? `${label}: the current draft (not approved yet)` : `${label}: none yet`;
+        const approvedEntry = versions.approved && versions.approved[key];
+        const format = key === "resume" && approvedEntry ? (approvedEntry.upload_format === "docx" ? " as Word" : " as a PDF") : "";
+        const text = use.kind === "approved" ? `${label}: version ${use.version}, approved${format}` : use.kind === "draft" ? `${label}: the current draft (not approved yet)` : `${label}: none yet`;
         return { text, waiting: use.kind === "approved" && !currentApproved && Boolean(original[key]) };
       });
       const waiting = parts.some((p) => p.waiting);
@@ -220,7 +318,12 @@
         }) }),
       ))));
     }
-    api(`/api/jobs/${id}/documents/versions`).then((data) => { versions = data; paintInUse(); paintHistory(); }).catch((error) => history.replaceChildren(ui.error(error)));
+    api(`/api/jobs/${id}/documents/versions`).then((data) => {
+      versions = data;
+      const approvedResume = data.approved && data.approved.resume;
+      if (approvedResume && approvedResume.upload_format) formatSelect.value = approvedResume.upload_format;
+      paintInUse(); paintHistory();
+    }).catch((error) => history.replaceChildren(ui.error(error)));
   };
 
   function renderPacket(job, prep, reload) {
@@ -468,6 +571,18 @@
     let page = 1;
     let data = await api(`/api/jobs?view=pipeline&page_size=${PAGE}&page=1&sort=updated`);
     const jobs = [...data.jobs];
+    const plural = (n) => `${n} ${n === 1 ? "application" : "applications"}`;
+    const refresh = () => renderPipeline(content, route);
+    const bulk = Aira.bulkSelection({ noun: "application", actions: [
+      { node: Aira.bulkStageSelect(async (next) => { const ids = [...bulk.picked]; Aira.bulkReport(await Aira.bulkJobs({ action: "stage", stage: next, job_ids: ids }), (n) => `Moved ${plural(n)} to ${fmt.stage(next)}.`); refresh(); }) },
+      { label: "Archive", kind: "ghost", run: async (ids) => {
+        const out = await Aira.bulkJobs({ action: "archive", job_ids: ids });
+        const note = Aira.bulkReport(out, (n) => `Archived ${plural(n)}.`);
+        const done = out.results.filter((r) => r.ok).map((r) => r.job_id);
+        if (done.length && note) note.insertBefore(h("button", { type: "button", class: "btn ghost sm", text: "Undo", onclick: async () => { note.remove(); Aira.bulkReport(await Aira.bulkJobs({ action: "restore", job_ids: done }), (n) => `Restored ${plural(n)}.`); refresh(); } }), note.lastElementChild);
+        refresh();
+      } },
+    ] });
     const draw = () => {
       const counts = new Map((data.facets.stages || []).map((item) => [item.stage, item.count]));
       const board = h("div", { class: "kanban" });
@@ -477,7 +592,7 @@
         const column = h("div", { class: "kanban-col" }, h("h3", {}, h("span", { text: group.label }), h("span", { class: "muted", text: String(total) })));
         const cards = h("div", { class: "cards" });
         if (!items.length) cards.append(h("div", { class: "muted", style: { padding: "12px", fontSize: "12.5px" }, text: total ? "Older ones are not shown yet. Choose Show more below." : "Nothing here yet." }));
-        for (const job of items) cards.append(h("button", { type: "button", class: "kcard", onclick: () => Aira.openJob(job.job_id, { tab: "apply" }) }, h("strong", { text: job.title || job.job_id }), h("span", { text: job.company || "" }), h("div", { class: "meta" }, ui.stage(job.stage), ui.classification(job.match_classification), job.match_score != null ? h("span", { class: "badge", text: `${Math.round(job.match_score)}%` }) : null)));
+        for (const job of items) cards.append(h("div", { class: "bulk-row" }, bulk.box(job.job_id, job.title || job.job_id), h("button", { type: "button", class: "kcard", onclick: () => Aira.openJob(job.job_id, { tab: "apply" }) }, h("strong", { text: job.title || job.job_id }), h("span", { text: job.company || "" }), h("div", { class: "meta" }, ui.stage(job.stage), ui.classification(job.match_classification), job.match_score != null ? h("span", { class: "badge", text: `${Math.round(job.match_score)}%` }) : null))));
         if (items.length && items.length < total) cards.append(h("div", { class: "muted careers-more-note", text: `${total - items.length} older not shown` }));
         column.append(cards);
         board.append(column);
@@ -492,7 +607,7 @@
         draw();
       }) }) : null;
       const summary = h("p", { class: "muted", style: { marginTop: "10px", fontSize: "12.5px" }, text: `Showing ${jobs.length} of ${data.total} applications, most recently updated first. ${discovered} more jobs are discovered or saved and not yet in the pipeline.` });
-      content.replaceChildren(...(tracking ? [tracking] : []), ...(jobs.length ? [board, summary, ...(more ? [h("div", { class: "btn-row", style: { marginTop: "10px" } }, more)] : [])] : [ui.empty("No applications in progress", `${discovered} discovered or saved jobs are waiting in Jobs. Prepare one to start the pipeline.`, h("a", { class: "btn", href: "#/jobs/recommended", text: "Pick a recommended job" }))]));
+      content.replaceChildren(...(tracking ? [tracking] : []), ...(jobs.length ? [bulk.bar, board, summary, ...(more ? [h("div", { class: "btn-row", style: { marginTop: "10px" } }, more)] : [])] : [ui.empty("No applications in progress", `${discovered} discovered or saved jobs are waiting in Jobs. Prepare one to start the pipeline.`, h("a", { class: "btn", href: "#/jobs/recommended", text: "Pick a recommended job" }))]));
     };
     draw();
   }

@@ -12,7 +12,9 @@
     { id: "upcoming", label: "Upcoming", icon: "interviews" },
     { id: "past", label: "Past", icon: "careers-history" },
     { id: "all", label: "All", icon: "careers-list" },
+    { id: "stories", label: "STAR stories", icon: "careers-sparkle" },
   ];
+  const QUESTION_GROUPS = [["opening", "Openers"], ["behavioral", "Behavioural (answer with a STAR story)"], ["technical", "Technical"], ["gap", "Gaps to prepare for"], ["role", "About the role"], ["logistics", "Logistics (decide your answers before the call)"], ["closing", "Closing"]];
   Aira.views.interviews = async (main, route) => {
     const making = Aira.careersTakeNew(route);
     // ?tab= (the menu folders) and the older ?scope= name the same thing.
@@ -20,6 +22,15 @@
     const scope = SCOPES.some((item) => item.id === asked) ? asked : "upcoming";
     Aira.careersFolders("interviews", SCOPES, scope);
     const list = h("div", { class: "panel" });
+    if (scope === "stories") {
+      main.replaceChildren(
+        h("div", { class: "page-head" }, h("div", {}, h("h1", { text: "Interviews" }), h("p", { text: "Your STAR stories: situation, task, action and result, each linked to the skills it shows. Interview prep links them to the questions they answer." }))),
+        h("nav", { class: "subnav careers-tabstrip", "aria-label": "Interview scope" }, ...SCOPES.map(({ id, label }) => h("a", { href: `#/interviews?tab=${id}`, "aria-current": id === scope ? "page" : "false", text: label }))),
+        list,
+      );
+      await renderStories(list);
+      return;
+    }
     main.replaceChildren(
       h("div", { class: "page-head" }, h("div", {}, h("h1", { text: "Interviews" }), h("p", { text: "Track every conversation with its time zone, participants, prep notes, and follow-ups. Add events to any calendar with one click." })), h("div", { class: "page-actions" }, h("button", { type: "button", class: "btn secondary sm", text: "Download all (.ics)", onclick: () => Aira.download("/api/interviews/calendar.ics", "aira-interviews.ics") }), h("a", { class: "btn secondary sm", href: "#/applications?tab=email", text: "Detect from email" }), h("button", { type: "button", class: "btn sm", text: "+ Add interview", onclick: () => interviewForm(null, () => router.render()) }))),
       h("nav", { class: "subnav careers-tabstrip", "aria-label": "Interview scope" }, ...SCOPES.map(({ id, label }) => h("a", { href: `#/interviews?tab=${id}`, "aria-current": id === scope ? "page" : "false", text: label }))),
@@ -59,8 +70,116 @@
         h("div", { class: "card" }, h("h3", { text: "When & where" }), ui.kv([["Start", `${fmt.datetime(i.start_at, i.timezone)} (${i.timezone})`], ["End", fmt.datetime(i.end_at, i.timezone)], ["Your local time", fmt.datetime(i.start_at)], ["Status", i.status], ["Meeting link", i.meeting_link ? h("a", { href: i.meeting_link, target: "_blank", rel: "noopener noreferrer", text: i.meeting_link }) : null], ["Location", i.location || null], ["Job", i.job_id ? h("a", { href: "#", text: i.job_title || i.job_id, onclick: (event) => { event.preventDefault(); Aira.openJob(i.job_id); } }) : null], ["Recruiter", i.recruiter_id ? h("a", { href: `#/recruiters/${i.recruiter_id}`, text: i.recruiter_name || "Recruiter" }) : null], ["Hiring manager", i.hiring_manager || null], ["Calendar UID", `${data.calendar.uid} · seq ${data.calendar.sequence}`]]), h("div", { style: { marginTop: "12px" } }, links)),
         h("div", { class: "card" }, h("h3", { text: "People" }), i.participants.length ? h("ul", { class: "inline-list" }, ...i.participants.map((p) => h("li", { text: `${p.name}${p.role ? ` · ${p.role}` : ""}${p.email ? ` · ${p.email}` : ""}` }))) : h("p", { class: "muted", text: "No participants listed." }), h("h3", { text: "Action items", style: { marginTop: "14px" } }), i.action_items.length ? h("ul", { class: "inline-list" }, ...i.action_items.map((a) => h("li", { text: a }))) : h("p", { class: "muted", text: "None yet." }), i.follow_up_at ? h("p", { class: "note", style: { marginTop: "10px" }, text: `Follow-up due ${fmt.datetime(i.follow_up_at)}` }) : null),
       ),
-      h("div", { class: "grid cols-2", style: { marginTop: "14px" } }, h("div", { class: "card" }, h("h3", { text: "Preparation" }), h("div", { class: "description", style: { maxHeight: "260px" }, text: i.preparation || "Add prep notes: STAR stories, questions to ask, research." })), h("div", { class: "card" }, h("h3", { text: "Notes & feedback" }), h("div", { class: "description", style: { maxHeight: "260px" }, text: [i.notes, i.feedback].filter(Boolean).join("\n\n") || "Capture notes and feedback after the conversation." }))),
+      renderPrep(i),
+      h("div", { class: "grid cols-2", style: { marginTop: "14px" } }, h("div", { class: "card" }, h("h3", { text: "Your own prep notes" }), h("div", { class: "description", style: { maxHeight: "260px" }, text: i.preparation || "Anything else to remember. Edit the interview to change these notes." })), h("div", { class: "card" }, h("h3", { text: "Notes & feedback" }), h("div", { class: "description", style: { maxHeight: "260px" }, text: [i.notes, i.feedback].filter(Boolean).join("\n\n") || "Capture notes and feedback after the conversation." }))),
     );
+  }
+
+  // Structured interview prep: likely questions (each with the STAR stories that answer it and practice notes)
+  // and a company brief from the posting. Monosage's own rules always answer; the AI adds to them when asked.
+  function renderPrep(interview) {
+    const card = h("div", { class: "card", style: { marginTop: "14px" } }, h("h3", { text: "Interview prep" }), ui.skeleton(3));
+    const base = `/api/interviews/${interview.interview_id}/prep`;
+    const paint = (state, note = "") => {
+      const { prep, stories, ai_available: aiAvailable } = state;
+      const useAi = h("input", { type: "checkbox", checked: Boolean(aiAvailable), disabled: !aiAvailable });
+      const build = h("button", { type: "button", class: prep ? "btn secondary sm" : "btn sm", text: prep ? "Prepare again" : "Prepare this interview" });
+      build.addEventListener("click", () => withBusy(build, async () => {
+        build.textContent = "Preparing…";
+        const out = await api(base, { method: "POST", body: { use_ai: useAi.checked, model: (Aira.state.settings && Aira.state.settings.default_model) || "" } });
+        toast(out.prep.generated_by.includes("ai") ? "Prep ready, with AI suggestions." : "Prep ready.", "success");
+        paint(out, out.note);
+      }));
+      const controls = h("div", { class: "btn-row" }, build, h("label", { class: "check", title: aiAvailable ? "Add questions and a sharper brief from your AI model" : "No AI model is set up: Monosage's own questions are used" }, useAi, "Use AI as well"), h("a", { class: "btn ghost sm", href: "#/interviews?tab=stories", text: "My STAR stories" }));
+      const parts = [h("h3", { text: "Interview prep" }), note ? h("p", { class: "note warn", text: note }) : null, controls];
+      if (!prep) {
+        parts.push(h("p", { class: "muted", text: "Monosage lists the questions this interview is likely to ask (from the job's skills, the interview type and your gaps), links your STAR stories to them, and writes a company brief from the posting." }));
+        card.replaceChildren(...parts.filter(Boolean));
+        return;
+      }
+      const byId = Object.fromEntries((stories || []).map((s) => [s.story_id, s]));
+      const r = prep.research || {};
+      const row = (label, value) => (value && (!Array.isArray(value) || value.length) ? [h("dt", { text: label }), h("dd", { text: Array.isArray(value) ? value.join(" · ") : value })] : []);
+      const brief = h("details", { class: "ivp-brief", open: true }, h("summary", { text: `Company brief: ${r.company || "the company"}` }),
+        h("dl", {}, ...row("About", r.summary), ...row("AI summary", r.ai_summary), ...row("The role", r.role_focus), ...row("Tech in the posting", r.tech), ...row("What they value", r.values), ...row("Your strengths here", r.your_strengths), ...row("Prepare for", r.your_gaps), ...row("Questions to ask", r.questions_to_ask)),
+        r.note ? h("p", { class: "muted", text: r.note }) : null,
+        h("p", { class: "muted cre-hint", text: `${(r.sources || []).join(", ") || "No sources"}${prep.generated_by.includes("ai") ? " · AI additions are marked and use only the posting" : ""} · prepared ${fmt.ago(prep.generated_at)}` }));
+      const groups = QUESTION_GROUPS.map(([kind, label]) => {
+        const items = prep.questions.filter((q) => q.kind === kind);
+        if (!items.length) return null;
+        return h("div", { class: "ivp-group" }, h("h4", { text: label }), ...items.map((q) => {
+          const notes = h("textarea", { class: "textarea", rows: 2, maxlength: 2000, placeholder: "Practice notes for your answer", "aria-label": `Notes for: ${q.question}` }, q.notes || "");
+          notes.addEventListener("change", async () => {
+            try { await api(base, { method: "PATCH", body: { notes: { [q.id]: notes.value } } }); toast("Notes saved.", "success"); }
+            catch (error) { Aira.reportError(error); }
+          });
+          const linked = (q.story_ids || []).map((sid) => byId[sid]).filter(Boolean);
+          return h("div", { class: "ivp-question" },
+            h("div", {}, h("strong", { text: q.question }), q.source === "ai" ? h("span", { class: "badge", text: "AI", title: "Suggested by your AI model" }) : null, q.skill ? h("span", { class: "chip", text: q.skill }) : null),
+            linked.length ? h("div", { class: "chips" }, h("span", { class: "muted", text: "Your stories: " }), ...linked.map((s) => h("button", { type: "button", class: "chip", text: s.title, onclick: () => showStory(s) }))) : q.skill && ["behavioral", "technical"].includes(kind) ? h("a", { class: "muted", href: "#/interviews?tab=stories", text: `No story for ${q.skill} yet: add one` }) : null,
+            notes);
+        }));
+      }).filter(Boolean);
+      card.replaceChildren(...parts.filter(Boolean), brief, ...groups);
+    };
+    api(base).then((state) => paint(state)).catch((error) => card.replaceChildren(h("h3", { text: "Interview prep" }), ui.error(error)));
+    return card;
+  }
+
+  function showStory(story) {
+    Aira.modal({ title: story.title, body: storyView(story), actions: [{ label: "Close", kind: "ghost" }] });
+  }
+  function storyView(story) {
+    const row = (label, value) => (value ? [h("dt", { text: label }), h("dd", { text: value })] : []);
+    return h("div", {}, story.skills && story.skills.length ? h("div", { class: "chips" }, ...story.skills.map((s) => h("span", { class: "chip", text: s }))) : null, h("dl", {}, ...row("Situation", story.situation), ...row("Task", story.task), ...row("Action", story.action), ...row("Result", story.result)));
+  }
+
+  // STAR stories: the person's own, linked to skills; drafts from resume bullets leave the context to them.
+  async function renderStories(box) {
+    box.replaceChildren(ui.skeleton(3));
+    let stories;
+    try { stories = (await api("/api/star-stories")).stories; } catch (error) { box.replaceChildren(ui.error(error, () => renderStories(box))); return; }
+    const reload = () => renderStories(box);
+    const add = h("button", { type: "button", class: "btn sm", text: "+ Add a story", onclick: () => storyForm(null, reload) });
+    const drafts = h("button", { type: "button", class: "btn secondary sm", text: "Draft from my resume" });
+    drafts.addEventListener("click", () => withBusy(drafts, async () => {
+      const out = await api("/api/star-stories/drafts", { method: "POST", body: {} });
+      if (!out.drafts.length) { toast("No resume bullets name a skill Monosage recognises. Add a story yourself.", "error"); return; }
+      let draftModal = null;
+      draftModal = Aira.modal({ title: "Drafts from your resume", wide: true, body: h("div", { class: "star-list" }, h("p", { class: "muted", text: "Each draft takes one resume bullet as the Action. Add the situation and task yourself, check the result, then save." }), ...out.drafts.map((d) => h("div", { class: "star-card" }, h("strong", { text: d.title }), storyView(d), h("div", { class: "btn-row" }, h("button", { type: "button", class: "btn secondary sm", text: "Edit and save", onclick: () => { if (draftModal) draftModal.close(); storyForm(d, reload); } }))))), actions: [{ label: "Close", kind: "ghost" }] });
+    }));
+    const list = h("div", { class: "star-list" });
+    if (!stories.length) list.append(ui.empty("No STAR stories yet", "Write the stories you tell in interviews once: situation, task, action, result. Interview prep links them to the questions they answer.", h("div", { class: "btn-row", style: { justifyContent: "center" } }, add.cloneNode(true), drafts)));
+    for (const story of stories) {
+      list.append(h("div", { class: "star-card" }, h("div", { class: "btn-row", style: { justifyContent: "space-between" } }, h("strong", { text: story.title }), h("div", { class: "btn-row" },
+        h("button", { type: "button", class: "btn ghost sm", text: "Edit", onclick: () => storyForm(story, reload) }),
+        h("button", { type: "button", class: "btn ghost sm danger", text: "Delete", onclick: async (event) => { if (await Aira.confirm({ title: "Delete this story?", message: "It is removed from your stories and from interview prep links.", confirmLabel: "Delete", danger: true })) await withBusy(event.currentTarget, async () => { await api(`/api/star-stories/${story.story_id}`, { method: "DELETE" }); toast("Story deleted.", "success"); reload(); }); } }))),
+        storyView(story)));
+    }
+    box.replaceChildren(h("div", { class: "panel-head" }, h("h3", { text: "STAR stories" }), h("div", { class: "btn-row" }, stories.length ? drafts : null, stories.length ? add : null)), list);
+    if (!stories.length) list.querySelector(".btn-row .btn").addEventListener("click", () => storyForm(null, reload));
+  }
+
+  function storyForm(existing, onSaved) {
+    const v = existing || {};
+    const title = h("input", { type: "text", value: v.title || "", maxlength: 160 });
+    const skills = h("input", { type: "text", value: (v.skills || []).join(", "), maxlength: 600, placeholder: "e.g. Kubernetes, Stakeholder management" });
+    const area = (value, rows) => h("textarea", { class: "textarea", rows, maxlength: 3000 }, value || "");
+    const situation = area(v.situation, 2);
+    const task = area(v.task, 2);
+    const action = area(v.action, 3);
+    const result = area(v.result, 2);
+    const body = h("div", { class: "form-grid" }, ui.field("Title", title), ui.field("Skills it shows", skills, "Separate with commas. Interview prep links the story to questions about these skills."), h("div", { class: "field wide" }, h("label", { text: "Situation" }), situation), h("div", { class: "field wide" }, h("label", { text: "Task" }), task), h("div", { class: "field wide" }, h("label", { text: "Action: what you did" }), action), h("div", { class: "field wide" }, h("label", { text: "Result: what came of it (numbers help)" }), result));
+    Aira.modal({ title: v.story_id ? "Edit story" : "Add a STAR story", wide: true, body, actions: [{ label: "Cancel", kind: "ghost" }, { label: v.story_id ? "Save changes" : "Save story", kind: "", onClick: async () => {
+      const payload = { title: title.value, skills: skills.value.split(",").map((s) => s.trim()).filter(Boolean), situation: situation.value, task: task.value, action: action.value, result: result.value, source: v.source || "user" };
+      try {
+        if (v.story_id) await api(`/api/star-stories/${v.story_id}`, { method: "PATCH", body: payload });
+        else await api("/api/star-stories", { method: "POST", body: payload });
+        toast("Story saved.", "success");
+        onSaved();
+      } catch (error) { Aira.reportError(error); return false; }
+      return undefined;
+    } }] });
   }
 
   function interviewForm(existing, onSaved) {

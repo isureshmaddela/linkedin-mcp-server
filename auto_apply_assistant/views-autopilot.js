@@ -97,9 +97,32 @@
     // ---- runs that wait for the user --------------------------------------------------------
     function needsYou() {
       if (!data.open.length) return null;
+      // Bulk (F16): skip several, or try several interrupted or failed ones again; each answers for itself.
+      const many = (n) => `${n} ${n === 1 ? "application" : "applications"}`;
+      const bulk = Aira.bulkSelection({ noun: "application", actions: [
+        { label: "Try again", run: async (ids) => {
+          if (!(await Aira.confirm({ title: `Try ${many(ids.length)} again?`, message: "Only interrupted or failed ones are tried again. Check each site first: if an application already went through, choose I applied on it instead, so it is not sent twice.", confirmLabel: "Try again" }))) return;
+          const out = await api(`${BASE}/runs/bulk`, { method: "POST", body: { action: "retry", run_ids: ids } });
+          Aira.bulkReport(out, (n) => `Trying ${many(n)} again.`);
+          if (out.done) afterStart("Trying again… the results appear here in a moment."); else load();
+        } },
+        { label: "Skip", kind: "ghost", run: async (ids) => {
+          if (!(await Aira.confirm({ title: `Skip ${many(ids.length)}?`, message: "Monosage will not apply to these jobs.", confirmLabel: "Skip" }))) return;
+          const out = await api(`${BASE}/runs/bulk`, { method: "POST", body: { action: "skip", run_ids: ids } });
+          Aira.bulkReport(out, (n) => `Skipped ${many(n)}.`);
+          load();
+        } },
+      ] });
+      const cards = data.open.map((run) => {
+        const card = openCard(run);
+        const head = card.querySelector("header");
+        if (head) head.prepend(bulk.box(run.run_id, jobLabel(run)));
+        return card;
+      });
       return h("section", { id: "aapNeeds", "aria-labelledby": "aapNeedsTitle" },
-        h("div", { class: "aap-sec-head" }, h("h2", { id: "aapNeedsTitle", text: part === "needs" ? `Held by Auto-apply (${data.open.length})` : `Needs you (${data.open.length})` })),
-        h("div", { class: "aap-needs" }, ...data.open.map(openCard)));
+        h("div", { class: "aap-sec-head" }, h("h2", { id: "aapNeedsTitle", text: part === "needs" ? `Held by Auto-apply (${data.open.length})` : `Needs you (${data.open.length})` }), data.open.length > 1 ? bulk.all(data.open.map((run) => run.run_id)) : null),
+        bulk.bar,
+        h("div", { class: "aap-needs" }, ...cards));
     }
 
     function openCard(run) {

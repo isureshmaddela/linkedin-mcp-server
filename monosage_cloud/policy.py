@@ -149,6 +149,17 @@ POLICY: dict[str, Rule] = {
     "api_applications_summary": read(),
     "api_job_document_versions": read("documents.read"),
     "api_job_document_version_text": read("documents.read", audit=True),
+    # The formatted resume and letter an employer would receive (aira/resume_render.py), drawn or as the file;
+    # the Word option reads the candidate's master resume, so the file route is audited.
+    "api_job_document_preview": read("documents.read"),
+    "api_job_document_file": read("documents.read", audit=True),
+    # Resume intelligence (aira/resume_intel.py): checks of the editor's text and the skill gaps across jobs.
+    "api_job_document_check": read(),
+    "api_skill_gaps": read(),
+    "api_certifications": read(kind="model"),
+    # Interview prep (aira/interview_prep.py): the candidate's STAR stories and each interview's questions and brief.
+    "api_interview_prep": read(),
+    "api_star_stories": read(),
     "api_autopilot": read(kind="runs_read"),
     "api_autopilot_plan_passes": read(),
     "api_autopilot_runs": read(kind="runs_read"),
@@ -187,6 +198,14 @@ POLICY: dict[str, Rule] = {
     "api_interviews_create": write(),
     "api_interview_update": write(),
     "api_interview_delete": write(),
+    "api_interview_prep_build": write(kind="model"),
+    "api_interview_prep_notes": write(),
+    "api_star_story_create": write(),
+    "api_star_story_drafts": read(),
+    "api_star_story_update": write(),
+    "api_star_story_delete": write(),
+    # Bulk actions (F16): the same per-job changes as the single routes, many at once.
+    "api_jobs_bulk": write("search.run"),
     "api_recruiters_create": write(),
     "api_recruiter_update": write(),
     "api_recruiter_delete": write(),
@@ -258,6 +277,8 @@ POLICY: dict[str, Rule] = {
     "api_autopilot_run_skip": write("search.run"),
     # Try again on an interrupted or failed run (the person checked the site): starts automation like Run now.
     "api_autopilot_run_retry": write("search.run", kind="automation", audit=True),
+    # Skip or try again several Needs you items at once; trying again starts automation like Run now.
+    "api_autopilot_runs_bulk": write("search.run", kind="automation", audit=True),
     # I applied: the person applied on the site themselves; recorded like any manual submission.
     "api_autopilot_run_applied": write(
         "applications.submit", kind="submit_manual", audit=True
