@@ -106,7 +106,7 @@ SALES_NAV_LEADS = [
         "company": "Northwind Cloud",
         "location": "Austin, Texas",
         "profile_url": "https://www.linkedin.com/sales/lead/ACwAAA111,NAME_SEARCH",
-        "linkedin_url": "https://www.linkedin.com/in/maria-lopez-77",
+        "linkedin_url": "https://www.linkedin.com/in/maria-lopez-example",
         "degree": "2nd",
         "tenure_in_role": "2 years 1 month",
     },
@@ -371,7 +371,7 @@ def test_web_search_builds_xray_queries_and_normalizes_linkedin_results():
             },
             {
                 "title": "Ana Silva - Sales Director at Fabrikam | LinkedIn",
-                "link": "https://br.linkedin.com/in/ana-silva-2",
+                "link": "https://br.linkedin.com/in/ana-silva-example",
                 "snippet": "Location: Remote · Experience: Fabrikam",
             },
             {

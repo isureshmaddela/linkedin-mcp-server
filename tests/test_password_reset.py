@@ -269,7 +269,7 @@ def test_gmail_settings_keep_the_app_password_secret(env, monkeypatch):
     status, body = owner.call(
         "POST",
         "/api/settings/reset-mail",
-        {"provider": "gmail", "smtp_username": "me@gmail.com"},
+        {"provider": "gmail", "smtp_username": "me@example.com"},
     )
     assert status == 400 and "app password" in body["error"]
     status, body = owner.call(
@@ -277,7 +277,7 @@ def test_gmail_settings_keep_the_app_password_secret(env, monkeypatch):
         "/api/settings/reset-mail",
         {
             "provider": "gmail",
-            "smtp_username": "me@gmail.com",
+            "smtp_username": "me@example.com",
             "password": "abcd efgh ijkl mnop",
             "smtp_host": "evil.example",
         },
@@ -288,7 +288,7 @@ def test_gmail_settings_keep_the_app_password_secret(env, monkeypatch):
         587,
         "starttls",
     )
-    assert body["from_email"] == "me@gmail.com" and body["has_password"] is True
+    assert body["from_email"] == "me@example.com" and body["has_password"] is True
     assert "password" not in body and "password_cipher" not in body
     with sqlite3.connect(env.tmp_path / "accounts.sqlite3") as connection:
         cipher = connection.execute(
@@ -302,7 +302,7 @@ def test_gmail_settings_keep_the_app_password_secret(env, monkeypatch):
     status, body = owner.call(
         "POST",
         "/api/settings/reset-mail",
-        {"provider": "gmail", "smtp_username": "me@gmail.com", "from_name": "Home"},
+        {"provider": "gmail", "smtp_username": "me@example.com", "from_name": "Home"},
     )
     assert (
         status == 200 and body["has_password"] is True and body["from_name"] == "Home"

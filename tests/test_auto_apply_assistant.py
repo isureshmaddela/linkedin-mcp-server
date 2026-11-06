@@ -560,27 +560,27 @@ def test_fit_review_persists_versioned_keyword_evidence(tmp_path, monkeypatch):
 
 def test_profile_settings_persist_locally_and_validate_link(tmp_path, monkeypatch):
     monkeypatch.setattr(app, "DB_PATH", tmp_path / "applications.sqlite3")
-    profile_url = "https://www.linkedin.com/in/hyma-somireddy/"
+    profile_url = "https://www.linkedin.com/in/jordan-example/"
 
     saved = app._save_profile_settings(
         "Resume content",
         profile_url,
         application_profile={
-            "full_name": "Hyma Somireddy",
-            "email": "hyma.bvrit@gmail.com",
+            "full_name": "Jordan Example",
+            "email": "jordan@example.com",
         },
     )
 
     assert saved["resume"] == "Resume content"
     assert saved["profile_url"] == profile_url
-    assert saved["application_profile"]["full_name"] == "Hyma Somireddy"
-    assert saved["application_profile"]["email"] == "hyma.bvrit@gmail.com"
+    assert saved["application_profile"]["full_name"] == "Jordan Example"
+    assert saved["application_profile"]["email"] == "jordan@example.com"
     assert app._profile_settings() == {
         "resume": "Resume content",
         "profile_url": profile_url,
         "application_profile": {
-            "full_name": "Hyma Somireddy",
-            "email": "hyma.bvrit@gmail.com",
+            "full_name": "Jordan Example",
+            "email": "jordan@example.com",
             "phone": "",
             "location": "",
             "work_authorization": "",
