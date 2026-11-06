@@ -207,7 +207,7 @@
 
     // ---- plan editor -------------------------------------------------------------------------------
     function planEditor(plan) {
-      const p = plan || { name: "", positions: [], location: Aira.recall("search.location", "United States"), workplace: "", job_type: "", sources: ["linkedin", "aira_jobs"], boards: [], exclude_keywords: [], exclude_companies: [], min_score: 70, max_per_run: 3, interval_minutes: 240, mode: "apply", linkedin_easy_apply: false, cover_letters: true, match_title: true };
+      const p = plan || { name: "", positions: [], location: Aira.recall("search.location", "United States"), workplace: "", job_type: "", sources: ["linkedin", "aira_jobs"], boards: [], exclude_keywords: [], exclude_companies: [], min_score: 70, max_per_run: 3, interval_minutes: 240, mode: "apply", linkedin_easy_apply: false, cover_letters: true, email_apply: false, match_title: true };
       const name = h("input", { type: "text", maxlength: 120, value: p.name, placeholder: "e.g. Architect roles in Austin" });
       const positions = h("textarea", { rows: 2, maxlength: 700, placeholder: "One per line, up to 5: Solution Architect, Cloud Architect…" }, p.positions.join("\n"));
       const location = h("input", { type: "text", maxlength: 200, value: p.location, placeholder: "City, region or Remote" });
@@ -225,6 +225,7 @@
       const modeReview = h("input", { type: "radio", name: "aapMode", value: "review", checked: p.mode === "review" });
       const easy = h("input", { type: "checkbox", checked: p.linkedin_easy_apply });
       const letters = h("input", { type: "checkbox", checked: p.cover_letters });
+      const byEmail = h("input", { type: "checkbox", checked: Boolean(p.email_apply) });
       const titleMatch = h("input", { type: "checkbox", checked: p.match_title });
       const excludeWords = h("input", { type: "text", maxlength: 600, value: p.exclude_keywords.join(", "), placeholder: "e.g. clearance, unpaid, commission" });
       const excludeCompanies = h("input", { type: "text", maxlength: 1500, value: p.exclude_companies.join(", "), placeholder: "Companies to never apply to" });
@@ -248,6 +249,7 @@
           ui.field("Never apply to these companies", excludeCompanies),
           h("label", { class: "check" }, titleMatch, "Only apply when the job title matches one of the positions"),
           h("label", { class: "check" }, letters, "Write a tailored cover letter with the local AI (when Ollama is running)"),
+          h("label", { class: "check" }, byEmail, h("span", {}, "Apply by email when the posting asks for it", h("span", { class: "muted", text: " (from your email in Business hub > Email, with your resume and cover letter attached; only for postings with no application form)" }))),
           h("label", { class: "check" }, easy, "Also apply through LinkedIn Easy Apply"), easyWarn));
       const parseList = (text) => text.split(/[\n,]/).map((s) => s.trim()).filter(Boolean);
       const parseBoards = (text) => text.split(/\n|·/).map((s) => s.trim()).filter(Boolean).map((line) => { const [source, ...rest] = line.split(":"); return { source: source.trim().toLowerCase(), identifier: rest.join(":").trim() }; });
@@ -258,7 +260,7 @@
             name: name.value.trim(), positions: parseList(positions.value).slice(0, 5), location: location.value.trim(), workplace: workplace.value, job_type: jobType.value,
             sources: [linkedin.checked ? "linkedin" : "", airaJobs.checked ? "aira_jobs" : "", google.checked ? "google_jobs" : ""].filter(Boolean), boards: parseBoards(boards.value),
             min_score: Number(minScore.value), max_per_run: Number(perRun.value), interval_minutes: Number(every.value), mode: modeReview.checked ? "review" : "apply",
-            exclude_keywords: parseList(excludeWords.value), exclude_companies: parseList(excludeCompanies.value), match_title: titleMatch.checked, cover_letters: letters.checked, linkedin_easy_apply: easy.checked,
+            exclude_keywords: parseList(excludeWords.value), exclude_companies: parseList(excludeCompanies.value), match_title: titleMatch.checked, cover_letters: letters.checked, email_apply: byEmail.checked, linkedin_easy_apply: easy.checked,
           };
           if (!plan && payload.mode === "apply" && !(await Aira.confirm({ title: "Let Monosage apply for you?", message: `Every ${intervalLabel(payload.interval_minutes).replace(/^Every /, "").toLowerCase()}, Monosage searches for ${payload.positions.join(", ") || "your positions"} and submits applications to up to ${payload.max_per_run} jobs scoring ${payload.min_score}% or more, with your profile and confirmed answers. You can pause at any time.`, confirmLabel: "Yes, apply for me" }))) return false;
           try {

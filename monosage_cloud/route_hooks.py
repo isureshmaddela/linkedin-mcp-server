@@ -381,6 +381,27 @@ def auto_apply_pre(ctx: Ctx) -> None:
             raise SubscriptionInactive(block[1], code_detail=block[0])
 
 
+def email_apply_pre(ctx: Ctx) -> None:
+    """Sending an application by email is a submission made now by the person pressing Send (so a review-only
+    policy does not stop it): the organization's state gates apply (suspended, past due, read-only, paused), and
+    someone sending for the candidate needs the candidate's consent, as recruiter email does. The operator's
+    outbound switch and the do-not-contact list are the organization's mail's (outreach_mail.application_mail)."""
+    if ctx.payload.get("confirm") is not True:
+        return  # the handler answers 400 and nothing is sent
+    block = ctx.app.gate.automation_block(ctx.org_id, ctx.candidate_id, consent=False)
+    if block:
+        raise SubscriptionInactive(block[1], code_detail=block[0])
+    if (
+        ctx.principal.member_id != ctx.candidate_id
+        and not ctx.app.tenancy.consent_state(ctx.org_id, ctx.candidate_id)["complete"]
+    ):
+        raise Forbidden(
+            "The candidate has not accepted how the organization works on their behalf, so only they can send "
+            "this application.",
+            code="consent_required",
+        )
+
+
 # --------------------------------------------------------------------------- held questions
 
 
@@ -1096,6 +1117,7 @@ HOOKS: dict[str, Hook] = {
     "plan_update": Hook(pre=plan_update_pre),
     "monitor_create": Hook(pre=source_check_pre, inside=monitor_create_inside),
     "auto_apply": Hook(pre=auto_apply_pre),
+    "email_apply": Hook(pre=email_apply_pre),
     "run_answer": Hook(inside=run_answer_inside, post=run_answer_post),
     "profile_write": Hook(inside=profile_write_inside),
     "answers_write": Hook(pre=answers_write_pre),

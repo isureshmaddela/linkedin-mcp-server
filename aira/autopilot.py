@@ -339,6 +339,8 @@ def validate_plan(
         "match_title": _flag(merged.get("match_title", 1)),
         "linkedin_easy_apply": _flag(merged.get("linkedin_easy_apply", 0)),
         "cover_letters": _flag(merged.get("cover_letters", 1)),
+        # Apply by email when the posting asks for one and has no application form (aira/email_apply.py).
+        "email_apply": _flag(merged.get("email_apply", 0)),
         "enabled": _flag(merged.get("enabled", 1)),
     }
 
@@ -350,7 +352,13 @@ _JSON_PLAN_FIELDS = (
     "exclude_keywords",
     "exclude_companies",
 )
-_FLAG_PLAN_FIELDS = ("match_title", "linkedin_easy_apply", "cover_letters", "enabled")
+_FLAG_PLAN_FIELDS = (
+    "match_title",
+    "linkedin_easy_apply",
+    "cover_letters",
+    "email_apply",
+    "enabled",
+)
 
 
 def plan_view(row: sqlite3.Row | Mapping[str, Any]) -> dict[str, Any]:

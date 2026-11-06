@@ -385,6 +385,18 @@ def install(app: CloudApp) -> None:
 
     HOOKS.business_mail = business_mail
 
+    def application_mail() -> Any:
+        """An application by email goes out through the organization's mail with the member's name on it and
+        Reply-To their own address (monosage_cloud/outreach_mail.py); None when the organization has no email."""
+        from monosage_cloud.outreach_mail import application_mail as lend
+
+        ctx = context.require()
+        if not ctx.candidate_id:
+            return None
+        return lend(app, ctx.org_id, ctx.candidate_id)
+
+    HOOKS.application_mail = application_mail
+
 
 def _org_serpapi_key(app: CloudApp, org_id: str) -> str | None:
     """The organization's own SerpApi key from its API workspace, decrypted with its data key."""

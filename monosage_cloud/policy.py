@@ -255,6 +255,12 @@ POLICY: dict[str, Rule] = {
     "api_preparation_approve": write("applications.submit", audit=True),
     "api_job_apply": write("applications.submit", audit=True),
     "api_job_submit": write("applications.submit", kind="submit_manual", audit=True),
+    # Applying by email (aira/email_apply.py): the preview reads the posting and the files; sending goes out through
+    # the organization's mail (outreach_mail.application_mail) once the organization's state allows applications.
+    "api_job_apply_email_preview": read(),
+    "api_job_apply_email_send": write(
+        "applications.submit", kind="email_apply", audit=True
+    ),
     # -- LinkedIn inbox and schedules (personal session) -----------------------------------------------------------
     "api_inbox": read("messages.read", linkedin=True, feature="sources.linkedin"),
     "api_inbox_sync_status": read(

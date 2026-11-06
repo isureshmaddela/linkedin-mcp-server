@@ -586,6 +586,12 @@ def _recruiter_contacts(connection: sqlite3.Connection) -> None:
     ensure_schema(connection)
 
 
+def _email_apply(connection: sqlite3.Connection) -> None:
+    from aira.email_apply import ensure_schema
+
+    ensure_schema(connection)
+
+
 def _normalize_stages(connection: sqlite3.Connection) -> None:
     """Rename the old stage names again.
 
@@ -726,6 +732,13 @@ MIGRATIONS: tuple[Migration, ...] = (
         "Recruiter contacts: where each contact was found (LinkedIn inbox, email, interview), saved contact lists, "
         "cached AI summaries of a contact's story and the do-not-contact list for recruiter outreach.",
         _recruiter_contacts,
+    ),
+    Migration(
+        22,
+        "email_apply",
+        "Applying by email: one ledger row per job emailed (recipient, Message-ID, status) so a job is emailed "
+        "once ever, and the Auto-apply plan switch 'Apply by email when the posting asks for it'.",
+        _email_apply,
     ),
 )
 

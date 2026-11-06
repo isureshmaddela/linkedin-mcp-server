@@ -524,6 +524,131 @@ def _parse_timestamp(value: Any) -> datetime | None:
     return parsed.replace(tzinfo=timezone.utc) if parsed.utcoffset() is None else parsed
 
 
+# Application systems whose form Monosage can fill: the employer's own application, wherever the host.
+_ATS_HOSTS = (
+    "greenhouse.io",
+    "lever.co",
+    "ashbyhq.com",
+    "smartrecruiters.com",
+    "myworkdayjobs.com",
+    "myworkdaysite.com",
+)
+# Job boards and aggregators that relist postings: their apply page leads somewhere else, if anywhere.
+_AGGREGATOR_HOSTS = (
+    "linkedin.com",
+    "indeed.com",
+    "glassdoor.com",
+    "ziprecruiter.com",
+    "monster.com",
+    "simplyhired.com",
+    "careerbuilder.com",
+    "talent.com",
+    "jooble.org",
+    "adzuna.com",
+    "dice.com",
+    "builtin.com",
+    "lensa.com",
+    "jobrapido.com",
+    "snagajob.com",
+    "theladders.com",
+    "bebee.com",
+    "salary.com",
+    "learn4good.com",
+    "jobgether.com",
+    "whatjobs.com",
+    "jobilize.com",
+    "mediabistro.com",
+    "tallo.com",
+    "recruit.net",
+    "jobleads.com",
+    "trabajo.org",
+    "teal.com",
+    "upwork.com",
+)
+_COMPANY_NOISE = frozenset(
+    {
+        "inc",
+        "llc",
+        "ltd",
+        "limited",
+        "corp",
+        "corporation",
+        "company",
+        "co",
+        "group",
+        "the",
+        "holdings",
+        "plc",
+        "gmbh",
+        "sa",
+        "ag",
+        "bv",
+        "technologies",
+        "technology",
+        "solutions",
+        "services",
+        "global",
+        "international",
+    }
+)
+
+
+def _host_in(host: str, domains: tuple[str, ...]) -> bool:
+    return any(host == domain or host.endswith("." + domain) for domain in domains)
+
+
+def _employer_host(host: str, company: str) -> bool:
+    """Whether ``host`` looks like the employer's own site: a distinctive word of the company's name is one of
+    the host's labels ("careers.acme.com" for "Acme Inc")."""
+    kept = [
+        word
+        for word in re.findall(r"[a-z0-9]+", company.casefold())
+        if word not in _COMPANY_NOISE
+    ]
+    words = {word for word in kept if len(word) >= 3}
+    if not words:
+        return False
+    labels = host.split(".")[
+        :-1
+    ]  # the top-level domain says nothing about the employer
+    joined = "".join(kept)  # "Acme Robotics, Inc." -> "acmerobotics"
+    return any(
+        label in words or (len(joined) >= 4 and label == joined) for label in labels
+    )
+
+
+def apply_link_rank(link: str, company: str = "") -> int:
+    """How directly an apply link reaches the employer's application: 0 a known application system, 1 the
+    employer's own site, 2 an unknown site, 3 a job board or aggregator."""
+    host = (urlsplit(str(link or "")).hostname or "").casefold()
+    if not host:
+        return 4
+    if _host_in(host, _ATS_HOSTS):
+        return 0
+    if _host_in(host, _AGGREGATOR_HOSTS):
+        return 3
+    if company and _employer_host(host, company):
+        return 1
+    return 2
+
+
+def best_apply_link(options: Any, company: str = "") -> str:
+    """The apply option that reaches the employer most directly (Google lists the aggregators first more often
+    than not); among equals, Google's own order. ``""`` when there is no usable link."""
+    if not isinstance(options, list):
+        return ""
+    links = [
+        str(option.get("link", "")).strip()
+        for option in options
+        if isinstance(option, Mapping) and str(option.get("link", "")).strip()
+    ]
+    if not links:
+        return ""
+    return min(
+        enumerate(links), key=lambda item: (apply_link_rank(item[1], company), item[0])
+    )[1]
+
+
 class GoogleJobsAdapter:
     """Google Jobs search through SerpApi's documented structured endpoint."""
 
@@ -636,17 +761,10 @@ class GoogleJobsAdapter:
         return "g-" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:40]
 
     def normalize(self, record: Mapping[str, Any]) -> JobPosting:
-        apply_options = record.get("apply_options", [])
-        apply_link = ""
-        if isinstance(apply_options, list):
-            apply_link = next(
-                (
-                    str(option.get("link", "")).strip()
-                    for option in apply_options
-                    if isinstance(option, Mapping) and option.get("link")
-                ),
-                "",
-            )
+        # The employer's own application (an ATS form or its careers site) ahead of a board that relists it.
+        apply_link = best_apply_link(
+            record.get("apply_options", []), str(record.get("company_name", ""))
+        )
         raw_source_url = str(record.get("share_link") or apply_link).strip()
         _validate_http_url(raw_source_url, "Google Jobs posting URL")
         job_id = self.stable_job_id(str(record.get("job_id", "")))

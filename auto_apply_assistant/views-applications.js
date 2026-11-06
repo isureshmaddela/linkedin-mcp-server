@@ -26,13 +26,58 @@
     steps.append(stepNode(prepDone ? "done" : submission ? "" : prep ? "active" : docsReady ? "active" : "", "Prepare and review answers", prep ? `${prep.summary.prefilled} prefilled · ${prep.summary.needs_confirmation} to confirm · ${prep.summary.unknown} unknown (${fmt.stage(prep.questions_source)})` : submission ? sentText : "Map the application questions to your profile and flag anything sensitive.", submission ? null : prepareBtn));
     // Step 4 submit
     steps.append(stepNode(submission ? "done" : prepDone ? "active" : "", "Apply on the provider site, then record confirmation", submission ? `Recorded ${fmt.datetime(submission.submitted_at)}${submission.confirmation_number ? ` · #${submission.confirmation_number}` : ""}` : "Monosage opens the application page; you submit it and paste the confirmation here.", null));
-    pane.append(Aira.renderAutoApplyCard(job, reload), h("h3", { text: "Or apply yourself", style: { marginTop: "16px" } }), h("p", { class: "note", text: "Monosage prepares, prefills and flags; you review and submit on the provider site, then Monosage records the confirmation and tracks the outcome." }), steps);
+    pane.append(Aira.renderAutoApplyCard(job, reload), job.apply_by_email && !submission ? renderEmailApplyCard(job, reload) : null, h("h3", { text: "Or apply yourself", style: { marginTop: "16px" } }), h("p", { class: "note", text: "Monosage prepares, prefills and flags; you review and submit on the provider site, then Monosage records the confirmation and tracks the outcome." }), steps);
 
     if (prep && !submission) pane.append(renderPacket(job, prep, reload));
     if (prepDone && !submission) pane.append(renderSubmitCard(job, prep, reload));
     if (!submission && ["discovered", "saved", "needs_review", "ready_to_apply", "applying"].includes(job.stage)) pane.append(renderOutsideCard(job, reload));
     if (submission) pane.append(h("div", { class: "card", style: { marginTop: "14px" } }, h("h3", { text: "Submitted" }), ui.kv([["Recorded", fmt.datetime(submission.submitted_at)], ["Confirmation #", submission.confirmation_number || "—"], ["Notes", submission.confirmation_text || "—"], ["Evidence", submission.evidence_document_id ? "Stored in Documents" : "None"]]), h("div", { class: "btn-row", style: { marginTop: "10px" } }, h("a", { class: "btn secondary sm", href: "#/interviews", text: "Track interviews" }), h("a", { class: "btn ghost sm", href: "#/applications?tab=email", text: "Import a status email" }))));
   };
+
+  // The posting asks for applications by email: preview the message (to, subject, text, attached files) and send
+  // it from the account's own email (hosted: the organization's, with the person's name and Reply-To). Nothing is
+  // sent without the preview and a confirmation; a job is emailed once.
+  function renderEmailApplyCard(job, reload) {
+    const target = job.apply_by_email;
+    const sent = job.email_application;
+    const card = h("div", { class: "card", style: { marginTop: "14px" } }, h("h3", { text: "Apply by email" }),
+      h("p", { text: `This posting asks for applications by email to ${target.address}.` }),
+      target.evidence ? h("p", { class: "muted", style: { fontSize: "12px" }, text: `From the posting: "${target.evidence}"` }) : null);
+    if (sent && sent.status !== "failed") {
+      card.append(h("p", { class: "muted", text: sent.status === "sent" ? `Emailed to ${sent.recipient} ${fmt.datetime(sent.sent_at)}.` : "An email application was started and not confirmed. Check your Sent folder." }));
+      return card;
+    }
+    if (sent && sent.status === "failed") card.append(h("p", { class: "note warn", text: `The last attempt was not sent: ${sent.error || "the mail server refused it"}.` }));
+    const open = h("button", { type: "button", class: "btn secondary", text: "Preview and send" });
+    open.addEventListener("click", () => withBusy(open, async () => {
+      const preview = await api(`/api/jobs/${encodeURIComponent(job.job_id)}/apply-email`);
+      const subject = h("input", { type: "text", maxlength: 200, value: preview.subject || "" });
+      const body = h("textarea", { rows: 10, maxlength: 20000 }, preview.body || "");
+      const files = (preview.attachments || []).map((file) => h("li", { text: `${file.name} (${Math.max(1, Math.round(file.bytes / 1024))} KB)` }));
+      const problem = preview.problem || (preview.mail && preview.mail.problem) || "";
+      const setup = preview.mail && !preview.mail.ready ? h("p", { class: "note warn" }, problem, " ", h("a", { href: "#/hub?tab=email", text: "Open Business hub > Email" })) : problem ? h("p", { class: "note warn", text: problem }) : null;
+      const content = h("div", {},
+        ui.kv([["To", preview.target ? preview.target.address : target.address], ["From", (preview.mail && preview.mail.from) || "—"], ["Replies go to", (preview.mail && preview.mail.reply_to) || "—"]]),
+        ui.field("Subject", subject), ui.field("Message", body, "Your name and contact details close the message. Edit anything before sending."),
+        h("div", {}, h("strong", { text: "Attached" }), files.length ? h("ul", { class: "inline-list" }, ...files) : h("p", { class: "muted", text: "No files yet: add your resume in Documents." })),
+        setup);
+      Aira.modal({ title: `Apply by email · ${job.title || "this job"}`, wide: true, body: content, actions: [
+        { label: "Cancel", kind: "ghost" },
+        { label: "Send application", kind: "", onClick: async () => {
+          if (problem || !files.length) { toast(problem || "Add your resume in Documents first.", "error"); return false; }
+          if (!(await Aira.confirm({ title: "Send this application?", message: `Monosage emails it to ${target.address} with ${files.length === 1 ? "1 file" : `${files.length} files`} attached. A job is emailed once.`, confirmLabel: "Send application" }))) return false;
+          try {
+            const result = await api(`/api/jobs/${encodeURIComponent(job.job_id)}/apply-email`, { method: "POST", body: { confirm: true, subject: subject.value, body: body.value } });
+            toast(`Application emailed to ${result.recipient}.`, "success");
+            reload("apply");
+          } catch (error) { Aira.reportError(error); return false; }
+          return undefined;
+        } },
+      ] });
+    }));
+    card.append(h("p", { class: "muted", text: "Monosage writes a short email with your resume and cover letter attached and your contact details at the end. You see it before it is sent." }), h("div", { class: "btn-row" }, open));
+    return card;
+  }
 
   // -------------------------------------------------------------------------
   // Documents tab inside the job drawer: the resume editor
