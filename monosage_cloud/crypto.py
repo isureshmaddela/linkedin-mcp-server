@@ -25,9 +25,35 @@ from cryptography.fernet import Fernet, InvalidToken, MultiFernet
 
 from monosage_cloud.config import Clock
 from monosage_cloud.db import ControlDB, one
-from monosage_cloud.errors import ValidationFailed
+from monosage_cloud.errors import Unavailable, ValidationFailed
 
 SCRYPT_N, SCRYPT_R, SCRYPT_P = 2**15, 8, 1
+# Each scrypt check holds about 32 MB (128 * N * r bytes) for a moment: a burst of sign-ins could hold gigabytes. At
+# most this many run at once in a process (CloudApp sets it from ``scrypt_concurrency``); the rest wait their turn,
+# and a check that waits longer than SCRYPT_WAIT_SECONDS answers 503 instead of piling up.
+SCRYPT_WAIT_SECONDS = 10.0
+_scrypt_slots = threading.BoundedSemaphore(4)
+
+
+def set_scrypt_concurrency(limit: int) -> None:
+    global _scrypt_slots
+    _scrypt_slots = threading.BoundedSemaphore(max(1, int(limit)))
+
+
+def _scrypt(password: bytes, salt: bytes, n: int, r: int, p: int) -> bytes:
+    slots = _scrypt_slots
+    if not slots.acquire(timeout=SCRYPT_WAIT_SECONDS):
+        raise Unavailable(
+            "The server is busy checking passwords. Try again in a moment.",
+            code="busy",
+            retry_after=5,
+        )
+    try:
+        return hashlib.scrypt(
+            password, salt=salt, n=n, r=r, p=p, maxmem=128 * 1024 * 1024
+        )
+    finally:
+        slots.release()
 EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 WEAK_PASSWORDS = {
     "password1234",
@@ -61,14 +87,7 @@ def check_password_policy(password: str, email: str = "") -> None:
 
 def hash_password(password: str, *, salt: bytes | None = None) -> str:
     salt = salt or secrets.token_bytes(16)
-    digest = hashlib.scrypt(
-        password.encode("utf-8"),
-        salt=salt,
-        n=SCRYPT_N,
-        r=SCRYPT_R,
-        p=SCRYPT_P,
-        maxmem=128 * 1024 * 1024,
-    )
+    digest = _scrypt(password.encode("utf-8"), salt, SCRYPT_N, SCRYPT_R, SCRYPT_P)
     return f"scrypt${SCRYPT_N}${SCRYPT_R}${SCRYPT_P}${salt.hex()}${digest.hex()}"
 
 
@@ -77,13 +96,8 @@ def verify_password(password: str, stored: str) -> bool:
         scheme, n, r, p, salt_hex, digest_hex = stored.split("$")
         if scheme != "scrypt":
             return False
-        digest = hashlib.scrypt(
-            password.encode("utf-8"),
-            salt=bytes.fromhex(salt_hex),
-            n=int(n),
-            r=int(r),
-            p=int(p),
-            maxmem=128 * 1024 * 1024,
+        digest = _scrypt(
+            password.encode("utf-8"), bytes.fromhex(salt_hex), int(n), int(r), int(p)
         )
     except (ValueError, TypeError):
         return False

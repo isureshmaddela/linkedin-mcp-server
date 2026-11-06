@@ -74,6 +74,10 @@ BYO_FEATURE = "byo_model"  # the OpenAI-compatible endpoint is an Enterprise fea
 BYO_LABEL = "Bring-your-own model endpoint"
 CHOICE_MESSAGE = "Choose platform (the hosted model), claude or openai (your own endpoint) as the model."
 NEED_CLAUDE_KEY = "Add an Anthropic API key before choosing Claude."
+# The monthly budget of calls on the platform's own model (ModelGateway.platform_budget): a plan limit of this name
+# wins over the deployment's default; the usage counter counts only calls the platform's key answered.
+PLATFORM_BUDGET_LIMIT = "model_calls_per_month"
+PLATFORM_BUDGET_METRIC = "platform_model_calls"
 FENCE_RE = re.compile(r"^```(?:json)?\s*|\s*```$", re.IGNORECASE)
 
 
@@ -277,7 +281,7 @@ class ModelGateway:
                     settings, prompt, max_tokens=model_provider.TEST_MAX_TOKENS
                 )
             return self._openai(
-                settings["url"], settings["key"], settings["model"], prompt
+                settings["url"], settings["key"], settings["model"], prompt, tenant=True
             )
 
         answer = self._metered(org_id, "", ask)
@@ -529,19 +533,79 @@ class ModelGateway:
                 settings["model"],
                 prompt,
                 system_extra,
+                tenant=True,  # an address the organization chose: checked again and pinned now
             )
-        platform = self.app.config.model_provider
-        if platform == "anthropic":
-            return self._anthropic(prompt, system_extra)
-        if platform == "openai":
-            return self._openai(
-                self.app.config.model_url,
-                self.app.config.model_api_key,
-                self.app.config.model_name or model,
-                prompt,
-                system_extra,
+        # The platform's own model and key: counted against the plan's monthly budget first.
+        reservation = self._reserve_platform_call(org_id)
+        try:
+            platform = self.app.config.model_provider
+            if platform == "anthropic":
+                return self._anthropic(prompt, system_extra)
+            if platform == "openai":
+                return self._openai(
+                    self.app.config.model_url,
+                    self.app.config.model_api_key,
+                    self.app.config.model_name or model,
+                    prompt,
+                    system_extra,
+                )
+            return self._ollama(
+                self.app.config.model_name or model, prompt, system_extra
             )
-        return self._ollama(self.app.config.model_name or model, prompt, system_extra)
+        except Exception:
+            if reservation is not None:
+                self.app.usage.release(reservation)  # a call that did not happen is not spent
+            raise
+
+    # -- the platform model's monthly budget ---------------------------------------------------------
+
+    def platform_budget(self, org_id: str) -> int | None:
+        """Calls a month the organization may make on the platform's own model (None: no limit).
+
+        A plan (or an operator's override) with a ``model_calls_per_month`` limit decides; otherwise the deployment's
+        default for the plan (``CloudConfig.model_calls_per_month``). Calls answered with the organization's own
+        Anthropic key, its own endpoint or a member's own Claude are never counted.
+        """
+        entitlements = self.app.entitlements.resolve(org_id)
+        if PLATFORM_BUDGET_LIMIT in entitlements.limits:
+            value = entitlements.limit(PLATFORM_BUDGET_LIMIT)
+            return None if value is None else int(value)
+        budgets = self.app.config.model_calls_per_month
+        if entitlements.plan_id in budgets:
+            value = budgets[entitlements.plan_id]
+            return None if value is None else int(value)
+        default = self.app.config.model_calls_default
+        return None if default is None else int(default)
+
+    def platform_usage(self, org_id: str) -> dict[str, Any]:
+        budget = self.platform_budget(org_id)
+        used = self.app.usage.used(org_id, PLATFORM_BUDGET_METRIC)
+        return {
+            "used": used,
+            "limit": budget,
+            "remaining": None if budget is None else max(0, budget - used),
+        }
+
+    def _reserve_platform_call(self, org_id: str) -> Any:
+        if not org_id:
+            return None
+        from monosage_cloud.entitlements import LimitReached
+        from monosage_cloud.errors import TooManyRequests
+
+        budget = self.platform_budget(org_id)
+        try:
+            return self.app.usage.reserve(
+                org_id, PLATFORM_BUDGET_METRIC, 1, monthly_limit=budget
+            )
+        except LimitReached as reached:
+            raise TooManyRequests(
+                f"Your organization has used this month's {reached.limit:,} AI requests on the hosted model. "
+                "They start again on the 1st. An owner or admin can add the organization's own Anthropic key "
+                "(Settings > Integrations), which is not counted, or move to a larger plan.",
+                code="model_budget_spent",
+                used=reached.used,
+                limit=reached.limit,
+            ) from None
 
     def _claude_json(
         self,
@@ -568,7 +632,11 @@ class ModelGateway:
         body: dict[str, Any],
         headers: dict[str, str],
         timeout: int = 120,
+        *,
+        tenant: bool = False,
     ) -> dict[str, Any]:
+        if tenant:
+            return self._tenant_post(url, body, headers, timeout)
         request = Request(
             url,
             data=json.dumps(body).encode("utf-8"),
@@ -584,6 +652,31 @@ class ModelGateway:
             raise RuntimeError(
                 f"The model endpoint could not be reached: {error}"
             ) from None
+
+    @staticmethod
+    def _tenant_post(
+        url: str, body: dict[str, Any], headers: dict[str, str], timeout: int
+    ) -> dict[str, Any]:
+        """The organization's own endpoint: checked when it was saved and again here, connected to the checked
+        address, and never redirected (monosage_cloud/outbound.py)."""
+        from monosage_cloud import outbound
+
+        try:
+            answer = outbound.request(
+                "POST",
+                url,
+                body=json.dumps(body).encode("utf-8"),
+                headers={"Content-Type": "application/json", **headers},
+                timeout=timeout,
+                max_bytes=8_000_000,
+            )
+            return json.loads(answer.body.decode("utf-8"))
+        except outbound.OutboundHTTPError as error:
+            raise RuntimeError(f"The model endpoint answered {error.status}.") from None
+        except outbound.OutboundError as error:
+            raise RuntimeError(f"The model endpoint could not be used: {error}") from None
+        except ValueError:
+            raise RuntimeError("The model endpoint returned an unexpected response.") from None
 
     def _anthropic(self, prompt: str, system_extra: str = "") -> dict[str, Any]:
         config = self.app.config
@@ -610,7 +703,14 @@ class ModelGateway:
         return parse_json_object(text)
 
     def _openai(
-        self, url: str, key: str, model: str, prompt: str, system_extra: str = ""
+        self,
+        url: str,
+        key: str,
+        model: str,
+        prompt: str,
+        system_extra: str = "",
+        *,
+        tenant: bool = False,
     ) -> dict[str, Any]:
         if not url:
             raise Unavailable(
@@ -630,6 +730,7 @@ class ModelGateway:
                 ],
             },
             {"Authorization": f"Bearer {key}"} if key else {},
+            tenant=tenant,
         )
         try:
             return parse_json_object(reply["choices"][0]["message"]["content"])

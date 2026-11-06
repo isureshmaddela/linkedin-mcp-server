@@ -24,6 +24,7 @@ from monosage_cloud.errors import (
     MfaRequired,
     NotFound,
     PlanRequired,
+    TooManyRequests,
     Unauthorized,
     ValidationFailed,
 )
@@ -47,6 +48,59 @@ DUMMY_HASH = crypto.hash_password("dummy-password-for-timing")
 # A setup key stays the same this long, so a page that asks again (a reload, a second tab) shows the key already typed
 # into the authenticator app instead of a new one.
 MFA_PENDING_SECONDS = 300
+# Throwaway mailbox services: a self-service sign-up from one is refused (Identity.check_signup). A short list of the
+# common ones, not an arms race; the hourly limits per address and per domain do the rest.
+DISPOSABLE_DOMAINS = frozenset(
+    {
+        "10minutemail.com",
+        "33mail.com",
+        "dispostable.com",
+        "emailondeck.com",
+        "fakeinbox.com",
+        "getnada.com",
+        "guerrillamail.com",
+        "guerrillamail.net",
+        "maildrop.cc",
+        "mailinator.com",
+        "mailnesia.com",
+        "mintemail.com",
+        "mohmal.com",
+        "mytemp.email",
+        "sharklasers.com",
+        "spamgourmet.com",
+        "temp-mail.org",
+        "tempmail.com",
+        "tempmailo.com",
+        "throwawaymail.com",
+        "trashmail.com",
+        "yopmail.com",
+    }
+)
+# Large mailbox providers: many unrelated people share the domain, so its hourly limit is this many times larger.
+FREE_MAIL_DOMAINS = frozenset(
+    {
+        "gmail.com",
+        "googlemail.com",
+        "outlook.com",
+        "hotmail.com",
+        "live.com",
+        "yahoo.com",
+        "icloud.com",
+        "me.com",
+        "proton.me",
+        "protonmail.com",
+        "aol.com",
+        "gmx.com",
+        "zoho.com",
+    }
+)
+FREE_MAIL_FACTOR = 25
+
+
+def _day(timestamp: int) -> str:
+    import time
+
+    return time.strftime("%d %B %Y, %H:%M UTC", time.gmtime(timestamp))
 
 
 def slugify(name: str) -> str:
@@ -57,6 +111,50 @@ def slugify(name: str) -> str:
 class Identity:
     def __init__(self, app: CloudApp) -> None:
         self.app = app
+        from aira.security import RateLimiter
+
+        # sign-up abuse checks (check_signup): successful sign-ups an hour per address and per email domain
+        self.signup_ip_limiter = RateLimiter(
+            limit=max(1, app.config.signups_per_ip_hour), window_seconds=3600
+        )
+        self.signup_domain_limiter = RateLimiter(
+            limit=max(1, app.config.signups_per_domain_hour), window_seconds=3600
+        )
+
+    # ------------------------------------------------------------ sign-up abuse checks
+
+    def check_signup(self, email: str, ip: str) -> str:
+        """Refuse a self-service sign-up from a throwaway address, or past the hourly limits for its network
+        address or its email domain. Returns the normalized email. (A platform admin's "New account" skips this.)"""
+        email = crypto.normalize_email(email)
+        domain = email.rsplit("@", 1)[1]
+        if domain in DISPOSABLE_DOMAINS or any(
+            domain.endswith("." + known) for known in DISPOSABLE_DOMAINS
+        ):
+            raise ValidationFailed(
+                "Use a permanent email address: we send sign-in links and receipts there.",
+                code="disposable_email",
+            )
+        limit = self.app.config.signups_per_domain_hour * (
+            FREE_MAIL_FACTOR if domain in FREE_MAIL_DOMAINS else 1
+        )
+        for limiter, key, cap, what in (
+            (self.signup_ip_limiter, f"signup-ip:{ip}", None, "from this network"),
+            (self.signup_domain_limiter, f"signup-domain:{domain}", limit, f"with @{domain} addresses"),
+        ):
+            allowed, retry = limiter.check(key, limit=cap)
+            if not allowed:
+                raise TooManyRequests(
+                    f"Too many new accounts {what} in the last hour. Try again in {retry // 60 + 1} minutes.",
+                    code="signup_limited",
+                    retry_after=retry,
+                )
+        return email
+
+    def record_signup(self, email: str, ip: str) -> None:
+        domain = crypto.normalize_email(email).rsplit("@", 1)[1]
+        self.signup_ip_limiter.hit(f"signup-ip:{ip}")
+        self.signup_domain_limiter.hit(f"signup-domain:{domain}")
 
     @property
     def db(self):  # noqa: ANN201
@@ -79,6 +177,7 @@ class Identity:
         user_agent: str = "",
         verified: bool = False,
         audit_actor: Principal | None = None,
+        age_attested: bool = False,
     ) -> dict[str, Any]:
         """Create an account: an organization, its owner and its subscription (the plan the superadmin chose for new
         sign-ups: All access, every app and feature, until they choose otherwise). One person on their own needs no
@@ -147,6 +246,8 @@ class Identity:
                     "slug": slug,
                     "plan": started["plan_id"],
                     "trial_days": started["trial_days"],
+                    # the owner confirmed they are 18 or older (the hosted product has no child accounts)
+                    **({"age_attested": True} if age_attested else {}),
                 },
                 connection=connection,
             )
@@ -413,6 +514,21 @@ class Identity:
                 or session["kind"] != kind
             ):
                 return None
+            idle = (
+                self.app.config.session_idle_seconds
+                if kind == "member"
+                else self.app.config.operator_session_idle_seconds
+            )
+            idle_out = bool(idle) and now - int(session["last_seen_at"]) > int(idle)
+        if idle_out:
+            # unused for longer than the idle timeout: this session is over, however long it had left
+            with self.db.write() as connection:
+                connection.execute(
+                    "UPDATE sessions SET revoked_at = ? WHERE session_id = ? AND revoked_at IS NULL",
+                    (now, session["session_id"]),
+                )
+            return None
+        with self.db.read() as connection:
             if kind == "member":
                 member = one(
                     connection,
@@ -554,6 +670,34 @@ class Identity:
         else:
             with self.db.write() as write_connection:
                 apply(write_connection)
+
+    def revoke_member_credentials(
+        self, connection: Any, org_id: str, member_id: str
+    ) -> dict[str, int]:
+        """End everything that signs in as this member besides a password: every session (the epoch moves on),
+        personal access tokens, and the OAuth access and refresh tokens of every app they allowed.
+
+        A password change or reset calls this in its own transaction, so a stolen token or cookie stops working
+        with the old password. Returns how many of each were revoked (for the audit entry).
+        """
+        sessions = connection.execute(
+            "UPDATE sessions SET revoked_at = ? WHERE org_id = ? AND member_id = ? AND revoked_at IS NULL",
+            (self.now, org_id, member_id),
+        ).rowcount
+        connection.execute(
+            "UPDATE members SET session_epoch = session_epoch + 1 WHERE member_id = ? AND org_id = ?",
+            (member_id, org_id),
+        )
+        counts = {"sessions": max(0, sessions)}
+        for kind in ("pat", "access", "refresh"):
+            counts[f"oauth_{kind}"] = max(
+                0,
+                connection.execute(
+                    "UPDATE oauth_tokens SET revoked_at = ? WHERE org_id = ? AND member_id = ? AND kind = ? AND revoked_at IS NULL",
+                    (self.now, org_id, member_id, kind),
+                ).rowcount,
+            )
+        return counts
 
     # ---------------------------------------------------------------- sign-in
 
@@ -1029,6 +1173,227 @@ class Identity:
                 connection=connection,
             )
 
+    # ------------------------------------------------- recovery of a sole owner's second factor
+
+    def _recovery_row(self, recovery_id: str) -> dict[str, Any]:
+        with self.db.read() as connection:
+            row = one(
+                connection,
+                "SELECT * FROM account_recoveries WHERE recovery_id = ?",
+                (recovery_id,),
+            )
+        if row is None:
+            raise NotFound("Recovery not found.")
+        return row
+
+    def list_recoveries(
+        self, operator: Principal, *, status: str = ""
+    ) -> list[dict[str, Any]]:
+        self.app.authz.require(operator, "platform.tenants.manage")
+        with self.db.read() as connection:
+            rows = many(
+                connection,
+                "SELECT r.recovery_id, r.org_id, r.member_id, r.requested_by, r.reason, r.status, r.created_at, "
+                "r.available_at, r.completed_at, r.completed_by, r.cancelled_at, r.cancelled_by, m.email, o.name AS org_name "
+                "FROM account_recoveries r JOIN members m ON m.member_id = r.member_id AND m.org_id = r.org_id "
+                "JOIN organizations o ON o.org_id = r.org_id "
+                + ("WHERE r.status = ? " if status else "")
+                + "ORDER BY r.created_at DESC LIMIT 200",
+                (status,) if status else (),
+            )
+        return rows
+
+    def request_recovery(
+        self, operator: Principal, org_id: str, member_id: str, reason: str
+    ) -> dict[str, Any]:
+        """Start the recovery of an organization's only owner who lost both their authenticator and their recovery
+        codes (another owner would reset it themselves: ``mfa_reset``).
+
+        Nothing changes for ``recovery_delay_seconds`` (72 hours by default): the owner is emailed at once with a
+        link that cancels it, so someone who talked support into this cannot finish before the real owner sees it.
+        ``reason`` records how support verified the person (a ticket, a call back, an ID check).
+        """
+        self.app.authz.require(operator, "platform.tenants.manage")
+        reason = str(reason or "").strip()
+        if not 10 <= len(reason) <= 500:
+            raise ValidationFailed(
+                "Say how you verified the person (10 to 500 characters): the ticket and the checks you made."
+            )
+        member = self.app.tenancy.member(org_id, member_id)
+        if member["role"] != OWNER or member["status"] != "active":
+            raise ValidationFailed("Only an active owner's second factor is recovered here.")
+        if not member.get("mfa_enabled_at"):
+            raise ValidationFailed("This owner has no second factor to recover.")
+        with self.db.read() as connection:
+            owners = one(
+                connection,
+                "SELECT COUNT(*) AS n FROM members WHERE org_id = ? AND role = 'owner' AND status = 'active' AND removed_at IS NULL AND member_id != ?",
+                (org_id, member_id),
+            )
+            pending = one(
+                connection,
+                "SELECT recovery_id FROM account_recoveries WHERE org_id = ? AND member_id = ? AND status = 'pending'",
+                (org_id, member_id),
+            )
+        if owners and int(owners["n"]):
+            raise Conflict(
+                "The organization has another owner, who can reset this owner's second factor (Members > Reset MFA).",
+                code="other_owner",
+            )
+        if pending:
+            raise Conflict("A recovery is already waiting for this owner.", code="recovery_pending")
+        recovery_id, token = new_id(), crypto.new_token()
+        available = self.now + int(self.app.config.recovery_delay_seconds)
+        with self.db.write() as connection:
+            connection.execute(
+                """INSERT INTO account_recoveries (org_id, recovery_id, member_id, requested_by, reason, cancel_token_hash, status, created_at, available_at)
+                VALUES (?, ?, ?, ?, ?, ?, 'pending', ?, ?)""",
+                (
+                    org_id,
+                    recovery_id,
+                    member_id,
+                    operator.operator_id,
+                    reason,
+                    crypto.hash_token(token),
+                    self.now,
+                    available,
+                ),
+            )
+            self.app.audit.record(
+                org_id,
+                "auth.recovery_requested",
+                actor=operator,
+                target_type="member",
+                target_id=member_id,
+                detail={"recovery_id": recovery_id, "available_at": available},
+                source="support",
+                connection=connection,
+            )
+        self.app.platform_audit.record(
+            "member.recovery_requested",
+            operator=operator,
+            org_id=org_id,
+            target_type="member",
+            target_id=member_id,
+            detail={"recovery_id": recovery_id, "reason": reason, "available_at": available},
+        )
+        org = self.app.tenancy.org(org_id)
+        self.app.mail.send(
+            org_id,
+            member["email"],
+            "account_recovery",
+            name=member["name"] or member["email"],
+            org=org["name"],
+            available_on=_day(available),
+            link=f"{self.app.config.base_url}/#/recovery-cancel/{token}",
+        )
+        return {"recovery_id": recovery_id, "status": "pending", "available_at": available}
+
+    def cancel_recovery(
+        self,
+        recovery_id: str,
+        *,
+        operator: Principal | None = None,
+        token: str = "",
+    ) -> dict[str, Any]:
+        """Stop a waiting recovery: support (``operator``), or the owner with the link they were emailed (``token``)."""
+        if operator is not None:
+            self.app.authz.require(operator, "platform.tenants.manage")
+            row = self._recovery_row(recovery_id)
+            by = f"operator:{operator.email}"
+        else:
+            with self.db.read() as connection:
+                row = one(
+                    connection,
+                    "SELECT * FROM account_recoveries WHERE cancel_token_hash = ?",
+                    (crypto.hash_token(token or ""),),
+                )
+            if row is None or not token:
+                raise NotFound("This link is not valid.")
+            by = "owner:email-link"
+        if row["status"] != "pending":
+            raise Gone(f"This recovery is already {row['status']}.")
+        with self.db.write() as connection:
+            connection.execute(
+                "UPDATE account_recoveries SET status = 'cancelled', cancelled_at = ?, cancelled_by = ? WHERE recovery_id = ? AND status = 'pending'",
+                (self.now, by, row["recovery_id"]),
+            )
+            self.app.audit.record(
+                row["org_id"],
+                "auth.recovery_cancelled",
+                actor=operator,
+                actor_type="" if operator is not None else "member",
+                actor_id="" if operator is not None else str(row["member_id"]),
+                target_type="member",
+                target_id=row["member_id"],
+                detail={"recovery_id": row["recovery_id"], "by": by},
+                connection=connection,
+            )
+        self.app.platform_audit.record(
+            "member.recovery_cancelled",
+            operator=operator,
+            operator_label="" if operator else by,
+            org_id=row["org_id"],
+            target_type="member",
+            target_id=row["member_id"],
+            detail={"recovery_id": row["recovery_id"], "by": by},
+        )
+        return {"recovery_id": row["recovery_id"], "status": "cancelled"}
+
+    def complete_recovery(self, operator: Principal, recovery_id: str) -> dict[str, Any]:
+        """After the waiting period: remove the owner's second factor and end everything signed in as them. They
+        sign in with their password (or reset it by email) and set up a new authenticator."""
+        self.app.authz.require(operator, "platform.tenants.manage")
+        row = self._recovery_row(recovery_id)
+        if row["status"] != "pending":
+            raise Gone(f"This recovery is already {row['status']}.")
+        if self.now < int(row["available_at"]):
+            raise Forbidden(
+                f"The waiting period ends on {_day(int(row['available_at']))}; the owner can still cancel until then.",
+                code="recovery_waiting",
+                available_at=row["available_at"],
+            )
+        org_id, member_id = row["org_id"], row["member_id"]
+        self.app.secrets.delete(org_id, f"mfa:{member_id}")
+        with self.db.write() as connection:
+            connection.execute(
+                "UPDATE members SET mfa_secret = '', mfa_enabled_at = NULL, recovery_codes = '[]', mfa_last_step = 0 WHERE member_id = ? AND org_id = ?",
+                (member_id, org_id),
+            )
+            revoked = self.revoke_member_credentials(connection, org_id, member_id)
+            connection.execute(
+                "UPDATE account_recoveries SET status = 'completed', completed_at = ?, completed_by = ? WHERE recovery_id = ?",
+                (self.now, operator.operator_id, recovery_id),
+            )
+            self.app.audit.record(
+                org_id,
+                "auth.recovery_completed",
+                actor=operator,
+                target_type="member",
+                target_id=member_id,
+                detail={"recovery_id": recovery_id, "revoked": revoked},
+                source="support",
+                connection=connection,
+            )
+        self.app.platform_audit.record(
+            "member.recovery_completed",
+            operator=operator,
+            org_id=org_id,
+            target_type="member",
+            target_id=member_id,
+            detail={"recovery_id": recovery_id, "requested_by": row["requested_by"]},
+        )
+        member = self.app.tenancy.member(org_id, member_id)
+        self.app.mail.send(
+            org_id,
+            member["email"],
+            "account_recovered",
+            name=member["name"] or member["email"],
+            org=self.app.tenancy.org(org_id)["name"],
+            link=f"{self.app.config.base_url}/#/",
+        )
+        return {"recovery_id": recovery_id, "status": "completed"}
+
     # ---------------------------------------------------------------- passwords
 
     def change_password(self, principal: Principal, current: str, new: str) -> str:
@@ -1048,13 +1413,25 @@ class Identity:
                 "UPDATE members SET password_hash = ? WHERE member_id = ? AND org_id = ?",
                 (crypto.hash_password(new), principal.member_id, principal.org_id),
             )
-            self.end_all_sessions(principal.org_id, principal.member_id, connection)
+            revoked = self.revoke_member_credentials(
+                connection, principal.org_id, principal.member_id
+            )
             self.app.audit.record(
                 principal.org_id,
                 "auth.password_change",
                 actor=principal,
                 target_type="member",
                 target_id=principal.member_id,
+                detail={"revoked": revoked},
+                connection=connection,
+            )
+            self.app.audit.record(
+                principal.org_id,
+                "auth.credentials_revoked",
+                actor=principal,
+                target_type="member",
+                target_id=principal.member_id,
+                detail={"reason": "password_change", **revoked},
                 connection=connection,
             )
         token, _ = self._create_session(
@@ -1121,7 +1498,9 @@ class Identity:
                     row["org_id"],
                 ),
             )
-            self.end_all_sessions(row["org_id"], row["member_id"], connection)
+            revoked = self.revoke_member_credentials(
+                connection, row["org_id"], row["member_id"]
+            )
             self.app.audit.record(
                 row["org_id"],
                 "auth.password_reset",
@@ -1129,6 +1508,17 @@ class Identity:
                 actor_id=row["member_id"],
                 target_type="member",
                 target_id=row["member_id"],
+                detail={"revoked": revoked},
+                connection=connection,
+            )
+            self.app.audit.record(
+                row["org_id"],
+                "auth.credentials_revoked",
+                actor_type="member",
+                actor_id=row["member_id"],
+                target_type="member",
+                target_id=row["member_id"],
+                detail={"reason": "password_reset", **revoked},
                 connection=connection,
             )
         return {"reset": True}

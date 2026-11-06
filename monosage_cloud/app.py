@@ -8,6 +8,10 @@ from __future__ import annotations
 
 import logging
 import os
+import socket
+import threading
+import time
+from pathlib import Path
 from typing import Any
 
 from aira.hosting import HOOKS
@@ -46,6 +50,98 @@ from monosage_cloud.tenancy import Tenancy
 from monosage_cloud.workspace import WorkspaceManager
 
 logger = logging.getLogger("monosage_cloud")
+
+# A node that has not reported for this long has stopped using the data directory.
+HOST_GUARD_STALE_SECONDS = 90
+HOST_GUARD_BEAT_SECONDS = 30
+
+
+def node_id() -> str:
+    """The machine this process runs on: the kernel's boot id, which every container on one node shares (so a web
+    and a worker container on one Docker host are one node), else the host name."""
+    try:
+        return Path("/proc/sys/kernel/random/boot_id").read_text().strip()[:64]
+    except OSError:
+        return socket.gethostname()[:64]
+
+
+class HostGuard:
+    """Refuse to run two machines over one data directory.
+
+    The control plane (SQLite in WAL mode) and every workspace file are SQLite: WAL keeps its shared index in
+    memory-mapped files that only processes on one machine can share, so two pods on two nodes writing the same
+    files over a network volume can corrupt them. Every long-running process records its node in ``cloud_kv``
+    and refreshes it; a process that starts while another node has reported recently stops with an error.
+    ``AIRA_CLOUD_ALLOW_SHARED_SQLITE=1`` turns this off (only for a file system that is known to be safe).
+    """
+
+    PREFIX = "sqlite_node:"
+
+    def __init__(self, app: CloudApp) -> None:
+        self.app = app
+        self.node = node_id()
+        self._last_beat = 0.0
+        self._lock = threading.Lock()
+
+    def others(self) -> list[str]:
+        now = self.app.clock.now()
+        with self.app.db.read() as connection:
+            rows = connection.execute(
+                "SELECT key, value FROM cloud_kv WHERE key LIKE ?", (f"{self.PREFIX}%",)
+            ).fetchall()
+        live = []
+        for row in rows:
+            key, value = row[0], row[1]
+            node = str(key)[len(self.PREFIX) :]
+            try:
+                seen = int(value)
+            except (TypeError, ValueError):
+                continue
+            if node != self.node and seen > now - HOST_GUARD_STALE_SECONDS:
+                live.append(node)
+        return live
+
+    def claim(self) -> None:
+        """At process start: stop if another node is using this data directory, else record this one."""
+        others = self.others()
+        if others:
+            message = (
+                f"Another machine ({', '.join(o[:12] for o in others)}) is using this data directory. The control "
+                "plane and the workspaces are SQLite files, and two machines writing them over a shared volume can "
+                "corrupt them. Run one replica (deploy/k8s runs one `serve --worker` pod on a ReadWriteOnce volume), "
+                "or set AIRA_CLOUD_ALLOW_SHARED_SQLITE=1 if you are certain the file system is safe."
+            )
+            if not self.app.config.allow_shared_sqlite:
+                logger.critical(message)
+                raise SystemExit(message)
+            logger.warning(message)
+        self.beat(force=True)
+
+    def beat(self, *, force: bool = False) -> None:
+        """Refresh this node's record (cheap: at most every 30 seconds)."""
+        now = time.monotonic()
+        with self._lock:
+            if not force and now - self._last_beat < HOST_GUARD_BEAT_SECONDS:
+                return
+            self._last_beat = now
+        try:
+            with self.app.db.write() as connection:
+                connection.execute(
+                    "INSERT INTO cloud_kv (key, value) VALUES (?, ?) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+                    (f"{self.PREFIX}{self.node}", str(self.app.clock.now())),
+                )
+        except Exception:  # noqa: BLE001 - a missed beat only shortens the record
+            logger.debug("Could not record this node", exc_info=True)
+
+    def release(self) -> None:
+        """At a clean stop: the next pod (perhaps on another node) may start at once."""
+        try:
+            with self.app.db.write() as connection:
+                connection.execute(
+                    "DELETE FROM cloud_kv WHERE key = ?", (f"{self.PREFIX}{self.node}",)
+                )
+        except Exception:  # noqa: BLE001
+            logger.debug("Could not release this node", exc_info=True)
 
 
 class CloudApp:
@@ -99,6 +195,7 @@ class CloudApp:
         self.workspaces = WorkspaceManager(self)
         self.storage = StorageService(self)
         self.queue = JobQueue(self)
+        self.mail.queue = self.queue  # with SMTP, platform mail is delivered by the job queue (mail.deliver)
         self.agents = AgentClient(self)
         self.linkedin = LinkedInSessions(self)
         self.launch = LaunchTokens(self)
@@ -128,6 +225,10 @@ class CloudApp:
         self.gate = Gate(self)
         self.models = ModelGateway(self)
         self.sso = Sso(self)
+        self.host_guard = HostGuard(self)
+        from monosage_cloud import crypto
+
+        crypto.set_scrypt_concurrency(self.config.scrypt_concurrency)
         if self.config.operator_email and self.config.operator_password:
             self.identity.bootstrap_operator(
                 self.config.operator_email, self.config.operator_password

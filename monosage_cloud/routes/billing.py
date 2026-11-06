@@ -105,7 +105,7 @@ def billing_portal(req: Req):  # noqa: ANN201
     return 200, req.app.billing.portal(req.principal)
 
 
-@cloud_route("POST", r"/api/billing/webhook/([a-z]{3,20})", auth="public", csrf=False)
+@cloud_route("POST", r"/api/billing/webhook/([a-z]{3,20})", auth="public", csrf=False, machine="webhook")
 def billing_webhook(req: Req):  # noqa: ANN201
     provider = req.group()
     headers = req.request.headers

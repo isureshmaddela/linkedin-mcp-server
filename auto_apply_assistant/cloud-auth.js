@@ -14,6 +14,7 @@
     { re: /^#\/invite\/([A-Za-z0-9_-]{20,80})$/, screen: "invite" },
     { re: /^#\/verify\/([A-Za-z0-9_-]{20,80})$/, screen: "verify" },
     { re: /^#\/reset\/([A-Za-z0-9_-]{20,80})$/, screen: "reset" },
+    { re: /^#\/recovery-cancel\/([A-Za-z0-9_-]{20,80})$/, screen: "recovery-cancel" },
     { re: /^#\/forgot$/, screen: "forgot" },
     { re: /^#\/signup$/, screen: "signup" },
     { re: /^#\/login$/, screen: "login" },
@@ -294,15 +295,19 @@
     const password = field("Password", { type: "password", autocomplete: "new-password", minlength: 12, maxlength: 1024 }, "At least 12 characters. A few random words work well.");
     const meter = strengthMeter(password.input, () => email.input.value);
     const notice = noticeNode();
+    // The hosted product has no child accounts yet: the person signing up confirms they are an adult.
+    const adult = h("input", { type: "checkbox", id: "caAdult", required: true });
+    const adultRow = h("label", { class: "ca-check", for: "caAdult" }, adult, h("span", { text: "I am 18 or older" }));
     const submit = h("button", { class: "btn", type: "submit", style: { width: "100%", marginTop: "8px" }, text: "Create account" });
     const trial = (cloud.config && cloud.config.trial_days) || 14;
-    const form = h("form", { novalidate: true }, name.node, email.node, password.node, meter.node, org.node, notice, submit);
+    const form = h("form", { novalidate: true }, name.node, email.node, password.node, meter.node, org.node, adultRow, notice, submit);
     form.addEventListener("submit", async (event) => {
       event.preventDefault();
       if (!strength(password.input.value, email.input.value).ok) { say(notice, "Choose a password of at least 12 characters that does not contain your email name."); password.input.focus(); return; }
+      if (!adult.checked) { say(notice, "Confirm that you are 18 or older to create an account."); adult.focus(); return; }
       await Aira.withBusy(submit, async () => {
         try {
-          await api("/api/auth/signup-org", { method: "POST", body: { organization: org.input.value, name: name.input.value, email: email.input.value, password: password.input.value }, silent: true });
+          await api("/api/auth/signup-org", { method: "POST", body: { organization: org.input.value, name: name.input.value, email: email.input.value, password: password.input.value, adult: true }, silent: true });
           renderCheckEmail(email.input.value);
         } catch (error) { say(notice, error.message); }
       });
@@ -371,6 +376,19 @@
     show("Choose a new password", "This link works once.", form);
   }
 
+  // The link in "Recovery of your second factor has started": the owner stops a recovery they did not ask for.
+  function renderRecoveryCancel(token) {
+    const notice = noticeNode();
+    const stop = h("button", { type: "button", class: "btn", text: "Cancel the recovery" });
+    stop.addEventListener("click", () => Aira.withBusy(stop, async () => {
+      try {
+        await api("/api/auth/recovery/cancel", { method: "POST", body: { token }, silent: true });
+        show("Recovery cancelled", "Your second factor stays as it is. If someone asked support for this without you, change your password.", h("div", { class: "btn-row" }, h("a", { class: "btn", href: "#/login", text: "Sign in" })));
+      } catch (error) { say(notice, error.message); }
+    }));
+    show("Stop this recovery?", "Monosage support was asked to remove the second factor from your owner account. If that was not you, cancel it.", notice, h("div", { class: "btn-row" }, stop));
+  }
+
   async function renderInvite(token) {
     show("Your invitation", "One moment…", ui.skeleton(1));
     let info;
@@ -407,7 +425,7 @@
     const target = screen || (anonymous && anonymous.screen) || "login";
     const token = anonymous ? anonymous.token : "";
     gateOn = "";
-    ({ login: () => renderLogin(options), signup: renderSignup, forgot: renderForgot, verify: () => renderVerify(token), reset: () => renderReset(token), invite: () => renderInvite(token) }[target] || (() => renderLogin(options)))();
+    ({ login: () => renderLogin(options), signup: renderSignup, forgot: renderForgot, verify: () => renderVerify(token), reset: () => renderReset(token), invite: () => renderInvite(token), "recovery-cancel": () => renderRecoveryCancel(token) }[target] || (() => renderLogin(options)))();
   };
   auth.show = show; // the console's second-factor screens use the same panel as this page
 

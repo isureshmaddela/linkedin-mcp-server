@@ -162,7 +162,7 @@ def org_branding(req: Req):  # noqa: ANN201
     }
 
 
-@cloud_route("POST", r"/api/internal/remote-login/validate", auth="public", csrf=False)
+@cloud_route("POST", r"/api/internal/remote-login/validate", auth="public", csrf=False, machine="signed")
 def remote_login_validate(req: Req):  # noqa: ANN201
     """The remote-desktop gateway asks which candidate's browser a sign-in token opens (signed with the broker secret; once)."""
     try:
@@ -174,7 +174,7 @@ def remote_login_validate(req: Req):  # noqa: ANN201
     return 200, req.app.linkedin.validate(str(req.body().get("token", "")))
 
 
-@cloud_route("POST", r"/api/internal/remote-login/event", auth="public", csrf=False)
+@cloud_route("POST", r"/api/internal/remote-login/event", auth="public", csrf=False, machine="signed")
 def remote_login_event(req: Req):  # noqa: ANN201
     """The sign-in broker reports a session's start, its heartbeats and how it ended (signed with the broker secret)."""
     try:

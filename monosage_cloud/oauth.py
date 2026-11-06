@@ -47,6 +47,7 @@ if TYPE_CHECKING:
     from monosage_cloud.app import CloudApp
 
 ACCESS_TTL = 3600
+LAST_USED_RESOLUTION = 60  # seconds between writes of a token's last_used_at
 REFRESH_TTL = 30 * 86_400
 CODE_TTL = 600
 PAT_DAYS = (7, 30, 90, 365)
@@ -959,11 +960,16 @@ class OAuth:
         if org is None or org["deleted_at"] or org["status"] != "active":
             return None
         oauth = {"scopes": scopes, "client_id": row["client_id"], "kind": row["kind"]}
-        with self.db.write() as connection:
-            connection.execute(
-                "UPDATE oauth_tokens SET last_used_at = ? WHERE token_hash = ?",
-                (self.now, row["token_hash"]),
-            )
+        if (
+            row["last_used_at"] is None
+            or self.now - int(row["last_used_at"]) >= LAST_USED_RESOLUTION
+        ):
+            # "last used" is shown to the minute: one write a minute per token, not one per request
+            with self.db.write() as connection:
+                connection.execute(
+                    "UPDATE oauth_tokens SET last_used_at = ? WHERE token_hash = ?",
+                    (self.now, row["token_hash"]),
+                )
         if row["member_id"]:
             with platform_scope(), self.db.read() as connection:
                 member = one(
