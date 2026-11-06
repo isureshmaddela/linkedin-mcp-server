@@ -806,12 +806,10 @@ class Tenancy:
         self.app.secrets.delete(actor.org_id, f"mfa:{member_id}")
         # their own Anthropic key ("My Claude") leaves with them
         self.app.models.clear_member_ai(actor.org_id, member_id)
-        from monosage_cloud.hooks import erase_social, erase_videos
+        from monosage_cloud import erasure_hooks
 
-        erase_social(
-            actor.org_id, (member_id,)
-        )  # their Social profile, posts and messages
-        erase_videos(actor.org_id, (member_id,))  # their channel, videos and files
+        # their Social and Dating, Videos, and their life apps in the organization's database (aira/erasure.py)
+        erasure_hooks.member_removed(self.app, actor.org_id, target, actor=actor)
         self.app.lifecycle.recompute_over_limits(actor.org_id)
         return result
 

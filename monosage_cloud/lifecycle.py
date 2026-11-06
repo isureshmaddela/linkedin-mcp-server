@@ -1011,6 +1011,9 @@ class Lifecycle:
 
     def _delete_member_data(self, actor: Principal, membership: dict[str, Any]) -> None:
         org_id, member_id = membership["org_id"], membership["member_id"]
+        from monosage_cloud import erasure_hooks  # erase the person everywhere first (aira/erasure.py)
+
+        erasure_hooks.member_deleted(self.app, org_id, member_id, actor_label=actor.email)
         if membership["role"] == "candidate":
             self.app.workspaces.stop_automation(org_id, member_id)
             self.app.workspaces.delete(org_id, member_id)

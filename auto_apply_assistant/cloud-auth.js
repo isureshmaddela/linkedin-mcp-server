@@ -585,12 +585,28 @@
       h("button", { type: "button", class: "btn secondary sm", text: "Sign out other devices", disabled: !others, onclick: (event) => Aira.withBusy(event.currentTarget, async () => { const r = await api("/api/auth/sessions/sign-out-others", { method: "POST", body: {} }); Aira.toast(`Signed out ${r.signed_out} device${r.signed_out === 1 ? "" : "s"}.`, "success"); router.render(); }) })),
       h("div", { class: "list" }, ...rows));
 
+    // Deleting one's own account erases the person in every app (POST /api/me/delete-account, aira/erasure.py).
+    const deletePassword = h("input", { type: "password", autocomplete: "current-password", maxlength: 1024 });
+    const deleteForm = h("form", { class: "panel-body", novalidate: true },
+      h("p", { class: "muted", text: "Erases your health records, plans, chats, Social and Videos, notifications and your workspace in every app, then closes your account. Your organization keeps its own books without your name. This cannot be undone." }),
+      ui.field("Current password", deletePassword),
+      h("div", { class: "btn-row", style: { marginTop: "10px" } }, h("button", { class: "btn danger secondary", type: "submit", text: "Delete my account" })));
+    deleteForm.addEventListener("submit", async (event) => {
+      event.preventDefault();
+      if (!(await Aira.confirm({ title: "Delete your account", message: "Delete your account and erase your data in every app? This cannot be undone.", confirmLabel: "Delete", danger: true }))) return;
+      await Aira.withBusy(deleteForm.querySelector("button"), async () => {
+        await api("/api/me/delete-account", { method: "POST", body: { password: deletePassword.value } });
+        location.href = "/";
+      });
+    });
+
     stage.replaceChildren(
       h("div", { class: "page-head" }, h("div", {}, h("h1", { text: "Security" }), h("p", { text: "Your sign-in, second factor and devices." }))),
       h("div", { class: "grid cols-2", style: { alignItems: "start" } },
         h("div", { class: "panel" }, h("div", { class: "panel-head" }, h("h3", { text: "Profile" })), profileForm),
         h("div", { class: "panel" }, h("div", { class: "panel-head" }, h("h3", { text: "Password" })), passwordForm),
-        mfaPanel, sessionPanel));
+        mfaPanel, sessionPanel,
+        h("div", { class: "panel" }, h("div", { class: "panel-head" }, h("h3", { text: "Delete your account" })), deleteForm)));
   }
   const router = Aira.router;
 
