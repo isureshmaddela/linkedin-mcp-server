@@ -761,6 +761,60 @@ ALTER TABLE plans ADD COLUMN archived_at INTEGER;
 ALTER TABLE plans ADD COLUMN created_by TEXT NOT NULL DEFAULT '';
 """
 
+# Billing correctness (billing.py):
+# * ``usage_overage``: overage units by the hour they happened in, so the overage of a provider's billing period (which
+#   is not a calendar month) can be summed exactly.
+# * ``overage_periods``: one row per closed billing period. A tick claims a row (state NULL or failed -> pending) with
+#   one conditional UPDATE before it calls the provider, marks it billed only after the provider accepted every line,
+#   and puts it back to failed (retryable) otherwise, so overlapping ticks cannot bill a period twice.
+# * ``billing_checkouts``: the organization's checkouts; one is open at a time and a late completion of an older one
+#   is recognised.
+# * ``subscriptions.pending_upgrade``: an upgrade waiting for the provider to confirm payment (JSON, '' for none);
+#   ``subscriptions.provider_event_at``: the provider time of the newest subscription event applied, so an older event
+#   delivered late is ignored.
+# * ``invoices.item_id`` / ``invoices.payment_id``: the provider's invoice item (or add-on) and payment behind a row,
+#   so an ad top-up is credited when its payment settles and reversed when it is refunded.
+_V11 = """
+CREATE TABLE usage_overage (
+    org_id TEXT NOT NULL,
+    metric TEXT NOT NULL,
+    hour INTEGER NOT NULL,
+    value INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (org_id, metric, hour)
+);
+CREATE TABLE overage_periods (
+    org_id TEXT NOT NULL,
+    period_start INTEGER NOT NULL,
+    period_end INTEGER NOT NULL,
+    state TEXT,
+    amount_cents INTEGER NOT NULL DEFAULT 0,
+    currency TEXT NOT NULL DEFAULT 'usd',
+    lines TEXT NOT NULL DEFAULT '[]',
+    attempts INTEGER NOT NULL DEFAULT 0,
+    error TEXT NOT NULL DEFAULT '',
+    claimed_at INTEGER,
+    billed_at INTEGER,
+    created_at INTEGER NOT NULL,
+    PRIMARY KEY (org_id, period_start)
+);
+CREATE INDEX overage_periods_state ON overage_periods (state);
+CREATE TABLE billing_checkouts (
+    session_id TEXT PRIMARY KEY,
+    org_id TEXT NOT NULL,
+    provider TEXT NOT NULL,
+    plan_id TEXT NOT NULL,
+    seats INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'open',
+    created_at INTEGER NOT NULL,
+    closed_at INTEGER
+);
+CREATE INDEX billing_checkouts_org ON billing_checkouts (org_id, status);
+ALTER TABLE subscriptions ADD COLUMN pending_upgrade TEXT NOT NULL DEFAULT '';
+ALTER TABLE subscriptions ADD COLUMN provider_event_at INTEGER;
+ALTER TABLE invoices ADD COLUMN item_id TEXT NOT NULL DEFAULT '';
+ALTER TABLE invoices ADD COLUMN payment_id TEXT NOT NULL DEFAULT '';
+"""
+
 # (version, name, SQL script)
 MIGRATIONS: list[tuple[int, str, str]] = [
     (1, "initial", _V1),
@@ -773,4 +827,5 @@ MIGRATIONS: list[tuple[int, str, str]] = [
     (8, "platform_apps", _V8),
     (9, "public_link_members", _V9),
     (10, "custom_plans", _V10),
+    (11, "billing_correctness", _V11),
 ]

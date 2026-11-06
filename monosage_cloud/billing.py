@@ -9,14 +9,19 @@ synchronously, so an organization is active the moment its payment webhook is pr
 
 from __future__ import annotations
 
+import base64
+import hashlib
 import logging
 import sqlite3
+import threading
+import time as _time
 from typing import TYPE_CHECKING, Any
 
 from aira import apps as app_catalog
 from monosage_cloud import crypto
 from monosage_cloud.billing_providers import (
     BillingProvider,
+    RazorpayProvider,
     StandInProvider,
     StripeProvider,
 )
@@ -38,7 +43,6 @@ from monosage_cloud.plans import (
     LIMIT_NAMES,
     TRIAL,
     is_free,
-    month_key,
     with_later_rates,
 )
 from monosage_cloud.rbac import BILLING, OWNER, Principal
@@ -62,6 +66,35 @@ TRANSITIONS: dict[str, set[str]] = {
 SIGNUP_KEY = "signup_plan"  # cloud_kv: the plan a new sign-up starts on, set from the platform console
 
 CUSTOM_LIMIT_NAMES = LIMIT_NAMES
+
+# Metered overage: the usage metric, the plan's rate for it and how an invoice line names it.
+OVERAGE_METRICS: dict[str, tuple[str, str]] = {
+    "applications:overage": ("application_cents", "applications"),
+    "searches:overage": ("search_cents", "searches"),
+    "cover_letters:overage": ("cover_letter_cents", "AI cover letters"),
+    "api_searches:overage": ("api_search_cents", "API searches"),
+    "pooled_searches:overage": ("pooled_search_cents", "pooled SerpApi searches"),
+}
+OVERAGE_CLAIM_SECONDS = 3600  # a claim older than this was left by a tick that died: it may be taken again
+OVERAGE_MAX_ATTEMPTS = 10
+UPGRADE_PENDING_SECONDS = DAY  # Stripe drops an unpaid pending update after 23 hours
+# Neutral events that change the subscription's state: one older than the newest applied is ignored.
+ORDERED_EVENTS = frozenset(
+    {
+        "invoice.paid",
+        "invoice.payment_failed",
+        "subscription.updated",
+        "subscription.deleted",
+    }
+)
+
+
+class StandInRefused(RuntimeError):
+    """The stand-in billing provider was asked to run where the public could reach it."""
+
+
+def _day(timestamp: int | None) -> str:
+    return _time.strftime("%Y-%m-%d", _time.gmtime(int(timestamp or 0)))
 
 
 def validate_overrides(values: Any) -> dict[str, Any]:
@@ -104,11 +137,32 @@ class Billing:
     def __init__(self, app: CloudApp) -> None:
         self.app = app
         self.providers: dict[str, BillingProvider] = {}
+        config = app.config
+        refusal = config.standin_refusal()
+        if refusal and not config.allow_standin_billing:
+            raise StandInRefused(refusal)
+        if config.billing_provider == "standin":
+            if refusal:
+                logger.warning(
+                    "!!! DEMO BILLING: the stand-in provider is on at %s (AIRA_CLOUD_ALLOW_STANDIN_BILLING). "
+                    "Anyone who can reach this server can activate paid plans without paying. !!!",
+                    config.base_url,
+                )
+            from monosage_cloud.routes.billing import register_standin_routes
+
+            register_standin_routes()
         secret = self._standin_secret()
-        self.standin = StandInProvider(app.db, app.clock, app.config, secret)
+        # The stand-in is kept for the scheduler's own renewals and for tests; its webhook route and hosted pages
+        # answer only when it is the configured provider.
+        self.standin = StandInProvider(app.db, app.clock, config, secret)
         self.providers["standin"] = self.standin
-        if app.config.stripe_secret_key or app.config.billing_provider == "stripe":
-            self.providers["stripe"] = StripeProvider(app.config, app.clock)
+        if config.stripe_secret_key or config.billing_provider == "stripe":
+            self.providers["stripe"] = StripeProvider(config, app.clock, app.db)
+        if config.razorpay_key_id or config.billing_provider == "razorpay":
+            self.providers["razorpay"] = RazorpayProvider(config, app.clock, app.db)
+        self._payout_lock = threading.Lock()
+        self._payout_fernet: Any = None
+        self._install_payout_key()
 
     # -- helpers ----------------------------------------------------------------------
 
@@ -134,6 +188,40 @@ class Billing:
                 (secret,),
             )
             return secret
+
+    # -- creators' payout details: encrypted with a key the KMS wraps ------------------------
+
+    def _install_payout_key(self) -> None:
+        """Creators' bank and UPI details live in the platform-wide Videos database; hosted, they are encrypted
+        with a data key wrapped by the control plane's master key (the KMS), never stored in the clear."""
+        from aira.suite.videos import store as videos_store
+
+        videos_store.set_payout_key(
+            self.app.config.data_root / "videos.sqlite3", self._payout_cipher
+        )
+
+    def _payout_cipher(self) -> Any:
+        from cryptography.fernet import Fernet
+
+        with self._payout_lock:
+            if self._payout_fernet is not None:
+                return self._payout_fernet
+            provider = self.app.secrets.provider
+            with self.db.write() as connection:
+                row = one(
+                    connection,
+                    "SELECT value FROM cloud_kv WHERE key = 'payout_data_key'",
+                )
+                if row:
+                    key = provider.unwrap(base64.b64decode(str(row["value"])))
+                else:
+                    key = Fernet.generate_key()
+                    connection.execute(
+                        "INSERT INTO cloud_kv (key, value) VALUES ('payout_data_key', ?)",
+                        (base64.b64encode(provider.wrap(key)).decode("ascii"),),
+                    )
+            self._payout_fernet = Fernet(key)
+            return self._payout_fernet
 
     @property
     def provider(self) -> BillingProvider:
@@ -576,18 +664,61 @@ class Billing:
             currency=quote["currency"],
             success_url=f"{base}/#/org/billing?checkout=success",
             cancel_url=f"{base}/#/org/billing?checkout=cancelled",
+            checkout_id=new_id(),
         )
+        # One open checkout per organization: this one replaces any other, which is closed at the provider so it
+        # cannot be paid as well (a completion that still arrives for it is handled in apply_event).
+        with self.db.write() as connection:
+            replaced = many(
+                connection,
+                "SELECT session_id, provider FROM billing_checkouts WHERE org_id = ? AND status = 'open'",
+                (actor.org_id,),
+            )
+            connection.execute(
+                "UPDATE billing_checkouts SET status = 'superseded', closed_at = ? WHERE org_id = ? AND status = 'open'",
+                (self.now, actor.org_id),
+            )
+            connection.execute(
+                "INSERT INTO billing_checkouts (session_id, org_id, provider, plan_id, seats, status, created_at) VALUES (?, ?, ?, ?, ?, 'open', ?)",
+                (
+                    str(session["id"]),
+                    actor.org_id,
+                    provider.name,
+                    plan_id,
+                    int(quote["seats"]),
+                    self.now,
+                ),
+            )
+        self._expire_checkouts(replaced)
         self.app.audit.record(
             actor.org_id,
             "billing.checkout_start",
             actor=actor,
-            detail={"plan": plan_id, "seats": quote["seats"]},
+            detail={
+                "plan": plan_id,
+                "seats": quote["seats"],
+                "replaced": len(replaced),
+            },
         )
         return {
             "checkout_url": session["url"],
             "session_id": session["id"],
             "quote": quote,
         }
+
+    def _expire_checkouts(self, rows: list[dict[str, Any]]) -> None:
+        for row in rows:
+            provider = self.providers.get(str(row.get("provider") or ""))
+            if provider is None:
+                continue
+            try:
+                provider.expire_checkout(str(row["session_id"]))
+            except Exception:  # noqa: BLE001 - already completed or expired there; a late completion is handled
+                logger.warning(
+                    "Could not expire checkout %s at %s",
+                    row["session_id"],
+                    provider.name,
+                )
 
     def checkout_required(self, subscription: dict[str, Any]) -> bool:
         """A paid plan has to be bought through checkout first: in a trial, after cancellation, and on a free plan
@@ -672,75 +803,276 @@ class Billing:
             }
         plan = self.app.catalog.get(plan_id)
         kept = [line["app_id"] for line in quote["addons"]]
-        if subscription["billing_subscription_id"]:
-            self._provider_for(subscription).update_subscription(
-                subscription["billing_subscription_id"],
-                plan_id=plan_id,
-                plan_name=plan["name"],
-                seats=target_seats,
-                seat_cents=int(plan["pricing"]["seat_cents_month"]),
-                currency=plan["pricing"].get("currency", "usd"),
-                prorate=True,
-                addons=self._provider_addons(plan_id, target_seats, kept),
-            )
         charge = int(quote.get("prorated_charge_cents", 0))
+        upgrade: dict[str, Any] = {
+            "kind": "plan",
+            "id": new_id(),
+            "plan_id": plan_id,
+            "plan_version": plan["version"],
+            "seats": target_seats,
+            "from_plan": subscription["plan_id"],
+            "from_seats": subscription["candidate_seats"],
+            "dropped": list(quote["dropped_apps"]),
+            "charge_cents": charge,
+            "currency": quote["currency"],
+            "requested_at": self.now,
+            "requested_by": actor.email,
+            "invoice_row": new_id(),
+            "invoice_id": "",
+            "match": {},
+            "provider": "",
+        }
+        lines = [
+            {
+                "description": f"Upgrade to {plan['name']} ({target_seats} seats), prorated",
+                "amount_cents": charge,
+            }
+        ]
+        if not subscription["billing_subscription_id"]:
+            # no provider subscription to confirm a payment (a plan an operator set up, invoiced outside): the
+            # upgrade applies now and its prorated charge waits on the next invoice, open
+            self._record_upgrade_invoice(actor.org_id, upgrade, lines, subscription)
+            self._apply_upgrade(actor.org_id, upgrade, actor=actor, paid=False)
+            return {
+                "scheduled": False,
+                "applied": True,
+                "pending_payment": False,
+                "prorated_charge_cents": charge,
+                "dropped_apps": quote["dropped_apps"],
+                "quote": quote,
+            }
+        if subscription.get("pending_upgrade"):
+            raise Conflict(
+                "An upgrade is already waiting for its payment. It applies once the payment goes through.",
+                code="upgrade_pending",
+            )
+        provider = self._provider_for(subscription)
+        answer = provider.update_subscription(
+            subscription["billing_subscription_id"],
+            plan_id=plan_id,
+            plan_name=plan["name"],
+            seats=target_seats,
+            seat_cents=int(plan["pricing"]["seat_cents_month"]),
+            currency=plan["pricing"].get("currency", "usd"),
+            prorate=True,
+            addons=self._provider_addons(plan_id, target_seats, kept),
+            confirm_payment=True,
+        )
+        upgrade.update(
+            {
+                "provider": provider.name,
+                "invoice_id": str(answer.get("invoice_id") or ""),
+                "match": dict(answer.get("match") or {}),
+            }
+        )
+        if provider.name == "razorpay" and charge > 0:
+            # Razorpay does not prorate: the difference for the rest of this period rides on the next charge
+            try:
+                upgrade["item_id"] = provider.add_invoice_item(
+                    subscription["billing_customer_id"],
+                    charge,
+                    lines[0]["description"],
+                    quote["currency"],
+                    subscription_id=subscription["billing_subscription_id"],
+                    idempotency_key=f"aira-upgrade-{upgrade['id']}",
+                )
+            except Exception:  # noqa: BLE001 - the plan change stands; reconcile reports the missing line
+                logger.exception(
+                    "Could not add the prorated upgrade charge for %s", actor.org_id
+                )
+        self._record_upgrade_invoice(actor.org_id, upgrade, lines, subscription)
         with self.db.write() as connection:
             connection.execute(
-                """UPDATE subscriptions SET plan_id = ?, plan_version = ?, candidate_seats = ?, pending_plan_id = '', pending_seats = NULL,
-                pending_effective_at = NULL, updated_at = ? WHERE org_id = ?""",
-                (plan_id, plan["version"], target_seats, self.now, actor.org_id),
+                "UPDATE subscriptions SET pending_upgrade = ?, updated_at = ? WHERE org_id = ?",
+                (dumps(upgrade), self.now, actor.org_id),
             )
-            self._cancel_apps(
-                connection,
-                actor.org_id,
-                quote["dropped_apps"],
-                reason=f"not available on {plan['name']}",
-                actor=actor,
-            )
-            if charge:
-                connection.execute(
-                    """INSERT INTO invoices (invoice_id, org_id, kind, amount_cents, currency, status, period_start, period_end, lines, created_at, paid_at)
-                    VALUES (?, ?, 'proration', ?, ?, 'paid', ?, ?, ?, ?, ?)""",
-                    (
-                        new_id(),
-                        actor.org_id,
-                        charge,
-                        quote["currency"],
-                        self.now,
-                        subscription["period_end"],
-                        dumps(
-                            [
-                                {
-                                    "description": f"Upgrade to {plan['name']} ({target_seats} seats), prorated",
-                                    "amount_cents": charge,
-                                }
-                            ]
-                        ),
-                        self.now,
-                        self.now,
-                    ),
-                )
             self.app.audit.record(
                 actor.org_id,
-                "billing.upgrade",
+                "billing.upgrade_requested",
                 actor=actor,
                 detail={
                     "from": subscription["plan_id"],
                     "to": plan_id,
                     "seats": target_seats,
                     "prorated_cents": charge,
+                    "provider": provider.name,
                 },
                 connection=connection,
             )
-        self.app.entitlements.invalidate(actor.org_id)
-        self.app.lifecycle.recompute_over_limits(actor.org_id)
+        if provider.name == "standin":
+            # the stand-in's card always works: its invoice.paid confirms the upgrade, as a provider's would
+            self._standin_event(
+                "invoice.paid",
+                {
+                    "org_id": actor.org_id,
+                    "subscription_id": subscription["billing_subscription_id"],
+                    "customer_id": subscription["billing_customer_id"],
+                    "invoice_id": upgrade["invoice_id"],
+                    "amount_cents": charge,
+                    "currency": quote["currency"],
+                    "billing_reason": "subscription_update",
+                },
+            )
+        applied = not self.subscription(actor.org_id)["pending_upgrade"]
         return {
             "scheduled": False,
-            "applied": True,
+            "applied": applied,
+            "pending_payment": not applied,
             "prorated_charge_cents": charge,
             "dropped_apps": quote["dropped_apps"],
             "quote": quote,
         }
+
+    def _standin_event(self, event_type: str, data: dict[str, Any]) -> dict[str, Any]:
+        payload, signature = self.standin.make_event(event_type, data)
+        return self.handle_webhook("standin", payload, signature)
+
+    def _record_upgrade_invoice(
+        self,
+        org_id: str,
+        upgrade: dict[str, Any],
+        lines: list[dict[str, Any]],
+        subscription: dict[str, Any],
+    ) -> None:
+        """The prorated charge of an upgrade, open until the provider says it was paid."""
+        if not upgrade["charge_cents"]:
+            return
+        with self.db.write() as connection:
+            connection.execute(
+                """INSERT INTO invoices (invoice_id, org_id, provider_invoice_id, item_id, kind, amount_cents, currency, status, period_start, period_end, lines, created_at)
+                VALUES (?, ?, ?, ?, 'proration', ?, ?, 'open', ?, ?, ?, ?)""",
+                (
+                    upgrade["invoice_row"],
+                    org_id,
+                    upgrade.get("invoice_id", ""),
+                    upgrade.get("item_id", ""),
+                    upgrade["charge_cents"],
+                    upgrade["currency"],
+                    self.now,
+                    subscription["period_end"],
+                    dumps(lines),
+                    self.now,
+                ),
+            )
+
+    def _apply_upgrade(
+        self,
+        org_id: str,
+        upgrade: dict[str, Any],
+        *,
+        actor: Principal | None = None,
+        paid: bool,
+        trigger_id: str = "",
+    ) -> bool:
+        """Put the upgrade into effect, once: the plan, seats and limits change, apps the plan does not offer stop."""
+        plan = self.app.catalog.get(upgrade["plan_id"])
+        with self.db.write() as connection:
+            current = one(
+                connection,
+                "SELECT pending_upgrade FROM subscriptions WHERE org_id = ?",
+                (org_id,),
+            )
+            waiting = loads((current or {}).get("pending_upgrade"), None)
+            if actor is None and (
+                not waiting or waiting.get("id") != upgrade.get("id")
+            ):
+                return False  # already applied, or replaced by another change
+            connection.execute(
+                """UPDATE subscriptions SET plan_id = ?, plan_version = ?, candidate_seats = ?, pending_plan_id = '', pending_seats = NULL,
+                pending_effective_at = NULL, pending_upgrade = '', updated_at = ? WHERE org_id = ?""",
+                (
+                    upgrade["plan_id"],
+                    plan["version"],
+                    int(upgrade["seats"]),
+                    self.now,
+                    org_id,
+                ),
+            )
+            self._cancel_apps(
+                connection,
+                org_id,
+                list(upgrade.get("dropped") or []),
+                reason=f"not available on {plan['name']}",
+                actor=actor,
+            )
+            if paid:
+                connection.execute(
+                    "UPDATE invoices SET status = 'paid', paid_at = ? WHERE org_id = ? AND invoice_id = ? AND status = 'open'",
+                    (self.now, org_id, upgrade.get("invoice_row", "")),
+                )
+            self.app.audit.record(
+                org_id,
+                "billing.upgrade",
+                actor=actor,
+                actor_type="" if actor is not None else "webhook",
+                actor_id="" if actor is not None else trigger_id,
+                detail={
+                    "from": upgrade.get("from_plan"),
+                    "to": upgrade["plan_id"],
+                    "seats": upgrade["seats"],
+                    "prorated_cents": upgrade.get("charge_cents", 0),
+                    "paid": paid,
+                },
+                connection=connection,
+            )
+        self.app.entitlements.invalidate(org_id)
+        self.app.lifecycle.recompute_over_limits(org_id)
+        if upgrade.get("dropped") and upgrade.get("provider") == "stripe":
+            # a pending update cannot delete items: the dropped add-ons leave the provider's subscription now
+            self._sync_provider(self.subscription(org_id))
+        return True
+
+    def _drop_upgrade(self, org_id: str, upgrade: dict[str, Any], reason: str) -> None:
+        """The upgrade's payment failed or expired: the organization stays on its plan."""
+        with self.db.write() as connection:
+            changed = connection.execute(
+                "UPDATE subscriptions SET pending_upgrade = '', updated_at = ? WHERE org_id = ? AND pending_upgrade = ?",
+                (self.now, org_id, dumps(upgrade)),
+            ).rowcount
+            if not changed:
+                return
+            connection.execute(
+                "UPDATE invoices SET status = 'void' WHERE org_id = ? AND invoice_id = ? AND status = 'open'",
+                (org_id, upgrade.get("invoice_row", "")),
+            )
+            self.app.audit.record(
+                org_id,
+                "billing.upgrade_failed",
+                actor_type="system",
+                detail={"to": upgrade.get("plan_id"), "reason": reason},
+                connection=connection,
+            )
+        self.notice(
+            org_id,
+            "warning",
+            "Upgrade not applied",
+            f"The payment for the upgrade to {self.app.catalog.name(upgrade.get('plan_id', ''))} did not go through "
+            f"({reason}). Nothing changed; update the payment method and try again.",
+        )
+
+    def _sync_provider(self, sub: dict[str, Any]) -> None:
+        """Rewrite the provider's subscription to what we have, without proration (best effort)."""
+        if not sub["billing_subscription_id"]:
+            return
+        plan = self.app.catalog.get(sub["plan_id"], sub["plan_version"])
+        try:
+            self._provider_for(sub).update_subscription(
+                sub["billing_subscription_id"],
+                plan_id=sub["plan_id"],
+                plan_name=plan["name"],
+                seats=int(sub["candidate_seats"]),
+                seat_cents=int(plan["pricing"]["seat_cents_month"]),
+                currency=plan["pricing"].get("currency", "usd"),
+                prorate=False,
+                addons=self._provider_addons(
+                    sub["plan_id"],
+                    int(sub["candidate_seats"]),
+                    self.active_addons(sub["org_id"], sub["plan_id"]),
+                ),
+                at_cycle_end=False,
+            )
+        except Exception:  # noqa: BLE001 - keep our state moving; reconcile reports the drift
+            logger.exception("Could not sync the provider subscription for %s", sub["org_id"])
 
     def cancel_pending_change(self, actor: Principal) -> None:
         self.app.authz.require(actor, "billing.manage")
@@ -785,7 +1117,7 @@ class Billing:
         if subscription["status"] not in {"active", "trialing"}:
             raise Conflict("There is no active subscription to cancel.")
         if subscription["billing_subscription_id"]:
-            self.provider.cancel_subscription(
+            self._provider_for(subscription).cancel_subscription(
                 subscription["billing_subscription_id"], at_period_end=True
             )
         with self.db.write() as connection:
@@ -890,6 +1222,14 @@ class Billing:
             }
             if subscription["pending_plan_id"]
             else None,
+            # an upgrade waiting for the provider to confirm its payment
+            "pending_upgrade": {
+                key: value
+                for key, value in loads(subscription.get("pending_upgrade"), {}).items()
+                if key
+                in {"plan_id", "seats", "charge_cents", "currency", "requested_at"}
+            }
+            or None,
             "past_due_since": subscription["past_due_since"],
             "read_only_at": subscription["read_only_at"],
             "deletion_scheduled_at": subscription["deletion_scheduled_at"],
@@ -1241,9 +1581,10 @@ class Billing:
                 (actor.org_id, app_id, seats, self.now),
             )
             if charge:
+                # the provider bills the prorated line with its next invoice: open until that invoice is paid
                 connection.execute(
-                    """INSERT INTO invoices (invoice_id, org_id, kind, amount_cents, currency, status, period_start, period_end, lines, created_at, paid_at)
-                    VALUES (?, ?, 'proration', ?, ?, 'paid', ?, ?, ?, ?, ?)""",
+                    """INSERT INTO invoices (invoice_id, org_id, kind, amount_cents, currency, status, period_start, period_end, lines, created_at)
+                    VALUES (?, ?, 'proration', ?, ?, 'open', ?, ?, ?, ?)""",
                     (
                         new_id(),
                         actor.org_id,
@@ -1260,7 +1601,6 @@ class Billing:
                                 }
                             ]
                         ),
-                        self.now,
                         self.now,
                     ),
                 )
@@ -1288,15 +1628,12 @@ class Billing:
     def charge_ads_topup(self, actor: Principal, amount_cents: int) -> dict[str, Any]:
         """Put money on the organization's ad balance (the Ads app is prepaid).
 
-        The amount goes to the billing provider as one invoice item on the organization's own customer, so it is
-        charged with the next invoice like any other line; the balance is credited once the provider accepted the
-        item. Aira never takes card details itself. A trial or an organization without a paid subscription has no
-        customer at the provider to bill, so it is refused."""
-        from contextlib import closing
-
+        The amount is billed to the organization's own customer at the provider (Stripe: a one-off invoice paid at
+        once; Razorpay: an add-on charged with the next cycle). The balance is credited only when the provider says
+        the money arrived (``invoice.paid``), so campaigns and creators' earnings run on settled money only; a failed
+        payment credits nothing and a refund takes the credit back. Aira never takes card details itself. A trial or
+        an organization without a paid subscription has no customer at the provider to bill, so it is refused."""
         from aira.suite.ads import service as ads
-        from aira.suite.ads.store import CENT
-        from aira.suite.videos import db as videos_db
 
         self.app.authz.require(actor, "billing.manage")
         self.app.entitlements.require_app(actor.org_id, "ads", audience="staff")
@@ -1318,21 +1655,28 @@ class Billing:
                 code="not_subscribed",
             )
         provider = self._provider_for(subscription)
-        item_id = provider.add_invoice_item(
+        topup_id = new_id()
+        charge = provider.charge_now(
             subscription["billing_customer_id"],
             amount,
             "Monosage Ads balance top-up",
             "usd",
+            subscription_id=subscription["billing_subscription_id"],
+            idempotency_key=f"aira-topup-{topup_id}",
+            metadata={"org_id": actor.org_id, "kind": "ads_topup", "topup_id": topup_id},
         )
+        status = "scheduled" if charge.get("status") == "scheduled" else "open"
         with self.db.write() as connection:
             connection.execute(
-                """INSERT INTO invoices (invoice_id, org_id, provider_invoice_id, kind, amount_cents, currency, status, lines, created_at)
-                VALUES (?, ?, ?, 'ads_topup', ?, 'usd', 'open', ?, ?)""",
+                """INSERT INTO invoices (invoice_id, org_id, provider_invoice_id, item_id, kind, amount_cents, currency, status, lines, created_at)
+                VALUES (?, ?, ?, ?, 'ads_topup', ?, 'usd', ?, ?, ?)""",
                 (
-                    new_id(),
+                    topup_id,
                     actor.org_id,
-                    item_id,
+                    str(charge.get("id") or ""),
+                    str(charge.get("item_id") or ""),
                     amount,
+                    status,
                     dumps(
                         [
                             {
@@ -1350,25 +1694,229 @@ class Billing:
                 "billing.ads_topup",
                 actor=actor,
                 target_type="invoice_item",
-                target_id=item_id,
-                detail={"amount_cents": amount, "provider": provider.name},
+                target_id=str(charge.get("item_id") or charge.get("id") or ""),
+                detail={
+                    "amount_cents": amount,
+                    "provider": provider.name,
+                    "status": status,
+                },
                 connection=connection,
             )
-        with closing(videos_db.connect()) as sc:
-            account = ads.credit(
-                sc,
-                actor.org_id,
-                amount * CENT,
-                kind="topup",
-                reference=item_id,
-                note=f"Billed through {provider.name}",
-                by=actor.email,
+        if provider.name == "standin":
+            # the stand-in's card always works: its invoice.paid credits the balance, as a provider's would
+            self._standin_event(
+                "invoice.paid",
+                {
+                    "org_id": actor.org_id,
+                    "customer_id": subscription["billing_customer_id"],
+                    "invoice_id": str(charge["id"]),
+                    "amount_cents": amount,
+                    "currency": "usd",
+                    "kind": "ads_topup",
+                },
             )
+        elif charge.get("status") == "paid":
+            # the provider's API answered that the invoice is paid: the money is settled (its webhook is a no-op)
+            self._settle_topups(
+                actor.org_id, {"invoice_id": str(charge["id"]), "payment_id": ""}
+            )
+        with self.db.read() as connection:
+            row = one(
+                connection,
+                "SELECT status FROM invoices WHERE invoice_id = ?",
+                (topup_id,),
+            )
+        from contextlib import closing
+
+        from aira.suite.videos import db as videos_db
+
+        with closing(videos_db.connect()) as sc:
+            account = ads.account(sc, actor.org_id)
+        settled = (row or {}).get("status") == "paid"
         return {
             "amount_cents": amount,
-            "invoice_item": item_id,
+            "invoice_item": str(charge.get("item_id") or charge.get("id") or ""),
+            "topup_id": topup_id,
+            "status": (row or {}).get("status", status),
+            "credited": settled,
             "balance_micros": int(account.get("balance_micros") or 0),
         }
+
+    # -- ad top-ups: credited on settled money only ----------------------------------------
+
+    def _topup_rows(
+        self, org_id: str, where: str, params: tuple[Any, ...]
+    ) -> list[dict[str, Any]]:
+        with self.db.read() as connection:
+            return many(
+                connection,
+                f"SELECT * FROM invoices WHERE org_id = ? AND kind = 'ads_topup' AND {where} ORDER BY created_at",
+                (org_id, *params),
+            )
+
+    def _settle_topups(self, org_id: str, neutral: dict[str, Any]) -> int:
+        """``invoice.paid``: credit the ad balance for the top-ups that invoice paid. A top-up billed as a Razorpay
+        add-on is paid by the subscription charge that carried it (the add-ons made before it)."""
+        invoice_id = str(neutral.get("invoice_id") or "")
+        rows = (
+            self._topup_rows(
+                # a failed attempt can be followed by a successful retry of the same invoice: it counts then
+                org_id,
+                "status IN ('open', 'scheduled', 'failed') AND provider_invoice_id = ?",
+                (invoice_id,),
+            )
+            if invoice_id
+            else []
+        )
+        addon_ids = [a for a in neutral.get("addon_ids") or [] if a]
+        if addon_ids:
+            rows += self._topup_rows(
+                org_id,
+                f"status = 'scheduled' AND item_id IN ({', '.join('?' * len(addon_ids))})",
+                tuple(addon_ids),
+            )
+        elif neutral.get("cycle_charge"):
+            paid_at = int(neutral.get("paid_at") or self.now)
+            rows += self._topup_rows(
+                org_id, "status = 'scheduled' AND created_at <= ?", (paid_at,)
+            )
+        settled = 0
+        seen: set[str] = set()
+        for row in rows:
+            if row["invoice_id"] in seen:
+                continue
+            seen.add(row["invoice_id"])
+            if self._credit_topup(org_id, row, str(neutral.get("payment_id") or "")):
+                settled += 1
+        return settled
+
+    def _credit_topup(self, org_id: str, row: dict[str, Any], payment_id: str) -> bool:
+        from contextlib import closing
+
+        from aira.suite.ads import service as ads
+        from aira.suite.ads.store import CENT
+        from aira.suite.videos import db as videos_db
+
+        # the ledger entry is keyed by the top-up, so a second delivery of the same payment credits nothing
+        with closing(videos_db.connect()) as sc:
+            ads.credit_once(
+                sc,
+                org_id,
+                int(row["amount_cents"]) * CENT,
+                kind="topup",
+                reference=row["invoice_id"],
+                note="Paid",
+                by="billing",
+            )
+        with self.db.write() as connection:
+            changed = connection.execute(
+                "UPDATE invoices SET status = 'paid', paid_at = ?, payment_id = ? WHERE invoice_id = ? AND status IN ('open', 'scheduled', 'failed')",
+                (self.now, payment_id, row["invoice_id"]),
+            ).rowcount
+            if changed:
+                self.app.audit.record(
+                    org_id,
+                    "billing.ads_topup_paid",
+                    actor_type="webhook",
+                    target_type="invoice",
+                    target_id=row["invoice_id"],
+                    detail={"amount_cents": int(row["amount_cents"])},
+                    connection=connection,
+                )
+        return bool(changed)
+
+    def _fail_topups(self, org_id: str, invoice_id: str, status: str) -> int:
+        """A top-up whose payment failed (or was voided) is never credited; it stays on record as failed."""
+        if not invoice_id:
+            return 0
+        with self.db.write() as connection:
+            changed = connection.execute(
+                "UPDATE invoices SET status = ? WHERE org_id = ? AND kind = 'ads_topup' AND provider_invoice_id = ? AND status IN ('open', 'scheduled')",
+                (status, org_id, invoice_id),
+            ).rowcount
+            if changed:
+                self.app.audit.record(
+                    org_id,
+                    f"billing.ads_topup_{status}",
+                    actor_type="webhook",
+                    target_type="invoice",
+                    target_id=invoice_id,
+                    connection=connection,
+                )
+        if changed:
+            self.notice(
+                org_id,
+                "warning",
+                "Ad top-up not paid",
+                "The payment for an ad balance top-up did not go through, so nothing was added to the balance.",
+                "#/ads?tab=balance",
+            )
+        return int(changed)
+
+    def _reverse_topups(self, org_id: str, neutral: dict[str, Any]) -> int:
+        """A refund (or a dispute) of a payment that credited top-ups takes the credit back from the balance."""
+        from contextlib import closing
+
+        from aira.suite.ads import service as ads
+        from aira.suite.ads.store import CENT
+        from aira.suite.videos import db as videos_db
+
+        payment_id = str(neutral.get("payment_id") or "")
+        invoice_id = str(neutral.get("invoice_id") or "")
+        clauses, params = [], []
+        if payment_id:
+            clauses.append("payment_id = ?")
+            params.append(payment_id)
+        if invoice_id:
+            clauses.append("provider_invoice_id = ?")
+            params.append(invoice_id)
+        if not clauses:
+            return 0
+        rows = self._topup_rows(
+            org_id, f"status = 'paid' AND ({' OR '.join(clauses)})", tuple(params)
+        )
+        # A refund in another currency than the top-ups (Razorpay refunds rupees for dollar top-ups) is taken as
+        # the whole payment: every top-up it paid is reversed.
+        currency = str(neutral.get("currency") or "").lower()
+        same_units = not currency or all(
+            currency == str(r["currency"]).lower() for r in rows
+        )
+        remaining = (int(neutral.get("amount_cents") or 0) if same_units else 0) or sum(
+            int(r["amount_cents"]) for r in rows
+        )
+        reversed_rows = 0
+        for row in rows:
+            if remaining <= 0:
+                break
+            amount = min(int(row["amount_cents"]), remaining)
+            # the ledger entry is keyed by the top-up, so the reversal happens once even if the event comes twice
+            with closing(videos_db.connect()) as sc:
+                ads.reverse_once(
+                    sc,
+                    org_id,
+                    amount * CENT,
+                    reference=row["invoice_id"],
+                    note="Payment refunded",
+                    by="billing",
+                )
+            with self.db.write() as connection:
+                changed = connection.execute(
+                    "UPDATE invoices SET status = 'refunded' WHERE invoice_id = ? AND status = 'paid'",
+                    (row["invoice_id"],),
+                ).rowcount
+            if not changed:
+                continue
+            self.app.audit.record(
+                org_id,
+                "billing.ads_topup_refunded",
+                actor_type="webhook",
+                target_type="invoice",
+                target_id=row["invoice_id"],
+                detail={"amount_cents": amount},
+            )
+            remaining -= amount
+            reversed_rows += 1
+        return reversed_rows
 
     def unsubscribe_app(self, actor: Principal, app_id: str) -> dict[str, Any]:
         """Turn an app off at the period end; it keeps working until then."""
@@ -1807,16 +2355,22 @@ class Billing:
     # -- webhooks -----------------------------------------------------------------------------
 
     def handle_webhook(
-        self, provider_name: str, payload: bytes, signature: str
+        self, provider_name: str, payload: bytes, signature: str, event_id: str = ""
     ) -> dict[str, Any]:
+        """Verify, record once (by the provider's event id) and apply a provider event. ``event_id`` is the id a
+        provider sends in a header instead of the body (Razorpay's ``X-Razorpay-Event-Id``)."""
         provider = self.providers.get(provider_name)
         if provider is None:
             raise NotFound("Unknown billing provider.")
         event = provider.verify_webhook(payload, signature)
         neutral = provider.normalize(event)
-        event_id = str(event.get("id") or "")
+        event_id = str(event.get("id") or event_id or "")
+        if not event_id and provider_name == "razorpay":
+            event_id = "sha256:" + hashlib.sha256(payload).hexdigest()[:48]
         if not event_id:
             raise ValidationFailed("The event has no id.")
+        if neutral is not None and not neutral.get("id"):
+            neutral["id"] = event_id
         with self.db.write() as connection:
             existing = one(
                 connection,
@@ -1831,7 +2385,7 @@ class Billing:
                     (
                         event_id,
                         provider_name,
-                        str(event.get("type", ""))[:80],
+                        str(event.get("type") or event.get("event") or "")[:80],
                         (neutral or {}).get("org_id", ""),
                         payload.decode("utf-8", "replace")[:20000],
                         self.now,
@@ -1841,7 +2395,7 @@ class Billing:
             self._finish_event(event_id, "")
             return {"ignored": True}
         try:
-            self.apply_event(neutral, provider_name)
+            outcome = self.apply_event(neutral, provider_name)
         except Exception as error:  # noqa: BLE001 - recorded so the provider's retry can succeed later
             with self.db.write() as connection:
                 connection.execute(
@@ -1850,7 +2404,10 @@ class Billing:
                 )
             raise
         self._finish_event(event_id, "")
-        return {"processed": True, "type": neutral["type"]}
+        answer: dict[str, Any] = {"processed": True, "type": neutral["type"]}
+        if outcome:
+            answer["outcome"] = outcome
+        return answer
 
     def _finish_event(self, event_id: str, error: str) -> None:
         with self.db.write() as connection:
@@ -1877,6 +2434,13 @@ class Billing:
                 )
                 if row:
                     return str(row["org_id"])
+                row = one(
+                    connection,
+                    "SELECT org_id FROM billing_checkouts WHERE session_id = ?",
+                    (subscription_id,),
+                )
+                if row:
+                    return str(row["org_id"])
             customer = neutral.get("customer_id") or ""
             if customer:
                 row = one(
@@ -1886,71 +2450,107 @@ class Billing:
                 )
                 if row:
                     return str(row["org_id"])
+            invoice_id = neutral.get("invoice_id") or ""
+            if invoice_id:
+                row = one(
+                    connection,
+                    "SELECT org_id FROM invoices WHERE provider_invoice_id = ?",
+                    (invoice_id,),
+                )
+                if row:
+                    return str(row["org_id"])
+            payment_id = neutral.get("payment_id") or ""
+            if payment_id:  # a refund names only the payment it returns
+                row = one(
+                    connection,
+                    "SELECT org_id FROM invoices WHERE payment_id = ?",
+                    (payment_id,),
+                )
+                if row:
+                    return str(row["org_id"])
         raise NotFound("The event does not belong to a known organization.")
 
-    def apply_event(self, neutral: dict[str, Any], provider_name: str) -> None:
+    def _stale(self, subscription: dict[str, Any], neutral: dict[str, Any]) -> bool:
+        """An event older than the newest one applied to this subscription (providers do not promise order)."""
+        if neutral["type"] not in ORDERED_EVENTS:
+            return False
+        created = int(neutral.get("created") or 0)
+        newest = int(subscription.get("provider_event_at") or 0)
+        return bool(created and newest and created < newest)
+
+    def _seen_event(self, org_id: str, neutral: dict[str, Any]) -> None:
+        created = int(neutral.get("created") or 0)
+        if not created or neutral["type"] not in ORDERED_EVENTS:
+            return
+        with self.db.write() as connection:
+            connection.execute(
+                "UPDATE subscriptions SET provider_event_at = ? WHERE org_id = ? AND (provider_event_at IS NULL OR provider_event_at < ?)",
+                (created, org_id, created),
+            )
+
+    def apply_event(self, neutral: dict[str, Any], provider_name: str) -> str:
         org_id = self._org_for_event(neutral)
+        subscription = self.subscription(org_id)
+        if subscription["status"] == "deleted":
+            return "deleted"
+        stale = self._stale(subscription, neutral)
+        outcome = self._apply(org_id, subscription, neutral, provider_name, stale)
+        if not stale:
+            self._seen_event(org_id, neutral)
+        return "stale" if stale and not outcome else outcome
+
+    def _apply(
+        self,
+        org_id: str,
+        subscription: dict[str, Any],
+        neutral: dict[str, Any],
+        provider_name: str,
+        stale: bool,
+    ) -> str:
         kind = neutral["type"]
         trigger: dict[str, Any] = {
             "trigger_type": "webhook",
             "trigger_id": neutral.get("id", ""),
         }
-        subscription = self.subscription(org_id)
-        if subscription["status"] == "deleted":
-            return
+        upgrade = loads(subscription.get("pending_upgrade"), None)
+        invoice_id = str(neutral.get("invoice_id") or "")
         if kind == "checkout.completed":
-            plan_id, seats = (
-                neutral.get("plan_id") or subscription["plan_id"],
-                int(neutral.get("seats") or subscription["candidate_seats"]),
+            return self._checkout_completed(
+                org_id, subscription, neutral, provider_name, trigger
             )
-            plan = self.app.catalog.get(plan_id)
-            self.transition(
-                org_id,
-                "active",
-                reason="checkout completed",
-                fields={
-                    "plan_id": plan_id,
-                    "plan_version": plan["version"],
-                    "candidate_seats": seats,
-                    "period_start": self.now,
-                    "period_end": self.now + PERIOD_SECONDS,
-                    "trial_end": None,
-                    "cancel_at_period_end": 0,
-                    "billing_provider": provider_name,
-                    "billing_customer_id": neutral.get("customer_id")
-                    or subscription["billing_customer_id"],
-                    "billing_subscription_id": neutral.get("subscription_id")
-                    or subscription["billing_subscription_id"],
-                    "past_due_since": None,
-                    "read_only_at": None,
-                    "deletion_scheduled_at": None,
-                    "export_until": None,
-                    "pending_plan_id": "",
-                    "pending_seats": None,
-                    "pending_effective_at": None,
-                },
-                **trigger,
-            )
-            self.app.lifecycle.recompute_over_limits(org_id)
-        elif kind == "invoice.paid":
+        if kind == "invoice.paid":
+            # money for a top-up or an upgrade is not a renewal: it settles that and leaves the period alone
+            if self._settle_topups(org_id, neutral) and self._is_one_off(neutral):
+                self._record_invoice(org_id, neutral, "paid")
+                return "topup_paid"
+            if upgrade and (
+                (upgrade.get("invoice_id") and invoice_id == upgrade["invoice_id"])
+                or (
+                    not upgrade.get("invoice_id")
+                    and upgrade.get("provider") == "stripe"
+                    and neutral.get("billing_reason") == "subscription_update"
+                )
+            ):
+                self._apply_upgrade(
+                    org_id, upgrade, paid=True, trigger_id=trigger["trigger_id"]
+                )
+                return "upgrade_applied"
+            if self._is_one_off(neutral):
+                self._record_invoice(org_id, neutral, "paid")
+                return "one_off_paid"
             self._record_invoice(org_id, neutral, "paid")
+            if provider_name == "razorpay" and not neutral.get("addon_ids"):
+                # Razorpay charges add-ons with the next cycle: this charge paid the top-ups added before it
+                self._settle_topups(org_id, {**neutral, "cycle_charge": True})
+            if stale:
+                return "recorded"
             fields: dict[str, Any] = {
                 "past_due_since": None,
                 "read_only_at": None,
                 "deletion_scheduled_at": None,
                 "deletion_notice_at": None,
             }
-            if (
-                neutral.get("period_start")
-                and neutral.get("period_end")
-                and neutral["period_end"] > neutral["period_start"]
-            ):
-                fields.update(
-                    {
-                        "period_start": neutral["period_start"],
-                        "period_end": neutral["period_end"],
-                    }
-                )
+            fields.update(self._period_fields(org_id, subscription, neutral))
             if subscription["status"] in {"past_due", "read_only"}:
                 self.transition(
                     org_id,
@@ -1963,8 +2563,18 @@ class Billing:
                 self.transition(
                     org_id, "active", reason="renewal paid", fields=fields, **trigger
                 )
-        elif kind == "invoice.payment_failed":
+            return "paid"
+        if kind == "invoice.payment_failed":
+            if self._fail_topups(org_id, invoice_id, "failed"):
+                return "topup_failed"
+            if upgrade and upgrade.get("invoice_id") and invoice_id == upgrade["invoice_id"]:
+                self._drop_upgrade(org_id, upgrade, "the card was declined")
+                return "upgrade_failed"
+            if self._is_one_off(neutral):
+                return "one_off_failed"
             self._record_invoice(org_id, neutral, "failed")
+            if stale:
+                return "recorded"
             if subscription["status"] == "active":
                 self.transition(
                     org_id,
@@ -1974,25 +2584,35 @@ class Billing:
                     **trigger,
                 )
                 self._notify_payment_failed(org_id)
-            elif subscription["status"] == "trialing":
-                return
-        elif kind == "subscription.updated":
-            fields = {}
-            if neutral.get("period_end"):
-                fields["period_end"] = neutral["period_end"]
-            if neutral.get("period_start"):
-                fields["period_start"] = neutral["period_start"]
-            fields["cancel_at_period_end"] = int(
-                bool(neutral.get("cancel_at_period_end"))
+            return "failed"
+        if kind == "invoice.voided":
+            if self._fail_topups(org_id, invoice_id, "void"):
+                return "topup_void"
+            if upgrade and upgrade.get("invoice_id") and invoice_id == upgrade["invoice_id"]:
+                self._drop_upgrade(org_id, upgrade, "the payment expired")
+                return "upgrade_failed"
+            return "ignored"
+        if kind == "payment.refunded":
+            return "topup_refunded" if self._reverse_topups(org_id, neutral) else "ignored"
+        if kind == "subscription.update_expired":
+            if upgrade:
+                self._drop_upgrade(org_id, upgrade, "the payment was not completed")
+                return "upgrade_failed"
+            return "ignored"
+        if kind == "subscription.updated":
+            if stale:
+                return ""
+            return self._subscription_updated(
+                org_id, subscription, neutral, upgrade, trigger
             )
-            self.transition(
-                org_id,
-                subscription["status"],
-                reason="provider update",
-                fields=fields,
-                **trigger,
-            )
-        elif kind == "subscription.deleted":
+        if kind == "subscription.deleted":
+            if stale:
+                return ""
+            if subscription["billing_subscription_id"] and neutral.get(
+                "subscription_id"
+            ) not in ("", None, subscription["billing_subscription_id"]):
+                return "other_subscription"  # an old or duplicate subscription ended; ours goes on
+            self._void_scheduled_topups(org_id)
             if subscription["status"] in {
                 "active",
                 "past_due",
@@ -2002,6 +2622,269 @@ class Billing:
                 self._enter_cancelled(
                     org_id, reason="subscription ended at the provider", **trigger
                 )
+            return "cancelled"
+        return ""
+
+    @staticmethod
+    def _is_one_off(neutral: dict[str, Any]) -> bool:
+        return neutral.get("kind") in {"ads_topup", "proration"} or neutral.get(
+            "billing_reason"
+        ) in {"manual", "subscription_update"}
+
+    def _void_scheduled_topups(self, org_id: str) -> None:
+        """Add-ons on a subscription that ended are never charged: their top-ups will not be paid."""
+        with self.db.write() as connection:
+            connection.execute(
+                "UPDATE invoices SET status = 'void' WHERE org_id = ? AND kind = 'ads_topup' AND status = 'scheduled'",
+                (org_id,),
+            )
+
+    def _period_fields(
+        self, org_id: str, subscription: dict[str, Any], neutral: dict[str, Any]
+    ) -> dict[str, Any]:
+        """The provider's billing period, when it is newer than ours. A period that moves on closes the one before
+        it for overage billing (the provider's boundaries, not calendar months)."""
+        start, end = neutral.get("period_start"), neutral.get("period_end")
+        if not (start and end and int(end) > int(start)):
+            return {}
+        start, end = int(start), int(end)
+        current_start = int(subscription["period_start"] or 0)
+        if subscription["period_end"] and end <= current_start:
+            return {}  # an older period than the one we are in
+        if current_start and start > current_start + DAY:
+            self._close_period(org_id, current_start, start)
+        return {"period_start": start, "period_end": end}
+
+    def _checkout_completed(
+        self,
+        org_id: str,
+        subscription: dict[str, Any],
+        neutral: dict[str, Any],
+        provider_name: str,
+        trigger: dict[str, Any],
+    ) -> str:
+        session_id = str(neutral.get("session_id") or "")
+        subscription_id = str(neutral.get("subscription_id") or "")
+        with self.db.read() as connection:
+            checkout = (
+                one(
+                    connection,
+                    "SELECT * FROM billing_checkouts WHERE session_id = ?",
+                    (session_id,),
+                )
+                if session_id
+                else None
+            )
+        live = subscription["status"] in {"active", "past_due", "read_only"}
+        if (
+            subscription_id
+            and subscription_id == subscription["billing_subscription_id"]
+            and live
+        ):
+            # the same provider subscription again: a repeated completion, or Razorpay re-activating after a retry
+            self._close_checkout(session_id, "completed")
+            if subscription["status"] in {"past_due", "read_only"}:
+                fields: dict[str, Any] = {
+                    "past_due_since": None,
+                    "read_only_at": None,
+                    "deletion_scheduled_at": None,
+                    "deletion_notice_at": None,
+                }
+                fields.update(self._period_fields(org_id, subscription, neutral))
+                self.transition(
+                    org_id,
+                    "active",
+                    reason="payment recovered",
+                    fields=fields,
+                    **trigger,
+                )
+                return "recovered"
+            return "already_applied"
+        if checkout and checkout["status"] == "completed":
+            return "already_applied"
+        if (
+            checkout
+            and checkout["status"] != "open"
+            and live
+            and subscription["billing_subscription_id"]
+        ):
+            # An older checkout was paid after a newer one already started the plan: a second subscription would bill
+            # twice, so it is cancelled at once and the payment flagged for a refund.
+            provider = self.providers.get(checkout["provider"]) or self.providers.get(
+                provider_name
+            )
+            if provider is not None and subscription_id:
+                try:
+                    provider.cancel_subscription(subscription_id, at_period_end=False)
+                except Exception:  # noqa: BLE001 - reported below; an operator cancels it by hand
+                    logger.exception(
+                        "Could not cancel the duplicate subscription %s", subscription_id
+                    )
+            self._close_checkout(session_id, "duplicate")
+            self.app.audit.record(
+                org_id,
+                "billing.checkout_duplicate",
+                actor_type="webhook",
+                actor_id=trigger["trigger_id"],
+                target_type="checkout",
+                target_id=session_id,
+                detail={"subscription_id": subscription_id, "provider": provider_name},
+            )
+            self.notice(
+                org_id,
+                "warning",
+                "A second payment was stopped",
+                "An older checkout was completed after your plan had started. Its subscription was cancelled so you "
+                "are not billed twice; any amount taken for it is refunded by support.",
+            )
+            return "duplicate"
+        plan_id, seats = (
+            neutral.get("plan_id") or subscription["plan_id"],
+            int(neutral.get("seats") or subscription["candidate_seats"]),
+        )
+        plan = self.app.catalog.get(plan_id)
+        start, end = neutral.get("period_start"), neutral.get("period_end")
+        if not (start and end and int(end) > int(start)):
+            start, end = self.now, self.now + PERIOD_SECONDS
+        self.transition(
+            org_id,
+            "active",
+            reason="checkout completed",
+            fields={
+                "plan_id": plan_id,
+                "plan_version": plan["version"],
+                "candidate_seats": seats,
+                "period_start": int(start),
+                "period_end": int(end),
+                "trial_end": None,
+                "cancel_at_period_end": 0,
+                "billing_provider": provider_name,
+                "billing_customer_id": neutral.get("customer_id")
+                or subscription["billing_customer_id"],
+                "billing_subscription_id": subscription_id
+                or subscription["billing_subscription_id"],
+                "past_due_since": None,
+                "read_only_at": None,
+                "deletion_scheduled_at": None,
+                "export_until": None,
+                "pending_plan_id": "",
+                "pending_seats": None,
+                "pending_effective_at": None,
+                "pending_upgrade": "",
+            },
+            **trigger,
+        )
+        self._close_checkout(session_id, "completed")
+        # this completion is the plan now: any other checkout still open is closed so it cannot be paid too
+        with self.db.write() as connection:
+            others = many(
+                connection,
+                "SELECT session_id, provider FROM billing_checkouts WHERE org_id = ? AND status = 'open'",
+                (org_id,),
+            )
+            connection.execute(
+                "UPDATE billing_checkouts SET status = 'superseded', closed_at = ? WHERE org_id = ? AND status = 'open'",
+                (self.now, org_id),
+            )
+        self._expire_checkouts(others)
+        self.app.lifecycle.recompute_over_limits(org_id)
+        return "activated"
+
+    def _close_checkout(self, session_id: str, status: str) -> None:
+        if not session_id:
+            return
+        with self.db.write() as connection:
+            connection.execute(
+                "UPDATE billing_checkouts SET status = ?, closed_at = ? WHERE session_id = ? AND status != 'completed'",
+                (status, self.now, session_id),
+            )
+
+    def _subscription_updated(
+        self,
+        org_id: str,
+        subscription: dict[str, Any],
+        neutral: dict[str, Any],
+        upgrade: dict[str, Any] | None,
+        trigger: dict[str, Any],
+    ) -> str:
+        """The provider changed the subscription: its period, cancellation at period end, and a plan or seat change
+        made outside Aira (Stripe's customer portal). An upgrade waiting for payment is confirmed when the provider
+        shows it applied."""
+        plan_id = str(neutral.get("plan_id") or "")
+        seats = int(neutral.get("seats") or 0)
+        if upgrade and not neutral.get("pending_update"):
+            match = upgrade.get("match") or {}
+            confirmed = (
+                match.get("provider_plan")
+                and neutral.get("provider_plan") == match["provider_plan"]
+                and seats == int(match.get("seats") or 0)
+            ) or (
+                not match.get("provider_plan")
+                and plan_id == upgrade["plan_id"]
+                and seats == int(upgrade["seats"])
+                and upgrade.get("provider") != "standin"
+            )
+            if confirmed:
+                self._apply_upgrade(
+                    org_id, upgrade, paid=True, trigger_id=trigger["trigger_id"]
+                )
+                subscription = self.subscription(org_id)
+        fields: dict[str, Any] = self._period_fields(org_id, subscription, neutral)
+        if neutral.get("cancel_at_period_end") is not None:
+            fields["cancel_at_period_end"] = int(bool(neutral["cancel_at_period_end"]))
+        portal_change = False
+        if (
+            not neutral.get("pending_update")
+            and not subscription.get("pending_upgrade")
+            and plan_id
+            and subscription["status"] in {"active", "past_due"}
+        ):
+            try:
+                plan = self.app.catalog.get(plan_id)
+            except NotFound:
+                plan = None
+                logger.warning("Provider update names an unknown plan %s", plan_id)
+            if plan is not None and (
+                plan_id != subscription["plan_id"]
+                or (seats and seats != subscription["candidate_seats"])
+            ):
+                fields.update(
+                    {
+                        "plan_id": plan_id,
+                        "plan_version": plan["version"],
+                        "candidate_seats": seats or subscription["candidate_seats"],
+                        "pending_plan_id": "",
+                        "pending_seats": None,
+                        "pending_effective_at": None,
+                    }
+                )
+                portal_change = True
+        self.transition(
+            org_id,
+            subscription["status"],
+            reason="provider update",
+            fields=fields,
+            **trigger,
+        )
+        if portal_change:
+            self.app.audit.record(
+                org_id,
+                "billing.provider_change",
+                actor_type="webhook",
+                actor_id=trigger["trigger_id"],
+                target_type="subscription",
+                target_id=org_id,
+                detail={
+                    "from": {
+                        "plan": subscription["plan_id"],
+                        "seats": subscription["candidate_seats"],
+                    },
+                    "to": {"plan": plan_id, "seats": fields["candidate_seats"]},
+                },
+            )
+            self.app.lifecycle.recompute_over_limits(org_id)
+            return "plan_changed"
+        return "updated"
 
     def _record_invoice(
         self, org_id: str, neutral: dict[str, Any], status: str
@@ -2013,8 +2896,9 @@ class Billing:
                 "SELECT 1 AS x FROM invoices WHERE org_id = ? AND provider_invoice_id = ?",
                 (org_id, invoice_id),
             ):
+                # a paid invoice stays paid: a late failure for it (out of order) changes nothing
                 connection.execute(
-                    "UPDATE invoices SET status = ?, paid_at = ? WHERE org_id = ? AND provider_invoice_id = ?",
+                    "UPDATE invoices SET status = ?, paid_at = ? WHERE org_id = ? AND provider_invoice_id = ? AND status NOT IN ('paid', 'refunded')",
                     (
                         status,
                         self.now if status == "paid" else None,
@@ -2027,12 +2911,13 @@ class Billing:
                 neutral.get("lines") if isinstance(neutral.get("lines"), list) else []
             )
             connection.execute(
-                """INSERT INTO invoices (invoice_id, org_id, provider_invoice_id, kind, amount_cents, currency, status, period_start, period_end, hosted_url, lines, created_at, paid_at)
-                VALUES (?, ?, ?, 'subscription', ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+                """INSERT INTO invoices (invoice_id, org_id, provider_invoice_id, payment_id, kind, amount_cents, currency, status, period_start, period_end, hosted_url, lines, created_at, paid_at)
+                VALUES (?, ?, ?, ?, 'subscription', ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
                 (
                     new_id(),
                     org_id,
                     invoice_id,
+                    str(neutral.get("payment_id") or ""),
                     int(neutral.get("amount_cents") or 0),
                     neutral.get("currency", "usd"),
                     status,
@@ -2100,6 +2985,7 @@ class Billing:
         import time
 
         subscription = self.subscription(org_id)
+        was_trial = subscription["status"] == "trialing"
         window = (
             self.app.config.trial_retention_days
             if subscription["plan_id"] == TRIAL or subscription["status"] == "trialing"
@@ -2135,6 +3021,18 @@ class Billing:
                 export_until=time.strftime("%Y-%m-%d", time.gmtime(export_until)),
                 link=f"{self.app.config.base_url}/#/org/data",
             )
+        if was_trial:
+            # the end of a trial is a clear step down: read-only, export only, until a plan is bought
+            self.notice(
+                org_id,
+                "warning",
+                "Your trial ended",
+                f"The {self.app.catalog.name(subscription['plan_id'])} trial is over, so the organization is read-only "
+                "and automation is off. Choose a plan to keep working; until then the data can be exported until "
+                f"{time.strftime('%Y-%m-%d', time.gmtime(export_until))}.",
+                "#/org/billing",
+            )
+            return
         self.notice(
             org_id,
             "warning",
@@ -2171,6 +3069,13 @@ class Billing:
             org_id = sub["org_id"]
             try:
                 status = sub["status"]
+                waiting = loads(sub.get("pending_upgrade"), None)
+                if (
+                    waiting
+                    and int(waiting.get("requested_at") or 0) + UPGRADE_PENDING_SECONDS
+                    <= now
+                ):
+                    self._drop_upgrade(org_id, waiting, "it was not paid within a day")
                 if status == "trialing":
                     if sub["trial_end"] and sub["trial_end"] <= now:
                         self._enter_cancelled(
@@ -2245,6 +3150,10 @@ class Billing:
                     done["deleted"].append(org_id)
             except Exception:  # noqa: BLE001 - one organization must not stop the sweep
                 logger.exception("Lifecycle step failed for %s", org_id)
+        try:
+            self.bill_due_overage()  # periods the provider's webhooks closed, and failed ones to retry
+        except Exception:  # noqa: BLE001 - the next tick tries again
+            logger.exception("Overage billing failed")
         return done
 
     def _period_rollover(self, sub: dict[str, Any], done: dict[str, list[str]]) -> None:
@@ -2257,7 +3166,16 @@ class Billing:
             self._apply_pending(sub)
             done["changed"].append(org_id)
             sub = self.subscription(org_id)
-        self._bill_overage(sub)
+        provider = self.providers.get(sub["billing_provider"] or "")
+        if not (
+            provider is not None
+            and provider.name != "standin"
+            and sub["billing_subscription_id"]
+        ):
+            # Our period is the billing period (the stand-in, an operator's plan): it closes now. A provider's
+            # period closes when the provider reports the next one (invoice.paid), at its own boundaries.
+            self._close_period(org_id, sub["period_start"], sub["period_end"])
+        self.bill_due_overage(org_id)
         self._apply_app_cancellations(sub)
         sub = self.subscription(org_id)
         plan = self.app.catalog.get(sub["plan_id"], sub["plan_version"])
@@ -2352,6 +3270,7 @@ class Billing:
                     currency=plan["pricing"].get("currency", "usd"),
                     prorate=False,
                     addons=self._provider_addons(plan_id, seats, kept),
+                    at_cycle_end=False,  # the period is over: the lower price applies from now
                 )
             except Exception:  # noqa: BLE001 - keep our state moving; reconcile reports the drift
                 logger.exception(
@@ -2410,62 +3329,184 @@ class Billing:
                 "#/org/members",
             )
 
-    def _bill_overage(self, sub: dict[str, Any]) -> None:
-        """Invoice last month's metered overage (Team and Enterprise) once."""
-        org_id = sub["org_id"]
-        previous = month_key(self.now - 31 * DAY)
-        flag = f"overage_billed:{org_id}:{previous}"
-        if self._flag(flag):
-            return
-        counters = self.app.usage.snapshot(org_id, previous)
+    # -- metered overage, per provider billing period ----------------------------------------
+
+    def _close_period(
+        self, org_id: str, start: int | None, end: int | None
+    ) -> bool:
+        """A billing period is over: its overage can be billed once. Nothing is kept for a period with no overage."""
+        if not start or not end or int(end) <= int(start):
+            return False
+        if not self.app.usage.overage_between(org_id, int(start), int(end)):
+            return False
+        with self.db.write() as connection:
+            return bool(
+                connection.execute(
+                    "INSERT OR IGNORE INTO overage_periods (org_id, period_start, period_end, state, created_at) VALUES (?, ?, ?, NULL, ?)",
+                    (org_id, int(start), int(end), self.now),
+                ).rowcount
+            )
+
+    def _overage_lines(
+        self, sub: dict[str, Any], start: int, end: int
+    ) -> list[dict[str, Any]]:
+        counters = self.app.usage.overage_between(sub["org_id"], start, end)
         plan = self.app.catalog.get(sub["plan_id"], sub["plan_version"])
         rates = with_later_rates(sub["plan_id"], plan["pricing"].get("overage", {}))
-        mapping = {
-            "applications:overage": ("application_cents", "applications"),
-            "searches:overage": ("search_cents", "searches"),
-            "cover_letters:overage": ("cover_letter_cents", "AI cover letters"),
-            "api_searches:overage": ("api_search_cents", "API searches"),
-            "pooled_searches:overage": (
-                "pooled_search_cents",
-                "pooled SerpApi searches",
-            ),
-        }
+        span = f"{_day(start)} to {_day(end)}"
         lines = []
-        for metric, (rate_name, label) in mapping.items():
+        for metric, (rate_name, label) in OVERAGE_METRICS.items():
             units = int(counters.get(metric, 0))
             rate = int(rates.get(rate_name, 0))
             if units and rate:
                 lines.append(
                     {
-                        "description": f"{units} extra {label} in {previous}",
+                        "metric": metric,
+                        "units": units,
+                        "rate_cents": rate,
+                        "description": f"{units} extra {label}, {span}",
                         "amount_cents": units * rate,
                     }
                 )
-        self._set_flag(flag)
-        if not lines:
-            return
-        total = sum(line["amount_cents"] for line in lines)
-        if (
-            sub["billing_customer_id"]
-            and sub["billing_provider"]
-            and sub["billing_provider"] != "standin"
-        ):
-            try:
-                self.providers[sub["billing_provider"]].add_invoice_item(
-                    sub["billing_customer_id"],
-                    total,
-                    f"Monosage overage {previous}",
-                    "usd",
-                )
-            except Exception:  # noqa: BLE001
-                logger.exception(
-                    "Could not add the overage invoice item for %s", org_id
-                )
-        with self.db.write() as connection:
-            connection.execute(
-                "INSERT INTO invoices (invoice_id, org_id, kind, amount_cents, currency, status, lines, created_at) VALUES (?, ?, 'overage', ?, 'usd', 'open', ?, ?)",
-                (new_id(), org_id, total, dumps(lines), self.now),
+        return lines
+
+    def bill_due_overage(self, org_id: str | None = None) -> dict[str, int]:
+        """Bill every closed period not billed yet (and retry failed ones). Safe to run from overlapping ticks."""
+        now = self.now
+        where = "(state IS NULL OR (state = 'failed' AND attempts < ?) OR (state = 'pending' AND claimed_at < ?))"
+        params: list[Any] = [OVERAGE_MAX_ATTEMPTS, now - OVERAGE_CLAIM_SECONDS]
+        if org_id:
+            where += " AND org_id = ?"
+            params.append(org_id)
+        with platform_scope(), self.db.read() as connection:
+            due = many(
+                connection,
+                f"SELECT org_id, period_start FROM overage_periods WHERE {where} ORDER BY period_start",
+                tuple(params),
             )
+        outcome: dict[str, int] = {}
+        for row in due:
+            try:
+                result = self._bill_overage_period(
+                    str(row["org_id"]), int(row["period_start"])
+                )
+            except Exception:  # noqa: BLE001 - one organization must not stop the rest
+                logger.exception("Overage billing failed for %s", row["org_id"])
+                result = "error"
+            outcome[result] = outcome.get(result, 0) + 1
+        return outcome
+
+    def _bill_overage_period(self, org_id: str, period_start: int) -> str:
+        """Claim the period (one conditional UPDATE: only one tick wins), call the provider for each line not billed
+        yet with an idempotency key from the organization, the period and the line, then mark it billed, or put it
+        back as failed for the next tick. A line the provider accepted keeps its item id, so a retry skips it."""
+        now = self.now
+        with self.db.write() as connection:
+            claimed = connection.execute(
+                """UPDATE overage_periods SET state = 'pending', claimed_at = ?, attempts = attempts + 1
+                WHERE org_id = ? AND period_start = ?
+                AND (state IS NULL OR (state = 'failed' AND attempts < ?) OR (state = 'pending' AND claimed_at < ?))""",
+                (
+                    now,
+                    org_id,
+                    period_start,
+                    OVERAGE_MAX_ATTEMPTS,
+                    now - OVERAGE_CLAIM_SECONDS,
+                ),
+            ).rowcount
+            if not claimed:
+                return "taken"
+            period = one(
+                connection,
+                "SELECT * FROM overage_periods WHERE org_id = ? AND period_start = ?",
+                (org_id, period_start),
+            )
+        assert period is not None
+        start, end = int(period["period_start"]), int(period["period_end"])
+        sub = self.subscription(org_id)
+        lines = loads(period["lines"], []) or self._overage_lines(sub, start, end)
+        if not lines:
+            with self.db.write() as connection:
+                connection.execute(
+                    "UPDATE overage_periods SET state = 'none', billed_at = ? WHERE org_id = ? AND period_start = ? AND state = 'pending'",
+                    (now, org_id, period_start),
+                )
+            return "none"
+        provider = self.providers.get(sub["billing_provider"] or "")
+        external = (
+            provider is not None
+            and provider.name != "standin"
+            and bool(sub["billing_customer_id"])
+        )
+        error = ""
+        if external:
+            assert provider is not None
+            for line in lines:
+                if line.get("item_id"):
+                    continue  # billed by an earlier attempt
+                try:
+                    line["item_id"] = provider.add_invoice_item(
+                        sub["billing_customer_id"],
+                        int(line["amount_cents"]),
+                        f"Monosage overage: {line['description']}",
+                        "usd",
+                        subscription_id=sub["billing_subscription_id"],
+                        idempotency_key=f"aira-overage-{org_id}-{start}-{end}-{line['metric']}",
+                        metadata={
+                            "org_id": org_id,
+                            "kind": "overage",
+                            "period_start": start,
+                            "period_end": end,
+                            "metric": line["metric"],
+                        },
+                    )
+                except Exception as failure:  # noqa: BLE001 - retried by the next tick
+                    error = f"{type(failure).__name__}: {failure}"[:300]
+                    logger.warning(
+                        "Overage for %s (%s to %s) not billed yet: %s",
+                        org_id,
+                        _day(start),
+                        _day(end),
+                        error,
+                    )
+                    break
+        total = sum(int(line["amount_cents"]) for line in lines)
+        with self.db.write() as connection:
+            if error:
+                connection.execute(
+                    "UPDATE overage_periods SET state = 'failed', lines = ?, amount_cents = ?, error = ? WHERE org_id = ? AND period_start = ? AND state = 'pending'",
+                    (dumps(lines), total, error, org_id, period_start),
+                )
+                return "failed"
+            done = connection.execute(
+                "UPDATE overage_periods SET state = 'billed', lines = ?, amount_cents = ?, error = '', billed_at = ? WHERE org_id = ? AND period_start = ? AND state = 'pending'",
+                (dumps(lines), total, now, org_id, period_start),
+            ).rowcount
+            if not done:
+                return "taken"
+            connection.execute(
+                """INSERT INTO invoices (invoice_id, org_id, item_id, kind, amount_cents, currency, status, period_start, period_end, lines, created_at)
+                VALUES (?, ?, ?, 'overage', ?, 'usd', 'open', ?, ?, ?, ?)""",
+                (
+                    new_id(),
+                    org_id,
+                    ",".join(str(line.get("item_id") or "") for line in lines)[:500],
+                    total,
+                    start,
+                    end,
+                    dumps(
+                        [
+                            {
+                                "description": line["description"],
+                                "amount_cents": line["amount_cents"],
+                            }
+                            for line in lines
+                        ]
+                    ),
+                    now,
+                ),
+            )
+        return "billed"
 
     def _dunning(self, sub: dict[str, Any], done: dict[str, list[str]]) -> None:
         import time
@@ -2822,6 +3863,12 @@ class Billing:
                     "past_due": "past_due",
                     "canceled": "cancelled",
                     "unpaid": "read_only",
+                    # Razorpay's states
+                    "authenticated": "active",
+                    "pending": "past_due",
+                    "halted": "past_due",
+                    "cancelled": "cancelled",
+                    "completed": "cancelled",
                 }.get(remote.get("status", ""), "") == subscription["status"]
             except Exception as error:  # noqa: BLE001
                 report["error"] = str(error)[:200]

@@ -60,7 +60,11 @@ Read once at start (`monosage_cloud/config.py`; a few more are read by `__main__
 
 | Variable | Meaning |
 | --- | --- |
-| `AIRA_CLOUD_BILLING` | `standin` (default; development) or `stripe` |
+| `AIRA_CLOUD_BILLING` | `standin` (default; development, loopback http base URL only), `stripe` or `razorpay` ([billing-razorpay.md](billing-razorpay.md)) |
+| `AIRA_CLOUD_ALLOW_STANDIN_BILLING` | `1` lets the stand-in run on a public or https base URL for a demo (it logs a warning; it activates paid plans without payment) |
+| `AIRA_CLOUD_SIGNUP_TRIAL_DAYS` | days of the All access trial a new sign-up gets (default `14`); the superadmin can choose another default in the console |
+| `STRIPE_API_VERSION` | the pinned `Stripe-Version` (default `2025-03-31.basil`); create the webhook endpoint with the same version |
+| `AIRA_CLOUD_STRIPE_TAX` | `1` turns on Stripe Tax at checkout (`automatic_tax` and tax ID collection) |
 | `STRIPE_SECRET_KEY` | API key used to create customers, checkout sessions, subscription changes and portal sessions |
 | `STRIPE_WEBHOOK_SECRET` | endpoint signing secret; webhooks are refused without it |
 | `STRIPE_API_BASE` | default `https://api.stripe.com`; point at a stub in tests |
@@ -178,7 +182,9 @@ To prove the drill, keep a record of: backup time, time to restore, the audit ve
 
 The provider's retries drive dunning: each failed attempt sends `invoice.payment_failed`; the first one starts the 14-day and 60-day clocks and later ones change nothing. A successful `invoice.paid` clears them.
 
-The stand-in provider (`AIRA_CLOUD_BILLING=standin`) serves a checkout page at `/billing/standin/checkout/<id>` and a billing portal that simulates failures and recoveries. It moves no money and must not be used in production: the checkout page is public and the session id is its only protection.
+Also enable `charge.refunded` (an ad top-up refunded is taken back from the balance), `invoice.voided` and `customer.subscription.pending_update_expired`. An upgrade is sent with `payment_behavior=pending_if_incomplete` and `proration_behavior=always_invoice`: it applies when its prorated invoice is paid, and an unpaid one is dropped after a day. A plan or seat change made in the customer portal is applied from `customer.subscription.updated`; give the portal's prices `metadata.plan_id` (or a `lookup_key` of `monosage_<plan>`) so Monosage knows which plan each price is. Every POST carries an `Idempotency-Key`, and events older than the newest one applied to a subscription do not change it.
+
+The stand-in provider (`AIRA_CLOUD_BILLING=standin`) serves a checkout page at `/billing/standin/checkout/<id>` and a billing portal that simulates failures and recoveries. It moves no money and must not be used in production: the checkout page is public and the session id is its only protection. The server refuses to start with it unless the base URL is http on a loopback host, or `AIRA_CLOUD_ALLOW_STANDIN_BILLING=1` is set for a demo; its pages and webhook answer 404 when another provider is configured.
 
 ## 9. Mail
 

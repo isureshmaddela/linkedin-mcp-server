@@ -7,7 +7,7 @@ from typing import Any
 from urllib.parse import quote
 
 from monosage_cloud.db import one
-from monosage_cloud.errors import Forbidden, NotFound, ValidationFailed
+from monosage_cloud.errors import Conflict, Forbidden, NotFound, ValidationFailed
 from monosage_cloud.webio import Reply, Req, cloud_route
 
 
@@ -108,12 +108,26 @@ def billing_portal(req: Req):  # noqa: ANN201
 @cloud_route("POST", r"/api/billing/webhook/([a-z]{3,20})", auth="public", csrf=False)
 def billing_webhook(req: Req):  # noqa: ANN201
     provider = req.group()
+    if provider == "standin" and req.app.config.billing_provider != "standin":
+        raise NotFound("Unknown billing provider.")  # the stand-in exists for tests and demos, not as a public door
     headers = req.request.headers
-    signature = headers.get("stripe-signature") or headers.get("x-aira-signature") or ""
-    return 200, req.app.billing.handle_webhook(provider, req.request.body, signature)
+    signature = (
+        headers.get("stripe-signature")
+        or headers.get("x-razorpay-signature")
+        or headers.get("x-aira-signature")
+        or ""
+    )
+    # Razorpay names the event in a header, not in the body; it is the key that makes a redelivery a no-op
+    event_id = headers.get("x-razorpay-event-id") or ""
+    return 200, req.app.billing.handle_webhook(
+        provider, req.request.body, signature, event_id=event_id
+    )
 
 
 # ----------------------------------------------------------------------------- stand-in hosted checkout
+# These pages exist only while the stand-in is the configured provider: Billing registers them at start-up
+# (register_standin_routes) and each one checks again, so a process that also built a Stripe or Razorpay app
+# (tests) answers 404 for them there.
 
 PAGE = """<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Hosted checkout (stand-in)</title><link rel="stylesheet" href="/static/app.css"></head><body class="auth-screen"><main class="auth-panel">
@@ -134,7 +148,31 @@ def _standin(req: Req) -> Any:
     return req.app.billing.standin
 
 
-@cloud_route(
+_STANDIN_ROUTES: list[tuple[str, str, dict[str, Any], Any]] = []
+_standin_registered = False
+
+
+def _standin_route(method: str, pattern: str, **options: Any) -> Any:
+    """Like ``cloud_route``, but the route is added only by :func:`register_standin_routes`."""
+
+    def wrap(function: Any) -> Any:
+        _STANDIN_ROUTES.append((method, pattern, options, function))
+        return function
+
+    return wrap
+
+
+def register_standin_routes() -> None:
+    """Add the stand-in's hosted checkout and portal pages (Billing calls this when the stand-in is the provider)."""
+    global _standin_registered
+    if _standin_registered:
+        return
+    _standin_registered = True
+    for method, pattern, options, function in _STANDIN_ROUTES:
+        cloud_route(method, pattern, **options)(function)
+
+
+@_standin_route(
     "GET", r"/billing/standin/checkout/(cs_standin_[a-z0-9]{20})", auth="public"
 )
 def standin_checkout_page(req: Req):  # noqa: ANN201
@@ -146,6 +184,8 @@ def standin_checkout_page(req: Req):  # noqa: ANN201
     notice = ""
     if session["status"] == "paid":
         notice = "<p class='muted'>This checkout was already paid.</p>"
+    elif session["status"] == "expired":
+        notice = "<p role='alert'>This checkout was replaced by a newer one and cannot be paid.</p>"
     elif req.q("declined"):
         notice = "<p role='alert' style='color:var(--danger,#b3261e)'>The card was declined. Try again.</p>"
     amount = f"{session['amount_cents'] / 100:,.2f} {html.escape(session['currency']).upper()}"
@@ -161,7 +201,7 @@ def standin_checkout_page(req: Req):  # noqa: ANN201
     return _page(body)
 
 
-@cloud_route(
+@_standin_route(
     "POST", r"/billing/standin/checkout/(cs_standin_[a-z0-9]{20})/pay", auth="public"
 )
 def standin_checkout_pay(req: Req):  # noqa: ANN201
@@ -170,8 +210,12 @@ def standin_checkout_pay(req: Req):  # noqa: ANN201
     session = provider.checkout_session(session_id)
     if not session:
         raise NotFound("This checkout does not exist.")
+    if session["status"] == "expired":
+        raise Conflict(
+            "This checkout was replaced by a newer one.", code="checkout_expired"
+        )
     if session["status"] != "paid":
-        subscription_id = f"sub_standin_{session['org_id'][:12]}"
+        subscription_id = f"sub_standin_{session_id[-12:]}"
         for event_type, data in (
             (
                 "checkout.completed",
@@ -181,6 +225,7 @@ def standin_checkout_pay(req: Req):  # noqa: ANN201
                     "seats": session["seats"],
                     "customer_id": session["customer_id"],
                     "subscription_id": subscription_id,
+                    "session_id": session_id,
                 },
             ),
             (
@@ -208,7 +253,7 @@ def standin_checkout_pay(req: Req):  # noqa: ANN201
     )
 
 
-@cloud_route(
+@_standin_route(
     "POST",
     r"/billing/standin/checkout/(cs_standin_[a-z0-9]{20})/decline",
     auth="public",
@@ -224,7 +269,7 @@ def standin_checkout_decline(req: Req):  # noqa: ANN201
     )
 
 
-@cloud_route(
+@_standin_route(
     "POST", r"/billing/standin/checkout/(cs_standin_[a-z0-9]{20})/cancel", auth="public"
 )
 def standin_checkout_cancel(req: Req):  # noqa: ANN201
@@ -240,7 +285,7 @@ def standin_checkout_cancel(req: Req):  # noqa: ANN201
     )
 
 
-@cloud_route(
+@_standin_route(
     "GET", r"/billing/standin/portal/(cus_standin_[a-z0-9]{12})", auth="public"
 )
 def standin_portal_page(req: Req):  # noqa: ANN201
@@ -295,14 +340,14 @@ def _portal_event(req: Req, event_type: str) -> Reply:
     )
 
 
-@cloud_route(
+@_standin_route(
     "POST", r"/billing/standin/portal/(cus_standin_[a-z0-9]{12})/fail", auth="public"
 )
 def standin_portal_fail(req: Req):  # noqa: ANN201
     return _portal_event(req, "invoice.payment_failed")
 
 
-@cloud_route(
+@_standin_route(
     "POST", r"/billing/standin/portal/(cus_standin_[a-z0-9]{12})/recover", auth="public"
 )
 def standin_portal_recover(req: Req):  # noqa: ANN201

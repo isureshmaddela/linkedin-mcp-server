@@ -196,8 +196,125 @@ def credit(
         "UPDATE ad_campaigns SET status = 'active', paused_reason = '', updated_at = ? WHERE home = ? AND status = 'paused' AND paused_reason = 'no_balance'",
         (moment, home),
     )
+    _release_held(sc, home)
     sc.commit()
     return account(sc, home)
+
+
+def credit_once(
+    sc: sqlite3.Connection,
+    home: str,
+    amount_micros: int,
+    *,
+    kind: str,
+    reference: str,
+    note: str = "",
+    by: str = "",
+) -> dict[str, Any]:
+    """Credit a settled payment once: a second call with the same ``reference`` (the provider delivering the same
+    payment twice) changes nothing. Hosted, this is the only way a top-up reaches the balance."""
+    account(sc, home)  # made (and committed) first, so the check and the credit share one write lock
+    if sc.in_transaction:
+        sc.commit()
+    sc.execute("BEGIN IMMEDIATE")
+    try:
+        if row(
+            sc,
+            "SELECT 1 AS x FROM ad_ledger WHERE home = ? AND kind = ? AND reference = ?",
+            (home, kind, reference[:200]),
+        ):
+            sc.commit()
+            return account(sc, home)
+        return credit(
+            sc,
+            home,
+            amount_micros,
+            kind=kind,
+            reference=reference,
+            note=note,
+            by=by,
+        )
+    except BaseException:
+        if sc.in_transaction:
+            sc.rollback()
+        raise
+
+
+def reverse_once(
+    sc: sqlite3.Connection,
+    home: str,
+    amount_micros: int,
+    *,
+    reference: str,
+    note: str = "",
+    by: str = "",
+) -> dict[str, Any]:
+    """Take back a top-up whose payment was refunded or disputed, once per ``reference``. The balance may go below
+    zero (the money was already spent): campaigns pause, and the creators' earnings it paid for are held, not
+    confirmed, until the advertiser's balance is above zero again."""
+    if amount_micros <= 0:
+        raise ValueError("The amount must be more than zero.")
+    account(sc, home)
+    if sc.in_transaction:
+        sc.commit()
+    sc.execute("BEGIN IMMEDIATE")
+    try:
+        if row(
+            sc,
+            "SELECT 1 AS x FROM ad_ledger WHERE home = ? AND kind = 'reversal' AND reference = ?",
+            (home, reference[:200]),
+        ):
+            sc.commit()
+            return account(sc, home)
+        moment = stamp()
+        sc.execute(
+            "INSERT INTO ad_ledger (id, home, kind, amount_micros, reference, note, created_by, created_at) VALUES (?, ?, 'reversal', ?, ?, ?, ?, ?)",
+            (new_id(), home, -amount_micros, reference[:200], note[:300], by[:120], moment),
+        )
+        sc.execute(
+            "UPDATE ad_accounts SET balance_micros = balance_micros - ?, updated_at = ? WHERE home = ?",
+            (amount_micros, moment, home),
+        )
+        for item in rows(
+            sc,
+            "SELECT * FROM ad_campaigns WHERE home = ? AND status = 'active'",
+            (home,),
+        ):
+            balance = int(
+                store.scalar(
+                    sc, "SELECT balance_micros FROM ad_accounts WHERE home = ?", (home,)
+                )
+                or 0
+            )
+            if balance < unit_cost(item):
+                sc.execute(
+                    "UPDATE ad_campaigns SET status = 'paused', paused_reason = 'no_balance', updated_at = ? WHERE id = ?",
+                    (moment, item["id"]),
+                )
+        sc.commit()
+        return account(sc, home)
+    except BaseException:
+        if sc.in_transaction:
+            sc.rollback()
+        raise
+
+
+def _owing_homes_sql() -> str:
+    """Advertisers whose balance is below zero: a payment that funded their ads was taken back."""
+    return "SELECT id FROM ad_campaigns WHERE home IN (SELECT home FROM ad_accounts WHERE balance_micros < 0)"
+
+
+def _release_held(sc: sqlite3.Connection, home: str) -> None:
+    """The advertiser paid what it owed: the creators' earnings held for its ads are confirmed."""
+    balance = int(
+        store.scalar(sc, "SELECT balance_micros FROM ad_accounts WHERE home = ?", (home,))
+        or 0
+    )
+    if balance >= 0:
+        sc.execute(
+            "UPDATE ad_impressions SET earning_status = 'confirmed' WHERE earning_status = 'held' AND campaign_id IN (SELECT id FROM ad_campaigns WHERE home = ?)",
+            (home,),
+        )
 
 
 def record_payment(
@@ -2039,7 +2156,14 @@ def balances(sc: sqlite3.Connection, channel_id: str) -> dict[str, int]:
         "SELECT COALESCE(SUM(amount_micros), 0) FROM ad_payouts WHERE channel_id = ? AND status = 'requested'",
         (channel_id,),
     )
+    held = _sum(
+        sc,
+        "SELECT COALESCE(SUM(creator_micros), 0) FROM ad_impressions WHERE channel_id = ? AND earning_status = 'held'",
+        (channel_id,),
+    )
     return {
+        # held: earned from an advertiser whose payment was taken back; payable once it pays what it owes
+        "held_micros": held,
         "estimated_micros": estimated,
         "confirmed_micros": confirmed,
         "paid_micros": paid,
@@ -2097,11 +2221,16 @@ def earnings(sc: sqlite3.Connection, ch: dict[str, Any]) -> dict[str, Any]:
         FROM ad_impressions WHERE channel_id = ? AND creator_micros > 0 GROUP BY month ORDER BY month DESC LIMIT 12""",
         (ch["id"],),
     )
-    payouts = rows(
-        sc,
-        "SELECT * FROM ad_payouts WHERE channel_id = ? ORDER BY requested_at DESC LIMIT 50",
-        (ch["id"],),
-    )
+    payouts = [
+        _masked_payout(item)
+        for item in rows(
+            sc,
+            "SELECT * FROM ad_payouts WHERE channel_id = ? ORDER BY requested_at DESC LIMIT 50",
+            (ch["id"],),
+        )
+    ]
+    found = row(sc, "SELECT payout_details FROM vi_channels WHERE id = ?", (ch["id"],))
+    saved = str((found or {}).get("payout_details") or "")
     return {
         "eligibility": eligibility(sc, ch),
         "settings": settings(sc),
@@ -2111,9 +2240,15 @@ def earnings(sc: sqlite3.Connection, ch: dict[str, Any]) -> dict[str, Any]:
         "videos": per_video,
         "months": months,
         "payouts": payouts,
-        "payout_details": ch.get("payout_details", ""),
+        # masked: sending the mask back with a payout request uses the saved details
+        "payout_details": store.payout_mask(saved),
+        "payout_details_saved": bool(saved),
         "terms_accepted_at": ch.get("terms_accepted_at"),
     }
+
+
+def _masked_payout(item: dict[str, Any]) -> dict[str, Any]:
+    return {**item, "details": store.payout_mask(item.get("details", ""))}
 
 
 def request_payout(
@@ -2122,8 +2257,12 @@ def request_payout(
     if not videos.adult(ch):
         raise PermissionError("Earning money from videos is for adults.")
     videos._active(ch)
+    saved = store.payout_details(sc, ch["id"])
+    given = str(raw.get("details") or "").strip()
+    if not given or given == store.mask_payout(saved):  # the masked value shown back means "the saved details"
+        given = saved
     details = kit.text(
-        raw.get("details") or ch.get("payout_details"),
+        given,
         "where to send your money (bank or UPI details)",
         max_len=500,
         required=True,
@@ -2157,18 +2296,23 @@ def request_payout(
             f"You can ask for up to {dollars(max(0, payable))} (confirmed earnings not yet paid)."
         )
     payout_id = new_id()
+    sealed = store.seal_payout(details)  # encrypted at rest (store.PAYOUT_PREFIX)
     sc.execute(
         "INSERT INTO ad_payouts (id, channel_id, home, amount_micros, details, status, requested_at) VALUES (?, ?, ?, ?, ?, 'requested', ?)",
-        (payout_id, ch["id"], ch.get("home", ""), amount, details, stamp()),
+        (payout_id, ch["id"], ch.get("home", ""), amount, sealed, stamp()),
     )
     sc.execute(
-        "UPDATE vi_channels SET payout_details = ? WHERE id = ?", (details, ch["id"])
+        "UPDATE vi_channels SET payout_details = ? WHERE id = ?", (sealed, ch["id"])
     )
     sc.commit()
-    return row(sc, "SELECT * FROM ad_payouts WHERE id = ?", (payout_id,)) or {}
+    return _masked_payout(
+        row(sc, "SELECT * FROM ad_payouts WHERE id = ?", (payout_id,)) or {}
+    )
 
 
 def payouts(sc: sqlite3.Connection, status: str = "requested") -> list[dict[str, Any]]:
+    """The payout queue for whoever pays creators. Only a request still to be paid shows where to send the money
+    (``details``, decrypted for that person); paid and declined ones show the mask."""
     kit.choice(status, "the status", ("requested", "paid", "rejected"))
     out = []
     for item in rows(
@@ -2177,9 +2321,19 @@ def payouts(sc: sqlite3.Connection, status: str = "requested") -> list[dict[str,
         (status,),
     ):
         ch = row(sc, "SELECT * FROM vi_channels WHERE id = ?", (item["channel_id"],))
+        if not store.is_sealed(item.get("details", "")) and item.get("details"):
+            sc.execute(  # a request from before encryption is encrypted now (migrated on read)
+                "UPDATE ad_payouts SET details = ? WHERE id = ?",
+                (store.seal_payout(item["details"]), item["id"]),
+            )
+            sc.commit()
         out.append(
             {
                 **item,
+                "details": store.unseal_payout(item.get("details", ""))
+                if status == "requested"
+                else store.payout_mask(item.get("details", "")),
+                "details_masked": store.payout_mask(item.get("details", "")),
                 "channel": videos.mini(ch) if ch else None,
                 "balances": balances(sc, item["channel_id"])
                 if item["channel_id"]
@@ -2231,7 +2385,9 @@ def decide_payout(
             ref_id=found["id"],
         )
     sc.commit()
-    return row(sc, "SELECT * FROM ad_payouts WHERE id = ?", (found["id"],)) or {}
+    return _masked_payout(
+        row(sc, "SELECT * FROM ad_payouts WHERE id = ?", (found["id"],)) or {}
+    )
 
 
 def _refund(
@@ -2293,6 +2449,12 @@ def close_month(sc: sqlite3.Connection, month: str, by: str) -> dict[str, Any]:
         )
         excess.extend(found[REVIEW_DAILY_CAP:])
     refunded = _refund(sc, excess, "review_excess")
+    # Earnings are paid from settled money only: ads of an advertiser whose payment was taken back (balance below
+    # zero) are held until it pays what it owes (credit releases them).
+    sc.execute(
+        f"UPDATE ad_impressions SET earning_status = 'held' WHERE month = ? AND earning_status = 'estimated' AND campaign_id IN ({_owing_homes_sql()})",
+        (month,),
+    )
     confirmed = _sum(
         sc,
         "SELECT COALESCE(SUM(creator_micros), 0) FROM ad_impressions WHERE month = ? AND earning_status = 'estimated'",
@@ -2421,9 +2583,10 @@ def totals(sc: sqlite3.Connection) -> dict[str, Any]:
         "balances_micros": _sum(
             sc, "SELECT COALESCE(SUM(balance_micros), 0) FROM ad_accounts", ()
         ),
+        # settled top-ups and recorded payments, less those taken back (a reversal is stored as a negative amount)
         "topped_up_micros": _sum(
             sc,
-            "SELECT COALESCE(SUM(amount_micros), 0) FROM ad_ledger WHERE kind IN ('topup', 'payment')",
+            "SELECT COALESCE(SUM(amount_micros), 0) FROM ad_ledger WHERE kind IN ('topup', 'payment', 'reversal')",
             (),
         ),
         "months": months,
@@ -2480,8 +2643,11 @@ def erase_advertiser(sc: sqlite3.Connection, home: str) -> int:
 
 def paid_payouts(sc: sqlite3.Connection, home: str) -> list[dict[str, Any]]:
     """Payouts made to the channels of one account (the single-user build counts them as revenue)."""
-    return rows(
-        sc,
-        "SELECT * FROM ad_payouts WHERE home = ? AND status = 'paid' ORDER BY decided_at",
-        (home,),
-    )
+    return [
+        _masked_payout(item)
+        for item in rows(
+            sc,
+            "SELECT * FROM ad_payouts WHERE home = ? AND status = 'paid' ORDER BY decided_at",
+            (home,),
+        )
+    ]

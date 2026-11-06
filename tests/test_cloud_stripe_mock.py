@@ -175,7 +175,9 @@ def test_the_adapter_reads_the_shapes_stripe_actually_returns(stripe, mock_url):
     assert event and event["period_start"] and event["period_end"], (
         "the billing period moved onto the items in newer API versions"
     )
-    assert event["plan_id"] == "team" and event["seats"] == 25
+    # the plan item's quantity is the seat count (a portal change shows there, not in metadata)
+    assert event["plan_id"] == "team"
+    assert event["seats"] == int(subscription["items"]["data"][0]["quantity"] or 25)
 
     session = _fixture(mock_url, "/v1/checkout/sessions/cs_123")
     session["metadata"] = {"org_id": "org-1", "plan_id": "team", "seats": "25"}
@@ -188,6 +190,33 @@ def test_the_adapter_reads_the_shapes_stripe_actually_returns(stripe, mock_url):
         }
     )
     assert done and done["subscription_id"] == "sub_9" and done["seats"] == 25
+
+
+def test_pending_upgrades_one_off_charges_and_expiry_validate(stripe):
+    """An upgrade as a pending update (Price objects, pending_if_incomplete, always_invoice), an ad top-up as a
+    one-off invoice paid at once, an expired checkout, and the pinned version and idempotency keys on each."""
+    upgrade = stripe.update_subscription(
+        "sub_123",
+        plan_id="team",
+        plan_name="Team",
+        seats=30,
+        seat_cents=1100,
+        currency="usd",
+        prorate=True,
+        addons=[{"app_id": "leads", "name": "Leads", "seat_cents": 400, "seats": 30}],
+        confirm_payment=True,
+    )
+    assert upgrade["pending"] is True and upgrade["match"] == {"plan_id": "team", "seats": 30}
+    charge = stripe.charge_now(
+        "cus_123",
+        2000,
+        "Monosage Ads balance top-up",
+        "usd",
+        idempotency_key="aira-topup-test",
+        metadata={"org_id": "org-1", "kind": "ads_topup"},
+    )
+    assert charge["id"].startswith("in_") and charge["status"] in {"paid", "open"}
+    stripe.expire_checkout("cs_123")
 
 
 def test_app_add_on_items_validate_against_the_openapi_spec(stripe):

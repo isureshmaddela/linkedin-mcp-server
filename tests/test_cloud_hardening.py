@@ -265,7 +265,11 @@ def test_hsts_is_sent_only_over_https(tmp_path):
     assert not browser.header("Strict-Transport-Security")
     plain.close()
     HOOKS.reset()
-    secure = make_app(tmp_path / "secure", base_url="https://aira.example.test")
+    secure = make_app(
+        tmp_path / "secure",
+        base_url="https://aira.example.test",
+        allow_standin_billing=True,  # the stand-in refuses an https base URL without the demo override
+    )
     browser = Browser(secure)
     browser.call("GET", "/api/health", headers={"Host": "aira.example.test"})
     assert "max-age=31536000" in browser.header("Strict-Transport-Security")

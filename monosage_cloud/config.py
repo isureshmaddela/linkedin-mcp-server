@@ -99,9 +99,13 @@ class CloudConfig:
     # subscription lifecycle (days)
     trial_days: int = 14
     # What a new sign-up starts on until the superadmin chooses (platform console > Plans > New sign-ups, stored in
-    # the control plane): All access, every app and feature, with no trial end (0 days).
+    # the control plane): a 14-day trial of All access (every app and feature). When it ends the organization becomes
+    # read-only with an export window unless a plan was bought, like any trial. Organizations that already exist keep
+    # what they have. 0 days (no end) can still be chosen for a free plan from the console, on purpose.
     signup_plan: str = "all_access"
-    signup_trial_days: int = 0
+    signup_trial_days: int = field(
+        default_factory=lambda: _int("AIRA_CLOUD_SIGNUP_TRIAL_DAYS", 14)
+    )
     past_due_read_only_days: int = 14
     past_due_deletion_days: int = 60
     cancelled_export_days: int = 30
@@ -116,8 +120,14 @@ class CloudConfig:
         )
     )
     smtp_url: str = field(default_factory=lambda: _env("AIRA_CLOUD_SMTP_URL"))
+    # standin (development and demos only), stripe or razorpay
     billing_provider: str = field(
         default_factory=lambda: _env("AIRA_CLOUD_BILLING", "standin")
+    )
+    # The stand-in activates paid plans without payment, so it only runs on a loopback http base URL unless this
+    # demo override is set (a loud warning is logged when it is).
+    allow_standin_billing: bool = field(
+        default_factory=lambda: _bool("AIRA_CLOUD_ALLOW_STANDIN_BILLING")
     )
     stripe_secret_key: str = field(default_factory=lambda: _env("STRIPE_SECRET_KEY"))
     stripe_webhook_secret: str = field(
@@ -125,6 +135,35 @@ class CloudConfig:
     )
     stripe_api_base: str = field(
         default_factory=lambda: _env("STRIPE_API_BASE", "https://api.stripe.com")
+    )
+    # Every request names the API version the adapter was written for; create the webhook endpoint with the same one.
+    stripe_api_version: str = field(
+        default_factory=lambda: _env("STRIPE_API_VERSION", "2025-03-31.basil")
+    )
+    # Stripe Tax: automatic_tax and tax ID collection at checkout (needs Stripe Tax set up on the account).
+    stripe_tax: bool = field(default_factory=lambda: _bool("AIRA_CLOUD_STRIPE_TAX"))
+    razorpay_key_id: str = field(
+        default_factory=lambda: _env("AIRA_CLOUD_RAZORPAY_KEY_ID")
+    )
+    razorpay_key_secret: str = field(
+        default_factory=lambda: _env("AIRA_CLOUD_RAZORPAY_KEY_SECRET")
+    )
+    razorpay_webhook_secret: str = field(
+        default_factory=lambda: _env("AIRA_CLOUD_RAZORPAY_WEBHOOK_SECRET")
+    )
+    razorpay_api_base: str = field(
+        default_factory=lambda: _env(
+            "AIRA_CLOUD_RAZORPAY_API_BASE", "https://api.razorpay.com"
+        )
+    )
+    # How many monthly cycles a Razorpay subscription is created for (Razorpay needs an end).
+    razorpay_total_count: int = field(
+        default_factory=lambda: _int("AIRA_CLOUD_RAZORPAY_TOTAL_COUNT", 120)
+    )
+    # A fixed rate (rupees per US dollar) for amounts with no explicit INR price (overage, top-ups, custom prices).
+    # Plans and the shipped app prices have explicit INR prices in plans.py; this is never a live exchange rate.
+    razorpay_inr_per_usd: int = field(
+        default_factory=lambda: _int("AIRA_CLOUD_RAZORPAY_INR_PER_USD", 85)
     )
     model_provider: str = field(
         default_factory=lambda: _env("AIRA_CLOUD_MODEL_PROVIDER", "ollama")
@@ -277,6 +316,24 @@ class CloudConfig:
     @property
     def cookie_secure(self) -> bool:
         return self.base_url.lower().startswith("https://")
+
+    def standin_refusal(self) -> str:
+        """Why the stand-in billing provider may not run here ('' when it may).
+
+        It activates paid plans for free, so it runs only where nobody else can reach it: an http base URL on a
+        loopback host. A public demo sets ``AIRA_CLOUD_ALLOW_STANDIN_BILLING=1`` on purpose."""
+        if self.billing_provider != "standin":
+            return ""
+        from urllib.parse import urlsplit
+
+        parts = urlsplit(self.base_url.strip())
+        host = (parts.hostname or "").lower()
+        if parts.scheme == "http" and host in {"127.0.0.1", "localhost", "::1"}:
+            return ""
+        return (
+            f"The stand-in billing provider activates paid plans without payment and cannot run at {self.base_url}. "
+            "Set AIRA_CLOUD_BILLING=stripe or razorpay, or AIRA_CLOUD_ALLOW_STANDIN_BILLING=1 for a demo."
+        )
 
     def host_allowed(self, host_header: str) -> bool:
         host = (

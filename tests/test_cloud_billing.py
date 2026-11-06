@@ -151,18 +151,35 @@ def test_stripe_events_are_normalized():
     assert done == {
         "id": "evt_2",
         "type": "checkout.completed",
+        "created": None,
         "org_id": "org1",
         "plan_id": "team",
         "seats": 40,
         "customer_id": "cus_1",
         "subscription_id": "sub_1",
+        "session_id": "",
     }
     assert (
         provider.normalize(
-            {"id": "e", "type": "charge.refunded", "data": {"object": {}}}
+            {"id": "e", "type": "customer.created", "data": {"object": {}}}
         )
         is None
     )
+    # a refund is read now: it takes back an ad top-up the refunded payment had credited
+    refunded = provider.normalize(
+        {
+            "id": "e2",
+            "type": "charge.refunded",
+            "data": {
+                "object": {
+                    "invoice": "in_7",
+                    "payment_intent": "pi_7",
+                    "amount_refunded": 500,
+                }
+            },
+        }
+    )
+    assert refunded["type"] == "payment.refunded" and refunded["payment_id"] == "pi_7"
 
 
 def test_quote_validates_seats_and_plan(cloud):
