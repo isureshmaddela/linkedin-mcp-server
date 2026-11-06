@@ -14,7 +14,7 @@ from typing import Any
 from aira.airaapi import routes as console
 from aira.airaapi import store as airastore
 from aira.airaapi.http import Raw, Request, aira_route
-from aira.leads import calls, intent, mail, scoring, service, store
+from aira.leads import calls, intent, mail, scoring, sequences, service, store
 from aira.suite.marketing import access
 
 BASE = "/api/leads"
@@ -654,3 +654,75 @@ def item_call_log(request: Request) -> tuple[int, dict[str, Any]]:
 def follow_ups(request: Request) -> tuple[int, dict[str, Any]]:
     with _connect(request) as connection:
         return 200, {"follow_ups": calls.follow_ups_due(connection)}
+
+
+# ---------------------------------------------------------------------------
+# follow-up sequences (aira.leads.sequences): steps go into the outbox when due, and stop when the lead replies
+# ---------------------------------------------------------------------------
+
+
+@aira_route("GET", f"{BASE}/sequences")
+def sequences_list(request: Request) -> tuple[int, dict[str, Any]]:
+    with _connect(request) as connection:
+        return 200, {"sequences": sequences.list_sequences(connection)}
+
+
+@aira_route("POST", f"{BASE}/sequences")
+def sequences_create(request: Request) -> tuple[int, dict[str, Any]]:
+    with _connect(request) as connection:
+        made = sequences.save_sequence(connection, request.payload)
+    request.audit("leads.sequence_create", "sequence", made["id"])
+    return 201, {"sequence": made}
+
+
+@aira_route("GET", f"{BASE}/sequences/{ID}")
+def sequences_get(request: Request) -> tuple[int, dict[str, Any]]:
+    with _connect(request) as connection:
+        return 200, sequences.sequence_detail(connection, request.match.group(1))
+
+
+@aira_route("PATCH", f"{BASE}/sequences/{ID}")
+def sequences_update(request: Request) -> tuple[int, dict[str, Any]]:
+    with _connect(request) as connection:
+        saved = sequences.save_sequence(
+            connection, request.payload, request.match.group(1)
+        )
+    return 200, {"sequence": saved}
+
+
+@aira_route("DELETE", f"{BASE}/sequences/{ID}")
+def sequences_delete(request: Request) -> tuple[int, dict[str, Any]]:
+    with _connect(request) as connection:
+        sequences.delete_sequence(connection, request.match.group(1))
+    request.audit("leads.sequence_delete", "sequence", request.match.group(1))
+    return 200, {"deleted": True}
+
+
+@aira_route("POST", f"{BASE}/sequences/{ID}/enroll")
+def sequences_enroll(request: Request) -> tuple[int, dict[str, Any]]:
+    ids = request.payload.get("lead_ids")
+    if not isinstance(ids, list) or not ids:
+        raise ValueError("Send the leads to enroll as lead_ids.")
+    with _connect(request) as connection:
+        outcome = sequences.enroll(
+            connection, request.match.group(1), [str(i) for i in ids]
+        )
+    request.audit(
+        "leads.sequence_enroll",
+        "sequence",
+        request.match.group(1),
+        {"enrolled": outcome["enrolled"]},
+    )
+    return 200, outcome
+
+
+@aira_route("POST", f"{BASE}/sequences/{ID}/stop")
+def sequences_stop(request: Request) -> tuple[int, dict[str, Any]]:
+    ids = request.payload.get("lead_ids")
+    if not isinstance(ids, list) or not ids:
+        raise ValueError("Send the leads to stop as lead_ids.")
+    with _connect(request) as connection:
+        stopped = sequences.stop(
+            connection, request.match.group(1), [str(i) for i in ids]
+        )
+    return 200, {"stopped": stopped}
