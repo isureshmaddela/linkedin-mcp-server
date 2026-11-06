@@ -255,6 +255,145 @@ def mp4_info(path: Path) -> dict[str, Any]:
 
 
 # ---------------------------------------------------------------------------
+# where a video was filmed, taken out
+# ---------------------------------------------------------------------------
+
+# Boxes that hold a place: QuickTime's and MP4's ISO 6709 string (©xyz), 3GPP's location (loci), and XMP packets
+# (which cameras fill with GPS). Apple's metadata keys name theirs "com.apple.quicktime.location.*".
+LOCATION_BOXES = {b"\xa9xyz", b"loci", b"XMP_"}
+XMP_UUID = bytes.fromhex("be7acfcb97a942e89c71999491e3afac")
+CONTAINERS = {b"moov", b"trak", b"mdia", b"minf", b"udta", b"meta", b"ilst", b"edts"}
+
+
+def _box_list(data: bytes, start: int, end: int) -> list[tuple[bytes, int, int, int]]:
+    """(type, offset of the box, header length, end) of each box between ``start`` and ``end``."""
+    out = []
+    at = start
+    while at + 8 <= end:
+        size, name = struct.unpack(">I4s", data[at : at + 8])
+        header = 8
+        if size == 1 and at + 16 <= end:
+            size = struct.unpack(">Q", data[at + 8 : at + 16])[0]
+            header = 16
+        elif size == 0:
+            size = end - at
+        if size < header or at + size > end:
+            break
+        out.append((name, at, header, at + size))
+        at += size
+    return out
+
+
+def _location_keys(data: bytes, start: int, end: int) -> set[int]:
+    """The 1-based indexes of Apple metadata keys (a ``keys`` box) that name a location."""
+    found: set[int] = set()
+    at = start + 8  # version and flags, then the number of entries
+    index = 0
+    while at + 8 <= end:
+        size = struct.unpack(">I", data[at : at + 4])[0]
+        if size < 8 or at + size > end:
+            break
+        index += 1
+        if b"location" in data[at + 8 : at + size].lower():
+            found.add(index)
+        at += size
+    return found
+
+
+def _location_regions(
+    data: bytes,
+    start: int,
+    end: int,
+    *,
+    ilst_keys: frozenset[int] = frozenset(),
+    in_ilst: bool = False,
+) -> list[tuple[int, int]]:
+    """(offset, header length) of each box holding a location, anywhere under these boxes."""
+    regions = []
+    for name, at, header, stop in _box_list(data, start, end):
+        body = at + header
+        if name in LOCATION_BOXES or (
+            name == b"uuid" and data[body : body + 16] == XMP_UUID
+        ):
+            regions.append((at, header))
+        elif in_ilst:
+            if int.from_bytes(name, "big") in ilst_keys:
+                regions.append((at, header))  # an entry whose metadata key names a location
+        elif name == b"meta":
+            # the ISO meta box has a version and flags before its children; QuickTime's has not
+            inner = body + 4 if data[body + 8 : body + 12] == b"hdlr" else body
+            keys: set[int] = set()
+            for child, child_at, child_header, child_stop in _box_list(data, inner, stop):
+                if child == b"keys":
+                    keys |= _location_keys(data, child_at + child_header, child_stop)
+            regions += _location_regions(data, inner, stop, ilst_keys=frozenset(keys))
+        elif name == b"ilst":
+            regions += _location_regions(
+                data, body, stop, ilst_keys=ilst_keys, in_ilst=True
+            )
+        elif name in CONTAINERS:
+            regions += _location_regions(data, body, stop)
+    return regions
+
+
+def strip_location(path: Path) -> int:
+    """Blank every box that says where an MP4 or MOV was filmed: renamed ``free`` and zeroed in place, so no size
+    or chunk offset changes and every player skips it. Returns how many were blanked (best effort: a damaged
+    file is left as it is)."""
+    blanked = 0
+    try:
+        total = path.stat().st_size
+        with path.open("r+b") as handle:
+            at = 0
+            while at + 8 <= total:
+                handle.seek(at)
+                head = handle.read(16)
+                if len(head) < 8:
+                    break
+                size, name = struct.unpack(">I4s", head[:8])
+                header = 8
+                if size == 1 and len(head) >= 16:
+                    size = struct.unpack(">Q", head[8:16])[0]
+                    header = 16
+                elif size == 0:
+                    size = total - at
+                if size < header or at + size > total:
+                    break
+                if name in (b"moov", b"udta", b"meta", b"uuid") and size <= 64 * MB:
+                    handle.seek(at)
+                    data = handle.read(size)
+                    for offset, box_header in _location_regions(data, 0, size):
+                        box_size = struct.unpack(">I", data[offset : offset + 4])[0]
+                        if box_size == 1:
+                            box_size = struct.unpack(">Q", data[offset + 8 : offset + 16])[0]
+                        handle.seek(at + offset + 4)
+                        handle.write(b"free")
+                        handle.seek(at + offset + box_header)
+                        handle.write(b"\x00" * (box_size - box_header))
+                        blanked += 1
+                at += size
+    except (OSError, struct.error):
+        return blanked
+    return blanked
+
+
+def _clean_picture(path: Path) -> int:
+    """A thumbnail without its EXIF, XMP and text chunks (where and when it was taken), the way Social cleans its
+    photos (aira.suite.social.photos.clean). Returns the new size."""
+    from aira.suite.social import photos
+
+    data = path.read_bytes()
+    try:
+        body, _mime, _width, _height = photos.clean(data)
+    except ValueError:
+        return len(data)
+    temporary = path.with_suffix(".clean")
+    temporary.write_bytes(body)
+    os.replace(temporary, path)
+    return len(body)
+
+
+# ---------------------------------------------------------------------------
 # uploads
 # ---------------------------------------------------------------------------
 
@@ -426,6 +565,11 @@ def complete(sc: sqlite3.Connection, upload_id: str, owner_key: str) -> dict[str
     target = root() / relative
     target.parent.mkdir(parents=True, exist_ok=True)
     os.replace(part, target)
+    size = found["size"]
+    if mime in ("video/mp4", "video/quicktime"):
+        strip_location(target)  # where it was filmed: blanked in place, so the file keeps its size
+    elif found["kind"] == "image":
+        size = _clean_picture(target)
     info = mp4_info(target) if mime in ("video/mp4", "video/quicktime") else {}
     sc.execute(
         """INSERT INTO vi_files (id, owner_key, home, kind, mime, size, path, duration, width, height, created_at)
@@ -436,7 +580,7 @@ def complete(sc: sqlite3.Connection, upload_id: str, owner_key: str) -> dict[str
             found["home"],
             found["kind"],
             mime,
-            found["size"],
+            size,
             relative.as_posix(),
             info.get("duration"),
             info.get("width"),
@@ -615,21 +759,34 @@ def signed_url(
     file_id: str,
     prefix: str = "/api/videos/media",
     hours: int = 6,
+    *,
+    viewer: str = "",
 ) -> str:
     """An address that plays this file for ``hours`` (rounded to the hour, so the address stays the same and
-    the browser can reuse what it fetched)."""
+    the browser can reuse what it fetched). ``viewer`` (a channel id) is signed in too: the server checks again,
+    each time the file is asked for, that this person may still watch it (videos_routes.media_get)."""
     if not file_id:
         return ""
     expires = (int(time.time()) // 3600 + 1 + hours) * 3600
+    if viewer:
+        signature = sign(sc, f"{file_id}:{expires}:{viewer}")
+        return f"{prefix}/{file_id}?e={expires}&v={viewer}&s={signature}"
     return f"{prefix}/{file_id}?e={expires}&s={sign(sc, f'{file_id}:{expires}')}"
 
 
-def verify(sc: sqlite3.Connection, file_id: str, expires: str, signature: str) -> None:
+def verify(
+    sc: sqlite3.Connection,
+    file_id: str,
+    expires: str,
+    signature: str,
+    viewer: str = "",
+) -> None:
     try:
         when = int(expires)
     except (TypeError, ValueError):
         raise LookupError("That file was not found.") from None
+    signed = f"{file_id}:{when}:{viewer}" if viewer else f"{file_id}:{when}"
     if when < time.time() or not hmac.compare_digest(
-        sign(sc, f"{file_id}:{when}"), str(signature or "")
+        sign(sc, signed), str(signature or "")
     ):
         raise LookupError("That file was not found.")
