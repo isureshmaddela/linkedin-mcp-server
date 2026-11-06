@@ -184,7 +184,16 @@ DEFAULT_SETTINGS: dict[str, Any] = {
     "chat_in_hours_only": False,
     "offline_message": "We are away right now. Leave a message and we will reply by email.",
     "auto_close_days": 7,
+    # Incoming mail (Business hub > Email > Incoming mail) that is not a reply to a case becomes a new case.
+    "email_to_case": True,
+    # Team notices by email (desk.notify_staff): to the case's assignee when that is an email address, otherwise
+    # to this address, otherwise to the business's own email.
+    "notify_email": "",
+    "notify_new_case": True,
+    "notify_new_chat": True,
+    "notify_sla_breach": True,
 }
+NOTICES = ("new_case", "new_chat", "sla_breach")
 
 
 def settings(connection: sqlite3.Connection) -> dict[str, Any]:
@@ -265,6 +274,12 @@ def save_settings(
             minimum=1,
             maximum=60,
         ),
+        "email_to_case": kit.flag(merged["email_to_case"]),
+        "notify_email": kit.email(merged["notify_email"], "the team's email address"),
+        **{
+            f"notify_{notice}": kit.flag(merged[f"notify_{notice}"])
+            for notice in NOTICES
+        },
     }
     kit.set_setting(connection, APP, "settings", clean)
     connection.commit()

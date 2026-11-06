@@ -15,6 +15,7 @@ from cloud_support import Browser, build_org, sign_in
 import test_careers
 from aira.suite import kit, public
 from aira.suite.service import desk, store
+from form_support import quick_forms, started  # noqa: F401 - public forms need the page's ticket
 from test_suite_service import (  # noqa: F401
     MONDAY_9,
     S,
@@ -366,21 +367,31 @@ def test_paid_help_from_the_help_centre_to_revenue_on_the_local_build(
         env,
         "POST",
         f"/api/public/{token}/request",
-        {"offer_id": created["id"], "email": "x@y.z", "website": "spam"},
+        {
+            "offer_id": created["id"],
+            "email": "x@y.z",
+            "website": "spam",
+            "started": started(page),
+        },
     )
     assert status == 201 and bot["reference"] == ""
     status, _ = _anonymous(
         env,
         "POST",
         f"/api/public/{token}/request",
-        {"offer_id": created["id"], "name": "Ana"},
+        {"offer_id": created["id"], "name": "Ana", "started": started(page)},
     )
     assert status == 400
     status, sent = _anonymous(
         env,
         "POST",
         f"/api/public/{token}/request",
-        {"offer_id": created["id"], "name": "Ana", "email": "ana@example.com"},
+        {
+            "offer_id": created["id"],
+            "name": "Ana",
+            "email": "ana@example.com",
+            "started": started(page),
+        },
     )
     assert status == 201 and sent["reference"] == "#1001"
     case_token = sent["path"].rsplit("/", 1)[1]
@@ -491,7 +502,11 @@ def test_hosted_paid_help_roles_and_isolation(cloud):
     status, sent = visitor.call(
         "POST",
         f"/api/public/{token}/request",
-        {"offer_id": made["offer"]["id"], "email": "ana@example.com"},
+        {
+            "offer_id": made["offer"]["id"],
+            "email": "ana@example.com",
+            "started": started(page),
+        },
     )
     assert status == 201, sent
 

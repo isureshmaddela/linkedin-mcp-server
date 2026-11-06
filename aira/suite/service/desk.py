@@ -1,6 +1,11 @@
 """Service: cases, replies, SLA due times, satisfaction, saved replies, the help centre and live chat.
 
 Times are stored as ISO UTC; business hours are read in the business time zone (kit.business).
+
+The team hears about new cases, new chats and overdue cases through :func:`notify_staff` (an email through the
+shared outbox today; other channels, such as Web Push, register in :data:`STAFF_CHANNELS`). Email that comes in
+(:mod:`aira.inbound_mail`) becomes cases (:func:`email_to_case`) or replies on them (:func:`email_reply`): the
+``[#1234]`` reference in the subject, or the Message-ID of the email it answers, names the case.
 """
 
 from __future__ import annotations
@@ -10,7 +15,7 @@ import hmac
 import re
 import secrets
 import sqlite3
-from collections.abc import Mapping
+from collections.abc import Callable, Mapping
 from datetime import datetime, timedelta, timezone
 from typing import Any
 from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
@@ -28,6 +33,7 @@ TRANSITIONS: dict[str, tuple[str, ...]] = {
 }
 DUE_SOON = timedelta(hours=2)
 MAX_ATTACHMENTS = 5
+CASE_REFERENCE = re.compile(r"\[#(\d{3,9})\]")
 
 
 def _now(now: datetime | None) -> datetime:
@@ -198,7 +204,10 @@ def create_case(
     origin: Any = None,
     now: datetime | None = None,
     acknowledge: bool = True,
+    notify: bool = True,
 ) -> dict[str, Any]:
+    """A new case. One that came from a customer (any channel but "manual") is acknowledged to them and announced
+    to the team (:func:`notify_staff`), unless ``acknowledge`` / ``notify`` say otherwise."""
     store.ensure(connection)
     channel = kit.choice(channel, "the channel", CHANNELS, default="manual")
     subject = kit.text(raw.get("subject"), "a subject", max_len=200, required=True)
@@ -277,15 +286,17 @@ def create_case(
             APP,
             "case_received",
             to=email,
-            subject=f"We received your request {case['reference']}",
+            subject=f"We received your request [{case['reference']}]",
             body=(
                 f"Hello {(name or 'there').split(' ')[0]},\n\nThanks for getting in touch. We received your request "
-                f'"{subject}" and will reply soon.\n\nYou can follow it and reply here: '
+                f'"{subject}" and will reply soon.\n\nYou can follow it and reply here, or answer this email: '
                 f"{kit.public_url(link['path'], origin)}\n\nYour reference is {case['reference']}."
             ),
             ref_type="case",
             ref_id=case_id,
         )
+    if notify and channel != "manual":
+        notify_staff(connection, "new_case", case, origin=origin)
     connection.commit()
     return _view(store.get_case(connection, case_id), now)
 
@@ -1265,6 +1276,7 @@ def start_chat(
         ref_id=chat_id,
         public=True,
     )
+    notify_staff(connection, "new_chat", store.get_chat(connection, chat_id))
     connection.commit()
     return {
         "chat_id": chat_id,
@@ -1420,6 +1432,7 @@ def chat_to_case(
         channel="chat" if chat["visitor_email"] else "manual",
         origin=origin,
         acknowledge=False,
+        notify=False,  # a team member turned the chat into a case: the team already knows
     )
     # The conversation moves over message by message, so the customer's request page reads like the chat did
     # and an answer the team already gave in the chat counts as the first reply.
@@ -1818,7 +1831,7 @@ def request_offer(
         APP,
         "case_received",
         to=case["customer_email"],
-        subject=f"We received your request {case['reference']}",
+        subject=f"We received your request [{case['reference']}]",
         body=(
             f"Hello {(case['customer_name'] or 'there').split(' ')[0]},\n\nThanks for asking for "
             f'"{offer["title"]}" ({_money(connection, offer["price_cents"])}). We will be in touch soon.\n\n'
@@ -2276,6 +2289,9 @@ def tick(connection: sqlite3.Connection, now: datetime | None = None) -> dict[st
                     ref_type="case",
                     ref_id=row["id"],
                 )
+                notify_staff(
+                    connection, "sla_breach", store.case_row(dict(row)) or {}, now=moment
+                )
     cutoff = kit.iso(moment - timedelta(days=int(rules["auto_close_days"])))
     for row in kit.fetch_all(
         connection,
@@ -2309,6 +2325,205 @@ def tick(connection: sqlite3.Connection, now: datetime | None = None) -> dict[st
             closed += 1
     connection.commit()
     return {"overdue": flagged, "closed": closed, "csat_requested": asked}
+
+
+# ---------------------------------------------------------------------------
+# telling the team: new cases, new chats, overdue cases
+# ---------------------------------------------------------------------------
+
+StaffChannel = Callable[[sqlite3.Connection, str, Mapping[str, Any], dict[str, Any]], None]
+# Other ways to reach the team (Web Push, chat apps) register here: fn(connection, kind, case, notice), where
+# ``notice`` is {"to", "subject", "body", "link"}. Email through the outbox is always the first channel.
+STAFF_CHANNELS: dict[str, StaffChannel] = {}
+
+
+def staff_channel(name: str) -> Callable[[StaffChannel], StaffChannel]:
+    def wrap(fn: StaffChannel) -> StaffChannel:
+        STAFF_CHANNELS[name] = fn
+        return fn
+
+    return wrap
+
+
+def staff_address(connection: sqlite3.Connection, case: Mapping[str, Any]) -> str:
+    """Who hears about a case: its assignee when that is an email address, else the team's address in the Service
+    settings, else the business's own email ('' when there is none)."""
+    assignee = str(case.get("assignee") or "").strip().lower()
+    try:
+        if assignee and kit.email(assignee):
+            return assignee
+    except ValueError:
+        pass
+    rules = store.settings(connection)
+    return str(rules.get("notify_email") or kit.business(connection).get("email") or "")
+
+
+def _notice(
+    connection: sqlite3.Connection,
+    kind: str,
+    case: Mapping[str, Any],
+    origin: Any,
+    now: datetime | None,
+) -> dict[str, str]:
+    if kind == "new_chat":
+        link = kit.public_url("/#/service?tab=chat", origin)
+        name = case.get("visitor_name") or "A visitor"
+        last = kit.fetch_one(
+            connection,
+            "SELECT body FROM sv_chat_messages WHERE chat_id = ? ORDER BY rowid LIMIT 1",
+            (case.get("id", ""),),
+        )
+        return {
+            "subject": f"New live chat from {name}"[:200],
+            "body": f"{name} started a live chat"
+            + (f" ({case['visitor_email']})" if case.get("visitor_email") else "")
+            + f":\n\n{(last or {}).get('body', '')[:1000]}\n\nAnswer it in Service: {link}",
+            "link": link,
+        }
+    link = kit.public_url(f"/#/service?open={case.get('id', '')}", origin)
+    who = case.get("customer_name") or case.get("customer_email") or "A customer"
+    reference = case.get("reference") or f"#{case.get('number', '')}"
+    if kind == "sla_breach":
+        missed = (
+            "the first reply"
+            if not case.get("first_responded_at")
+            and case.get("first_response_due")
+            and kit.parse_time(case["first_response_due"]) < _now(now)
+            else "the solution"
+        )
+        return {
+            "subject": f"Overdue: [{reference}] {case.get('subject', '')}"[:200],
+            "body": f"Case {reference} from {who} is past its due time for {missed} ({case.get('priority', 'normal')} "
+            f"priority).\n\n{case.get('subject', '')}\n\nOpen it in Service: {link}",
+            "link": link,
+        }
+    return {
+        "subject": f"New case [{reference}] {case.get('subject', '')}"[:200],
+        "body": f"{who} sent a new request through {case.get('channel', 'the help centre')}"
+        + (f" ({case['customer_email']})" if case.get("customer_email") else "")
+        + f":\n\n{case.get('subject', '')}\n\n{str(case.get('description') or '')[:2000]}\n\nOpen it in Service: {link}",
+        "link": link,
+    }
+
+
+def notify_staff(
+    connection: sqlite3.Connection,
+    kind: str,
+    case: Mapping[str, Any],
+    *,
+    origin: Any = None,
+    now: datetime | None = None,
+) -> dict[str, Any] | None:
+    """Tell the team about a new case (``new_case``), a new live chat (``new_chat``, ``case`` is the chat) or a
+    case past its due time (``sla_breach``): an email to :func:`staff_address` through the outbox (sent without
+    approval, as an internal notice), then every other registered channel. Off when the Service setting for the
+    kind is off. Returns the queued email, or None when nothing was sent by email."""
+    if kind not in store.NOTICES:
+        raise ValueError(f"Unknown notice: {kind}.")
+    if not store.settings(connection).get(f"notify_{kind}", True):
+        return None
+    to = staff_address(connection, case) if kind != "new_chat" else staff_address(
+        connection, {"assignee": case.get("assignee", "")}
+    )
+    notice = {"to": to, **_notice(connection, kind, case, origin, now)}
+    message = None
+    if to:
+        message = kit.queue_email(
+            connection,
+            APP,
+            f"staff_{kind}",
+            to=to,
+            subject=notice["subject"],
+            body=notice["body"],
+            ref_type="chat" if kind == "new_chat" else "case",
+            ref_id=str(case.get("id", "")),
+        )
+    for name, channel in STAFF_CHANNELS.items():
+        try:
+            channel(connection, kind, case, notice)
+        except Exception:  # noqa: BLE001 - one channel must not stop the others
+            kit.suite.logger.exception("Service notice channel %s failed", name)
+    return message
+
+
+# ---------------------------------------------------------------------------
+# email in: new cases and replies (aira.inbound_mail)
+# ---------------------------------------------------------------------------
+
+
+def case_by_number(connection: sqlite3.Connection, number: int) -> dict[str, Any] | None:
+    store.ensure(connection)
+    return store.case_row(
+        kit.fetch_one(connection, "SELECT * FROM sv_cases WHERE number = ?", (int(number),))
+    )
+
+
+def _from_customer(case: Mapping[str, Any], message: Mapping[str, Any]) -> bool:
+    """A reply joins a case only from the case's own customer (anyone can type a reference into a subject), or
+    from anyone when it answers an email we sent about that case (its Message-ID)."""
+    sender = str(message.get("from_email") or "").lower()
+    return bool(sender) and sender == str(case.get("customer_email") or "").lower()
+
+
+def email_reply(
+    connection: sqlite3.Connection,
+    case: Mapping[str, Any],
+    message: Mapping[str, Any],
+    *,
+    now: datetime | None = None,
+) -> str:
+    """An email answering a case: added to the conversation (the case reopens), or, when the case is closed, a new
+    case that points back to it. Returns what was done ('' when the sender is not the case's customer)."""
+    store.ensure(connection)
+    kept = kept_case(connection, store.get_case(connection, case["id"]))
+    answers_ours = bool(
+        (sent := kit.sent_message(connection, message.get("threads") or []))
+        and sent.get("ref_type") == "case"
+        and sent.get("ref_id") in (case["id"], kept["id"])
+    )
+    if not (_from_customer(kept, message) or answers_ours):
+        return ""
+    body = str(message.get("text") or "").strip() or "(The email had no text.)"
+    if kept["status"] == "closed":
+        follow = create_case(
+            connection,
+            {
+                "subject": str(message.get("subject") or kept["subject"])[:200],
+                "description": f"Follow-up to {kept['reference']} (closed):\n\n{body}"[:10000],
+                "name": message.get("from_name") or kept["customer_name"],
+                "email": message.get("from_email"),
+            },
+            channel="email",
+            now=now,
+        )
+        return f"new case {follow['reference']} (follow-up to {kept['reference']})"
+    customer_reply(connection, kept["id"], {"body": body[:5000]}, now=now)
+    return f"reply on {kept['reference']}"
+
+
+def email_to_case(
+    connection: sqlite3.Connection,
+    message: Mapping[str, Any],
+    *,
+    now: datetime | None = None,
+) -> dict[str, Any] | None:
+    """A new email to the business becomes a case (channel "email"), acknowledged to the sender and announced to
+    the team. None when the Service setting is off."""
+    store.ensure(connection)
+    if not store.settings(connection).get("email_to_case", True):
+        return None
+    subject = " ".join(str(message.get("subject") or "").split())[:200] or "(no subject)"
+    return create_case(
+        connection,
+        {
+            "subject": subject,
+            "description": str(message.get("text") or "")[:10000],
+            "name": str(message.get("from_name") or "")[:120],
+            "email": message.get("from_email"),
+        },
+        channel="email",
+        now=now,
+    )
 
 
 def checklist(connection: sqlite3.Connection) -> list[dict[str, Any]]:

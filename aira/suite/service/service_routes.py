@@ -579,7 +579,9 @@ def _help_page(connection: Any) -> dict[str, Any]:
 @public.page(APP, "help_center")
 def help_center_page(connection: Any, link: dict[str, Any]) -> dict[str, Any]:
     store.ensure(connection)
-    return _help_page(connection)
+    # "started": the page's ticket, sent back with a form (kit.check_form: a bot that never loaded the page, or
+    # sends within a few seconds, is turned away)
+    return {**_help_page(connection), "started": kit.form_ticket(connection)}
 
 
 @public.action(APP, "help_center", "search")
@@ -627,11 +629,11 @@ def _contact(
     connection: Any, payload: dict[str, Any], visitor: dict[str, Any], channel: str
 ) -> tuple[int, dict[str, Any]]:
     store.ensure(connection)
-    if str(payload.get("website") or ""):
+    if not kit.check_form(connection, payload):
         return 201, {
             "reference": "",
             "path": "",
-        }  # a bot filled the hidden field: accept quietly, keep nothing
+        }  # a bot filled the hidden field or never loaded the page: accept quietly, keep nothing
     raw = {
         "subject": payload.get("subject") or "A question",
         "message": payload.get("message"),
@@ -666,8 +668,8 @@ def help_request(
 ) -> tuple[int, dict[str, Any]]:
     """A visitor asks for one of the business's paid services."""
     store.ensure(connection)
-    if str(payload.get("website") or ""):
-        return 201, {"reference": "", "path": ""}  # a bot filled the hidden field
+    if not kit.check_form(connection, payload):
+        return 201, {"reference": "", "path": ""}  # a bot: the hidden field, or no ticket from the page
     case = desk.request_offer(
         connection,
         {
@@ -700,6 +702,7 @@ def chat_page(connection: Any, link: dict[str, Any]) -> dict[str, Any]:
     return {
         "online": desk.chat_online(connection),
         "offline_message": rules["offline_message"],
+        "started": kit.form_ticket(connection),  # for the "leave a message" form shown while away
     }
 
 
