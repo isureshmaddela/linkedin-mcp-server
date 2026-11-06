@@ -147,6 +147,7 @@ SCHEMA = (
 def ensure(connection: sqlite3.Connection) -> None:
     kit.ensure_core(connection)
     kit.ensure(connection, "events.v1", SCHEMA)
+    kit.contact_columns(connection, "ev_orders")
 
 
 # ---------------------------------------------------------------------------

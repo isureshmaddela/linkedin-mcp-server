@@ -81,8 +81,61 @@ SCHEMA = (
 )
 
 
+# Columns added after the first release: a deal's customer in the suite's one record (``suite_contacts``), and what
+# it was handed over from ("marketing:lead:<id>", "service:case:<id>", "contact:<id>": aira.suite.customers).
+ADDED_COLUMNS = (
+    ("st_deals", "customer_id", "TEXT NOT NULL DEFAULT ''"),
+    ("st_deals", "handoff_ref", "TEXT NOT NULL DEFAULT ''"),
+)
+
+
 def ensure(connection: sqlite3.Connection) -> None:
     kit.ensure(connection, "studio.sales.v1", SCHEMA)
+    marker = (kit._db_file(connection), "studio.sales.columns.v1")  # noqa: SLF001 - kit.ensure's own marker
+    if marker in kit._ensured:  # noqa: SLF001
+        return
+    present = {row[1] for row in connection.execute("PRAGMA table_info(st_deals)")}
+    for table, column, definition in ADDED_COLUMNS:
+        if column not in present:
+            connection.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS st_deals_handoff ON st_deals (handoff_ref)"
+    )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS st_deals_customer ON st_deals (customer_id)"
+    )
+    connection.commit()
+    kit._ensured.add(marker)  # noqa: SLF001
+
+
+def handoff_of(connection: sqlite3.Connection, ref: str) -> dict[str, Any] | None:
+    """The deal handed over from ``ref`` (a Marketing lead, a Service case, a contact), or None."""
+    ensure(connection)
+    row = kit.fetch_one(
+        connection, "SELECT id FROM st_deals WHERE handoff_ref = ? LIMIT 1", (ref,)
+    )
+    return get_deal(connection, row["id"]) if row else None
+
+
+def covered_lead(connection: sqlite3.Connection, invoice: dict[str, Any]) -> str:
+    """The Marketing lead line (kit.revenue_key) an invoice's payments stand for, when the invoice came from a deal
+    handed over from that lead: the sale counts once, here. '' otherwise."""
+    if not kit.fetch_one(
+        connection,
+        "SELECT 1 AS x FROM sqlite_master WHERE type = 'table' AND name = 'st_deals'",
+    ):
+        return ""
+    ensure(connection)
+    clauses, params = ["invoice_id = ?"], [invoice["id"]]
+    if invoice.get("proposal_id"):
+        clauses.append("proposal_id = ?")
+        params.append(invoice["proposal_id"])
+    row = kit.fetch_one(
+        connection,
+        f"SELECT handoff_ref FROM st_deals WHERE ({' OR '.join(clauses)}) AND handoff_ref LIKE 'marketing:lead:%' LIMIT 1",  # noqa: S608
+        params,
+    )
+    return str(row["handoff_ref"]) if row else ""
 
 
 # ---------------------------------------------------------------------------

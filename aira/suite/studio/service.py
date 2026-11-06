@@ -965,6 +965,8 @@ def add_payment(
         )
     kit.update_row(connection, "st_invoices", invoice_id, {"updated_at": kit.now()})
     client = _client_name(connection, invoice["client_id"])
+    from aira.suite.studio import sales
+
     kit.record_revenue(
         connection,
         APP,
@@ -974,6 +976,8 @@ def add_payment(
         label=f"Invoice {invoice['number']}",
         customer=client["client_company"] or client["client_name"],
         at=f"{payment['day']}T12:00:00Z",
+        # a deal handed over from a Marketing lead: a payment marked on that lead is the same sale, counted once
+        covers=sales.covered_lead(connection, invoice),
     )
     remaining = balance - amount
     kit.log(

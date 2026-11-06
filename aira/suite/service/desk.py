@@ -258,6 +258,7 @@ def create_case(
             stamp,
         ),
     )
+    kit.link_row(connection, "sv_cases", case_id)  # the customer's one record (aira.suite.customers)
     if description:
         _message(
             connection,

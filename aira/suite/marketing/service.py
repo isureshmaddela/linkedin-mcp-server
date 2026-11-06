@@ -229,7 +229,13 @@ def _insert(connection: sqlite3.Connection, table: str, values: dict[str, Any]) 
     columns = ", ".join(row)
     marks = ", ".join(f":{column}" for column in row)
     connection.execute(f"INSERT INTO {table} ({columns}) VALUES ({marks})", row)  # noqa: S608 - fixed names
+    if table in CONTACT_TABLES:
+        kit.link_row(connection, table, row_id)  # a lead or a subscriber is one of the business's contacts
     return row_id
+
+
+# Leads and subscribers point at the suite's one customer record (kit.contact_for).
+CONTACT_TABLES = ("mk_submissions", "mk_subscribers")
 
 
 def _update(
@@ -238,6 +244,8 @@ def _update(
     kit.update_row(
         connection, table, row_id, {**_store_values(values), "updated_at": kit.now()}
     )
+    if table == "mk_subscribers" and "status" in values:
+        kit.link_row(connection, table, row_id)  # confirmed or unsubscribed: the contact's email consent follows
 
 
 def roi_percent(revenue_cents: int, spend_cents: int) -> int | None:

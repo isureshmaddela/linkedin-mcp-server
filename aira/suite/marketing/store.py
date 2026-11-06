@@ -202,6 +202,7 @@ def ensure(connection: sqlite3.Connection) -> None:
     kit.ensure(connection, "marketing.v1", SCHEMA)
     kit.ensure(connection, "marketing.v2", SCHEMA_V2)
     _add_columns(connection)
+    kit.contact_columns(connection, "mk_submissions", "mk_subscribers")
 
 
 def decode(row: dict[str, Any] | None) -> dict[str, Any]:

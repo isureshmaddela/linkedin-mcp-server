@@ -1080,18 +1080,23 @@ def record_revenue(
     label: str = "",
     customer: str = "",
     at: str = "",
+    covers: str = "",
 ) -> None:
     """Money the business received (an invoice paid, an order paid, a ticket sold). Recording the same source
-    again updates it, so a payment is never counted twice."""
+    again updates it, so a payment is never counted twice.
+
+    ``covers`` names another app's line for the same sale (:func:`revenue_key`), such as the Marketing lead a Sales
+    deal came from: while this line counts, that one does not (:func:`_cover`), whichever was recorded first."""
     _ensure_ledger(connection)
     code = currency_code or business(connection)["currency"]
+    covers = str(covers or "")[:200]
     connection.execute(
-        """INSERT INTO suite_revenue (id, app, source_type, source_id, label, customer, amount_cents, currency, at, voided_at)
-        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL)
+        """INSERT INTO suite_revenue (id, app, source_type, source_id, label, customer, amount_cents, currency, at, voided_at, covers, covered_by)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, '')
         ON CONFLICT(app, source_type, source_id) DO UPDATE SET amount_cents = excluded.amount_cents,
         label = excluded.label, customer = excluded.customer, currency = excluded.currency,
         at = CASE WHEN ? <> '' OR suite_revenue.voided_at IS NOT NULL THEN excluded.at ELSE suite_revenue.at END,
-        voided_at = NULL""",
+        voided_at = NULL, covers = excluded.covers, covered_by = ''""",
         (
             new_id(),
             app,
@@ -1102,9 +1107,71 @@ def record_revenue(
             int(amount_cents),
             code,
             at or now(),
+            covers,
             at,  # a payment recorded again with its own date, or after a void, moves to that date
         ),
     )
+    key = revenue_key(app, source_type, source_id)
+    if covers and covers != key:
+        _cover(connection, covers, by=key)
+    _cover_if_covered(connection, key)
+
+
+def revenue_key(app: str, source_type: str, source_id: str) -> str:
+    """How one ledger line is named in ``covers`` / ``covered_by``: ``app:source_type:source_id``."""
+    return f"{app}:{source_type[:40]}:{source_id[:64]}"
+
+
+def _split_key(key: str) -> tuple[str, str, str] | None:
+    parts = str(key or "").split(":", 2)
+    return (parts[0], parts[1], parts[2]) if len(parts) == 3 and all(parts) else None
+
+
+def _cover(connection: sqlite3.Connection, target: str, *, by: str) -> int:
+    """The same sale counted elsewhere (``by``): the payment ``target`` and its refunds stop counting, marked
+    ``covered_by`` so they count again when ``by`` is voided (:func:`_uncover`)."""
+    parts = _split_key(target)
+    if parts is None or target == by:
+        return 0
+    app, source_type, source_id = parts
+    return int(
+        connection.execute(
+            """UPDATE suite_revenue SET voided_at = ?, covered_by = ? WHERE app = ? AND source_type = ? AND voided_at IS NULL
+            AND ((kind = 'payment' AND source_id = ?) OR (kind = 'refund' AND refund_of = ?))""",
+            (now(), by[:200], app, source_type, source_id, source_id),
+        ).rowcount
+        or 0
+    )
+
+
+def _cover_if_covered(connection: sqlite3.Connection, key: str) -> None:
+    """A line recorded (again) while another app's counting line covers it does not count."""
+    found = connection.execute(
+        "SELECT app, source_type, source_id FROM suite_revenue WHERE covers = ? AND voided_at IS NULL AND kind = 'payment' LIMIT 1",
+        (key,),
+    ).fetchone()
+    if found is not None:
+        _cover(connection, key, by=revenue_key(str(found[0]), str(found[1]), str(found[2])))
+
+
+def _uncover(connection: sqlite3.Connection, by: str) -> None:
+    """``by`` stopped counting: what it covered counts again, unless another counting line covers it too."""
+    rows = connection.execute(
+        "SELECT app, source_type, source_id, kind, refund_of FROM suite_revenue WHERE covered_by = ?",
+        (by,),
+    ).fetchall()
+    if not rows:
+        return
+    connection.execute(
+        "UPDATE suite_revenue SET voided_at = NULL, covered_by = '' WHERE covered_by = ?",
+        (by,),
+    )
+    targets = {
+        revenue_key(str(row[0]), str(row[1]), str(row[4] if row[3] == "refund" else row[2]))
+        for row in rows
+    }
+    for target in targets:
+        _cover_if_covered(connection, target)
 
 
 def void_revenue(
@@ -1143,10 +1210,12 @@ def void_revenue(
             at=at,
         )
         return
+    # voided for its own reason now (not only covered by another app's line), so un-covering leaves it voided
     connection.execute(
-        "UPDATE suite_revenue SET voided_at = ? WHERE app = ? AND source_type = ? AND source_id = ? AND voided_at IS NULL",
+        "UPDATE suite_revenue SET voided_at = COALESCE(voided_at, ?), covered_by = '' WHERE app = ? AND source_type = ? AND source_id = ?",
         (now(), app, source_type, source_id),
     )
+    _uncover(connection, revenue_key(app, source_type, source_id))
 
 
 def record_refund(
@@ -1189,6 +1258,16 @@ def record_refund(
             source_id[:64],
         ),
     )
+    # a refund of a payment another app's line covers does not count either
+    payment = connection.execute(
+        "SELECT covered_by FROM suite_revenue WHERE app = ? AND source_type = ? AND source_id = ? AND kind = 'payment'",
+        (app, source_type[:40], source_id[:64]),
+    ).fetchone()
+    if payment is not None and payment[0]:
+        connection.execute(
+            "UPDATE suite_revenue SET voided_at = ?, covered_by = ? WHERE id = ?",
+            (now(), payment[0], line_id),
+        )
     return line_id
 
 
@@ -1205,9 +1284,10 @@ def refunded_cents(
 
 
 def _ensure_ledger(connection: sqlite3.Connection) -> None:
-    """The ledger's later columns: ``kind`` ('payment' or 'refund') and ``refund_of`` (the refunded source)."""
+    """The ledger's later columns: ``kind`` ('payment' or 'refund'), ``refund_of`` (the refunded source), and
+    ``covers`` / ``covered_by`` (one sale recorded by two apps counts once: :func:`record_revenue`)."""
     ensure_core(connection)
-    marker = (_db_file(connection), "suite.ledger.v2")
+    marker = (_db_file(connection), "suite.ledger.v3")
     if marker in _ensured:
         return
     columns = {row[1] for row in connection.execute("PRAGMA table_info(suite_revenue)")}
@@ -1219,6 +1299,14 @@ def _ensure_ledger(connection: sqlite3.Connection) -> None:
         connection.execute(
             "ALTER TABLE suite_revenue ADD COLUMN refund_of TEXT NOT NULL DEFAULT ''"
         )
+    for column in ("covers", "covered_by"):
+        if column not in columns:
+            connection.execute(
+                f"ALTER TABLE suite_revenue ADD COLUMN {column} TEXT NOT NULL DEFAULT ''"
+            )
+    connection.execute(
+        "CREATE INDEX IF NOT EXISTS suite_revenue_covers ON suite_revenue (covers)"
+    )
     connection.execute(
         "CREATE INDEX IF NOT EXISTS suite_revenue_refund ON suite_revenue (app, source_type, refund_of)"
     )
@@ -1350,6 +1438,308 @@ def revenue_lines(
         f"SELECT * FROM suite_revenue {where} ORDER BY at DESC LIMIT ?",  # noqa: S608
         (*params, max(1, min(limit, 5000))),
     )
+
+
+# ---------------------------------------------------------------------------
+# one customer record: the suite's contacts
+# ---------------------------------------------------------------------------
+#
+# Every app that meets a customer (an order, a booking, a form, a case, a lead, tickets, a course) points its row at
+# one contact with a nullable ``contact_id``: NULL means "not linked yet" (the backfill links it), '' means the row
+# has no email or phone to link by. A contact is found by its normalized email or phone (``suite_contact_keys``,
+# ``e:<email>`` and ``p:<last 10 digits>``), so the same person ordering in the Shop and booking in Bookings is one
+# record with one timeline (aira.suite.customers).
+
+CONTACTS_SCHEMA = (
+    """CREATE TABLE IF NOT EXISTS suite_contacts (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL DEFAULT '',
+        email TEXT NOT NULL DEFAULT '',
+        phone TEXT NOT NULL DEFAULT '',
+        company TEXT NOT NULL DEFAULT '',
+        tags TEXT NOT NULL DEFAULT '[]',
+        email_consent INTEGER,
+        sms_consent INTEGER,
+        consent_at TEXT,
+        source_app TEXT NOT NULL DEFAULT '',
+        apps TEXT NOT NULL DEFAULT '[]',
+        notes TEXT NOT NULL DEFAULT '',
+        first_seen TEXT NOT NULL,
+        last_seen TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS suite_contacts_seen ON suite_contacts (last_seen)",
+    """CREATE TABLE IF NOT EXISTS suite_contact_keys (
+        key TEXT PRIMARY KEY,
+        contact_id TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS suite_contact_keys_contact ON suite_contact_keys (contact_id)",
+)
+
+
+class ContactSource:
+    """Where an app keeps a customer's details in one of its tables (column names; '' when it has none)."""
+
+    __slots__ = ("app", "email", "phone", "name", "company", "at")
+
+    def __init__(
+        self,
+        app: str,
+        *,
+        email: str = "",
+        phone: str = "",
+        name: str = "",
+        company: str = "",
+        at: str = "created_at",
+    ) -> None:
+        self.app, self.email, self.phone = app, email, phone
+        self.name, self.company, self.at = name, company, at
+
+
+# The tables that point at a contact. Their apps call contact_columns() in their own ensure().
+CONTACT_SOURCES: dict[str, ContactSource] = {
+    "sh_orders": ContactSource(
+        "shop",
+        email="customer_email",
+        phone="customer_phone",
+        name="customer_name",
+        company="company",
+    ),
+    "bk_customers": ContactSource(
+        "bookings", email="email", phone="phone", name="name", at="updated_at"
+    ),
+    "mk_submissions": ContactSource(
+        "marketing", email="email", phone="phone", name="name", company="company"
+    ),
+    "mk_subscribers": ContactSource("marketing", email="email", name="name"),
+    "sv_cases": ContactSource(
+        "service",
+        email="customer_email",
+        phone="customer_phone",
+        name="customer_name",
+    ),
+    "leads": ContactSource(
+        "leads", email="email", phone="phone", name="name", company="company"
+    ),
+    "ev_orders": ContactSource(
+        "events", email="buyer_email", phone="buyer_phone", name="buyer_name"
+    ),
+    "ac_enrolments": ContactSource("academy", email="email", name="name"),
+}
+
+
+def email_key(value: Any) -> str:
+    """An email address as the contacts compare it (trimmed, lower case), or '' when it is not one."""
+    text = str(value or "").strip().lower()
+    return text if len(text) <= 254 and _EMAIL.match(text) else ""
+
+
+def phone_key(value: Any) -> str:
+    """A phone number as the contacts compare it: its digits, the last ten of a longer number, so +91 98765 43210,
+    098765 43210 and 9876543210 are one person. '' for fewer than seven digits."""
+    digits = re.sub(r"\D", "", str(value or ""))
+    if len(digits) < 7 or len(digits) > 15:
+        return ""
+    return digits[-10:]
+
+
+def ensure_contacts(connection: sqlite3.Connection) -> None:
+    ensure_core(connection)
+    ensure(connection, "suite.contacts.v1", CONTACTS_SCHEMA)
+
+
+def contact_columns(connection: sqlite3.Connection, *tables: str) -> None:
+    """Give these app tables their nullable ``contact_id`` (added safely to an older database) and link their rows
+    that are not linked yet: the backfill, which each row goes through once. Apps call it from ``ensure()``."""
+    ensure_contacts(connection)
+    for table in tables:
+        if table not in CONTACT_SOURCES:
+            raise ValueError(f"{table} does not hold customers.")
+        marker = (_db_file(connection), f"suite.contacts.{table}")
+        if marker in _ensured:
+            continue
+        columns = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
+        if not columns:
+            continue  # the app has not made the table yet
+        if "contact_id" not in columns:
+            connection.execute(f"ALTER TABLE {table} ADD COLUMN contact_id TEXT")
+        connection.execute(
+            f"CREATE INDEX IF NOT EXISTS {table}_contact ON {table} (contact_id)"
+        )
+        connection.commit()
+        link_pending(connection, table)
+        _ensured.add(marker)
+
+
+def _has_contact_column(connection: sqlite3.Connection, table: str) -> bool:
+    marker = (_db_file(connection), f"suite.contacts.{table}")
+    if marker in _ensured:
+        return True
+    return any(
+        row[1] == "contact_id"
+        for row in connection.execute(f"PRAGMA table_info({table})")  # noqa: S608 - a CONTACT_SOURCES name
+    )
+
+
+def _contact_values(table: str, row: Mapping[str, Any]) -> dict[str, Any]:
+    spec = CONTACT_SOURCES[table]
+    out: dict[str, Any] = {
+        "email": row.get(spec.email) if spec.email else "",
+        "phone": row.get(spec.phone) if spec.phone else "",
+        "name": row.get(spec.name) if spec.name else "",
+        "company": row.get(spec.company) if spec.company else "",
+        "source": spec.app,
+        "at": str(row.get(spec.at) or ""),
+    }
+    if table == "leads" and not out["name"]:
+        out["name"] = " ".join(
+            str(part) for part in (row.get("first_name"), row.get("last_name")) if part
+        )
+    if table == "mk_subscribers":
+        # double opt-in: consent is a confirmed subscription; an unsubscribe withdraws it; pending says nothing yet
+        status = str(row.get("status") or "")
+        out["email_consent"] = (
+            True if status == "subscribed" else False if status == "unsubscribed" else None
+        )
+    return out
+
+
+def link_row(connection: sqlite3.Connection, table: str, row_id: str) -> str:
+    """Point one row of an app's table at its contact (made or updated from the row) and return the contact's id
+    ('' when the row has no email or phone). Apps call it after they insert a customer's row."""
+    if table not in CONTACT_SOURCES:
+        raise ValueError(f"{table} does not hold customers.")
+    if not _has_contact_column(connection, table):
+        return ""
+    row = fetch_one(connection, f"SELECT * FROM {table} WHERE id = ?", (row_id,))  # noqa: S608 - a known table
+    if not row:
+        return ""
+    contact_id = contact_for(connection, **_contact_values(table, row))
+    connection.execute(
+        f"UPDATE {table} SET contact_id = ? WHERE id = ?",  # noqa: S608 - a known table
+        (contact_id, row_id),
+    )
+    return contact_id
+
+
+def link_pending(connection: sqlite3.Connection, table: str = "") -> int:
+    """Link every row not linked yet (``contact_id IS NULL``), in one table or in all of them. Returns how many."""
+    ensure_contacts(connection)
+    linked = 0
+    for name in [table] if table else list(CONTACT_SOURCES):
+        if not _has_contact_column(connection, name):
+            continue
+        while True:
+            rows = fetch_all(
+                connection,
+                f"SELECT * FROM {name} WHERE contact_id IS NULL LIMIT 500",  # noqa: S608 - a known table
+            )
+            if not rows:
+                break
+            for row in rows:
+                contact_id = contact_for(connection, **_contact_values(name, row))
+                connection.execute(
+                    f"UPDATE {name} SET contact_id = ? WHERE id = ?",  # noqa: S608
+                    (contact_id, row["id"]),
+                )
+                linked += 1
+            connection.commit()
+    return linked
+
+
+def contact_for(
+    connection: sqlite3.Connection,
+    *,
+    email: Any = "",
+    phone: Any = "",
+    name: Any = "",
+    source: str = "",
+    company: Any = "",
+    tags: Iterable[str] | None = None,
+    email_consent: bool | None = None,
+    at: str = "",
+) -> str:
+    """The contact for this email or phone, made on first sight and updated after (blank details filled in, tags
+    and apps added, last seen moved on). Returns its id, or '' when there is neither a valid email nor a phone.
+
+    The email decides first. A phone alone matches a contact that has no other email, so two people who share a
+    phone but give different emails stay two people."""
+    ensure_contacts(connection)
+    address, number = email_key(email), phone_key(phone)
+    if not address and not number:
+        return ""
+    stamp = str(at or "") or now()
+    person = _CONTROL.sub("", str(name or "")).strip()[:120]
+    firm = _CONTROL.sub("", str(company or "")).strip()[:120]
+    found: dict[str, Any] | None = None
+    if address:
+        found = fetch_one(
+            connection,
+            "SELECT c.* FROM suite_contact_keys k JOIN suite_contacts c ON c.id = k.contact_id WHERE k.key = ?",
+            (f"e:{address}",),
+        )
+    if found is None and number:
+        by_phone = fetch_one(
+            connection,
+            "SELECT c.* FROM suite_contact_keys k JOIN suite_contacts c ON c.id = k.contact_id WHERE k.key = ?",
+            (f"p:{number}",),
+        )
+        if by_phone and (not address or not by_phone["email"]):
+            found = by_phone
+    extra_tags = [str(tag) for tag in (tags or []) if str(tag).strip()]
+    if found is None:
+        contact_id = new_id()
+        connection.execute(
+            """INSERT INTO suite_contacts (id, name, email, phone, company, tags, email_consent, consent_at, source_app,
+            apps, first_seen, last_seen, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",
+            (
+                contact_id,
+                person,
+                address,
+                str(phone or "").strip()[:30] if number else "",
+                firm,
+                dumps(sorted(set(extra_tags))[:50]),
+                None if email_consent is None else int(bool(email_consent)),
+                stamp if email_consent is not None else None,
+                source[:40],
+                dumps([source] if source else []),
+                stamp,
+                stamp,
+                now(),
+                now(),
+            ),
+        )
+    else:
+        contact_id = str(found["id"])
+        apps = loads(found["apps"], []) or []
+        if source and source not in apps:
+            apps.append(source)
+        values: dict[str, Any] = {
+            "name": found["name"] or person,
+            "email": found["email"] or address,
+            "phone": found["phone"] or (str(phone or "").strip()[:30] if number else ""),
+            "company": found["company"] or firm,
+            "tags": dumps(sorted(set(loads(found["tags"], []) or []) | set(extra_tags))[:50]),
+            "apps": dumps(apps[:20]),
+            "first_seen": min(str(found["first_seen"]), stamp),
+            "last_seen": max(str(found["last_seen"]), stamp),
+            "source_app": found["source_app"] or source[:40],
+            "updated_at": now(),
+        }
+        if email_consent is not None and (
+            found["email_consent"] is None or int(found["email_consent"]) != int(email_consent)
+        ):
+            values["email_consent"] = int(bool(email_consent))
+            values["consent_at"] = stamp
+        update_row(connection, "suite_contacts", contact_id, values)
+    for key in ([f"e:{address}"] if address else []) + ([f"p:{number}"] if number else []):
+        # a key another contact already has stays theirs (merge the two to join them)
+        connection.execute(
+            "INSERT OR IGNORE INTO suite_contact_keys (key, contact_id) VALUES (?, ?)",
+            (key, contact_id),
+        )
+    return contact_id
 
 
 # ---------------------------------------------------------------------------

@@ -516,6 +516,9 @@
         row.email ? S.button("Reply by email", reply) : null,
         !row.paid ? S.button("Ask for payment", askPayment, { kind: "secondary" }) : null,
         row.paid ? S.button("Mark not paid", async () => { if (await Aira.confirm({ title: "Mark not paid", message: "Take this payment off your revenue? Use this for a mistake or a refund.", confirmLabel: "Mark not paid" })) { await M(`/submissions/${row.id}/paid`, { method: "DELETE" }); done("Marked not paid."); } }, { kind: "secondary" }) : S.button("Mark paid", markPaid, { kind: "secondary" })),
+      // A lead worth a deal goes to the Sales pipeline; once its invoice is paid there, the sale counts once.
+      S.salesHandoff({ app: "marketing", objectType: "lead", objectId: row.id }),
+      row.contact_id ? h("p", { class: "small" }, h("a", { href: `#/hub?tab=customers&contact=${row.contact_id}`, text: "See everything from this customer" })) : null,
       form.node,
       h("div", { class: "btn-row" },
         S.button("Save", async () => { form.setError(""); try { await M(`/submissions/${row.id}`, { method: "PATCH", body: form.read() }); done("Saved."); } catch (error) { form.setError(error.message); } }),
