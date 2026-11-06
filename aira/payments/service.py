@@ -550,7 +550,12 @@ def close_open(
         (app, object_type, object_id),
     )
     for row in rows:
-        _close(connection, row, status)
+        if _SECRETS.get() is not None:
+            _close_at_provider(
+                connection, row, status=status
+            )  # cancel it at Razorpay too, when the key is at hand
+        else:
+            _close(connection, row, status)
     return len(rows)
 
 

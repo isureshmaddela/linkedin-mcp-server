@@ -397,7 +397,10 @@ def _order_action(request: Request, action: str) -> tuple[int, dict[str, Any]]:
     order_id = request.match.group(1)
     payload = request.payload
     note = kit.text(payload.get("note"), "a note", max_len=300)
-    with _open(request) as connection:
+    from aira.payments import service as payments
+
+    # a cancelled order's open payment link is cancelled at Razorpay too
+    with _open(request) as connection, payments.secrets(request.secret_store):
         if action == "paid":
             order = service.mark_paid(
                 connection, order_id, note=note, origin=request.base_url()

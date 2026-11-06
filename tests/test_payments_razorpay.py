@@ -449,6 +449,15 @@ def test_link_expired_cancelled_and_failed_attempts(db, rzp, secrets):
     assert deliver(db, secrets, body, headers)["outcome"] == "ignored"
 
 
+def test_cancelling_an_order_cancels_its_open_link_at_razorpay(db, rzp):
+    _, order = an_order(db)
+    made = payments.create_request(db, "shop", "order", order["id"])
+    shop.cancel(db, order["id"])
+    assert payments.get(db, made["id"])["status"] == "cancelled"
+    assert rzp.links[made["provider_ref"]]["status"] == "cancelled"
+    assert not payments.has_open_link(db, "shop", "order", order["id"])
+
+
 def test_an_amount_change_cancels_the_open_link_and_makes_a_new_one(db, rzp):
     _, order = an_order(db)
     first = payments.create_request(db, "shop", "order", order["id"])

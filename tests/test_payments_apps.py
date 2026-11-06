@@ -155,6 +155,7 @@ def test_an_event_ticket_order_is_confirmed_when_paid(db, rzp):
 def test_a_marketing_lead_and_a_website_project(db, rzp):
     from aira.suite.marketing import service as marketing
     from aira.suite.marketing import store as marketing_store
+    import aira.suite.sites.sites_routes  # noqa: F401 - its public pages (a paid project gets its preview link)
     from aira.suite.sites import store as sites_store
 
     marketing_store.ensure(db)
