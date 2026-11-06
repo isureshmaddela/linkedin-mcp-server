@@ -8984,6 +8984,18 @@ class RequestHandler(BaseHTTPRequestHandler):
         length = int(self.headers.get("Content-Length", "0"))
         if length < 1 or length > 20_000_000:
             raise ValueError("Request body must be between 1 byte and 20 MB.")
+        kind = self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+        if kind == "application/x-www-form-urlencoded" and urlsplit(
+            self.path
+        ).path.startswith("/api/public/"):
+            # a public link's form post: a mail client's RFC 8058 one-click unsubscribe (List-Unsubscribe=One-Click)
+            return {
+                name: values[-1]
+                for name, values in parse_qs(
+                    self.rfile.read(length).decode("utf-8", "replace"),
+                    keep_blank_values=True,
+                ).items()
+            }
         try:
             value = json.loads(self.rfile.read(length))
         except RecursionError:

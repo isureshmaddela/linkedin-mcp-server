@@ -92,9 +92,19 @@ def services_list(request: Request):
   (`kit.business(...)["payment_link"]`) or instructions, and the business marks the payment received (or the app
   records it when the business confirms). Never claim money moved that did not.
 * **Email.** `kit.queue_email(connection, "<id>", kind, to=, subject=, body=, ref_type=, ref_id=,
-  send_after=)` puts a message for a customer in the shared outbox (Business hub > Outbox). It waits for approval
-  unless the business listed `kind` under automatic sending. Use stable kind names (`booking_confirmation`,
-  `booking_reminder`, `invoice`, `payment_receipt`, `order_confirmation`, `ticket`, `enrolment`, ...).
+  send_after=, expires_at=, unsubscribe_url=)` puts a message for a customer in the shared outbox (Business hub >
+  Outbox). It waits for approval unless the business sends `kind` automatically (Business hub > Email > Send
+  without approval). Use stable kind names and add a new one to `kit.MESSAGE_KINDS` with its label: transactional
+  kinds a customer is waiting for (`order_confirmation`, `ticket`, `booking_confirmation`, `payment_receipt`) are
+  sent automatically until the business chooses otherwise. A time-bound message (a reminder) gets `expires_at` (or
+  a default from `kit.EXPIRE_AFTER`) and is dropped if still unsent then. Bulk mail passes `unsubscribe_url` (the
+  RFC 8058 one-click address) and is checked against unsubscribes again when it is sent; an app adds its own
+  send-time check with `@kit.suppression("<id>")`. Sending retries passing failures (`kit.RETRY_MINUTES`); an
+  address refused for good, or bounced, goes on the do-not-contact list. Public forms send back the page's
+  `kit.form_ticket(connection)` as `started`; check it with `kit.check_form(connection, payload)`.
+* **Email in.** `aira/inbound_mail.py` reads the business's mailbox (Business hub > Email > Incoming mail) and
+  routes each message: bounces, unsubscribes, registered consumers (`@inbound_mail.consumer("<name>")`), replies
+  threaded by the `[#1234]` reference or In-Reply-To (Service cases, Leads), then email-to-ticket.
 * **Writing model.** `kit.draft(prompt, fallback_dict)` returns the model's JSON object (keys and types of the
   fallback) or the fallback marked `"source": "template"` when no model runs. Always ship a good template.
 * **Public pages.** A link is made for one thing (`public.create_link(connection, "<id>", kind, ref_id,
