@@ -176,7 +176,7 @@
   };
   const STAGES = ["discovered", "saved", "ready_to_apply", "applying", "needs_review", "applied", "assessment", "recruiter_screen", "technical_interview", "manager_interview", "panel_interview", "final_interview", "offer", "accepted", "rejected", "withdrawn", "failed"];
   const CLASSES = ["Recommended", "Strong Match", "Good Match", "Stretch", "Not Recommended"];
-  const SUBMISSION_METHODS = { manual: "You sent Monosage's application", assisted: "Monosage filled it in, you sent it", auto: "Monosage applied for you", outside: "You applied another way" };
+  const SUBMISSION_METHODS = { manual: "You sent Monosage's application", assisted: "Monosage filled it in, you sent it", auto: "Monosage applied for you", email: "Monosage emailed your application", outside: "You applied another way" };
 
   // The source catalog is read again on every visit to Jobs: a SerpApi key connected in API, or a LinkedIn session
   // that just came up, must show here without a reload.

@@ -586,6 +586,12 @@ def _recruiter_contacts(connection: sqlite3.Connection) -> None:
     ensure_schema(connection)
 
 
+def _email_apply(connection: sqlite3.Connection) -> None:
+    from aira.email_apply import ensure_schema
+
+    ensure_schema(connection)
+
+
 def _normalize_stages(connection: sqlite3.Connection) -> None:
     """Rename the old stage names again.
 
@@ -733,6 +739,13 @@ MIGRATIONS: tuple[Migration, ...] = (
         "Auto-apply runs count their tries and keep when the next retry is due (passing failures are tried again "
         "twice; a run whose result is unknown waits for the person as interrupted).",
         _autopilot,
+    ),
+    Migration(
+        22,
+        "email_apply",
+        "Applying by email: one ledger row per job emailed (recipient, Message-ID, status) so a job is emailed "
+        "once ever, and the Auto-apply plan switch 'Apply by email when the posting asks for it'.",
+        _email_apply,
     ),
 )
 

@@ -25,7 +25,8 @@ from aira.hosting import notify_submission
 PREP_STATUSES = ("draft", "needs_review", "approved", "submitted", "failed")
 # manual: the person sent Aira's packet; assisted / auto: Aira filled or sent it; outside: the person applied
 # another way (email, in person, before using Aira), which the daily limit does not pace.
-SUBMISSION_METHODS = ("manual", "assisted", "auto", "outside")
+# "email": Monosage emailed the application to the address the posting asked for (aira/email_apply.py).
+SUBMISSION_METHODS = ("manual", "assisted", "auto", "email", "outside")
 EARLIEST_SUBMISSION_YEAR = 1990
 DEFAULT_QUESTIONS: tuple[dict[str, Any], ...] = (
     {"label": "First name", "required": True, "type": "text"},
@@ -371,7 +372,9 @@ def record_submission(
     submitted_at: str | None = None,
 ) -> dict[str, Any]:
     if method not in SUBMISSION_METHODS:
-        raise ValueError("Submission method must be manual, assisted, auto or outside.")
+        raise ValueError(
+            "Submission method must be manual, assisted, auto, email or outside."
+        )
     existing = connection.execute(
         "SELECT * FROM application_submissions WHERE job_id = ?", (job_id,)
     ).fetchone()

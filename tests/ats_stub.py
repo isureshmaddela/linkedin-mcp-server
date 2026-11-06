@@ -49,6 +49,9 @@ by redirect), ``GET /captcha-frame`` (what the CAPTCHA placeholder embeds).
 ``fail_submit``      ``/submit`` answers HTTP 500
 ``no_marker``        ``/submit`` answers 200 with a neutral page and no success wording
 ``captcha``          a visible reCAPTCHA-style placeholder sits above the submit button
+``es_marker``        ``/submit`` answers 200 with Spanish success wording only
+``de_marker``        ``/submit`` answers 200 with German success wording only
+``de_applied``       the form is replaced by a German "already applied" notice
 ===================  =============================================================
 
 ``stub.submissions`` holds one :class:`Submission` per accepted POST (fields as
@@ -76,6 +79,25 @@ VARIANTS = (
     "fail_submit",
     "no_marker",
     "captcha",
+    "es_marker",
+    "de_marker",
+    "de_applied",
+)
+# Confirmation pages and an "already applied" notice in other languages (aira.apply_engine.CONFIRMATION_PHRASES).
+_LOCALE_CONFIRMATION = {
+    "es_marker": (
+        "Solicitud recibida",
+        "<h1>¡Gracias por tu solicitud!</h1><p>Hemos recibido tu candidatura. Referencia: {ref}.</p>",
+    ),
+    "de_marker": (
+        "Bewerbung eingegangen",
+        "<h1>Vielen Dank für Ihre Bewerbung</h1><p>Ihre Bewerbung ist bei uns eingegangen. "
+        "Referenznummer: {ref}.</p>",
+    ),
+}
+_DE_ALREADY_APPLIED = (
+    '<div class="already-applied"><p>Sie haben sich bereits auf diese Stelle beworben. '
+    "Wir melden uns bei Ihnen.</p></div>"
 )
 UNKNOWN_QUESTION = "Which of our products have you used, and what would you improve?"
 SENSITIVE_QUESTION = (
@@ -375,10 +397,13 @@ class AtsStub:
     def form_page(self, ats: str, variant: str) -> str:
         """The form HTML for ``ats`` with the variant applied."""
         html = self._pages[ats]
-        if variant == "applied":
-            return re.sub(
-                r"<form\b.*?</form>", _ALREADY_APPLIED[ats], html, count=1, flags=re.S
+        if variant in ("applied", "de_applied"):
+            notice = (
+                _DE_ALREADY_APPLIED
+                if variant == "de_applied"
+                else _ALREADY_APPLIED[ats]
             )
+            return re.sub(r"<form\b.*?</form>", notice, html, count=1, flags=re.S)
         extra = ""
         if variant == "unknown_required":
             extra = _TEXTAREA[ats].format(
@@ -461,6 +486,9 @@ class AtsStub:
                 ),
                 {},
             )
+        if variant in _LOCALE_CONFIRMATION:
+            title, page = _LOCALE_CONFIRMATION[variant]
+            return 200, _page(title, page.format(ref=reference)), {}
         redirect = _REDIRECT_PATH.get(ats)
         if redirect:
             return 303, b"", {"Location": f"/{ats}/{redirect}?ref={reference}"}

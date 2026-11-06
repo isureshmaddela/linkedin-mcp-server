@@ -35,6 +35,10 @@ if TYPE_CHECKING:
 FEATURE = "leads_outreach"  # outbound email (Team and up): the same feature Leads outreach sends with
 NOT_IN_PLAN = "Recruiter email is not part of your organization's plan."
 ON_ORGANIZATION_LIST = "On your organization's do-not-contact list."
+APPLICATIONS_SWITCHED_OFF = (
+    "Email from Monosage is switched off for every organization right now, so applications by email wait. "
+    "Apply on the posting instead."
+)
 
 
 def _organization_settings(app: CloudApp, org_id: str) -> tuple[dict[str, Any], str]:
@@ -87,6 +91,79 @@ def business_mail(app: CloudApp, org_id: str, member_id: str) -> OutreachMail | 
     }
     return OutreachMail(
         settings=lent, password=password, suppressed=lambda _address: ""
+    )
+
+
+def _suppression_check(app: CloudApp, org_id: str) -> Any:
+    """``address -> reason`` for the organization's do-not-contact list ('' when it may be written to)."""
+    from aira.leads import mail as leads_mail
+
+    suppressions: set[str] = set()
+    if app.workspaces.org_api_path(org_id).exists():
+        connection = app.workspaces.org_api_connection(org_id)
+        try:
+            suppressions = {
+                str(row[0])
+                for row in connection.execute("SELECT key FROM lead_suppressions")
+            }
+        except Exception:  # noqa: BLE001 - an organization that never used Leads has no list yet
+            suppressions = set()
+        finally:
+            connection.close()
+
+    def suppressed(address: str) -> str:
+        email = str(address or "").strip().lower()
+        if not email:
+            return ""
+        keys = {f"email:{email}"}
+        domain = email.split("@")[-1]
+        if domain not in leads_mail.FREEMAIL:
+            keys.add(f"domain:{domain}")
+        return ON_ORGANIZATION_LIST if keys & suppressions else ""
+
+    return suppressed
+
+
+def application_mail(
+    app: CloudApp, org_id: str, candidate_id: str
+) -> OutreachMail | None:
+    """The organization's mail for a member's application by email (aira/email_apply.py), or None when the
+    organization has not set up email.
+
+    Applying is part of Careers on every plan, so no outbound-email feature is needed; the member's name is on
+    it ("Jordan Lee via Acme Careers") and Reply-To is their own sign-in address, so the employer answers them.
+    The organization's do-not-contact list, the operator's outbound switch and the organization's state still
+    apply (``unavailable``). Which applications may go out, and how many, is Auto-apply's gate, as for every
+    other application."""
+    settings, password = _organization_settings(app, org_id)
+    if not (settings.get("smtp_host") and settings.get("from_email")):
+        return None
+    try:
+        member = app.tenancy.member(org_id, candidate_id)
+    except NotFound:  # no longer a member: nothing is sent in their name
+        return None
+    writer = (
+        " ".join(str(member.get("name") or "").split())
+        or str(member["email"]).split("@")[0]
+    )
+    organization = " ".join(
+        str(settings.get("from_name") or app.tenancy.org(org_id)["name"]).split()
+    )
+    lent = {
+        **settings,
+        "from_name": (f"{writer} via {organization}" if organization else writer)[:100],
+        "reply_to": str(member["email"]),
+        "auto_send": [],
+    }
+    unavailable = ""
+    block = app.gate.outreach_block(org_id, candidate_id)
+    if block is not None:
+        unavailable = APPLICATIONS_SWITCHED_OFF if block[0] == "switch" else block[2]
+    return OutreachMail(
+        settings=lent,
+        password=password,
+        suppressed=_suppression_check(app, org_id),
+        unavailable=unavailable,
     )
 
 
@@ -149,6 +226,7 @@ def organization_mail(app: CloudApp, org_id: str, candidate_id: str) -> Outreach
 
 
 __all__ = [
+    "application_mail",
     "organization_mail",
     "business_mail",
     "FEATURE",

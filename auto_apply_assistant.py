@@ -29,6 +29,7 @@ import zipfile
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import asdict
 from datetime import datetime, timedelta, timezone
+from email.utils import formataddr
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from http.cookies import SimpleCookie
 from pathlib import Path
@@ -152,7 +153,7 @@ from aira.airaapi import service as airaapi_service
 from aira.airaapi import store as airaapi_store
 from aira.airaapi.client import SerpApiError
 from aira import answer_drafts, autopilot
-from aira import ai_instructions, ai_instructions_routes, model_provider
+from aira import ai_instructions, ai_instructions_routes, email_apply, model_provider
 from aira.apply_engine import ApplyRequest, detect_ats
 from aira.apply_engine import run as run_apply_engine
 from aira import workday_accounts
@@ -5477,6 +5478,10 @@ def _job_detail(job_id: str) -> dict[str, Any]:
         )
         job["auto_runs"] = autopilot.list_runs(connection, job_id=job_id, limit=10)
         job["auto_review_drafts"] = _setting("review_drafted_answers") != "0"
+        # Where the posting asks for applications by email, and whether one was sent (the Apply tab's card)
+        target = email_apply.target_for(job)
+        job["apply_by_email"] = target.public() if target else None
+        job["email_application"] = email_apply.record(connection, job_id)
         job["recruiters"] = [
             dict(row)
             for row in connection.execute(
@@ -6614,6 +6619,46 @@ def _autopilot_documents(
     return job
 
 
+def _engine_packet_fields(job: dict[str, Any]) -> list[dict[str, Any]]:
+    """The packet the form engine fills from, as the manual path has it.
+
+    The approved (or already submitted) packet when there is one: its reviewed answers and the employer's own
+    question ids. Otherwise, for a Greenhouse job, the employer's questions from its question API, mapped and
+    prefilled from the profile and confirmed answers only (``build_packet`` never answers a sensitive one). An
+    empty list leaves the engine to map the live form itself, as before.
+    """
+    try:
+        with _connect() as connection:
+            preparation = latest_preparation(connection, job["job_id"])
+        if preparation and preparation["status"] in {"approved", "submitted"}:
+            return [
+                dict(item)
+                for item in preparation.get("fields") or []
+                if isinstance(item, Mapping)
+            ]
+        questions, questions_source = _portal_questions(job)
+        if not questions:
+            return []
+        state = _profile_state()
+        with _connect() as connection:
+            answers = standard_answers_map(connection)
+        packet = build_packet(
+            job=job,
+            profile=state["candidate_profile"],
+            standard_answers=answers,
+            questions=questions,
+            questions_source=questions_source,
+        )
+        return list(packet["fields"])
+    except Exception:  # noqa: BLE001 - without a packet the engine maps the form itself
+        logger.info(
+            "No packet for %s; the form is mapped live",
+            job.get("job_id"),
+            exc_info=True,
+        )
+        return []
+
+
 def _apply_with_engine(
     job: dict[str, Any],
     url: str,
@@ -6653,6 +6698,7 @@ def _apply_with_engine(
             letter_path, letter_cleanup = cover_letter_for_upload(job)
         except LookupError:
             pass
+    packet_fields = _engine_packet_fields(job)
     shots = Path(tempfile.mkdtemp(prefix="aira-shots-"))
     try:
         outcome = run_apply_engine(
@@ -6660,7 +6706,7 @@ def _apply_with_engine(
                 job_id=job["job_id"],
                 source=source,
                 application_url=url,
-                fields=[],
+                fields=packet_fields,
                 profile=profile,
                 standard_answers=standard,
                 resume_path=str(resume_path),
@@ -6725,6 +6771,406 @@ def _apply_with_engine(
         resume_cleanup()
         letter_cleanup()
         shutil.rmtree(shots, ignore_errors=True)
+
+
+# ---------------------------------------------------------------------------
+# Applying by email (aira/email_apply.py): postings that ask for an email, sent through the account's own mail
+# ---------------------------------------------------------------------------
+
+EMAIL_SETUP_NEEDED = (
+    "Set up email to apply by email: add your mail server in Business hub > Email."
+)
+EMAIL_SETUP_NEEDED_HOSTED = (
+    "Set up email to apply by email: your organization has not set up email yet. An owner or admin sets it up "
+    "in Business hub > Email."
+)
+# Application systems with a form Monosage fills: a posting on one of these applies there, not by email.
+_FORM_ATS = frozenset({"greenhouse", "lever", "ashby", "smartrecruiters", "workday"})
+# Tests replace the transport; None sends through the mail server (aira.leads.mail.smtp_send).
+EMAIL_APPLY_SENDER: Callable[..., None] | None = None
+
+
+def _application_mail() -> dict[str, Any]:
+    """How an email application leaves: ``{"settings", "password", "problem", "suppressed", "hosted"}``.
+
+    Here, the person's own Business hub > Email. Hosted, the organization's mail (the member's name on it, Reply-To
+    their sign-in address, its do-not-contact list, the operator's outbound switch and the organization's state)."""
+    if HOSTING.application_mail is not None:
+        mail = HOSTING.application_mail()
+        if mail is None:
+            return {
+                "settings": {},
+                "password": "",
+                "problem": EMAIL_SETUP_NEEDED_HOSTED,
+                "suppressed": lambda _address: "",
+                "hosted": True,
+            }
+        settings = dict(mail.settings)
+        ready = bool(settings.get("smtp_host") and settings.get("from_email"))
+        return {
+            "settings": settings,
+            "password": mail.password,
+            "problem": mail.unavailable or ("" if ready else EMAIL_SETUP_NEEDED_HOSTED),
+            "suppressed": mail.suppressed,
+            "hosted": True,
+        }
+    with _connect() as connection:
+        settings, password, _lent = suite_kit.outgoing_mail(
+            connection, _airaapi_secret_store()
+        )
+    ready = bool(settings.get("smtp_host") and settings.get("from_email"))
+    return {
+        "settings": dict(settings),
+        "password": password,
+        "problem": "" if ready else EMAIL_SETUP_NEEDED,
+        "suppressed": lambda _address: "",
+        "hosted": False,
+    }
+
+
+def _application_profile() -> dict[str, Any]:
+    profile = dict(_profile_state()["candidate_profile"])
+    profile.setdefault("full_name", email_apply.person_name(profile))
+    return profile
+
+
+def _email_identity(
+    mail: Mapping[str, Any], profile: Mapping[str, Any]
+) -> tuple[str, str]:
+    """``(display name, Reply-To)`` on an application email: the person's own name and address. Hosted, the
+    organization's mail already names the member ("Jordan Lee via Acme Careers") and replies to them."""
+    settings = mail["settings"]
+    if mail["hosted"]:
+        return str(settings.get("from_name") or ""), str(settings.get("reply_to") or "")
+    name = email_apply.person_name(profile) or str(settings.get("from_name") or "")
+    reply_to = str(profile.get("email") or settings.get("reply_to") or "")
+    return name, reply_to
+
+
+def _email_attachments(
+    job: dict[str, Any],
+) -> tuple[list[email_apply.Attachment], Callable[[], None]]:
+    """The resume (the approved one for this job first) and the cover letter as files, with their cleanup."""
+    job = _with_approved_documents(job)
+    state = _profile_state()
+    with _connect() as connection:
+        resume_path, resume_cleanup = resume_for_upload(
+            connection,
+            _document_store(),
+            _owner_id(),
+            job,
+            state["resume"],
+            actor=_actor(),
+        )
+    items = [email_apply.Attachment(str(resume_path), "resume")]
+    cleanups = [resume_cleanup]
+    if job.get("cover_letter"):
+        try:
+            letter_path, letter_cleanup = cover_letter_for_upload(job)
+        except LookupError:
+            pass
+        else:
+            items.append(email_apply.Attachment(str(letter_path), "cover_letter"))
+            cleanups.append(letter_cleanup)
+
+    def cleanup() -> None:
+        for step in cleanups:
+            step()
+
+    return items, cleanup
+
+
+def _email_text(
+    job: Mapping[str, Any],
+    target: email_apply.ApplyAddress,
+    profile: Mapping[str, Any],
+    *,
+    has_letter: bool,
+    subject: str | None = None,
+    body: str | None = None,
+) -> tuple[str, str]:
+    name = email_apply.person_name(profile)
+    subject_text = " ".join(str(subject or "").split())[: email_apply.MAX_SUBJECT]
+    body_text = str(body or "").strip()[: email_apply.MAX_BODY]
+    return (
+        subject_text or email_apply.default_subject(job, target, name),
+        body_text
+        or email_apply.default_body(job, profile, target, has_letter=has_letter),
+    )
+
+
+def _email_apply_preview(job_id: str) -> dict[str, Any]:
+    """What applying by email would send for this job: the address and why, the message, the files and the mail."""
+    row = _job_row(job_id)
+    if row is None:
+        raise LookupError("Job not found.")
+    job = _decode_job(row)
+    target = email_apply.target_for(job)
+    with _connect() as connection:
+        existing = email_apply.record(connection, job_id)
+        submission = get_submission(connection, job_id)
+    preview: dict[str, Any] = {
+        "available": target is not None,
+        "target": target.public() if target else None,
+        "record": existing,
+        "submitted": submission is not None,
+    }
+    if target is None:
+        return preview
+    mail = _application_mail()
+    profile = _application_profile()
+    problem = ""
+    attachments: list[dict[str, Any]] = []
+    try:
+        items, cleanup = _email_attachments(job)
+        try:
+            attachments = email_apply.check_attachments(items)
+        finally:
+            cleanup()
+    except (LookupError, ValueError) as error:
+        problem = str(error)
+    subject, body = _email_text(
+        job,
+        target,
+        profile,
+        has_letter=any(item["kind"] == "cover_letter" for item in attachments),
+    )
+    name, reply_to = _email_identity(mail, profile)
+    sender = str(mail["settings"].get("from_email") or "")
+    preview.update(
+        {
+            "subject": subject,
+            "body": body,
+            "attachments": attachments,
+            "mail": {
+                "ready": not mail["problem"],
+                "problem": mail["problem"] or mail["suppressed"](target.address),
+                "from": formataddr((name, sender)) if sender else "",
+                "reply_to": reply_to,
+            },
+            "problem": (
+                "This application was already submitted."
+                if submission
+                else email_apply.blocked_reason(existing) or problem
+            ),
+        }
+    )
+    return preview
+
+
+def _email_target(
+    job: Mapping[str, Any], plan: Mapping[str, Any] | None
+) -> email_apply.ApplyAddress | None:
+    """The address Auto-apply emails for this job, or None (the browser route applies instead).
+
+    Only when the plan turned on "Apply by email when the posting asks for it", the posting asks for an email,
+    and it has no application form Monosage fills (a ``mailto:`` link always counts as the posting's way in)."""
+    if plan is None or not plan.get("email_apply"):
+        return None
+    target = email_apply.target_for(job)
+    if target is None:
+        return None
+    if target.how == "mailto":
+        return target
+    url = str(job.get("application_url") or job.get("job_url") or "")
+    if url and detect_ats(url) in _FORM_ATS:
+        return None  # the employer's own form is the way in
+    return target
+
+
+def _email_apply(
+    job: dict[str, Any],
+    target: email_apply.ApplyAddress,
+    *,
+    submit: bool,
+    subject: str | None = None,
+    body: str | None = None,
+    run_id: str = "",
+) -> dict[str, Any]:
+    """Apply to ``job`` by email (an outcome in the shape of :func:`_apply_with_engine`'s).
+
+    ``submit=False`` prepares the message and waits for the person's OK (``filled``). One email per job, ever:
+    the ledger is claimed before anything is sent, and a job already applied to is never written to."""
+    job_id = job["job_id"]
+    address = target.address
+    steps = [f"The posting asks for applications by email to {address}"]
+    outcome: dict[str, Any] = {
+        "route": "email",
+        "ats": "email",
+        "questions": [],
+        "unanswered": [],
+        "steps": steps,
+        "error": "",
+        "confirmation_text": "",
+        "confirmation_number": "",
+        "evidence_document_id": None,
+        "screenshot_document_id": None,
+        "url": f"mailto:{address}",
+    }
+
+    def stop(status: str, error: str) -> dict[str, Any]:
+        steps.append(error)
+        return {**outcome, "status": status, "error": error}
+
+    with _connect() as connection:
+        submitted = get_submission(connection, job_id) is not None
+        existing = email_apply.record(connection, job_id)
+    if submitted:
+        return stop("already_applied", "This job already has a recorded application.")
+    blocked = email_apply.blocked_reason(existing)
+    if blocked:
+        return stop(
+            "already_applied"
+            if existing and existing.get("status") == "sent"
+            else "needs_review",
+            blocked,
+        )
+    mail = _application_mail()
+    if mail["problem"]:
+        return stop("needs_review", mail["problem"])
+    suppressed = mail["suppressed"](address)
+    if suppressed:
+        return stop("needs_review", f"{address}: {suppressed}")
+    profile = _application_profile()
+    try:
+        items, cleanup = _email_attachments(job)
+    except LookupError as error:
+        return stop("needs_review", str(error))
+    try:
+        listed = email_apply.check_attachments(items)
+        subject_text, body_text = _email_text(
+            job,
+            target,
+            profile,
+            has_letter=any(item.kind == "cover_letter" for item in items),
+            subject=subject,
+            body=body,
+        )
+        name, reply_to = _email_identity(mail, profile)
+        message = email_apply.compose(
+            mail["settings"],
+            to=address,
+            subject=subject_text,
+            body=body_text,
+            attachments=items,
+            from_name=name,
+            reply_to=reply_to,
+        )
+    except ValueError as error:
+        cleanup()
+        return stop("needs_review", str(error))
+    files = ", ".join(item["name"] for item in listed)
+    if not submit:
+        cleanup()
+        steps.append(
+            f"Prepared an email to {address} with {files}; it waits for your OK"
+        )
+        return {**outcome, "status": "filled"}
+    try:
+        with _connect() as connection:
+            claimed = email_apply.claim(
+                connection,
+                job_id,
+                recipient=address,
+                subject=subject_text,
+                attachments=listed,
+                run_id=run_id,
+            )
+            if not claimed:
+                return stop(
+                    "needs_review",
+                    email_apply.blocked_reason(email_apply.record(connection, job_id))
+                    or "This job's email application is already under way.",
+                )
+        try:
+            (EMAIL_APPLY_SENDER or leads_mail.smtp_send)(
+                mail["settings"], mail["password"], message
+            )
+        except Exception as error:  # noqa: BLE001 - the server refused it: nothing went out, it may be tried again
+            with _connect() as connection:
+                email_apply.mark_failed(connection, job_id, str(error))
+            return stop("failed", f"The application email was not sent: {error}")
+    finally:
+        cleanup()
+    message_id = str(message["Message-ID"] or "")
+    with _connect() as connection:
+        sent_at = email_apply.mark_sent(connection, job_id, message_id)
+    evidence_id = _store_evidence(
+        job,
+        kind="application_confirmation",
+        filename="application-email.txt",
+        data=email_apply.evidence_text(message, sent_at).encode("utf-8"),
+        title="Application email",
+    )
+    steps.append(f"Sent the application to {address} with {files}")
+    return {
+        **outcome,
+        "status": "submitted",
+        "confirmation_text": f"Emailed to {address} on {sent_at}. Message-ID {message_id}.",
+        "evidence_document_id": evidence_id,
+        "submission_method": "email",
+        "recipient": address,
+        "message_id": message_id,
+    }
+
+
+def _email_apply_send(job_id: str, payload: Mapping[str, Any]) -> dict[str, Any]:
+    """The job drawer's "Apply by email": send the previewed message the person confirmed, then record it."""
+    if payload.get("confirm") is not True:
+        raise ValueError(
+            "Confirm that you read the preview and want to send the application."
+        )
+    row = _job_row(job_id)
+    if row is None:
+        raise LookupError("Job not found.")
+    job = _decode_job(row)
+    target = email_apply.target_for(job)
+    if target is None:
+        raise ValueError("This posting does not ask for applications by email.")
+    subject = payload.get("subject")
+    body = payload.get("body")
+    if subject is not None and not isinstance(subject, str):
+        raise ValueError("Send the subject as text.")
+    if body is not None and not isinstance(body, str):
+        raise ValueError("Send the message as text.")
+    with _connect() as connection:
+        if get_submission(connection, job_id):
+            raise ValueError("This application was already submitted.")
+        check_daily_limit(
+            connection, daily_limit=int(_setting("daily_application_limit"))
+        )
+    outcome = _email_apply(job, target, submit=True, subject=subject, body=body)
+    if outcome["status"] != "submitted":
+        raise ValueError(outcome["error"] or "The application email was not sent.")
+    with _connect() as connection:
+        preparation = latest_preparation(connection, job_id)
+        submission = record_submission(
+            connection,
+            job_id=job_id,
+            prep_id=preparation["prep_id"] if preparation else None,
+            confirmation_text=outcome["confirmation_text"],
+            confirmation_number="",
+            evidence_document_id=outcome["evidence_document_id"],
+            method="email",
+            actor=_actor(),
+            correlation_id=_correlation_id(),
+            idempotency_key=f"email:{job_id}",
+        )
+    if not submission.get("duplicate"):
+        _move_stage_along(job_id, "applied", f"Applied by email to {target.address}")
+        _after_submission(job, f"Applied by email to {target.address}")
+    _audit(
+        "application.email",
+        "job",
+        job_id,
+        {"recipient_domain": target.address.split("@")[-1], "how": target.how},
+    )
+    return {
+        "submission": submission,
+        "recipient": target.address,
+        "message_id": outcome["message_id"],
+        "job": _decode_job(_job_row(job_id) or row),
+    }
 
 
 def _apply_with_linkedin(
@@ -6828,10 +7274,22 @@ def _autopilot_apply(
     submit: bool,
     plan: Mapping[str, Any] | None,
 ) -> dict[str, Any]:
-    """Apply through LinkedIn Easy Apply or the form engine, whichever fits the job."""
+    """Apply through LinkedIn Easy Apply, the form engine or by email, whichever fits the job."""
     sources = _job_sources(job["job_id"])
     linkedin = sources.get("linkedin")
-    if linkedin and job.get("easy_apply"):
+    easy_apply = bool(linkedin and job.get("easy_apply"))
+    target = None if easy_apply else _email_target(job, plan)
+    if target is not None:
+        # The posting asks for an email and has no form Monosage fills: no browser needed.
+        job = _autopilot_documents(job, plan)
+        _autopilot_progress(
+            f"{'Applying by email to' if submit else 'Writing the application email for'} "
+            f"{job.get('title') or 'the job'}{' at ' + job['company'] if job.get('company') else ''}"
+        )
+        return _email_apply(
+            job, target, submit=submit, run_id=str(run.get("run_id") or "")
+        )
+    if easy_apply:
         allowed = plan is None or bool(plan.get("linkedin_easy_apply"))
         if not allowed:
             return {
@@ -6939,7 +7397,8 @@ def _autopilot_on_submitted(
             confirmation_number=outcome.get("confirmation_number") or "",
             evidence_document_id=outcome.get("evidence_document_id")
             or outcome.get("screenshot_document_id"),
-            method="auto",
+            # "email" for an application sent by email (no browser); "auto" for a form or Easy Apply
+            method="email" if outcome.get("route") == "email" else "auto",
             actor=_actor(),
             correlation_id=_correlation_id(),
             idempotency_key=f"autopilot:{run['run_id']}",
@@ -9683,6 +10142,26 @@ class RequestHandler(BaseHTTPRequestHandler):
         user: dict[str, Any] | None,
     ) -> None:
         self._send_json(200, {"job": _job_detail(match.group(1))})
+
+    @route("GET", rf"/api/jobs/({JOB_KEY_PATTERN})/apply-email")
+    def api_job_apply_email_preview(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        self._send_json(200, _email_apply_preview(match.group(1)))
+
+    @route("POST", rf"/api/jobs/({JOB_KEY_PATTERN})/apply-email")
+    def api_job_apply_email_send(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        self._send_json(200, _email_apply_send(match.group(1), payload))
 
     @route("GET", rf"/api/jobs/({JOB_KEY_PATTERN})/events")
     def api_job_events(
