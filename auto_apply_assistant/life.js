@@ -181,6 +181,7 @@
       L.me = me.profile;
       L.profiles = me.profiles;
       L.canManage = me.can_manage;
+      L.archived = me.archived || [];
       L.apps = me.apps;
       // Apps a parent or guardian turned off for this child or teen (and Dating, always off for them).
       L.off = (me.controls && me.controls.off) || [];
@@ -476,9 +477,36 @@
         S.button("Edit", () => S.edit({ title: `Edit ${person.name}`, fields: fields(false, person), values: person, onSave: async (values) => { await Aira.api(`/api/life/profiles/${person.id}`, { method: "PATCH", body: values }); await refresh(); } }), { kind: "ghost sm" }),
         person.pin_rule && person.pin_rule.allowed ? S.button(person.has_pin ? "Change PIN" : "Set PIN", () => S.edit({ title: `PIN for ${person.name}`, fields: pinFields(person), onSave: async (values) => { const data = await Aira.api(`/api/life/profiles/${person.id}/pin`, { method: "POST", body: { pin: values.pin, confirm: values.confirm || "" } }); if (data.header) setHeader(data.header, data.lock); await refresh(); } }), { kind: "ghost sm" }) : null,
         person.guardian ? S.button("Parental controls", () => controlsDialog(person).catch((error) => Aira.reportError(error)), { kind: "ghost sm" }) : null,
-        L.canManage && !person.owner ? S.button("Remove", async () => { if (await S.confirmDelete(person.name)) { await Aira.api(`/api/life/profiles/${person.id}`, { method: "DELETE" }); await refresh(); } }, { kind: "ghost sm" }) : null) : null));
+        L.canManage && !person.owner ? S.button("Remove", () => removeDialog(person), { kind: "ghost sm" }) : null) : null));
+    // Removing a person: "Archive" hides them and keeps their data; "Erase everything" deletes every app's data
+    // about them for good, confirmed with the household owner's PIN.
+    const removeDialog = (person, archivedAlready = false) => S.edit({
+      title: archivedAlready ? `Erase ${person.name}` : `Remove ${person.name}`,
+      fields: [
+        ...(archivedAlready ? [] : [{ name: "mode", label: "How", type: "select", options: [["archive", "Archive: hide them and keep their data"], ["erase", "Erase everything: delete all their data for good"]] }]),
+        { type: "heading", label: "Erasing deletes their medicines, life book, chats, posts, games, plans and notifications in every app. Orders and invoices stay for the books without their name. It cannot be undone." },
+        { name: "pin", label: "Household owner's PIN (to erase everything)", type: "password" },
+      ],
+      values: { mode: archivedAlready ? "erase" : "archive" },
+      submitLabel: archivedAlready ? "Erase everything" : "Remove",
+      onSave: async (values) => {
+        if (!archivedAlready && values.mode !== "erase") {
+          await Aira.api(`/api/life/profiles/${person.id}`, { method: "DELETE" });
+          Aira.toast(`${person.name} was archived.`, "success");
+        } else {
+          const data = await Aira.api(`/api/life/profiles/${person.id}/erase`, { method: "POST", body: { pin: values.pin || "" } });
+          Aira.toast(data.erased ? `${person.name} was erased.` : "Most of it was erased. Monosage will try the rest again.", data.erased ? "success" : "info");
+        }
+        await refresh();
+      },
+    });
+    const archived = (L.archived || []).map((person) => h("li", { class: "life-person" },
+      h("span", { class: "life-face-small", style: { background: person.color }, "aria-hidden": "true", text: person.emoji }),
+      h("div", {}, h("strong", { text: person.name }), h("span", { class: "muted small", text: " archived" })),
+      h("div", { class: "btn-row" }, S.button("Erase everything", () => removeDialog(person, true), { kind: "ghost sm" }))));
     return S.section("People on this device", h("p", { class: "muted", text: "Everyone in the household can have their own reminders, games and settings." }),
       h("ul", { class: "life-people" }, ...rows),
-      L.canManage ? h("div", { class: "btn-row" }, S.button("Add a person", () => S.edit({ title: "Add a person", fields: fields(true), values: { emoji: "", age_group: "adult" }, onSave: async (values) => { await Aira.api("/api/life/profiles", { method: "POST", body: values }); await refresh(); } }))) : null);
+      L.canManage ? h("div", { class: "btn-row" }, S.button("Add a person", () => S.edit({ title: "Add a person", fields: fields(true), values: { emoji: "", age_group: "adult" }, onSave: async (values) => { await Aira.api("/api/life/profiles", { method: "POST", body: values }); await refresh(); } }))) : null,
+      L.canManage && archived.length ? h("div", {}, h("h3", { text: "Archived people" }), h("p", { class: "muted", text: "Hidden everywhere; their data is kept until you erase it." }), h("ul", { class: "life-people" }, ...archived)) : null);
   }
 })();

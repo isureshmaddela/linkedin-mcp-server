@@ -139,6 +139,7 @@ ROUTE_MODULES = (
     "aira.suite.suite_routes",
     "aira.suite.life_routes",
     *(f"aira.suite.{name}.{name}_routes" for name in APP_PACKAGES),
+    "aira.suite.erasure_routes",  # Business hub > Privacy: erase a customer (aira/erasure.py)
 )
 
 

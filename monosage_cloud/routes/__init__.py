@@ -6,4 +6,5 @@ from monosage_cloud.routes import apps  # noqa: F401
 from monosage_cloud.routes import developers  # noqa: F401  (OAuth 2.0, tokens, webhooks)
 from monosage_cloud.routes import creators  # noqa: F401  (Videos moderation, Creators & ads, ad top-ups)
 from monosage_cloud.routes import live  # noqa: F401  (live updates for open pages, Server-Sent Events)
+from monosage_cloud.routes import erasure  # noqa: F401  (a member deletes their own account)
 from monosage_cloud import sso_routes  # noqa: F401

@@ -30,6 +30,9 @@ with request.connect() as connection:
   * A child cannot create public links or post to a public board.
 * In the hosted build the "household" is the organization's members. The data lives in the organization's
   shared database: never let one member read another member's private rows.
+* **Erasure.** Removing a person offers "Archive" (hidden, data kept) or "Erase everything" (the owner's PIN):
+  every app's eraser deletes that person's rows (`aira/erasers.py`; how to write one: suite-sdk.md, "Erasing a
+  person"). A new table keyed by `owner_id` or `profile_id` needs a line in its app's eraser.
 
 ## Today and live updates
 

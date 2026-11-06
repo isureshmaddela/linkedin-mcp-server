@@ -79,6 +79,15 @@ def run(connection: sqlite3.Connection, secret_store: Any) -> dict[str, Any]:
         except Exception:  # noqa: BLE001 - one app must not stop the others or the mail
             suite.logger.exception("Background task for %s failed", app_id)
             result["tasks"][app_id] = "failed"
+    # An erasure that could not finish (aira/erasure.py: one app failed) is tried again.
+    try:
+        from aira import erasure
+
+        retried = erasure.retry_partial(connection, actor="system")
+        if retried:
+            result["erasures"] = [r["status"] for r in retried]
+    except Exception:  # noqa: BLE001 - an erasure problem must not stop the apps or the outbox
+        suite.logger.exception("Retrying erasures failed")
     # Reminders that reach a person with every tab closed (a dose that is due, an appointment a staff member gives,
     # a stock alert): the notification centre, Web Push and email (aira/notify/reminders.py). Each is told once, so
     # the single-user build's minute-by-minute reminder tick and this pass never repeat one.

@@ -165,6 +165,32 @@ Tasks must be idempotent (they run again five minutes later) and quick. Message 
 (safety notices a person set up, such as `missed_dose`) are approved on creation; everything else waits for
 approval unless the business listed the kind under automatic sending.
 
+## Erasing a person
+
+One erasure job (`aira/erasure.py`) runs when a household profile is removed with "Erase everything", an account
+is deleted, a hosted member is removed or deletes their account, and when a business erases a customer (Business
+hub > Privacy). Every app with personal data registers an eraser; the built-in ones are in `aira/erasers.py`:
+
+```python
+from aira import erasure
+
+def erase_bookings(connection, person):             # person.profile_id, member_id, emails, phones, names
+    customers = erasure.matching(connection, "bk_customers", person, emails=("email",), phones=("phone",), key="id")
+    return {
+        "bk_waitlist": erasure.delete(connection, "bk_waitlist", "email", list(person.emails)),
+        # what the books need stays, without the person: amounts kept, name/email/phone/address blanked
+        "bk_customers": erasure.blank(connection, "bk_customers", "id", customers,
+                                      {"name": erasure.ERASED_NAME, "email": "", "phone": ""}),
+    }
+
+erasure.register("bookings", erase_bookings, customer=True)   # customer=True: a customer request runs it too
+```
+
+Delete what is only the person's; anonymise orders, invoices, tickets and payments (keep amounts and references).
+An eraser must be safe to run twice (a failed one is retried) and must skip tables the database does not have
+(the helpers do). Count what a legal hold keeps under `"held:<table>"`. A last `sweep` blanks any email or phone
+column left that names the person, so a new table is never missed entirely, but write an eraser for it anyway.
+
 ## Frontend
 
 `views-<id>.js` replaces the placeholder and defines `Aira.views.<id> = async (main, route) => { ... }`. Build it

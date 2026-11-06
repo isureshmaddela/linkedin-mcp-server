@@ -4204,22 +4204,43 @@ def evidence(
                 "kind": item["kind"],
                 "data": store.loads(item["data"], {}),
                 "created_at": item["created_at"],
+                # the person was erased: this is kept only until the report is closed
+                "legal_hold": bool(item.get("legal_hold")),
             }
         )
     return out
 
 
 def purge_kept(sc: sqlite3.Connection) -> dict[str, int]:
-    """Social's background task: ended Dating chats past their retention, and evidence of closed reports past it."""
+    """Social's background task: ended Dating chats past their retention, and evidence of closed reports past it.
+
+    What a legal hold kept of an erased person (:func:`erase_account`) goes as soon as no open report needs it:
+    the evidence, the ended chats, the reports about them and the photos the evidence showed."""
     moment = stamp()
     ended = sc.execute(
-        "DELETE FROM so_dating_ended WHERE purge_after < ?", (moment,)
+        """DELETE FROM so_dating_ended WHERE (purge_after < ? AND legal_hold = '') OR (legal_hold != '' AND NOT EXISTS
+        (SELECT 1 FROM so_reports r WHERE r.status = 'open' AND r.target_type = 'account'
+        AND ((r.reporter_id = so_dating_ended.a_id AND r.target_id = so_dating_ended.b_id)
+        OR (r.reporter_id = so_dating_ended.b_id AND r.target_id = so_dating_ended.a_id))))""",
+        (moment,),
     ).rowcount
     kept = sc.execute(
-        """DELETE FROM so_evidence WHERE purge_after < ? AND report_id NOT IN
+        """DELETE FROM so_evidence WHERE (purge_after < ? OR legal_hold != '') AND report_id NOT IN
         (SELECT id FROM so_reports WHERE status = 'open')""",
         (moment,),
     ).rowcount
+    # closed reports by or about someone erased while they were open, and the photos only their evidence showed
+    sc.execute(
+        """DELETE FROM so_reports WHERE status != 'open' AND (
+        (reporter_id != '' AND reporter_id NOT IN (SELECT id FROM so_accounts))
+        OR (target_type = 'account' AND target_id NOT IN (SELECT id FROM so_accounts)))"""
+    )
+    held = _held_media(sc)
+    for item in rows(
+        sc, "SELECT id FROM so_media WHERE owner_id NOT IN (SELECT id FROM so_accounts)"
+    ):
+        if item["id"] not in held:
+            photos.delete(sc, item["id"])
     sc.commit()
     return {"ended_chats": max(ended, 0), "evidence": max(kept, 0)}
 
@@ -4537,68 +4558,175 @@ def export_account(sc: sqlite3.Connection, account_id: str) -> dict[str, Any]:
 
 def erase_accounts(sc: sqlite3.Connection, account_ids: Iterable[str]) -> int:
     """Remove these people from Social: their profile, posts, comments, stories, messages, reactions,
-    friendships, memberships and notifications. Groups, pages and chats they made stay for the others."""
+    friendships, memberships and notifications. Groups, pages and chats they made stay for the others. Evidence of
+    an open report about them, or that they filed, stays under a legal hold (:func:`erase_account`)."""
     ids = [str(a) for a in account_ids if a]
+    for account_id in ids:
+        erase_account(sc, account_id)
+    return len(ids)
+
+
+LEGAL_HOLD = "erased_person"  # so_evidence / so_dating_ended.legal_hold: kept for an open report, purged when it closes
+
+
+def _open_reports_of(sc: sqlite3.Connection, account_id: str) -> list[str]:
+    """Open reports this person filed, or about them, or about a message they wrote."""
+    return [
+        r["id"]
+        for r in rows(
+            sc,
+            """SELECT id FROM so_reports WHERE status = 'open' AND (reporter_id = ?
+            OR (target_type = 'account' AND target_id = ?)
+            OR (target_type = 'message' AND target_id IN (SELECT id FROM so_messages WHERE author_id = ?))
+            OR id IN (SELECT report_id FROM so_evidence WHERE kind IN ('dating', 'chat') AND data LIKE ?))""",
+            (account_id, account_id, account_id, f'%"{account_id}"%'),
+        )
+    ]
+
+
+def _open_between(sc: sqlite3.Connection, a_id: str, b_id: str) -> bool:
+    return bool(
+        row(
+            sc,
+            """SELECT 1 AS x FROM so_reports WHERE status = 'open' AND target_type = 'account'
+            AND ((reporter_id = ? AND target_id = ?) OR (reporter_id = ? AND target_id = ?)) LIMIT 1""",
+            (a_id, b_id, b_id, a_id),
+        )
+    )
+
+
+def erase_account(sc: sqlite3.Connection, account_id: str) -> dict[str, int]:
+    """Erase one person from Social and Dating; what went, by table.
+
+    **Legal hold.** A moderation report that is still open keeps its evidence: the report itself, the chat and the
+    dating profiles copied with it (``so_evidence``), the ended matches' chats between the two (``so_dating_ended``)
+    and the photos those show. They are marked ``legal_hold``, counted under ``held:<table>``, and Social's
+    background task (:func:`purge_kept`) deletes them once the report is closed. Closed reports by or about the
+    person go now."""
     from aira.suite.social import dating
 
-    dating.erase(sc, ids)  # their dating profile, likes, matches and the matches' chats
-    for account_id in ids:
-        posts = [
-            r["id"]
-            for r in rows(
-                sc, "SELECT id FROM so_posts WHERE author_id = ?", (account_id,)
+    counts: dict[str, int] = {}
+
+    def add(table: str, number: int) -> None:
+        if number and number > 0:
+            counts[table] = counts.get(table, 0) + number
+
+    if not row(sc, "SELECT id FROM so_accounts WHERE id = ?", (account_id,)):
+        return counts
+    dating.ensure(sc)
+    held_reports = _open_reports_of(sc, account_id)
+    for table, where, params in (
+        ("so_dating_profiles", "account_id = ?", (account_id,)),
+        ("so_dating_matches", "a_id = ? OR b_id = ?", (account_id, account_id)),
+        ("so_dating_swipes", "actor_id = ? OR target_id = ?", (account_id, account_id)),
+        ("so_dating_daily", "account_id = ?", (account_id,)),
+    ):
+        found = row(sc, f"SELECT COUNT(*) AS n FROM {table} WHERE {where}", params)  # noqa: S608 - fixed names
+        add(table, int(found["n"]) if found else 0)
+    dating.erase(sc, [account_id])  # their dating profile, likes and matches (each match's chat is copied first)
+    if held_reports:
+        marks = ", ".join("?" for _ in held_reports)
+        add(
+            "held:so_evidence",
+            sc.execute(
+                f"UPDATE so_evidence SET legal_hold = ? WHERE report_id IN ({marks})",  # noqa: S608
+                (LEGAL_HOLD, *held_reports),
+            ).rowcount,
+        )
+        add("held:so_reports", len(held_reports))
+    for ended in rows(
+        sc,
+        "SELECT id, a_id, b_id FROM so_dating_ended WHERE a_id = ? OR b_id = ?",
+        (account_id, account_id),
+    ):
+        if _open_between(sc, ended["a_id"], ended["b_id"]):
+            sc.execute(
+                "UPDATE so_dating_ended SET legal_hold = ? WHERE id = ?",
+                (LEGAL_HOLD, ended["id"]),
             )
-        ]
-        for post_id in posts:
-            for table in ("so_post_tags", "so_reactions", "so_comments", "so_polls", "so_poll_votes", "so_saves"):
-                sc.execute(f"DELETE FROM {table} WHERE post_id = ?", (post_id,))  # noqa: S608 - fixed names
-        stories = [
-            r["id"]
-            for r in rows(
-                sc, "SELECT id FROM so_stories WHERE author_id = ?", (account_id,)
-            )
-        ]
-        for story_id in stories:
-            sc.execute("DELETE FROM so_story_views WHERE story_id = ?", (story_id,))
-            sc.execute("DELETE FROM so_story_reactions WHERE story_id = ?", (story_id,))
-            sc.execute("DELETE FROM so_highlight_items WHERE story_id = ?", (story_id,))
-        photos.delete_owner(sc, account_id)  # the photo files they uploaded, from the disk too
-        for statement in (
-            "DELETE FROM so_comment_likes WHERE account_id = ? OR comment_id IN (SELECT id FROM so_comments WHERE author_id = ?)",
-            "DELETE FROM so_poll_votes WHERE account_id = ?",
-            "DELETE FROM so_saves WHERE account_id = ?",
-            "DELETE FROM so_collections WHERE owner_id = ?",
-            "DELETE FROM so_close_friends WHERE owner_id = ? OR friend_id = ?",
-            "DELETE FROM so_highlight_items WHERE highlight_id IN (SELECT id FROM so_highlights WHERE owner_id = ?)",
-            "DELETE FROM so_highlights WHERE owner_id = ?",
-            "DELETE FROM so_story_reactions WHERE account_id = ?",
-            "DELETE FROM so_posts WHERE author_id = ?",
-            "DELETE FROM so_comments WHERE author_id = ?",
-            "DELETE FROM so_reactions WHERE account_id = ?",
-            "DELETE FROM so_stories WHERE author_id = ?",
-            "DELETE FROM so_story_views WHERE viewer_id = ?",
-            "DELETE FROM so_messages WHERE author_id = ?",
-            "DELETE FROM so_chat_members WHERE account_id = ?",
-            "DELETE FROM so_group_members WHERE account_id = ?",
-            "DELETE FROM so_page_admins WHERE account_id = ?",
-            "DELETE FROM so_notifications WHERE account_id = ? OR actor_id = ?",
-            "DELETE FROM so_friends WHERE a_id = ? OR b_id = ?",
-            "DELETE FROM so_follows WHERE follower_id = ? OR (target_type = 'account' AND target_id = ?)",
-            "DELETE FROM so_blocks WHERE blocker_id = ? OR blocked_id = ?",
-            "DELETE FROM so_reports WHERE reporter_id = ? OR (target_type = 'account' AND target_id = ?)",
-            "DELETE FROM so_rate WHERE account_id = ?",
-            "DELETE FROM so_listing_saves WHERE account_id = ? OR listing_id IN (SELECT id FROM so_listings WHERE seller_id = ?)",
-            "DELETE FROM so_listings WHERE seller_id = ?",
-            "DELETE FROM so_guardian WHERE child_id = ? OR other_id = ?",
-            "DELETE FROM so_approved_contacts WHERE young_id = ? OR contact_id = ?",
-            "DELETE FROM so_held WHERE author_id = ?",
-            "DELETE FROM so_dating_ended WHERE a_id = ? OR b_id = ?",
-            "DELETE FROM so_accounts WHERE id = ?",
-        ):
-            sc.execute(statement, (account_id,) * statement.count("?"))
-    sc.execute("DELETE FROM so_evidence WHERE report_id NOT IN (SELECT id FROM so_reports)")
+            add("held:so_dating_ended", 1)
+        else:
+            sc.execute("DELETE FROM so_dating_ended WHERE id = ?", (ended["id"],))
+            add("so_dating_ended", 1)
+    posts = [
+        r["id"] for r in rows(sc, "SELECT id FROM so_posts WHERE author_id = ?", (account_id,))
+    ]
+    for post_id in posts:
+        for table in ("so_post_tags", "so_reactions", "so_comments", "so_polls", "so_poll_votes", "so_saves"):
+            sc.execute(f"DELETE FROM {table} WHERE post_id = ?", (post_id,))  # noqa: S608 - fixed names
+    stories = [
+        r["id"] for r in rows(sc, "SELECT id FROM so_stories WHERE author_id = ?", (account_id,))
+    ]
+    for story_id in stories:
+        sc.execute("DELETE FROM so_story_views WHERE story_id = ?", (story_id,))
+        sc.execute("DELETE FROM so_story_reactions WHERE story_id = ?", (story_id,))
+        sc.execute("DELETE FROM so_highlight_items WHERE story_id = ?", (story_id,))
+    # the photo files they uploaded, from the disk too, except those held evidence shows
+    held = _held_media(sc)
+    for item in rows(sc, "SELECT id FROM so_media WHERE owner_id = ?", (account_id,)):
+        if item["id"] in held:
+            add("held:so_media", 1)
+            continue
+        photos.delete(sc, item["id"])
+        add("so_media", 1)
+    for statement in (
+        "DELETE FROM so_comment_likes WHERE account_id = ? OR comment_id IN (SELECT id FROM so_comments WHERE author_id = ?)",
+        "DELETE FROM so_poll_votes WHERE account_id = ?",
+        "DELETE FROM so_saves WHERE account_id = ?",
+        "DELETE FROM so_collections WHERE owner_id = ?",
+        "DELETE FROM so_close_friends WHERE owner_id = ? OR friend_id = ?",
+        "DELETE FROM so_highlight_items WHERE highlight_id IN (SELECT id FROM so_highlights WHERE owner_id = ?)",
+        "DELETE FROM so_highlights WHERE owner_id = ?",
+        "DELETE FROM so_story_reactions WHERE account_id = ?",
+        "DELETE FROM so_posts WHERE author_id = ?",
+        "DELETE FROM so_comments WHERE author_id = ?",
+        "DELETE FROM so_reactions WHERE account_id = ?",
+        "DELETE FROM so_stories WHERE author_id = ?",
+        "DELETE FROM so_story_views WHERE viewer_id = ?",
+        "DELETE FROM so_messages WHERE author_id = ?",
+        "DELETE FROM so_chat_members WHERE account_id = ?",
+        "DELETE FROM so_group_members WHERE account_id = ?",
+        "DELETE FROM so_page_admins WHERE account_id = ?",
+        "DELETE FROM so_notifications WHERE account_id = ? OR actor_id = ?",
+        "DELETE FROM so_friends WHERE a_id = ? OR b_id = ?",
+        "DELETE FROM so_follows WHERE follower_id = ? OR (target_type = 'account' AND target_id = ?)",
+        "DELETE FROM so_blocks WHERE blocker_id = ? OR blocked_id = ?",
+        # an open report stays for its moderator (legal hold); a closed one by or about them goes
+        "DELETE FROM so_reports WHERE status != 'open' AND (reporter_id = ? OR (target_type = 'account' AND target_id = ?))",
+        "DELETE FROM so_rate WHERE account_id = ?",
+        "DELETE FROM so_listing_saves WHERE account_id = ? OR listing_id IN (SELECT id FROM so_listings WHERE seller_id = ?)",
+        "DELETE FROM so_listings WHERE seller_id = ?",
+        "DELETE FROM so_guardian WHERE child_id = ? OR other_id = ?",
+        "DELETE FROM so_approved_contacts WHERE young_id = ? OR contact_id = ?",
+        "DELETE FROM so_held WHERE author_id = ?",
+        "DELETE FROM so_accounts WHERE id = ?",
+    ):
+        table = statement.split()[2]
+        add(table, sc.execute(statement, (account_id,) * statement.count("?")).rowcount)
+    add(
+        "so_evidence",
+        sc.execute(
+            "DELETE FROM so_evidence WHERE report_id NOT IN (SELECT id FROM so_reports)"
+        ).rowcount,
+    )
     sc.commit()
-    return len(ids)
+    return counts
+
+
+def _held_media(sc: sqlite3.Connection) -> set[str]:
+    """Photos that held evidence shows (``media:<id>`` in its copied profiles and chats)."""
+    found: set[str] = set()
+    for text in [
+        *(r["data"] for r in rows(sc, "SELECT data FROM so_evidence WHERE legal_hold != ''")),
+        *(
+            f"{r['transcript']} {r['profiles']}"
+            for r in rows(
+                sc, "SELECT transcript, profiles FROM so_dating_ended WHERE legal_hold != ''"
+            )
+        ),
+    ]:
+        found.update(re.findall(r"media:([0-9a-f]{32})", str(text or "")))
+    return found
 
 
 # ---------------------------------------------------------------------------
