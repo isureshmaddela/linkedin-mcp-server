@@ -26,7 +26,14 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger("monosage_cloud.gate")
 
-BOARD_SOURCES = {"greenhouse", "lever", "ashby", "smartrecruiters"}
+BOARD_SOURCES = {
+    "greenhouse",
+    "lever",
+    "ashby",
+    "smartrecruiters",
+    "workable",
+    "recruitee",
+}
 SOURCE_TO_POLICY = {
     "linkedin": "linkedin",
     "google_jobs": "google_jobs",
@@ -39,6 +46,19 @@ def policy_source(source: str) -> str:
         source,
         "company_boards" if source in BOARD_SOURCES or source else "company_boards",
     )
+
+
+# The operator's switch (CloudConfig.linkedin_automation, AIRA_CLOUD_LINKEDIN_AUTOMATION): without it no organization
+# runs LinkedIn automation here, whatever its policy, plan or candidates' opt-ins say (those stay stored as they are).
+LINKEDIN_OPERATOR_OFF = (
+    "LinkedIn automation is off on this Monosage Cloud: the operator has not enabled it. "
+    "Use LinkedIn in your own browser or the local build."
+)
+
+
+def linkedin_operator_block(app: CloudApp) -> str:
+    """'' when this installation runs LinkedIn automation at all, else the reason it does not."""
+    return "" if app.config.linkedin_automation else LINKEDIN_OPERATOR_OFF
 
 
 @dataclass(frozen=True)
@@ -155,6 +175,8 @@ class Gate:
         if not source:
             return ""
         name = policy_source(source)
+        if name == "linkedin" and not self.app.config.linkedin_automation:
+            return LINKEDIN_OPERATOR_OFF
         with self.app.db.read() as connection:
             blocked = one(
                 connection,
@@ -410,6 +432,8 @@ class Gate:
         )
 
     def _easy_apply_allowed(self, org_id: str, candidate_id: str) -> bool:
+        if not self.app.config.linkedin_automation:
+            return False
         if self.app.flags.killed("linkedin.easy_apply"):
             return False
         if not self.app.tenancy.policy(org_id).get("easy_apply_allowed"):

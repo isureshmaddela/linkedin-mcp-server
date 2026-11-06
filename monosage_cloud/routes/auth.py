@@ -13,6 +13,7 @@ from monosage_cloud.errors import (
     Unauthorized,
     ValidationFailed,
 )
+from monosage_cloud.gate import linkedin_operator_block
 from monosage_cloud.policy import LINKEDIN_NOTICE
 from monosage_cloud.tenancy import CONSENT_VERSION
 from monosage_cloud.rbac import (
@@ -114,7 +115,10 @@ def me_payload(app: Any, principal: Principal) -> dict[str, Any]:
         "auth_method": principal.auth_method,
         "policy": {
             "submission_mode": policy["submission_mode"],
-            "linkedin_allowed": bool(policy["linkedin_allowed"]),
+            # LinkedIn needs the operator's switch as well as the organization's (stored grants stay as they are).
+            "linkedin_allowed": bool(policy["linkedin_allowed"])
+            and app.config.linkedin_automation,
+            "linkedin_operator": bool(app.config.linkedin_automation),
             "cover_letters": bool(policy["cover_letters"]),
         },
         "paused": bool(org["paused_at"]),
@@ -471,6 +475,9 @@ def easy_apply_opt_in(req: Req):  # noqa: ANN201
     if enable:
         if body.get("acknowledge") is not True:
             raise ValidationFailed(LINKEDIN_NOTICE, code="acknowledgement_required")
+        operator = linkedin_operator_block(app)
+        if operator:
+            raise Forbidden(operator, code="linkedin_off")
         app.entitlements.require_feature(
             principal.org_id, "sources.linkedin", audience="candidate", label="LinkedIn"
         )

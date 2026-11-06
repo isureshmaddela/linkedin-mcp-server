@@ -274,6 +274,30 @@ Aira Leads (`/api/leads/*`, [aira/leads/](../aira/leads/)) runs inside each cand
 - **outreach** (`leads_outreach` feature, Team and up; limits `lead_emails_per_month` and `lead_email_daily_cap`): permission `leads.outreach` held only by the candidate (approve, send, sender settings, test message, removing a do-not-contact entry); the send hook (`leads_outreach_send`) checks the kill switch and the automation gates (suspended, past due, read-only, paused, over limits), reserves the batch against the month's allowance and returns what was not sent; the platform kill switch is the source name `leads_outreach` (`POST /api/platform/sources/block`) and stops every send and test message while drafting and reading carry on;
 - lead tables, including the outbox, the do-not-contact list, the call log and the sender settings, in the candidate's own export (staff exports leave them out: `redaction.PRIVATE_TABLES`), and removal with the workspace.
 
+## LinkedIn in the hosted build
+
+**Position: LinkedIn automation stays in the person's own browser or the local build. The hosted build applies through
+company boards, ATS forms and email.** LinkedIn's User Agreement forbids automated access, and running many
+candidates' LinkedIn sessions from data-centre addresses risks account restrictions for those candidates (see
+[legal/automation-and-linkedin.md](legal/automation-and-linkedin.md)).
+
+- **The operator's switch.** `AIRA_CLOUD_LINKEDIN_AUTOMATION` (`CloudConfig.linkedin_automation`) is off by default.
+  While it is off, every LinkedIn route refuses with `403 linkedin_off` and "LinkedIn automation is off on this
+  Monosage Cloud: the operator has not enabled it": sign-in and restart, LinkedIn search and job details, the inbox,
+  replies and automatic replies, schedules, Sales Navigator, search plans with the LinkedIn source, Easy Apply in a plan
+  and the candidate's own Easy Apply opt-in. The worker's source gate and automatic Easy Apply refuse the same way
+  (`Gate.source_block`, `Gate._easy_apply_allowed`), owners and admins cannot turn "LinkedIn allowed" or "Easy Apply
+  allowed" on, and the onboarding checklist and dashboard stop expecting a LinkedIn connection.
+- **Stored grants are data.** An organization that allowed LinkedIn earlier, and candidates who opted in, keep those
+  values. With the switch off they are not honoured; saving the rest of the policy with them still on keeps working.
+- **Only for supervised pilots.** With the switch on, the earlier gates all still apply, in order: the plan feature
+  (`sources.linkedin`), the organization's policy (`linkedin_allowed`, `easy_apply_allowed`), each candidate's own
+  acknowledged opt-in with the User Agreement notice, and the platform kill switch (`linkedin.easy_apply`).
+- Code: `monosage_cloud/gate.py` (`LINKEDIN_OPERATOR_OFF`, `linkedin_operator_block`), `gateway.py`
+  (`require_linkedin`, `check_source`), `route_hooks.py` (`linkedin_pre`, plan checks), `tenancy.py` (policy setter,
+  checklists), `routes/auth.py` (`/api/auth/me` policy, `/api/me/easy-apply`). Tests:
+  `tests/test_cloud_linkedin_gate.py`.
+
 ## Differences from the scope document and known gaps
 
 Stated plainly so nobody plans around something that does not exist.
@@ -305,7 +329,7 @@ Stated plainly so nobody plans around something that does not exist.
 | --- | --- |
 | Who owns candidate data when a member leaves | per-organization policy, default: the candidate keeps it |
 | SerpApi key model | bring-your-own key (Starter and up, entered in the API console); pooled key for Team and Enterprise behind a policy switch; Aira Jobs is free for all |
-| LinkedIn automation | off by default; needs the plan feature, organization policy and the candidate's own acknowledged opt-in; a platform kill switch can turn it off for everyone |
+| LinkedIn automation | off unless the operator sets `AIRA_CLOUD_LINKEDIN_AUTOMATION` (supervised pilots only; see "LinkedIn in the hosted build"); then it still needs the plan feature, organization policy and the candidate's own acknowledged opt-in, and a platform kill switch can turn Easy Apply off for everyone |
 | Database layout | control-plane SQLite plus one SQLite per candidate (see gaps) |
 | AI model | model gateway, chosen per organization by an owner or admin in Settings > Integrations (`/api/settings/model-provider`, the same card as the local build): hosted or Ollama by default; Claude with the organization's own Anthropic API key and model on every plan (like the local build's Claude card, and like the organization's own SerpApi key it costs the platform nothing); the organization's own OpenAI-compatible endpoint stays Enterprise (`byo_model`) because the server calls an address the organization supplies. Keys are encrypted organization secrets, never returned or logged; every call is metered (`model_calls`) whichever key answers it |
 | Billing provider | Stripe for self-serve, operator-activated invoicing for Enterprise; a stand-in provider for development |
@@ -313,6 +337,6 @@ Stated plainly so nobody plans around something that does not exist.
 
 ## Legal review still needed (scope section "Security, compliance and legal")
 
-1. The LinkedIn position: the User Agreement forbids automated access; the hosted product keeps Easy Apply and inbox automation off by default and behind an acknowledged opt-in, but counsel should confirm whether to keep, restrict by plan or remove it. See [legal/automation-and-linkedin.md](legal/automation-and-linkedin.md).
+1. The LinkedIn position: the User Agreement forbids automated access. Settled for now in the product: hosted LinkedIn automation is off unless the operator turns it on for a supervised pilot (`AIRA_CLOUD_LINKEDIN_AUTOMATION`), LinkedIn stays in the person's own browser or the local build, and hosted applies through boards, ATS forms and email ("LinkedIn in the hosted build" above). Counsel should still confirm whether a pilot with the switch on is acceptable, or whether to remove hosted LinkedIn automation altogether. See [legal/automation-and-linkedin.md](legal/automation-and-linkedin.md).
 2. The terms for automated applications in each market, because some jurisdictions regulate automated decision-making about employment; review mode is a first-class mode and the policy can require it (including by region list).
 3. The data-processing agreement template, [legal/dpa.md](legal/dpa.md).

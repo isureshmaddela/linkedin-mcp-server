@@ -134,6 +134,9 @@
     if (!cloud.has("sources.linkedin")) {
       return [h("p", { class: "muted", text: "LinkedIn is part of the Team and Enterprise plans; your organization's plan does not include it. Jobs from the other sources work as usual." }), staff("billing.manage", "#/org/billing", "See plans")];
     }
+    if (cloud.me.policy && cloud.me.policy.linkedin_operator === false) {
+      return [h("p", { class: "muted", text: "LinkedIn automation is off on this Monosage Cloud. Use LinkedIn in your own browser or the local build. Jobs from the other sources work as usual." })];
+    }
     if (cloud.me.policy && cloud.me.policy.linkedin_allowed === false) {
       return [h("p", { class: "muted", text: "Your organization has LinkedIn turned off. Jobs from the other sources work as usual." }), staff("org.settings", "#/org/policy", "Open Policy")];
     }

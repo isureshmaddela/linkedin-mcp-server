@@ -20,6 +20,7 @@ from monosage_cloud.errors import (
     SubscriptionInactive,
     ValidationFailed,
 )
+from monosage_cloud.gate import linkedin_operator_block
 from monosage_cloud.policy import LINKEDIN_NOTICE
 from monosage_cloud.rbac import CANDIDATE
 
@@ -44,6 +45,9 @@ def _ok(response: HttpResponse | None, failure: BaseException | None) -> bool:
 
 def linkedin_pre(ctx: Ctx) -> None:
     app = ctx.app
+    operator = linkedin_operator_block(app)
+    if operator:
+        raise Forbidden(operator, code="linkedin_off")
     if not app.tenancy.policy(ctx.org_id).get("linkedin_allowed"):
         raise Forbidden(
             "LinkedIn is off in your organization's policy.", code="linkedin_off"
@@ -286,6 +290,9 @@ def _plan_checks(ctx: Ctx) -> None:
             ctx.principal, "applications.submit", candidate_id=ctx.candidate_id
         )
     if ctx.payload.get("linkedin_easy_apply"):
+        operator = linkedin_operator_block(ctx.app)
+        if operator:
+            raise Forbidden(operator, code="linkedin_off")
         if ctx.principal.role != CANDIDATE:
             raise Forbidden(
                 "Only the candidate can turn on LinkedIn Easy Apply.",
