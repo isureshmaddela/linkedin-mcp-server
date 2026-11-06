@@ -4,8 +4,9 @@
  * customers did on public pages), revenue (every payment recorded, CSV), outbox (messages the apps prepared for
  * customers: approve, edit, cancel, send through your own mail server), business (the profile every public page
  * shows: name, contact, currency, brand colour, tax, how customers pay) and email (the mail server, which kinds of
- * message go out without approval, and the incoming mailbox read for replies, new requests and bounces).
- * Everything runs through /api/suite/* (aira/suite/suite_routes.py).
+ * message go out without approval, and the incoming mailbox read for replies, new requests and bounces) and privacy
+ * (erase one customer by email or phone across the apps, keeping anonymised accounting rows; every erasure's receipt).
+ * Everything runs through /api/suite/* (aira/suite/suite_routes.py, aira/suite/erasure_routes.py).
  */
 "use strict";
 (() => {
@@ -21,6 +22,7 @@
     { id: "outbox", label: "Outbox" },
     { id: "business", label: "Business profile" },
     { id: "email", label: "Email" },
+    { id: "privacy", label: "Privacy" },
   ];
 
   // The apps this person can open here: on for the organization and, hosted, in their menu (a member's own space
@@ -356,6 +358,54 @@
     return section;
   }
 
+  // A customer asks to be forgotten: find what names them (counts only), then erase it. Orders, invoices, tickets
+  // and enrolments stay for the books without the name, email, phone and address. The address never carries them.
+  async function privacyTab(body, rerender) {
+    const data = await Aira.api("/api/suite/privacy/erasures");
+    const form = S.form([
+      { name: "email", label: "Customer's email", type: "email" },
+      { name: "phone", label: "or phone number", type: "tel" },
+    ]);
+    const found = h("div", { class: "suite-body" });
+    const erase = async (who) => {
+      const ok = await Aira.confirm({ title: "Erase this customer", message: "Erase this customer from every app? Their bookings, orders and invoices stay for your books without their name, email, phone and address. This cannot be undone.", confirmLabel: "Erase", danger: true });
+      if (!ok) return;
+      const result = await Aira.api("/api/suite/privacy/erase", { method: "POST", body: { ...who, confirm: true } });
+      Aira.toast(result.receipt.status === "done" ? "The customer was erased." : "Most of it was erased. Monosage will try the rest again.", result.receipt.status === "done" ? "success" : "info");
+      rerender();
+    };
+    const find = async () => {
+      form.setError("");
+      try {
+        const who = form.read();
+        const preview = await Aira.api("/api/suite/privacy/preview", { method: "POST", body: who });
+        const rows = Object.entries(preview.found).map(([table, count]) => ({ table, count }));
+        found.replaceChildren(rows.length
+          ? h("div", {}, S.table({ columns: [{ key: "table", label: "Records" }, { key: "count", label: "Found", num: true }], rows }), h("div", { class: "btn-row" }, S.button("Erase this customer", () => erase(who).catch((error) => Aira.reportError(error)), { kind: "danger" })))
+          : h("p", { class: "muted", text: "Nothing in your apps names this customer." }));
+      } catch (error) { form.setError(error.message); }
+    };
+    const receipts = (data.erasures || []).map((item) => ({
+      ...item,
+      apps: Object.entries(item.erased || {}).map(([app, count]) => `${APP_NAMES[app] || app} ${count}`).join(", ") || "Nothing found",
+    }));
+    body.append(
+      S.section("Erase a customer", h("p", { class: "muted", text: "When a customer asks you to delete their data, find them by email or phone and erase them from Shop, Bookings, Marketing, Service, Events, Courses, Studio and Leads, with the mail you keep. Accounting records stay with their amounts but without the customer." }), form.node,
+        h("div", { class: "btn-row" }, S.button("Find", find, { kind: "secondary" })), found),
+      S.section("Erasures", h("p", { class: "muted", text: "Every erasure run in this account: people removed from the household and customers. Receipts list counts only, never the person." }),
+        S.table({
+          columns: [
+            { key: "created_at", label: "Date", render: (r) => S.day(r.created_at) },
+            { key: "reason", label: "Why", render: (r) => ({ customer_request: "Customer asked", profile_erased: "Person removed", account_deleted: "Account deleted", member_removed: "Member removed", member_deleted: "Member deleted" })[r.reason] || r.reason },
+            { key: "apps", label: "Erased" },
+            { key: "status", label: "Status", render: (r) => r.status === "partial" ? h("span", {}, S.pill("unfinished", { unfinished: "warn" }), " ", S.button("Try again", async () => { await Aira.api(`/api/suite/privacy/erasures/${r.job_id}/retry`, { method: "POST", body: {} }); rerender(); }, { kind: "ghost sm" })) : S.pill("done", { done: "good" }) },
+          ],
+          rows: receipts,
+          empty: "Nothing was erased yet",
+        })),
+    );
+  }
+
   Aira.views.hub = async (main, route) => {
     const body = S.page(main, { title: "Business hub", subtitle: "Revenue, customers and setup across your industry apps." });
     const tab = S.tabs(body, route, "hub", TABS);
@@ -369,6 +419,7 @@
         else if (tab === "outbox") await outboxTab(holder, render);
         else if (tab === "business") await businessTab(holder);
         else if (tab === "email") await emailTab(holder, render);
+        else if (tab === "privacy") await privacyTab(holder, render);
         else await overview(holder);
         panel.replaceChildren(holder);
       } catch (error) { panel.replaceChildren(Aira.ui.error(error, render)); }

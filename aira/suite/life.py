@@ -552,6 +552,65 @@ def remove(
     connection.commit()
 
 
+def archived(connection: sqlite3.Connection) -> list[dict[str, Any]]:
+    """People removed with "Archive": hidden everywhere, their data kept until someone erases it."""
+    return [p for p in profiles(connection, include_archived=True) if p.get("archived_at")]
+
+
+def erase(
+    connection: sqlite3.Connection,
+    actor: dict[str, Any],
+    profile_id: str,
+    *,
+    pin: str,
+) -> dict[str, Any]:
+    """Remove a person with "Erase everything": every app's data about them is deleted, and what a business must
+    keep (an order they placed) is anonymised (:mod:`aira.erasure`). Archived people can be erased too.
+
+    An adult of the household asks, and the household owner's PIN confirms it; the owner needs a PIN for this (an
+    erasure cannot be undone). Returns the erasure's receipt (counts per app, nothing about the person)."""
+    ensure(connection)
+    target = _row(
+        kit.fetch_one(
+            connection, "SELECT * FROM life_profiles WHERE id = ?", (profile_id,)
+        )
+    )
+    if not target:
+        raise LookupError("That person was not found.")
+    if not can_manage_household(actor):
+        raise PermissionError("Ask an adult in the household to erase people.")
+    if target["owner"]:
+        raise ValueError(
+            "The household owner cannot be erased here. Delete the account in Settings instead."
+        )
+    if target.get("member_ref"):
+        raise ValueError(
+            "A member of the organization is removed by its administrators."
+        )
+    owner = _owner_of(connection)
+    if owner is None or not owner.get("pin_hash"):
+        raise ValueError(
+            "Erasing everything needs the household owner's PIN. Set a PIN for the owner first."
+        )
+    if not check_pin(owner, pin):
+        raise WrongPin(
+            f"Type {owner['name']}'s PIN (the household owner) to erase everything.",
+            owner["id"],
+        )
+    from aira import erasure
+
+    end_unlocks(connection, profile_id)
+    connection.commit()
+    person = erasure.Person(
+        profile_id=target["id"],
+        emails=(target.get("email") or "",),
+        names=(target.get("name") or "",),
+    )
+    return erasure.run_erasure(
+        connection, person, reason="profile_erased", actor="household"
+    )
+
+
 # ---------------------------------------------------------------------------
 # PINs: who confirms a change, and unlocking a profile for a while
 # ---------------------------------------------------------------------------

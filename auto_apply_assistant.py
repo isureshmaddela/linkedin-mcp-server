@@ -57,6 +57,7 @@ from linkedin_mcp_server.matching import score_keyword_evidence
 from aira import __version__ as AIRA_VERSION
 from aira import apps as aira_apps
 from aira import apply_summary
+from aira import erasure
 from aira.hosting import HOOKS as HOSTING
 from aira.analytics import summary as analytics_summary
 from aira.analytics import timeline as analytics_timeline
@@ -8812,6 +8813,8 @@ def _delete_account(user: dict[str, Any], password: str) -> None:
             process = registry.pop(user_id, None)
             if process and process.poll() is None:
                 process.terminate()
+    # Every person of the household is erased first (aira/erasure.py): Social and Videos live outside the file below.
+    erasure.erase_account_database(user["data_path"], actor="self")
     with _auth_connect() as connection:
         connection.execute("DELETE FROM sessions WHERE user_id = ?", (user_id,))
         connection.execute("DELETE FROM password_resets WHERE user_id = ?", (user_id,))

@@ -132,6 +132,10 @@ def me(request: Request) -> tuple[int, dict[str, Any]]:
                 for p in everyone
             ],
             "can_manage": life.can_manage_household(profile),
+            # people removed with "Archive" (their data kept until someone erases it), for the household's adults
+            "archived": [life.public(p) for p in life.archived(connection)]
+            if life.can_manage_household(profile)
+            else [],
             "hosted": suite.actor() is not None,
             "apps": _apps(controls["off"]),
             "controls": controls,
@@ -180,6 +184,31 @@ def profiles_remove(request: Request) -> tuple[int, dict[str, Any]]:
         life.remove(connection, actor, request.match.group(1))
     request.audit("life.profile_remove", "profile", request.match.group(1))
     return 200, {"removed": True}
+
+
+@aira_route("POST", f"{BASE}/profiles/{ID}/erase")
+def profiles_erase(request: Request) -> tuple[int, dict[str, Any]]:
+    """Remove a person with "Erase everything" (``pin``: the household owner's PIN): every app's data about them
+    is deleted, and what a business keeps for its books is anonymised. Answers the receipt (counts per app)."""
+    if suite.actor() is not None:
+        raise PermissionError("A member of the organization is removed by its administrators.")
+    with _open(request) as connection:
+        actor = life.current(request, connection)
+        owner = next((p for p in life.profiles(connection) if p["owner"]), None)
+        tries = _pin_tries(owner["id"]) if owner else []
+        try:
+            receipt = life.erase(
+                connection,
+                actor,
+                request.match.group(1),
+                pin=str(request.payload.get("pin") or ""),
+            )
+        except life.WrongPin as error:
+            _wrong_pin(error.profile_id, tries)
+            raise
+    # the account's audit log names the erasure, never the person (they are gone)
+    request.audit("life.profile_erase", "erasure", receipt["job_id"], {"status": receipt["status"]})
+    return 200, {"erased": receipt["status"] == "done", "receipt": receipt}
 
 
 @aira_route("POST", f"{BASE}/profiles/{ID}/pin")
