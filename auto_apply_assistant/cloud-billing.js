@@ -334,6 +334,7 @@
       actions: [{ label: "Not now", kind: "ghost" }, { label: dir === "up" ? "Upgrade" : "Schedule change", kind: "", onClick: async () => {
         const result = await Aira.api("/api/org/billing/change-plan", { method: "POST", body: { plan: state.plan, seats: state.seats } });
         if (result.scheduled) Aira.toast(`Scheduled for ${fmt.date(result.effective_at)}.${(result.would_exceed || []).length ? " Over limits then: " + result.would_exceed.join(", ") + "." : ""}`, "success", { timeout: 9000 });
+        else if (result.pending_payment) Aira.toast("The upgrade applies as soon as its payment goes through.", "success", { timeout: 9000 });
         else Aira.toast(`Upgraded${result.prorated_charge_cents ? `; charged ${money(result.prorated_charge_cents, "usd")}` : ""}.`, "success");
         await refreshIdentity();
         Aira.router.render();

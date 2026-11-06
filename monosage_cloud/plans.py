@@ -224,6 +224,47 @@ _PRICING = {
     },
 }
 
+# Indian rupee prices for Razorpay, in paise per candidate seat per month. They are set by hand, not converted at a
+# live rate: a rupee price is a price decision. A plan the superadmin creates can carry ``inr_seat_paise_month`` in
+# its pricing; anything without an explicit price uses the configured fixed rate (``razorpay_inr_per_usd``).
+INR_SEAT_PAISE: dict[str, int] = {"starter": 119_900, "team": 94_900}
+# The shipped app add-on prices (USD cents per seat) and the rupee price that stands for each, in paise.
+INR_APP_PAISE_BY_USD_CENTS: dict[int, int] = {
+    500: 42_900,
+    400: 33_900,
+    300: 25_900,
+    200: 16_900,
+    150: 12_900,
+}
+
+
+def inr_paise(usd_cents: int, rupees_per_usd: int) -> int:
+    """A US-cent amount in paise at a fixed rate (cents x rupees per dollar = paise)."""
+    return int(usd_cents) * int(rupees_per_usd)
+
+
+def plan_inr_paise(
+    plan_id: str, pricing: dict[str, Any], usd_cents: int, rupees_per_usd: int
+) -> int:
+    """A plan's seat price in paise: the plan's own INR price, the shipped one while the USD price is the shipped
+    price, else the fixed rate."""
+    explicit = pricing.get("inr_seat_paise_month") if pricing else None
+    if explicit:
+        return int(explicit)
+    shipped = DEFAULT_PLANS.get(plan_id, {}).get("pricing", {})
+    if plan_id in INR_SEAT_PAISE and int(usd_cents) == int(
+        shipped.get("seat_cents_month") or -1
+    ):
+        return INR_SEAT_PAISE[plan_id]
+    return inr_paise(usd_cents, rupees_per_usd)
+
+
+def app_inr_paise(usd_cents: int, rupees_per_usd: int) -> int:
+    return INR_APP_PAISE_BY_USD_CENTS.get(int(usd_cents)) or inr_paise(
+        usd_cents, rupees_per_usd
+    )
+
+
 DEFAULT_PLANS: dict[str, dict[str, Any]] = {
     "trial": {
         "name": "Trial",

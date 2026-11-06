@@ -137,6 +137,8 @@ def validate_pricing(values: Any) -> dict[str, Any]:
     for name, value in values.items():
         if name == "seat_cents_month":
             clean[name] = whole(name, value, MAX_SEAT_CENTS)
+        elif name == "inr_seat_paise_month":  # the Razorpay price (plans.plan_inr_paise)
+            clean[name] = whole(name, value, MAX_SEAT_CENTS * 100)
         elif name == "min_seats":
             clean[name] = whole(name, value, 100_000)
         elif name == "trial_days":
@@ -1020,7 +1022,10 @@ class EntitlementService:
             limits=limits,
             features=frozenset(features),
             apps=frozenset(apps),
-            restrictions=STATUS_RESTRICTIONS.get(status, frozenset()),
+            # a trial whose end has passed is over even before the scheduler moves it on (read-only, export only)
+            restrictions=STATUS_RESTRICTIONS["cancelled"]
+            if status == "trialing" and sub["trial_end"] and sub["trial_end"] <= now
+            else STATUS_RESTRICTIONS.get(status, frozenset()),
             period_start=sub["period_start"],
             period_end=sub["period_end"],
             trial_end=sub["trial_end"],
@@ -1029,11 +1034,11 @@ class EntitlementService:
             overage_enabled=bool(sub["overage_enabled"]) and "overage" in features,
             pricing=plan["pricing"],
         )
+        expires = now + self.config.entitlement_cache_seconds
+        if status == "trialing" and sub["trial_end"] and sub["trial_end"] > now:
+            expires = min(expires, int(sub["trial_end"]))  # the trial's end is seen at once
         with self._lock:
-            self._cache[org_id] = (
-                now + self.config.entitlement_cache_seconds,
-                entitlements,
-            )
+            self._cache[org_id] = (expires, entitlements)
         return entitlements
 
     def _apps_for(
@@ -1201,12 +1206,24 @@ class Reservation:
     candidate_id: str
     overage: int = 0
     released: bool = False
+    hour: int = 0  # the hour bucket its overage was counted in (usage_overage)
 
 
 class LimitReached(Exception):
     def __init__(self, metric: str, scope: str, used: int, limit: int) -> None:
         super().__init__(f"{metric} limit reached ({scope}).")
         self.metric, self.scope, self.used, self.limit = metric, scope, used, limit
+
+
+def _count_overage(
+    connection: Any, org_id: str, metric: str, now: int, units: int
+) -> None:
+    """The overage of one action, in the hour it happened (``UsageService.overage_between`` sums a billing period)."""
+    if units > 0:
+        connection.execute(
+            "INSERT INTO usage_overage (org_id, metric, hour, value) VALUES (?, ?, ?, ?) ON CONFLICT(org_id, metric, hour) DO UPDATE SET value = usage_overage.value + excluded.value",
+            (org_id, f"{metric}:overage", int(now) // 3600, int(units)),
+        )
 
 
 class UsageService:
@@ -1288,7 +1305,9 @@ class UsageService:
         """Take ``amount`` units now, or raise :class:`LimitReached`. One transaction, one conditional UPDATE each."""
         now = self.clock.now()
         period, day = month_key(now), day_key(now)
-        reservation = Reservation(org_id, metric, amount, period, day, candidate_id)
+        reservation = Reservation(
+            org_id, metric, amount, period, day, candidate_id, hour=now // 3600
+        )
         with self.db.write(
             exclusive=False
         ) as connection:  # atomic conditional UPDATEs, no global lock
@@ -1350,6 +1369,7 @@ class UsageService:
                         "INSERT INTO usage_counters (org_id, period, metric, value) VALUES (?, ?, ?, ?) ON CONFLICT(org_id, period, metric) DO UPDATE SET value = usage_counters.value + excluded.value",
                         (org_id, period, f"{metric}:overage", over),
                     )
+                    _count_overage(connection, org_id, metric, now, over)
                     reservation.overage = over
         return reservation
 
@@ -1376,6 +1396,15 @@ class UsageService:
                         reservation.org_id,
                         reservation.period,
                         f"{reservation.metric}:overage",
+                    ),
+                )
+                connection.execute(
+                    "UPDATE usage_overage SET value = MAX(0, value - ?) WHERE org_id = ? AND metric = ? AND hour = ?",
+                    (
+                        reservation.overage,
+                        reservation.org_id,
+                        f"{reservation.metric}:overage",
+                        reservation.hour,
                     ),
                 )
             if reservation.candidate_id:
@@ -1447,6 +1476,7 @@ class UsageService:
                         "INSERT INTO usage_counters (org_id, period, metric, value) VALUES (?, ?, ?, ?) ON CONFLICT(org_id, period, metric) DO UPDATE SET value = usage_counters.value + excluded.value",
                         (org_id, period, f"{metric}:overage", over),
                     )
+                    _count_overage(connection, org_id, metric, now, over)
             if candidate_id:
                 connection.execute(
                     "INSERT INTO usage_daily (org_id, candidate_id, day, metric, value) VALUES (?, ?, ?, ?, ?) ON CONFLICT(org_id, candidate_id, day, metric) DO UPDATE SET value = usage_daily.value + excluded.value",
@@ -1454,10 +1484,26 @@ class UsageService:
                 )
         return over
 
+    def overage_between(self, org_id: str, start: int, end: int) -> dict[str, int]:
+        """Overage units counted from ``start`` (inclusive) to ``end`` (exclusive), by ``<metric>:overage``.
+
+        Units are kept by the hour they happened in; an hour belongs to the period its last second is in, so
+        periods that follow each other share no hour, every unit is billed in exactly one of them, and an hour is
+        over before the period it belongs to closes (a unit is never added to a period already billed)."""
+        first, last = int(start) // 3600, int(end) // 3600
+        with self.db.read() as connection:
+            rows = many(
+                connection,
+                "SELECT metric, SUM(value) AS units FROM usage_overage WHERE org_id = ? AND hour >= ? AND hour < ? GROUP BY metric",
+                (org_id, first, last),
+            )
+        return {row["metric"]: int(row["units"] or 0) for row in rows}
+
     def delete_org(self, org_id: str) -> None:
         with self.db.write() as connection:
             connection.execute("DELETE FROM usage_counters WHERE org_id = ?", (org_id,))
             connection.execute("DELETE FROM usage_daily WHERE org_id = ?", (org_id,))
+            connection.execute("DELETE FROM usage_overage WHERE org_id = ?", (org_id,))
 
 
 class Enforcer:
