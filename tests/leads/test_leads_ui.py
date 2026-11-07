@@ -23,6 +23,7 @@ patchright = pytest.importorskip("patchright.sync_api")
 from serpapi_stub import DEFAULT_KEY  # noqa: E402
 from test_careers import PASSWORD, env, stub  # noqa: E402, F401
 from test_leads import site  # noqa: E402, F401
+from aira import webfiles  # noqa: E402
 
 ROOT = Path(__file__).resolve().parents[2]
 NODE = shutil.which("node")
@@ -452,7 +453,7 @@ def test_leads_logic_and_syntax():
     assert NODE is not None
     for script in ("views-leads.js", "views-leads-outreach.js"):
         check = subprocess.run(
-            [NODE, "--check", f"auto_apply_assistant/{script}"],
+            [NODE, "--check", str(webfiles.find(script))],
             cwd=ROOT,
             capture_output=True,
             text=True,
