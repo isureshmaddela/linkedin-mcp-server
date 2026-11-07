@@ -137,9 +137,12 @@
     button.setAttribute("aria-label", `Account menu, ${N.unread} unread notification${N.unread === 1 ? "" : "s"}`);
   }
   let counting = null;
+  let waits = 0;
   async function refreshCount() {
     if (counting) return counting;
     if (Aira.state.user && Aira.state.user.kind === "operator") return null;  // the console: no centre to count
+    // On a shared device the chosen person is restored first (life.js), so the count asks as them.
+    if (Aira.life && !Aira.life.ready && waits < 20) { waits += 1; setTimeout(refreshCount, 300); return null; }
     counting = Aira.api(`${BASE}/items?unread=1&limit=1`, { silent: true })
       .then((data) => { N.unread = data.unread || 0; drawBadge(); redraw(); })
       .catch(() => { /* signed out, or a profile to pick first */ })

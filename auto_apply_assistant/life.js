@@ -217,6 +217,8 @@
   Aira.onApiError = (status, data, path) => {
     if (status !== 403 || !data || !["profile_required", "profile_locked"].includes(data.code)) return;
     if (String(path).startsWith("/api/life/unlock") || String(path).startsWith("/api/life/profiles")) return;
+    // The notification badge may ask before the chosen person is restored after a reload: never a reason to forget them.
+    if (String(path).startsWith("/api/notify/")) return;
     setHeader("");
     L.pickProfile(data.code).then((ok) => { if (ok) { loadMe(); Aira.router.render(); } });
   };

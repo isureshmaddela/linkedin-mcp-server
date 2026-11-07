@@ -724,6 +724,8 @@ def test_dating_timestamps_reset_daily(sc, monkeypatch):
     other.date(first_name="Other")
     me.swipe(other, "like")
     assert dating.limits(sc, me.acct)["likes_left"] == dating.LIKES_PER_DAY - 1
-    tomorrow = date.today() + timedelta(days=1)
+    tomorrow = dating._today() + timedelta(
+        days=1
+    )  # Dating's day is the UTC day, not this machine's
     monkeypatch.setattr(dating, "_today", lambda: tomorrow)
     assert dating.limits(sc, me.acct)["likes_left"] == dating.LIKES_PER_DAY

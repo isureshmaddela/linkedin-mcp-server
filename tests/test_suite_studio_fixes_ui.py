@@ -149,8 +149,10 @@ def test_a_child_profile_sees_a_plain_page_and_can_switch(browser, env):
     header = _api(context, env, "POST", "/api/life/unlock", {"profile_id": kid["id"]})[
         "header"
     ]
-    # the browser remembers who is using Aira the way life.js does after a face is tapped
+    # the browser remembers who is using Aira the way life.js does after a face is tapped; the first page must have
+    # settled (it asks who is using the device) before the choice is written, or its last answers could clear it
     go(page, env, "studio")
+    page.wait_for_selector(".life-picker")
     page.evaluate(
         "([key, value]) => localStorage.setItem(key, value)",
         ["aira.lifeProfile.leads-ui@example.com", json.dumps(header)],

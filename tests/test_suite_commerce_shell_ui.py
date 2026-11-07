@@ -191,9 +191,10 @@ def test_new_search_and_folders_in_the_frame(browser, env):
     booking_folders = page.locator(
         ".shell-subnav[data-section='bookings'] .shell-sublink"
     )
-    assert [t.strip() for t in shop_folders.all_inner_texts()][:3] == [
+    assert [t.strip() for t in shop_folders.all_inner_texts()][:4] == [
         "Overview",
         "Orders",
+        "Returns",
         "Products",
     ]
     assert "Team pay" in [t.strip() for t in booking_folders.all_inner_texts()]
