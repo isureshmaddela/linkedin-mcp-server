@@ -364,10 +364,18 @@ def test_share_and_earn_settings_are_validated(db):
 
 
 def anonymous(env, method, path, body=None):
-    if method == "POST" and path.endswith("/place_order") and isinstance(body, dict) and "form_token" not in body:
+    if (
+        method == "POST"
+        and path.endswith("/place_order")
+        and isinstance(body, dict)
+        and "form_token" not in body
+    ):
         from test_suite_shop import form_token
 
-        body = {**body, "form_token": form_token(env)}  # a person took a while to fill the form in
+        body = {
+            **body,
+            "form_token": form_token(env),
+        }  # a person took a while to fill the form in
     data = json.dumps(body).encode() if body is not None else None
     request = urllib.request.Request(env.base + path, data=data, method=method)
     request.add_header("Content-Type", "application/json")

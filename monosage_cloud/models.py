@@ -554,7 +554,9 @@ class ModelGateway:
             )
         except Exception:
             if reservation is not None:
-                self.app.usage.release(reservation)  # a call that did not happen is not spent
+                self.app.usage.release(
+                    reservation
+                )  # a call that did not happen is not spent
             raise
 
     # -- the platform model's monthly budget ---------------------------------------------------------
@@ -674,9 +676,13 @@ class ModelGateway:
         except outbound.OutboundHTTPError as error:
             raise RuntimeError(f"The model endpoint answered {error.status}.") from None
         except outbound.OutboundError as error:
-            raise RuntimeError(f"The model endpoint could not be used: {error}") from None
+            raise RuntimeError(
+                f"The model endpoint could not be used: {error}"
+            ) from None
         except ValueError:
-            raise RuntimeError("The model endpoint returned an unexpected response.") from None
+            raise RuntimeError(
+                "The model endpoint returned an unexpected response."
+            ) from None
 
     def _anthropic(self, prompt: str, system_extra: str = "") -> dict[str, Any]:
         config = self.app.config

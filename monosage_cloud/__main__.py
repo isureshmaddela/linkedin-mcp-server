@@ -491,12 +491,16 @@ def main(argv: list[str] | None = None) -> int:
         "import-local",
         help="bring a single-user installation's data into a member's workspace and organization",
     )
-    bring.add_argument("--email", required=True, help="the account, the same email on both sides")
+    bring.add_argument(
+        "--email", required=True, help="the account, the same email on both sides"
+    )
     bring.add_argument(
         "--source",
         help="the single-user data folder (default: AUTO_APPLY_DB_PATH's folder or ~/.linkedin-mcp/auto_apply)",
     )
-    bring.add_argument("--org", help="the organization, when the email belongs to several")
+    bring.add_argument(
+        "--org", help="the organization, when the email belongs to several"
+    )
     bring.add_argument(
         "--replace",
         action="store_true",

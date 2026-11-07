@@ -987,7 +987,11 @@ def erase_shop(connection: sqlite3.Connection, person: Person) -> dict[str, int]
     tally.add(
         "sh_returns",
         blank(
-            connection, "sh_returns", "order_id", orders, {"details": None, "shop_note": None}
+            connection,
+            "sh_returns",
+            "order_id",
+            orders,
+            {"details": None, "shop_note": None},
         ),
     )
     trade = _rows(

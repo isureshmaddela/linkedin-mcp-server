@@ -102,13 +102,13 @@ def _sent_at(order: Mapping[str, Any]) -> str:
     return ""
 
 
-def window(
-    connection: sqlite3.Connection, order: Mapping[str, Any]
-) -> dict[str, Any]:
+def window(connection: sqlite3.Connection, order: Mapping[str, Any]) -> dict[str, Any]:
     """Whether the customer may ask for a return now, until when, and why not."""
     days = int(store.settings(connection)["return_window_days"] or 0)
     sent = _sent_at(order)
-    until = kit.iso(kit.parse_time(sent) + timedelta(days=days)) if sent and days else ""
+    until = (
+        kit.iso(kit.parse_time(sent) + timedelta(days=days)) if sent and days else ""
+    )
     reason = ""
     if not days:
         reason = "This shop does not take returns online. Contact the shop."
@@ -127,7 +127,9 @@ def window(
     return {"open": not reason, "until": until, "days": days, "reason": reason}
 
 
-def returnable(connection: sqlite3.Connection, order: Mapping[str, Any]) -> list[dict[str, Any]]:
+def returnable(
+    connection: sqlite3.Connection, order: Mapping[str, Any]
+) -> list[dict[str, Any]]:
     """Each line with how many can still be returned (bought, less what is in returns not rejected)."""
     taken: dict[tuple[str, str], int] = {}
     for entry in for_order(connection, str(order["id"])):
@@ -187,8 +189,12 @@ def request(
     state = window(connection, order)
     if not state["open"]:
         raise ValueError(state["reason"])
-    reason = kit.choice(raw.get("reason"), "the reason", tuple(REASONS), default="other")
-    details = kit.text(raw.get("details"), "what happened", max_len=1000, multiline=True)
+    reason = kit.choice(
+        raw.get("reason"), "the reason", tuple(REASONS), default="other"
+    )
+    details = kit.text(
+        raw.get("details"), "what happened", max_len=1000, multiline=True
+    )
     if reason == "other" and not details:
         raise ValueError("Tell the shop why you are returning it.")
     lines = returnable(connection, order)
@@ -199,8 +205,12 @@ def request(
     for item in wanted[:100]:
         if not isinstance(item, Mapping):
             raise ValueError("Choose what you are returning.")
-        index = kit.integer(item.get("line"), "the item", minimum=0, maximum=len(lines) - 1)
-        quantity = kit.integer(item.get("quantity"), "how many", default=1, minimum=0, maximum=100_000)
+        index = kit.integer(
+            item.get("line"), "the item", minimum=0, maximum=len(lines) - 1
+        )
+        quantity = kit.integer(
+            item.get("quantity"), "how many", default=1, minimum=0, maximum=100_000
+        )
         if quantity:
             picked[index] = picked.get(index, 0) + quantity
     if not picked:
@@ -209,7 +219,9 @@ def request(
     for index, quantity in sorted(picked.items()):
         line = lines[index]
         if quantity > line["returnable"]:
-            label_text = f"{line['name']}{f' ({line['option']})' if line['option'] else ''}"
+            label_text = (
+                f"{line['name']}{f' ({line["option"]})' if line['option'] else ''}"
+            )
             raise ValueError(
                 f"You can return at most {line['returnable']} of {label_text}."
                 if line["returnable"]
@@ -341,7 +353,11 @@ def receive(
             (
                 1 if restock else 0,
                 kit.now(),
-                _history(entry, "received", "Back in stock" if restock else "Not put back in stock"),
+                _history(
+                    entry,
+                    "received",
+                    "Back in stock" if restock else "Not put back in stock",
+                ),
                 kit.now(),
                 return_id,
             ),
@@ -352,7 +368,9 @@ def receive(
         raise
     if restock:
         for product_id in {item["product_id"] for item in entry["items"]}:
-            row = kit.fetch_one(connection, "SELECT * FROM sh_products WHERE id = ?", (product_id,))
+            row = kit.fetch_one(
+                connection, "SELECT * FROM sh_products WHERE id = ?", (product_id,)
+            )
             if row:
                 service.notify_restocked(connection, store.decode_product(row))
     kit.log(
@@ -391,7 +409,9 @@ def refund(
     entry = get(connection, return_id)
     if entry["status"] != "received":
         raise ValueError(
-            "Mark the return received first." if entry["status"] in ("requested", "approved") else f"This return is {entry['status']}."
+            "Mark the return received first."
+            if entry["status"] in ("requested", "approved")
+            else f"This return is {entry['status']}."
         )
     order = store.get_order(connection, entry["order_id"])
     left = int(order["total_cents"]) - int(order["refunded_cents"] or 0)
@@ -415,15 +435,29 @@ def refund(
             secret_store=secret_store,
             actor=actor,
         )
-    except (ValueError, LookupError, OSError, RuntimeError) as error:  # RazorpayError is a RuntimeError
+    except (
+        ValueError,
+        LookupError,
+        OSError,
+        RuntimeError,
+    ) as error:  # RazorpayError is a RuntimeError
         connection.rollback()
         connection.execute(
             "UPDATE sh_returns SET refund_error = ?, updated_at = ? WHERE id = ?",
             (str(error)[:300], kit.now(), return_id),
         )
         connection.commit()
-        raise ValueError(f"The items are back, but the refund did not go through: {error}") from None
-    _finish(connection, entry, store.get_order(connection, order["id"]), amount, text, origin=origin)
+        raise ValueError(
+            f"The items are back, but the refund did not go through: {error}"
+        ) from None
+    _finish(
+        connection,
+        entry,
+        store.get_order(connection, order["id"]),
+        amount,
+        text,
+        origin=origin,
+    )
     return get(connection, return_id)
 
 
@@ -441,7 +475,12 @@ def _finish(
         (
             amount,
             kit.now(),
-            _history(entry, "refunded", kit.fmt_money(amount, order["currency"]) + (f" · {note}" if note else "")),
+            _history(
+                entry,
+                "refunded",
+                kit.fmt_money(amount, order["currency"])
+                + (f" · {note}" if note else ""),
+            ),
             kit.now(),
             entry["id"],
         ),
@@ -453,7 +492,7 @@ def _finish(
 
 def _items_text(items: list[Mapping[str, Any]]) -> str:
     return ", ".join(
-        f"{item['quantity']} x {item['name']}{f' ({item['option']})' if item.get('option') else ''}"
+        f"{item['quantity']} x {item['name']}{f' ({item["option"]})' if item.get('option') else ''}"
         for item in items
     )
 
@@ -531,7 +570,9 @@ def _tell(
     )
 
 
-def public_view(connection: sqlite3.Connection, order: Mapping[str, Any]) -> dict[str, Any]:
+def public_view(
+    connection: sqlite3.Connection, order: Mapping[str, Any]
+) -> dict[str, Any]:
     """What the order page shows about returns: whether one can be asked for, the lines and the returns so far."""
     state = window(connection, order)
     lines = returnable(connection, order) if state["open"] else []
@@ -566,6 +607,8 @@ def public_view(connection: sqlite3.Connection, order: Mapping[str, Any]) -> dic
 
 def counts(connection: sqlite3.Connection) -> dict[str, int]:
     out = {status: 0 for status in store.RETURN_STATUSES}
-    for row in connection.execute("SELECT status, COUNT(*) FROM sh_returns GROUP BY status"):
+    for row in connection.execute(
+        "SELECT status, COUNT(*) FROM sh_returns GROUP BY status"
+    ):
         out[row[0]] = int(row[1])
     return out

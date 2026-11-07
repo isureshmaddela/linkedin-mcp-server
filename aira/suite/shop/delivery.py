@@ -145,7 +145,9 @@ def zone_values(
     merged = {**dict(current or {}), **raw}
     rate = kit.choice(merged.get("rate_type"), "the rate", ZONE_RATES, default="flat")
     values = {
-        "name": kit.text(merged.get("name"), "the zone name", max_len=80, required=True),
+        "name": kit.text(
+            merged.get("name"), "the zone name", max_len=80, required=True
+        ),
         "countries": _list(merged.get("countries"), "countries"),
         "regions": _list(merged.get("regions"), "states or regions"),
         "postcodes": _postcodes(merged.get("postcodes")),
@@ -210,7 +212,9 @@ def _stored(values: Mapping[str, Any]) -> dict[str, Any]:
     return row
 
 
-def create_zone(connection: sqlite3.Connection, raw: Mapping[str, Any]) -> dict[str, Any]:
+def create_zone(
+    connection: sqlite3.Connection, raw: Mapping[str, Any]
+) -> dict[str, Any]:
     if kit.count(connection, "SELECT COUNT(*) FROM sh_delivery_zones") >= MAX_ZONES:
         raise ValueError(f"A shop can have at most {MAX_ZONES} delivery zones.")
     row = _stored(zone_values(raw))
@@ -218,7 +222,9 @@ def create_zone(connection: sqlite3.Connection, raw: Mapping[str, Any]) -> dict[
     row.update({"id": kit.new_id(), "created_at": stamp, "updated_at": stamp})
     columns = ", ".join(row)
     marks = ", ".join(f":{key}" for key in row)
-    connection.execute(f"INSERT INTO sh_delivery_zones ({columns}) VALUES ({marks})", row)  # noqa: S608 - our keys
+    connection.execute(
+        f"INSERT INTO sh_delivery_zones ({columns}) VALUES ({marks})", row
+    )  # noqa: S608 - our keys
     connection.commit()
     return get_zone(connection, row["id"])
 
@@ -244,7 +250,11 @@ def _postcode_matches(rule: str, postcode: str) -> bool:
     if "-" in rule:
         low, high = rule.split("-", 1)
         head = postcode[: len(low)]
-        return head.isdigit() and len(head) == len(low) and int(low) <= int(head) <= int(high)
+        return (
+            head.isdigit()
+            and len(head) == len(low)
+            and int(low) <= int(head) <= int(high)
+        )
     return postcode.startswith(rule)
 
 
@@ -252,7 +262,9 @@ def covers(zone: Mapping[str, Any], address: Mapping[str, Any]) -> bool:
     """Does the zone cover this address? Every kind of rule the zone has must match (and needs the address part)."""
     if zone["countries"]:
         country = store.country_key(address.get("country"))
-        if not country or country not in {store.country_key(c) for c in zone["countries"]}:
+        if not country or country not in {
+            store.country_key(c) for c in zone["countries"]
+        }:
             return False
     if zone["regions"]:
         region = store.region_key(address.get("region"))
@@ -260,7 +272,9 @@ def covers(zone: Mapping[str, Any], address: Mapping[str, Any]) -> bool:
             return False
     if zone["postcodes"]:
         postcode = store.postcode_key(address.get("postcode"))
-        if not postcode or not any(_postcode_matches(rule, postcode) for rule in zone["postcodes"]):
+        if not postcode or not any(
+            _postcode_matches(rule, postcode) for rule in zone["postcodes"]
+        ):
             return False
     return True
 
@@ -333,7 +347,9 @@ def weight_label(grams: int) -> str:
 
 
 def zones_in_use(connection: sqlite3.Connection) -> bool:
-    return bool(kit.count(connection, "SELECT COUNT(*) FROM sh_delivery_zones WHERE active = 1"))
+    return bool(
+        kit.count(connection, "SELECT COUNT(*) FROM sh_delivery_zones WHERE active = 1")
+    )
 
 
 def address_needs(connection: sqlite3.Connection) -> dict[str, bool]:
@@ -346,7 +362,9 @@ def address_needs(connection: sqlite3.Connection) -> dict[str, bool]:
     }
 
 
-def public_zones(connection: sqlite3.Connection, shop: Mapping[str, Any]) -> dict[str, Any]:
+def public_zones(
+    connection: sqlite3.Connection, shop: Mapping[str, Any]
+) -> dict[str, Any]:
     """What the storefront says about delivery before an address is typed."""
     zones = list_zones(connection, active_only=True)
     fallback = default_zone(shop)
@@ -374,7 +392,11 @@ def describe(zone: Mapping[str, Any], currency: str) -> str:
             f"up to {weight_label(int(band['up_to_grams']))} {kit.fmt_money(int(band['cents']), currency)}"
             for band in zone["bands"]
         )
-    fee = kit.fmt_money(int(zone["fee_cents"] or 0), currency) if zone["fee_cents"] else "free"
+    fee = (
+        kit.fmt_money(int(zone["fee_cents"] or 0), currency)
+        if zone["fee_cents"]
+        else "free"
+    )
     if zone["rate_type"] == "free_over" or zone.get("free_over_cents"):
         return f"{fee}, free over {kit.fmt_money(int(zone['free_over_cents'] or 0), currency)}"
     return fee
@@ -388,7 +410,9 @@ def describe(zone: Mapping[str, Any], currency: str) -> str:
 def tracking_number(value: Any) -> str:
     text = kit.text(value, "the tracking number", max_len=60)
     if text and not _TRACKING_NUMBER.match(text):
-        raise ValueError("A tracking number is letters and digits (with - . / allowed).")
+        raise ValueError(
+            "A tracking number is letters and digits (with - . / allowed)."
+        )
     return text
 
 
@@ -422,6 +446,11 @@ def carrier_name(carrier: str) -> str:
 def carriers(shop: Mapping[str, Any]) -> list[dict[str, Any]]:
     """The carriers the ship form offers (the shop's own page only once it is set)."""
     return [
-        {"id": key, "name": name, "builds_link": bool(url) or (key == "custom" and bool(shop.get("custom_tracking_url")))}
+        {
+            "id": key,
+            "name": name,
+            "builds_link": bool(url)
+            or (key == "custom" and bool(shop.get("custom_tracking_url"))),
+        }
         for key, (name, url) in CARRIERS.items()
     ]

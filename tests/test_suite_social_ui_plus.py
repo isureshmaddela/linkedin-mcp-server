@@ -460,9 +460,7 @@ def test_social_phone_bottom_bar_and_more(browser, env, dark):
         t.splitlines()[0].strip()
         for t in bar.locator(".so-bottom-item").all_inner_texts()
     ]
-    assert labels == ["Home", "Explore", "Reels", "Chats", "Alerts", "More"], (
-        labels
-    )
+    assert labels == ["Home", "Explore", "Reels", "Chats", "Alerts", "More"], labels
     assert (
         bar.locator(
             ".so-bottom-item[aria-label='Notifications'] .so-bottom-count"

@@ -60,7 +60,9 @@ class _Channel:
         self.touched = time.monotonic()
         self.dropped = 0  # the newest sequence number this channel no longer holds
         self.tickets: deque[int] = deque()  # the open streams, oldest first
-        self.evicted: set[int] = set()  # streams told to end because newer ones needed their slot
+        self.evicted: set[int] = (
+            set()
+        )  # streams told to end because newer ones needed their slot
 
 
 class Hub:
@@ -156,7 +158,9 @@ class Hub:
             if target is None:
                 return
             if ticket:
-                if ticket in target.evicted:  # its slot was already given to a newer stream
+                if (
+                    ticket in target.evicted
+                ):  # its slot was already given to a newer stream
                     target.evicted.discard(ticket)
                     return
                 try:

@@ -19,10 +19,14 @@ def test_add_column_adds_once_and_tolerates_a_racing_connection(tmp_path):
     # Both connections looked before either added it: the second ALTER is the one that used to fail.
     assert dbutil.add_column(first, "t", "kind", "TEXT NOT NULL DEFAULT ''") is True
     first.commit()
-    second.execute("ALTER TABLE t ADD COLUMN other TEXT")  # unrelated work on the second connection
+    second.execute(
+        "ALTER TABLE t ADD COLUMN other TEXT"
+    )  # unrelated work on the second connection
     second.commit()
     assert dbutil.add_column(second, "t", "kind", "TEXT NOT NULL DEFAULT ''") is False
-    dbutil.execute_migration(second, "ALTER TABLE t ADD COLUMN kind TEXT")  # a plain statement: also done
+    dbutil.execute_migration(
+        second, "ALTER TABLE t ADD COLUMN kind TEXT"
+    )  # a plain statement: also done
     with pytest.raises(sqlite3.OperationalError):
         dbutil.execute_migration(second, "ALTER TABLE missing ADD COLUMN kind TEXT")
     first.close()

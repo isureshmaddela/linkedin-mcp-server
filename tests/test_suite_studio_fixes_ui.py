@@ -160,7 +160,9 @@ def test_a_child_profile_sees_a_plain_page_and_can_switch(browser, env):
     page.wait_for_selector("text=only the grown-ups in your household can open it")
     assert page.locator("text=Something went wrong").count() == 0
     assert page.locator("text=Lee Chen").count() == 0
-    assert page.locator(".shell-new").count() == 0  # nothing to create on a child's profile
+    assert (
+        page.locator(".shell-new").count() == 0
+    )  # nothing to create on a child's profile
     page.get_by_role("button", name="Switch person").click()
     page.wait_for_selector(".life-picker")
     page.locator(".life-face").filter(has_not_text="Kid").first.click()

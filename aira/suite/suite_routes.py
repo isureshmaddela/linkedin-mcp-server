@@ -225,7 +225,9 @@ def _payments_view(request: Request, connection: Any) -> dict[str, Any]:
     settings = kit.payment_settings(connection)
     has_secret = bool(payments.key_secret(connection, request.secret_store))
     has_webhook = bool(payments.webhook_secret(connection, request.secret_store))
-    path = payments.webhook_path(connection) if settings["provider"] == "razorpay" else ""
+    path = (
+        payments.webhook_path(connection) if settings["provider"] == "razorpay" else ""
+    )
     webhook_url = kit.public_url(path, request) if path else ""
     return {
         "settings": {
@@ -280,18 +282,35 @@ def payments_save(request: Request) -> tuple[int, dict[str, Any]]:
             if isinstance(value, str) and value.strip():
                 secret = value.strip()
                 if len(secret) > 200 or any(ch.isspace() for ch in secret):
-                    raise ValueError("That secret does not look right: paste it again from the Razorpay dashboard.")
+                    raise ValueError(
+                        "That secret does not look right: paste it again from the Razorpay dashboard."
+                    )
                 request.secret_store.put(connection, name, secret, airastore.now_utc())
             elif payload.get(clear):
                 request.secret_store.delete(connection, name)
         raw = dict(payload)
-        raw["key_secret_saved"] = bool(payments.key_secret(connection, request.secret_store))
-        raw["webhook_secret_saved"] = bool(payments.webhook_secret(connection, request.secret_store))
+        raw["key_secret_saved"] = bool(
+            payments.key_secret(connection, request.secret_store)
+        )
+        raw["webhook_secret_saved"] = bool(
+            payments.webhook_secret(connection, request.secret_store)
+        )
         kit.save_payment_settings(connection, raw)
-        kit.log(connection, "core", "payments", "Payment settings updated", actor=_actor(request))
+        kit.log(
+            connection,
+            "core",
+            "payments",
+            "Payment settings updated",
+            actor=_actor(request),
+        )
         connection.commit()
         view = _payments_view(request, connection)
-    request.audit("suite.payment_settings", "suite", "payments", {"provider": view["settings"]["provider"], "mode": view["mode"]})
+    request.audit(
+        "suite.payment_settings",
+        "suite",
+        "payments",
+        {"provider": view["settings"]["provider"], "mode": view["mode"]},
+    )
     return 200, view
 
 
@@ -325,8 +344,12 @@ def payment_request_create(request: Request) -> tuple[int, dict[str, Any]]:
     _grown_up(request)
     payload = request.payload
     app = kit.text(payload.get("app"), "the app", max_len=40, required=True)
-    object_type = kit.text(payload.get("object_type"), "what to pay", max_len=40, required=True)
-    object_id = kit.text(payload.get("object_id"), "the item", max_len=64, required=True)
+    object_type = kit.text(
+        payload.get("object_type"), "what to pay", max_len=40, required=True
+    )
+    object_id = kit.text(
+        payload.get("object_id"), "the item", max_len=64, required=True
+    )
     with request.connect() as connection, kit.origin_of(request):
         made = payments.create_request(
             connection,
@@ -336,7 +359,9 @@ def payment_request_create(request: Request) -> tuple[int, dict[str, Any]]:
             secret_store=request.secret_store,
             actor=_actor(request),
         )
-    request.audit("suite.payment_link", app, object_id, {"amount_cents": made["amount_cents"]})
+    request.audit(
+        "suite.payment_link", app, object_id, {"amount_cents": made["amount_cents"]}
+    )
     return 201, {"request": made}
 
 
@@ -354,7 +379,12 @@ def payment_request_refund(request: Request) -> tuple[int, dict[str, Any]]:
             secret_store=request.secret_store,
             actor=_actor(request),
         )
-    request.audit("suite.payment_refund", made["app"], made["object_id"], {"refunded_cents": made["refunded_cents"]})
+    request.audit(
+        "suite.payment_refund",
+        made["app"],
+        made["object_id"],
+        {"refunded_cents": made["refunded_cents"]},
+    )
     return 200, {"request": made}
 
 
@@ -362,7 +392,9 @@ def payment_request_refund(request: Request) -> tuple[int, dict[str, Any]]:
 def payment_request_cancel(request: Request) -> tuple[int, dict[str, Any]]:
     _grown_up(request)
     with request.connect() as connection:
-        made = payments.cancel_request(connection, request.match.group(1), secret_store=request.secret_store)
+        made = payments.cancel_request(
+            connection, request.match.group(1), secret_store=request.secret_store
+        )
     return 200, {"request": made}
 
 
@@ -469,17 +501,33 @@ def customers_get(request: Request) -> tuple[int, dict[str, Any]]:
 def customers_update(request: Request) -> tuple[int, dict[str, Any]]:
     _grown_up(request)
     with request.connect() as connection:
-        return 200, {"contact": customers.update(connection, request.match.group(1), request.payload)}
+        return 200, {
+            "contact": customers.update(
+                connection, request.match.group(1), request.payload
+            )
+        }
 
 
 @aira_route("POST", f"{BASE}/customers/{CONTACT}/merge")
 def customers_merge(request: Request) -> tuple[int, dict[str, Any]]:
     """Merge ``other_id`` into this customer: its records, deals and lookup keys move here and it is gone."""
     _grown_up(request)
-    other = kit.text(request.payload.get("other_id"), "the customer to merge", max_len=64, required=True)
+    other = kit.text(
+        request.payload.get("other_id"),
+        "the customer to merge",
+        max_len=64,
+        required=True,
+    )
     with request.connect() as connection:
-        result = customers.merge(connection, request.match.group(1), other, actor=_actor(request))
-    request.audit("suite.customer_merge", "contact", request.match.group(1), {"merged": other, "moved": result["moved"]})
+        result = customers.merge(
+            connection, request.match.group(1), other, actor=_actor(request)
+        )
+    request.audit(
+        "suite.customer_merge",
+        "contact",
+        request.match.group(1),
+        {"merged": other, "moved": result["moved"]},
+    )
     return 200, result
 
 
@@ -488,9 +536,19 @@ def customers_to_sales(request: Request) -> tuple[int, dict[str, Any]]:
     _grown_up(request)
     with request.connect() as connection:
         result = customers.send_to_sales(
-            connection, "suite", "contact", request.match.group(1), request.payload, actor=_actor(request)
+            connection,
+            "suite",
+            "contact",
+            request.match.group(1),
+            request.payload,
+            actor=_actor(request),
         )
-    request.audit("suite.send_to_sales", "contact", request.match.group(1), {"deal": result["deal"]["id"]})
+    request.audit(
+        "suite.send_to_sales",
+        "contact",
+        request.match.group(1),
+        {"deal": result["deal"]["id"]},
+    )
     return (201 if result["created"] else 200), result
 
 
@@ -503,7 +561,9 @@ def sales_handoff_get(request: Request) -> tuple[int, dict[str, Any]]:
             "deal": customers.handoff_for(
                 connection,
                 kit.text(request.q("app"), "the app", max_len=40, required=True),
-                kit.text(request.q("object_type"), "what was sent", max_len=40, required=True),
+                kit.text(
+                    request.q("object_type"), "what was sent", max_len=40, required=True
+                ),
                 kit.text(request.q("object_id"), "the item", max_len=64, required=True),
             ),
             "sales_available": app_enabled("studio"),
@@ -517,8 +577,12 @@ def sales_handoff(request: Request) -> tuple[int, dict[str, Any]]:
     _grown_up(request)
     payload = request.payload
     app = kit.text(payload.get("app"), "the app", max_len=40, required=True)
-    object_type = kit.text(payload.get("object_type"), "what to send", max_len=40, required=True)
-    object_id = kit.text(payload.get("object_id"), "the item", max_len=64, required=True)
+    object_type = kit.text(
+        payload.get("object_type"), "what to send", max_len=40, required=True
+    )
+    object_id = kit.text(
+        payload.get("object_id"), "the item", max_len=64, required=True
+    )
     with request.connect() as connection:
         result = customers.send_to_sales(
             connection, app, object_type, object_id, payload, actor=_actor(request)
@@ -747,7 +811,9 @@ def public_action(request: Request) -> tuple[int, dict[str, Any]]:
     with (
         request.connect() as connection,
         payments.secrets(request.secret_store),
-        kit.origin_of(request),  # a payment link brings the customer back to the address they used
+        kit.origin_of(
+            request
+        ),  # a payment link brings the customer back to the address they used
     ):
         return public.act(
             connection,

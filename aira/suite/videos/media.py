@@ -358,12 +358,16 @@ def _location_regions(
             regions.append((at, header))
         elif in_ilst:
             if int.from_bytes(name, "big") in ilst_keys:
-                regions.append((at, header))  # an entry whose metadata key names a location
+                regions.append(
+                    (at, header)
+                )  # an entry whose metadata key names a location
         elif name == b"meta":
             # the ISO meta box has a version and flags before its children; QuickTime's has not
             inner = body + 4 if data[body + 8 : body + 12] == b"hdlr" else body
             keys: set[int] = set()
-            for child, child_at, child_header, child_stop in _box_list(data, inner, stop):
+            for child, child_at, child_header, child_stop in _box_list(
+                data, inner, stop
+            ):
                 if child == b"keys":
                     keys |= _location_keys(data, child_at + child_header, child_stop)
             regions += _location_regions(data, inner, stop, ilst_keys=frozenset(keys))
@@ -405,7 +409,9 @@ def strip_location(path: Path) -> int:
                     for offset, box_header in _location_regions(data, 0, size):
                         box_size = struct.unpack(">I", data[offset : offset + 4])[0]
                         if box_size == 1:
-                            box_size = struct.unpack(">Q", data[offset + 8 : offset + 16])[0]
+                            box_size = struct.unpack(
+                                ">Q", data[offset + 8 : offset + 16]
+                            )[0]
                         handle.seek(at + offset + 4)
                         handle.write(b"free")
                         handle.seek(at + offset + box_header)
@@ -610,7 +616,9 @@ def complete(sc: sqlite3.Connection, upload_id: str, owner_key: str) -> dict[str
     os.replace(part, target)
     size = found["size"]
     if mime in ISO_MEDIA:
-        strip_location(target)  # where it was filmed: blanked in place, so the file keeps its size
+        strip_location(
+            target
+        )  # where it was filmed: blanked in place, so the file keeps its size
     elif found["kind"] == "image":
         size = _clean_picture(target)
     info = mp4_info(target) if mime in ISO_MEDIA else {}

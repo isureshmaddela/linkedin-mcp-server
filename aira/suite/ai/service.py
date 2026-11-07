@@ -517,7 +517,9 @@ def undo(
     except Exception as error:  # noqa: BLE001 - say so rather than fail the page
         connection.rollback()
         kit.suite.logger.exception("Undoing %s failed", action.name)
-        raise ValueError("Monosage could not undo this. Change it in its app.") from error
+        raise ValueError(
+            "Monosage could not undo this. Change it in its app."
+        ) from error
     kit.update_row(
         connection,
         "ai_ops",

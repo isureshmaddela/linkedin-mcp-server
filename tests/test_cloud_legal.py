@@ -299,7 +299,8 @@ ENV_TOKEN = re.compile(
 
 def _code_corpus() -> str:
     return "\n".join(
-        path.read_text(encoding="utf-8") for path in (ROOT / "monosage_cloud").rglob("*.py")
+        path.read_text(encoding="utf-8")
+        for path in (ROOT / "monosage_cloud").rglob("*.py")
     )
 
 

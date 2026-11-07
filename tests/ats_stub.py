@@ -535,9 +535,10 @@ class AtsStub:
     ) -> tuple[int, bytes, dict[str, str]]:
         fields, files = _parse_body(handler.headers.get("Content-Type", ""), body)
         variant = (fields.pop("variant", None) or [""])[0]
-        if variant == "captcha_step" and not (
-            fields.get("g-recaptcha-response") or [""]
-        )[0].strip():
+        if (
+            variant == "captcha_step"
+            and not (fields.get("g-recaptcha-response") or [""])[0].strip()
+        ):
             return (
                 400,
                 _page("Error", "<h1>Please complete the CAPTCHA</h1>"),

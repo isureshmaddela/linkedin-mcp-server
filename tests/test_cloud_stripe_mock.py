@@ -206,7 +206,10 @@ def test_pending_upgrades_one_off_charges_and_expiry_validate(stripe):
         addons=[{"app_id": "leads", "name": "Leads", "seat_cents": 400, "seats": 30}],
         confirm_payment=True,
     )
-    assert upgrade["pending"] is True and upgrade["match"] == {"plan_id": "team", "seats": 30}
+    assert upgrade["pending"] is True and upgrade["match"] == {
+        "plan_id": "team",
+        "seats": 30,
+    }
     charge = stripe.charge_now(
         "cus_123",
         2000,

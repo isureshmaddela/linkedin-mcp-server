@@ -54,6 +54,8 @@ def _scrypt(password: bytes, salt: bytes, n: int, r: int, p: int) -> bytes:
         )
     finally:
         slots.release()
+
+
 EMAIL_RE = re.compile(r"^[^\s@]+@[^\s@]+\.[^\s@]+$")
 WEAK_PASSWORDS = {
     "password1234",

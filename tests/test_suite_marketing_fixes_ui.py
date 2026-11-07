@@ -35,7 +35,10 @@ def _business_with_a_paid_lead(context, env):
         "POST",
         f"/api/public/{token}/submit",
         {
-            "started": started(call(context, env, "GET", f"/api/public/{token}")),"name": "Kim Brightwater", "email": "kim.brightwater@example.com"},
+            "started": started(call(context, env, "GET", f"/api/public/{token}")),
+            "name": "Kim Brightwater",
+            "email": "kim.brightwater@example.com",
+        },
     )
     lead = call(context, env, "GET", "/api/marketing/submissions")["submissions"][0]
     call(

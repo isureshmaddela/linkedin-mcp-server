@@ -191,7 +191,9 @@ def profiles_erase(request: Request) -> tuple[int, dict[str, Any]]:
     """Remove a person with "Erase everything" (``pin``: the household owner's PIN): every app's data about them
     is deleted, and what a business keeps for its books is anonymised. Answers the receipt (counts per app)."""
     if suite.actor() is not None:
-        raise PermissionError("A member of the organization is removed by its administrators.")
+        raise PermissionError(
+            "A member of the organization is removed by its administrators."
+        )
     with _open(request) as connection:
         actor = life.current(request, connection)
         owner = next((p for p in life.profiles(connection) if p["owner"]), None)
@@ -207,7 +209,12 @@ def profiles_erase(request: Request) -> tuple[int, dict[str, Any]]:
             _wrong_pin(error.profile_id, tries)
             raise
     # the account's audit log names the erasure, never the person (they are gone)
-    request.audit("life.profile_erase", "erasure", receipt["job_id"], {"status": receipt["status"]})
+    request.audit(
+        "life.profile_erase",
+        "erasure",
+        receipt["job_id"],
+        {"status": receipt["status"]},
+    )
     return 200, {"erased": receipt["status"] == "done", "receipt": receipt}
 
 
@@ -232,7 +239,9 @@ def profiles_pin(request: Request) -> tuple[int, dict[str, Any]]:
             raise
         opened = None
         if updated["id"] == actor["id"]:
-            opened = life.unlock(connection, updated)  # this browser stays open with the new PIN
+            opened = life.unlock(
+                connection, updated
+            )  # this browser stays open with the new PIN
     request.audit("life.profile_pin", "profile", request.match.group(1))
     return 200, {
         "profile": life.public(updated),

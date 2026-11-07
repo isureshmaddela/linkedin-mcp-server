@@ -418,9 +418,9 @@ def _install_notify(app: CloudApp) -> None:
 
     HOOKS.notify = {
         "key_dir": lambda: app.config.data_root / "secrets",
-        "subject": lambda: app.config.base_url
-        if app.config.base_url.startswith("https://")
-        else "",
+        "subject": lambda: (
+            app.config.base_url if app.config.base_url.startswith("https://") else ""
+        ),
         "mailer": mailer,
         "live": True,
     }

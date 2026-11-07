@@ -520,7 +520,9 @@ def test_the_hub_caps_streams_and_wakes_waiters():
     _, newest = hub.open_stream("local:a")
     oldest = opened[0][1]
     assert hub.ended("local:a", oldest) and not hub.ended("local:a", newest)
-    assert hub.wait("local:a", after[0], 5, oldest) == []  # the told-to-end stream stops waiting at once
+    assert (
+        hub.wait("local:a", after[0], 5, oldest) == []
+    )  # the told-to-end stream stops waiting at once
     assert hub.stats()["streams"] == realtime.PER_CHANNEL
     hub.close("local:a", oldest)  # its own close does not free a second slot
     assert hub.stats()["streams"] == realtime.PER_CHANNEL

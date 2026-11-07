@@ -493,7 +493,9 @@ def test_a_routine_runs_once_at_its_time_and_shows_on_today(db, people, clock):
     pulse = ai_routes._pulse(db, pat, "")
     assert pulse["alerts"] == []
     card = next(
-        c for c in ai_routes._today(db, pat) if c["title"] == "Monosage's routines today"
+        c
+        for c in ai_routes._today(db, pat)
+        if c["title"] == "Monosage's routines today"
     )
     assert [line["text"] for line in card["lines"]] == [
         "Morning brief"
@@ -522,7 +524,9 @@ def test_a_routine_runs_once_at_its_time_and_shows_on_today(db, people, clock):
         session["session"]["title"] == "Morning brief" and len(session["messages"]) == 2
     )
     card = next(
-        c for c in ai_routes._today(db, pat) if c["title"] == "Monosage's routines today"
+        c
+        for c in ai_routes._today(db, pat)
+        if c["title"] == "Monosage's routines today"
     )
     assert (
         card["lines"][0]["done"] is True

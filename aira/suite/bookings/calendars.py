@@ -28,12 +28,12 @@ Fetcher = Callable[[str], bytes]
 
 
 def _fetch(url: str) -> bytes:
-    return webfetch.fetch(
-        url, accept="text/calendar, text/plain;q=0.8, */*;q=0.5"
-    )
+    return webfetch.fetch(url, accept="text/calendar, text/plain;q=0.8, */*;q=0.5")
 
 
-fetcher: Fetcher = _fetch  # tests may point this at something else; the default is the safe reader
+fetcher: Fetcher = (
+    _fetch  # tests may point this at something else; the default is the safe reader
+)
 
 
 def check_address(value: Any) -> str:
@@ -41,7 +41,9 @@ def check_address(value: Any) -> str:
     try:
         return webfetch.check_url(text)
     except webfetch.FetchError as error:
-        raise ValueError(f"{error} Paste the calendar's private address in iCal format.") from None
+        raise ValueError(
+            f"{error} Paste the calendar's private address in iCal format."
+        ) from None
 
 
 def set_feed(
@@ -59,7 +61,14 @@ def set_feed(
         (staff_id, address, stamp, stamp),
     )
     connection.execute("DELETE FROM bk_calendar_busy WHERE staff_id = ?", (staff_id,))
-    kit.log(connection, APP, "calendar", "A staff calendar was connected", ref_type="staff", ref_id=staff_id)
+    kit.log(
+        connection,
+        APP,
+        "calendar",
+        "A staff calendar was connected",
+        ref_type="staff",
+        ref_id=staff_id,
+    )
     connection.commit()
     if sync:
         sync_feed(connection, staff_id)
@@ -93,7 +102,8 @@ def sync_feed(
     moment = now or kit.utcnow()
     stamp = kit.iso(moment)
     connection.execute(
-        "UPDATE bk_calendar_feeds SET last_attempt_at = ? WHERE staff_id = ?", (stamp, staff_id)
+        "UPDATE bk_calendar_feeds SET last_attempt_at = ? WHERE staff_id = ?",
+        (stamp, staff_id),
     )
     connection.commit()
     start, end = _window(connection, moment)
@@ -110,7 +120,8 @@ def sync_feed(
     except (webfetch.FetchError, ValueError) as error:
         message = str(error)[:300] or "The calendar could not be read."
         connection.execute(
-            "UPDATE bk_calendar_feeds SET last_error = ? WHERE staff_id = ?", (message, staff_id)
+            "UPDATE bk_calendar_feeds SET last_error = ? WHERE staff_id = ?",
+            (message, staff_id),
         )
         connection.commit()
         return {"ok": False, "error": message}
@@ -127,7 +138,9 @@ def sync_feed(
     return {"ok": True, "busy": len(busy)}
 
 
-def sync_due(connection: sqlite3.Connection, *, now: datetime | None = None) -> dict[str, int]:
+def sync_due(
+    connection: sqlite3.Connection, *, now: datetime | None = None
+) -> dict[str, int]:
     """The background pass: every active person's calendar not read in the last :data:`SYNC_MINUTES`."""
     moment = now or kit.utcnow()
     cutoff = kit.iso(moment - timedelta(minutes=SYNC_MINUTES))
@@ -160,7 +173,9 @@ def busy_between(
     ]
 
 
-def overview(connection: sqlite3.Connection, *, now: datetime | None = None) -> list[dict[str, Any]]:
+def overview(
+    connection: sqlite3.Connection, *, now: datetime | None = None
+) -> list[dict[str, Any]]:
     """Every connected calendar with when it was last read and any problem (for the Staff tab)."""
     moment = now or kit.utcnow()
     stale = kit.iso(moment - timedelta(days=STALE_DAYS))

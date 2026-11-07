@@ -1454,11 +1454,13 @@ def visitor_key(visitor: dict[str, Any]) -> str:
     )
 
 
-BOARD_LINK_DAYS = 30  # a board link stops working after this; a grown-up makes a new one (rotate)
+BOARD_LINK_DAYS = (
+    30  # a board link stops working after this; a grown-up makes a new one (rotate)
+)
 
 
 def initials(name: str) -> str:
-    """"Mia Rao" -> "M. R." (the board names children and teens this way)."""
+    """ "Mia Rao" -> "M. R." (the board names children and teens this way)."""
     parts = [p for p in str(name or "").replace(".", " ").split() if p]
     return " ".join(f"{p[0].upper()}." for p in parts[:2]) or "?"
 

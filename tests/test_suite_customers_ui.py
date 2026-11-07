@@ -28,16 +28,29 @@ def local_index():
 
 
 def _orders(call):
-    mug = call("POST", "/api/shop/products", {"name": "Mug", "price_cents": 1500, "status": "draft"})["product"]
+    mug = call(
+        "POST",
+        "/api/shop/products",
+        {"name": "Mug", "price_cents": 1500, "status": "draft"},
+    )["product"]
     paid = call(
         "POST",
         "/api/shop/orders",
-        {"items": [{"product_id": mug["id"]}], "name": "Ana Silva", "email": "ana@example.com", "mark_paid": True},
+        {
+            "items": [{"product_id": mug["id"]}],
+            "name": "Ana Silva",
+            "email": "ana@example.com",
+            "mark_paid": True,
+        },
     )["order"]
     open_order = call(
         "POST",
         "/api/shop/orders",
-        {"items": [{"product_id": mug["id"]}], "name": "Ana S", "email": "ana.s@work.example"},
+        {
+            "items": [{"product_id": mug["id"]}],
+            "name": "Ana S",
+            "email": "ana.s@work.example",
+        },
     )["order"]
     return paid, open_order
 
@@ -51,14 +64,25 @@ def test_customers_contact_page_merge_and_send_to_sales(browser, env):
     page.locator(".suite-table tbody tr", has_text="ana@example.com").click()
     page.wait_for_selector(".hub-timeline")
     assert "Order #1001" in page.locator(".hub-timeline").inner_text()
-    assert page.locator(".suite-kpi", has_text="Payments").inner_text().strip().endswith("1")
+    assert (
+        page.locator(".suite-kpi", has_text="Payments")
+        .inner_text()
+        .strip()
+        .endswith("1")
+    )
     page.get_by_role("button", name="Merge with another record").click()
     dialog = page.locator(".modal", has_text="Merge with")
     dialog.get_by_label("Find the other record").fill("work.example")
     dialog.get_by_role("button", name="Search").click()
     dialog.get_by_role("button", name="Merge", exact=True).click()
-    page.locator(".modal", has_text="Merge two records").get_by_role("button", name="Merge", exact=True).click()
-    until(page, lambda: page.locator(".hub-timeline li", has_text="Order #").count() == 2, what="both orders on one record")
+    page.locator(".modal", has_text="Merge two records").get_by_role(
+        "button", name="Merge", exact=True
+    ).click()
+    until(
+        page,
+        lambda: page.locator(".hub-timeline li", has_text="Order #").count() == 2,
+        what="both orders on one record",
+    )
     page.get_by_role("button", name="Send to Sales").click()
     page.wait_for_url(re.compile(r"#/studio"))
     deals = call("GET", "/api/studio/deals")["deals"]
@@ -73,7 +97,9 @@ def test_order_payment_card_subscribers_waiting_and_lead_sequences(browser, env)
     call = caller(context, env)
     _paid, open_order = _orders(call)
     # the Shop order: an Online payment card with its buttons (no link yet)
-    go(page, env, f"shop?tab=orders&order={open_order['id']}")  # opens the order's drawer
+    go(
+        page, env, f"shop?tab=orders&order={open_order['id']}"
+    )  # opens the order's drawer
     card = page.locator(".suite-payments")
     card.wait_for()
     assert card.get_by_role("button", name="Create payment link").is_visible()
@@ -83,12 +109,27 @@ def test_order_payment_card_subscribers_waiting_and_lead_sequences(browser, env)
     call("POST", "/api/marketing/subscribers", {"email": "sam@example.com"})
     go(page, env, "marketing?tab=subscribers")
     page.wait_for_selector("text=Waiting to confirm")
-    assert page.get_by_label("Status").locator("option", has_text="Waiting to confirm").count() == 1
+    assert (
+        page.get_by_label("Status")
+        .locator("option", has_text="Waiting to confirm")
+        .count()
+        == 1
+    )
     # Leads: a follow-up sequence made in the editor, and a lead added to it from its drawer
     call(
         "POST",
         "/api/leads/items",
-        {"leads": [{"name": "Biz A", "company": "Biz A", "email": "ana@biza.test", "kind": "company", "source": "manual"}]},
+        {
+            "leads": [
+                {
+                    "name": "Biz A",
+                    "company": "Biz A",
+                    "email": "ana@biza.test",
+                    "kind": "company",
+                    "source": "manual",
+                }
+            ]
+        },
     )
     go(page, env, "leads?tab=outreach")
     page.locator("#ldSeqNew").click()
@@ -101,7 +142,11 @@ def test_order_payment_card_subscribers_waiting_and_lead_sequences(browser, env)
     editor.get_by_role("button", name="Save sequence").click()
     page.wait_for_selector("#ldSeqTable >> text=Website follow-up")
     saved = call("GET", "/api/leads/sequences")["sequences"]
-    assert len(saved) == 1 and len(saved[0]["steps"]) == 2 and saved[0]["steps"][1]["delay_days"] == 3
+    assert (
+        len(saved) == 1
+        and len(saved[0]["steps"]) == 2
+        and saved[0]["steps"][1]["delay_days"] == 3
+    )
     lead_id = call("GET", "/api/leads/items")["leads"][0]["id"]
     go(page, env, f"leads?tab=leads&open={lead_id}")
     status = page.locator("#ldLeadSequences")

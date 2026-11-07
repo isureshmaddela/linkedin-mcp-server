@@ -306,9 +306,7 @@ def business_unit_price(
     return unit - kit.percent_of(unit, percent * 100) if percent else unit
 
 
-def buyer_problem(
-    product: Mapping[str, Any], account: Mapping[str, Any] | None
-) -> str:
+def buyer_problem(product: Mapping[str, Any], account: Mapping[str, Any] | None) -> str:
     """Why this buyer cannot buy this product ('' = they can)."""
     audience = product.get("audience") or "all"
     if account is not None and audience == "consumers":
@@ -662,7 +660,9 @@ def price(
     free_over = int(shop["free_delivery_over_cents"] or 0)
     weight = sum(int(line["weight_grams"]) * int(line["quantity"]) for line in lines)
     where = {
-        "country": str((address or {}).get("country") or shop.get("default_country") or ""),
+        "country": str(
+            (address or {}).get("country") or shop.get("default_country") or ""
+        ),
         "region": str((address or {}).get("region") or customer_state or ""),
         "postcode": str((address or {}).get("postcode") or ""),
     }
@@ -682,14 +682,18 @@ def price(
                 if needs[key] and not where[key]
             ]
             place = ", ".join(
-                part for part in (where["postcode"], where["region"], where["country"]) if part
+                part
+                for part in (where["postcode"], where["region"], where["country"])
+                if part
             )
             if missing:
                 delivery_problem = f"Enter your {' and '.join(missing)} to see if the shop delivers there."
             elif place:
                 delivery_problem = f"Sorry, the shop does not deliver to {place}. Choose pickup, or check the address."
             else:
-                delivery_problem = "Enter your address to see if the shop delivers there."
+                delivery_problem = (
+                    "Enter your address to see if the shop delivers there."
+                )
         else:
             zone_name = "" if zone.get("default") else zone["name"]
             free_over = int(zone.get("free_over_cents") or 0)
@@ -870,7 +874,9 @@ def ship_to(raw: Mapping[str, Any], method: str) -> dict[str, str]:
     return {
         "ship_country": kit.text(raw.get("country"), "the country", max_len=60),
         "ship_region": kit.text(raw.get("region"), "the state or region", max_len=60),
-        "ship_postcode": kit.text(raw.get("postcode"), "the postcode or PIN code", max_len=20),
+        "ship_postcode": kit.text(
+            raw.get("postcode"), "the postcode or PIN code", max_len=20
+        ),
     }
 
 
@@ -1038,7 +1044,9 @@ def place_order(
                 1 if quote["prices_include_tax"] else 0,
                 quote["weight_grams"],
                 # the country the zone was chosen by (the shop's own when the customer named none)
-                store.country_key(customer["ship_country"] or shop.get("default_country"))
+                store.country_key(
+                    customer["ship_country"] or shop.get("default_country")
+                )
                 if method == "delivery"
                 else "",
                 customer["ship_region"],
@@ -1047,7 +1055,9 @@ def place_order(
                 order_id,
             ),
         )
-        kit.link_row(connection, "sh_orders", order_id)  # the customer's one record (aira.suite.customers)
+        kit.link_row(
+            connection, "sh_orders", order_id
+        )  # the customer's one record (aira.suite.customers)
         connection.commit()
     except BaseException:
         connection.rollback()
@@ -1133,7 +1143,11 @@ def check_form(connection: sqlite3.Connection, payload: Mapping[str, Any]) -> No
 def _client_key(client: str) -> str:
     import hashlib
 
-    return hashlib.sha256(f"shop-visitor:{client}".encode()).hexdigest()[:24] if client else ""
+    return (
+        hashlib.sha256(f"shop-visitor:{client}".encode()).hexdigest()[:24]
+        if client
+        else ""
+    )
 
 
 def _check_order_caps(
@@ -1146,11 +1160,15 @@ def _check_order_caps(
     per_contact = int(shop["max_orders_per_contact_hour"])
     for column in ("customer_email", "customer_phone"):
         value = str(customer.get(column) or "")
-        if value and kit.count(
-            connection,
-            f"SELECT COUNT(*) FROM sh_orders WHERE {column} = ? AND source = 'storefront' AND created_at >= ?",  # noqa: S608 - fixed names
-            (value, since),
-        ) >= per_contact:
+        if (
+            value
+            and kit.count(
+                connection,
+                f"SELECT COUNT(*) FROM sh_orders WHERE {column} = ? AND source = 'storefront' AND created_at >= ?",  # noqa: S608 - fixed names
+                (value, since),
+            )
+            >= per_contact
+        ):
             raise PermissionError(
                 "Too many orders with these contact details in the last hour. Please try again later or contact the shop."
             )
@@ -1212,7 +1230,9 @@ def expire_unpaid(connection: sqlite3.Connection, *, moment: Any = None) -> int:
     )
     lapsed = 0
     for row in rows:
-        if row["pay_online"] and kit.parse_time(row["expires_at"]) > now - timedelta(minutes=ONLINE_GRACE_MINUTES):
+        if row["pay_online"] and kit.parse_time(row["expires_at"]) > now - timedelta(
+            minutes=ONLINE_GRACE_MINUTES
+        ):
             continue
         order = cancel(
             connection,
@@ -1304,7 +1324,9 @@ def paid_online(
             connection.execute(
                 "UPDATE sh_orders SET fulfilment_status = 'placed', restocked = 0, expired_at = '', history = ?, updated_at = ? WHERE id = ?",
                 (
-                    _history(order, "placed", "Paid after it lapsed: back in the queue"),
+                    _history(
+                        order, "placed", "Paid after it lapsed: back in the queue"
+                    ),
                     kit.now(),
                     order_id,
                 ),
@@ -1362,7 +1384,9 @@ def refund(
         amount_cents, "the refund amount (in cents)", default=left, minimum=1
     )
     if amount > left:
-        raise ValueError(f"At most {kit.fmt_money(left, order['currency'])} can be refunded.")
+        raise ValueError(
+            f"At most {kit.fmt_money(left, order['currency'])} can be refunded."
+        )
     kit.void_revenue(connection, APP, "order", order_id, refund_cents=amount)
     kit.log(
         connection,
@@ -1389,10 +1413,14 @@ def refunded_online(
     the stock, the discount use and the referral reward (an order not yet shipped is also cancelled)."""
     order = store.get_order(connection, order_id)
     amount = int(refund_info.get("amount_cents") or 0)
-    refunded = min(int(order["total_cents"]), int(order["refunded_cents"] or 0) + amount)
+    refunded = min(
+        int(order["total_cents"]), int(order["refunded_cents"] or 0) + amount
+    )
     full = bool(refund_info.get("full")) or refunded >= int(order["total_cents"])
     note = str(refund_info.get("note") or "")
-    label = f"Refunded {kit.fmt_money(amount, order['currency'])}" + (f": {note}" if note else "")
+    label = f"Refunded {kit.fmt_money(amount, order['currency'])}" + (
+        f": {note}" if note else ""
+    )
     connection.execute(
         "UPDATE sh_orders SET refunded_cents = ?, payment_status = ?, history = ?, updated_at = ? WHERE id = ?",
         (
@@ -1548,7 +1576,15 @@ def set_fulfilment(
         return order
     connection.execute(
         "UPDATE sh_orders SET fulfilment_status = ?, tracking_url = ?, carrier = ?, tracking_number = ?, history = ?, updated_at = ? WHERE id = ?",
-        (wanted, tracking, chosen, number, _history(order, wanted, note), kit.now(), order_id),
+        (
+            wanted,
+            tracking,
+            chosen,
+            number,
+            _history(order, wanted, note),
+            kit.now(),
+            order_id,
+        ),
     )
     kit.log(
         connection,
@@ -2216,9 +2252,13 @@ def queue_message(
         )
     elif kind == "payment_reminder":
         late = bool(order.get("due_on")) and order["due_on"] < kit.today()
-        subject = f"{'Overdue' if late else 'Reminder'}: payment for order #{number} - {name}"
+        subject = (
+            f"{'Overdue' if late else 'Reminder'}: payment for order #{number} - {name}"
+        )
         pay = [
-            f"Pay here: {profile['payment_link']}" if profile.get("payment_link") else "",
+            f"Pay here: {profile['payment_link']}"
+            if profile.get("payment_link")
+            else "",
             str(profile.get("payment_instructions") or ""),
         ]
         owed = kit.fmt_money(int(order["total_cents"]), order["currency"])
@@ -2331,7 +2371,8 @@ def customers(connection: sqlite3.Connection, *, q: str = "") -> list[dict[str, 
         rows = [
             row
             for row in rows
-            if needle in f"{row['name']} {row['email']} {row['phone']} {row['company']}".lower()
+            if needle
+            in f"{row['name']} {row['email']} {row['phone']} {row['company']}".lower()
         ]
     for row in rows:
         row["repeat"] = row["orders"] > 1

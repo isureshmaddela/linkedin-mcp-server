@@ -316,7 +316,9 @@ class CloudConfig:
     # -- hosted security and operations (docs/multitenant-operations.md, "Limits, draining and budgets") --------
     # signed machine callers: per provider, OAuth client or SCIM token, never the sign-in limiter
     machine_requests_per_minute: int = 3000
-    machine_failures_per_window: int = 60  # rejected credentials per address in 5 minutes
+    machine_failures_per_window: int = (
+        60  # rejected credentials per address in 5 minutes
+    )
     # the HTTP tier (gateway.make_server)
     http_max_connections: int = field(
         default_factory=lambda: _int("AIRA_CLOUD_HTTP_MAX_CONNECTIONS", 512)

@@ -37,7 +37,11 @@ def test_a_business_applies_is_approved_and_orders_on_terms(browser, env):
     call(
         "PATCH",
         f"/api/shop/products/{product['id']}",
-        {"wholesale_cents": 1500, "min_quantity": 5, "price_breaks": [{"min_quantity": 20, "unit_cents": 1300}]},
+        {
+            "wholesale_cents": 1500,
+            "min_quantity": 5,
+            "price_breaks": [{"min_quantity": 20, "unit_cents": 1300}],
+        },
     )
     go(page, env, "shop?tab=products")
     page.wait_for_selector("text=trade")

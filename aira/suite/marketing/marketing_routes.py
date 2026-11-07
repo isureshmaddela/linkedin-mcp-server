@@ -491,7 +491,9 @@ def subscribers_confirm_again(request: Request) -> tuple[int, dict[str, Any]]:
         subscriber = service.resend_confirmation(
             connection, request.match.group(1), origin=request
         )
-    request.audit("marketing.subscriber_confirm_again", "subscriber", request.match.group(1))
+    request.audit(
+        "marketing.subscriber_confirm_again", "subscriber", request.match.group(1)
+    )
     return 200, {"subscriber": subscriber}
 
 

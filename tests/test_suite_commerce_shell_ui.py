@@ -97,7 +97,10 @@ def test_new_search_and_folders_in_the_frame(browser, env):
     open_app(page, env)
     # The top bar says only Monosage; the app is named for screen readers and in its menu below.
     assert page.locator("#appBrand").inner_text().strip() == "Monosage"
-    assert page.locator("#appBrand").get_attribute("aria-label") == "Monosage Commerce: home"
+    assert (
+        page.locator("#appBrand").get_attribute("aria-label")
+        == "Monosage Commerce: home"
+    )
 
     # "+ New": the app's main creates, each opening its form; the address forgets the request.
     page.click(".shell-new")

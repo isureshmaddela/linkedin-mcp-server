@@ -19,7 +19,13 @@ DISCOUNT_KINDS = ("percent", "fixed")
 AUDIENCES = ("all", "consumers", "businesses")
 BUYER_TYPES = ("consumer", "business")
 TRADE_STATUSES = ("pending", "approved", "declined", "paused")
-TRADE_TERMS: dict[str, int] = {"prepay": 0, "net7": 7, "net15": 15, "net30": 30, "net60": 60}
+TRADE_TERMS: dict[str, int] = {
+    "prepay": 0,
+    "net7": 7,
+    "net15": 15,
+    "net30": 30,
+    "net60": 60,
+}
 FIRST_ORDER_NUMBER = 1001
 
 SCHEMA = (
@@ -193,9 +199,21 @@ SCHEMA_V4 = (
 )
 ADDED_COLUMNS = (
     ("sh_products", "audience", "TEXT NOT NULL DEFAULT 'all'"),
-    ("sh_products", "wholesale_cents", "INTEGER NOT NULL DEFAULT 0"),  # 0 = businesses pay the price
-    ("sh_products", "min_quantity", "INTEGER NOT NULL DEFAULT 1"),  # the least a business may order
-    ("sh_products", "price_breaks", "TEXT NOT NULL DEFAULT '[]'"),  # [{min_quantity, unit_cents}] for businesses
+    (
+        "sh_products",
+        "wholesale_cents",
+        "INTEGER NOT NULL DEFAULT 0",
+    ),  # 0 = businesses pay the price
+    (
+        "sh_products",
+        "min_quantity",
+        "INTEGER NOT NULL DEFAULT 1",
+    ),  # the least a business may order
+    (
+        "sh_products",
+        "price_breaks",
+        "TEXT NOT NULL DEFAULT '[]'",
+    ),  # [{min_quantity, unit_cents}] for businesses
     ("sh_orders", "buyer_type", "TEXT NOT NULL DEFAULT 'consumer'"),
     ("sh_orders", "trade_account_id", "TEXT NOT NULL DEFAULT ''"),
     ("sh_orders", "company", "TEXT NOT NULL DEFAULT ''"),
@@ -214,7 +232,11 @@ ADDED_COLUMNS = (
     ("sh_orders", "customer_state", "TEXT NOT NULL DEFAULT ''"),
     ("sh_orders", "tax_lines", "TEXT NOT NULL DEFAULT '[]'"),
     ("sh_orders", "prices_include_tax", "INTEGER NOT NULL DEFAULT 0"),
-    ("sh_products", "hsn_sac", "TEXT NOT NULL DEFAULT ''"),  # HSN (goods) or SAC (services) code on invoices
+    (
+        "sh_products",
+        "hsn_sac",
+        "TEXT NOT NULL DEFAULT ''",
+    ),  # HSN (goods) or SAC (services) code on invoices
     # Delivery zones: a product's weight, the order's weight, where it goes and the zone that priced it.
     ("sh_products", "weight_grams", "INTEGER NOT NULL DEFAULT 0"),
     ("sh_orders", "weight_grams", "INTEGER NOT NULL DEFAULT 0"),

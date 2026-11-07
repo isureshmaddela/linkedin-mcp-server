@@ -368,7 +368,9 @@ def _payout_cipher() -> Any:
         return provider()
     override = os.getenv("AIRA_PAYOUT_KEY", "").strip()
     if override:
-        return MultiFernet([Fernet(k.strip().encode()) for k in override.split(",") if k.strip()])
+        return MultiFernet(
+            [Fernet(k.strip().encode()) for k in override.split(",") if k.strip()]
+        )
     with _payout_lock:
         cipher = _payout_files.get(str(target))
         if cipher is None:
@@ -431,7 +433,9 @@ def payout_mask(value: str) -> str:
 
 def payout_details(sc: sqlite3.Connection, channel_id: str) -> str:
     """A channel's saved payout details in the clear; a plaintext row is encrypted on the way (migrated on read)."""
-    found = row(sc, "SELECT payout_details FROM vi_channels WHERE id = ?", (channel_id,))
+    found = row(
+        sc, "SELECT payout_details FROM vi_channels WHERE id = ?", (channel_id,)
+    )
     stored = str((found or {}).get("payout_details") or "")
     if stored and not is_sealed(stored):
         sc.execute(

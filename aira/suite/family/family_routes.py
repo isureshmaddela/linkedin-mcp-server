@@ -430,7 +430,9 @@ def board_link(request: Request) -> tuple[int, dict[str, Any]]:
         _adult(me)
         fresh = public.link_for(connection, APP, "board", service.BOARD_REF) is None
         if not fresh and not service.board_link_live(connection):
-            public.revoke(connection, APP, "board", service.BOARD_REF)  # the old one ran out: a new one
+            public.revoke(
+                connection, APP, "board", service.BOARD_REF
+            )  # the old one ran out: a new one
             fresh = True
         link = public.create_link(
             connection,

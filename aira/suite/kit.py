@@ -580,14 +580,18 @@ def save_business(
         "sell_to": choice(
             merged["sell_to"], "who you sell to", SELL_TO, default="consumers"
         ),
-        "tax_mode": choice(merged["tax_mode"], "the tax mode", TAX_MODES, default="flat"),
+        "tax_mode": choice(
+            merged["tax_mode"], "the tax mode", TAX_MODES, default="flat"
+        ),
         "prices_include_tax": flag(merged["prices_include_tax"]),
         "state_code": text(merged["state_code"], "the state code", max_len=2),
     }
     if clean["tax_mode"] == "gst":
         clean["tax_id"] = clean["tax_id"].upper().replace(" ", "")
         if clean["currency"] != "INR":
-            raise ValueError("GST is for prices in Indian rupees: set the currency to INR first.")
+            raise ValueError(
+                "GST is for prices in Indian rupees: set the currency to INR first."
+            )
         if not valid_gstin(clean["tax_id"]):
             raise ValueError(
                 "Enter your 15-character GSTIN as your tax number (for example 29ABCDE1234F1Z5) to charge GST."
@@ -624,7 +628,9 @@ def public_business(connection: sqlite3.Connection) -> dict[str, Any]:
     pay = payment_settings(connection)
     provider = pay["provider"]
     if provider != "manual":
-        shown["payment_link"] = ""  # "none" and Razorpay do not send customers to a fixed page
+        shown["payment_link"] = (
+            ""  # "none" and Razorpay do not send customers to a fixed page
+        )
     shown["payment_provider"] = provider
     shown["online_payments"] = online_ready(pay)
     shown["upi_id"] = pay["upi_id"] if profile["currency"] == "INR" else ""
@@ -767,16 +773,26 @@ def tax_breakdown(
         if place == home:
             central = tax // 2 + (tax % 2)
             result["supply"] = "intra"
-            result["lines"] = [
-                {"label": "CGST", "rate_bp": rate / 2, "cents": central},
-                {"label": "SGST", "rate_bp": rate / 2, "cents": tax - central},
-            ] if tax else []
+            result["lines"] = (
+                [
+                    {"label": "CGST", "rate_bp": rate / 2, "cents": central},
+                    {"label": "SGST", "rate_bp": rate / 2, "cents": tax - central},
+                ]
+                if tax
+                else []
+            )
         else:
             result["supply"] = "inter"
-            result["lines"] = [{"label": "IGST", "rate_bp": rate, "cents": tax}] if tax else []
+            result["lines"] = (
+                [{"label": "IGST", "rate_bp": rate, "cents": tax}] if tax else []
+            )
     elif tax:
         result["lines"] = [
-            {"label": str(profile.get("tax_label") or "Tax"), "rate_bp": rate, "cents": tax}
+            {
+                "label": str(profile.get("tax_label") or "Tax"),
+                "rate_bp": rate,
+                "cents": tax,
+            }
         ]
     return result
 
@@ -811,7 +827,9 @@ def payment_settings(connection: sqlite3.Connection) -> dict[str, Any]:
         **{k: v for k, v in stored.items() if k in PAYMENT_DEFAULTS},
     }
     if not merged["provider"]:
-        merged["provider"] = "manual" if business(connection)["payment_link"] else "none"
+        merged["provider"] = (
+            "manual" if business(connection)["payment_link"] else "none"
+        )
     return merged
 
 
@@ -825,14 +843,24 @@ def save_payment_settings(
         **{k: v for k, v in raw.items() if k in PAYMENT_DEFAULTS},
     }
     clean = {
-        "provider": choice(merged["provider"], "the payment provider", PAYMENT_PROVIDERS, default="none"),
-        "razorpay_key_id": text(merged["razorpay_key_id"], "the Razorpay key id", max_len=60),
+        "provider": choice(
+            merged["provider"],
+            "the payment provider",
+            PAYMENT_PROVIDERS,
+            default="none",
+        ),
+        "razorpay_key_id": text(
+            merged["razorpay_key_id"], "the Razorpay key id", max_len=60
+        ),
         "key_secret_saved": flag(merged["key_secret_saved"]),
         "webhook_secret_saved": flag(merged["webhook_secret_saved"]),
         "notify_customer": flag(merged["notify_customer"]),
         "link_expiry_hours": integer(
-            merged["link_expiry_hours"], "how long a payment link stays open (hours)",
-            default=72, minimum=1, maximum=24 * 180,
+            merged["link_expiry_hours"],
+            "how long a payment link stays open (hours)",
+            default=72,
+            minimum=1,
+            maximum=24 * 180,
         ),
         "upi_id": text(merged["upi_id"], "the UPI ID", max_len=300).replace(" ", ""),
         "upi_name": text(merged["upi_name"], "the UPI payee name", max_len=60),
@@ -845,7 +873,9 @@ def save_payment_settings(
     if clean["upi_id"] and not _VPA.match(clean["upi_id"]):
         raise ValueError("A UPI ID looks like yourname@okbank.")
     if clean["provider"] == "manual" and not business(connection)["payment_link"]:
-        raise ValueError("Add your payment link to the business profile first, or pick another way to be paid.")
+        raise ValueError(
+            "Add your payment link to the business profile first, or pick another way to be paid."
+        )
     if clean["provider"] == "razorpay" and not key_id:
         raise ValueError("Enter your Razorpay key id to take payments with Razorpay.")
     set_setting(connection, "core", "payments", clean)
@@ -949,16 +979,27 @@ def save_public_address(connection: sqlite3.Connection, value: Any) -> str:
         parts = urlsplit(cleaned)
         host = (parts.hostname or "").lower()
         if parts.scheme != "https" or not host:
-            raise ValueError("The public address starts with https:// (your tunnel's address).")
-        if parts.path not in ("", "/") or parts.query or parts.fragment or parts.username:
-            raise ValueError("Enter only the address, like https://shop.example.com (no path).")
+            raise ValueError(
+                "The public address starts with https:// (your tunnel's address)."
+            )
+        if (
+            parts.path not in ("", "/")
+            or parts.query
+            or parts.fragment
+            or parts.username
+        ):
+            raise ValueError(
+                "Enter only the address, like https://shop.example.com (no path)."
+            )
         if (
             host in ("localhost",)
             or host.endswith(".localhost")
             or re.fullmatch(r"[0-9.]+|\[?[0-9a-f:]+\]?", host)
             or "." not in host
         ):
-            raise ValueError("The public address is a name on the internet, not this computer or an IP address.")
+            raise ValueError(
+                "The public address is a name on the internet, not this computer or an IP address."
+            )
         cleaned = f"https://{host}" + (f":{parts.port}" if parts.port else "")
     set_setting(connection, "core", "public_address", cleaned)
     connection.commit()
@@ -1152,7 +1193,9 @@ def _cover_if_covered(connection: sqlite3.Connection, key: str) -> None:
         (key,),
     ).fetchone()
     if found is not None:
-        _cover(connection, key, by=revenue_key(str(found[0]), str(found[1]), str(found[2])))
+        _cover(
+            connection, key, by=revenue_key(str(found[0]), str(found[1]), str(found[2]))
+        )
 
 
 def _uncover(connection: sqlite3.Connection, by: str) -> None:
@@ -1168,7 +1211,9 @@ def _uncover(connection: sqlite3.Connection, by: str) -> None:
         (by,),
     )
     targets = {
-        revenue_key(str(row[0]), str(row[1]), str(row[4] if row[3] == "refund" else row[2]))
+        revenue_key(
+            str(row[0]), str(row[1]), str(row[4] if row[3] == "refund" else row[2])
+        )
         for row in rows
     }
     for target in targets:
@@ -1412,7 +1457,9 @@ def revenue(
 
     by_currency = {code: view(entry) for code, entry in sums.items()}
     others = sorted(
-        code for code in by_currency if code != home and sums[code]["count"] + abs(sums[code]["total"])
+        code
+        for code in by_currency
+        if code != home and sums[code]["count"] + abs(sums[code]["total"])
     )
     return {
         "currency": home,
@@ -1597,7 +1644,11 @@ def _contact_values(table: str, row: Mapping[str, Any]) -> dict[str, Any]:
         # double opt-in: consent is a confirmed subscription; an unsubscribe withdraws it; pending says nothing yet
         status = str(row.get("status") or "")
         out["email_consent"] = (
-            True if status == "subscribed" else False if status == "unsubscribed" else None
+            True
+            if status == "subscribed"
+            else False
+            if status == "unsubscribed"
+            else None
         )
     return out
 
@@ -1715,9 +1766,12 @@ def contact_for(
         values: dict[str, Any] = {
             "name": found["name"] or person,
             "email": found["email"] or address,
-            "phone": found["phone"] or (str(phone or "").strip()[:30] if number else ""),
+            "phone": found["phone"]
+            or (str(phone or "").strip()[:30] if number else ""),
             "company": found["company"] or firm,
-            "tags": dumps(sorted(set(loads(found["tags"], []) or []) | set(extra_tags))[:50]),
+            "tags": dumps(
+                sorted(set(loads(found["tags"], []) or []) | set(extra_tags))[:50]
+            ),
             "apps": dumps(apps[:20]),
             "first_seen": min(str(found["first_seen"]), stamp),
             "last_seen": max(str(found["last_seen"]), stamp),
@@ -1725,12 +1779,15 @@ def contact_for(
             "updated_at": now(),
         }
         if email_consent is not None and (
-            found["email_consent"] is None or int(found["email_consent"]) != int(email_consent)
+            found["email_consent"] is None
+            or int(found["email_consent"]) != int(email_consent)
         ):
             values["email_consent"] = int(bool(email_consent))
             values["consent_at"] = stamp
         update_row(connection, "suite_contacts", contact_id, values)
-    for key in ([f"e:{address}"] if address else []) + ([f"p:{number}"] if number else []):
+    for key in ([f"e:{address}"] if address else []) + (
+        [f"p:{number}"] if number else []
+    ):
         # a key another contact already has stays theirs (merge the two to join them)
         connection.execute(
             "INSERT OR IGNORE INTO suite_contact_keys (key, contact_id) VALUES (?, ?)",
@@ -1869,8 +1926,14 @@ MAX_ATTEMPTS = len(RETRY_MINUTES) + 1
 OUTBOX_COLUMNS = (
     ("expires_at", "TEXT"),
     ("attempts", "INTEGER NOT NULL DEFAULT 0"),
-    ("message_id", "TEXT NOT NULL DEFAULT ''"),  # the Message-ID it went out with (replies thread on it)
-    ("unsubscribe_url", "TEXT NOT NULL DEFAULT ''"),  # bulk mail: the one-click unsubscribe address
+    (
+        "message_id",
+        "TEXT NOT NULL DEFAULT ''",
+    ),  # the Message-ID it went out with (replies thread on it)
+    (
+        "unsubscribe_url",
+        "TEXT NOT NULL DEFAULT ''",
+    ),  # bulk mail: the one-click unsubscribe address
 )
 
 
@@ -2017,11 +2080,23 @@ def message_kinds(settings: Mapping[str, Any]) -> list[dict[str, Any]]:
     """Every kind the hub offers as a checkbox (with whether it is on now), plus any other kind already chosen."""
     on = auto_send_kinds(settings)
     rows = [
-        {"id": kind, "label": label, "group": group, "default": default, "on": kind in on}
+        {
+            "id": kind,
+            "label": label,
+            "group": group,
+            "default": default,
+            "on": kind in on,
+        }
         for kind, (label, group, default) in MESSAGE_KINDS.items()
     ]
     rows.extend(
-        {"id": kind, "label": kind.replace("_", " ").capitalize(), "group": "other", "default": False, "on": True}
+        {
+            "id": kind,
+            "label": kind.replace("_", " ").capitalize(),
+            "group": "other",
+            "default": False,
+            "on": True,
+        }
         for kind in sorted(on - set(MESSAGE_KINDS))
     )
     return rows
@@ -2251,9 +2326,13 @@ def expire_outbox(connection: sqlite3.Connection, at: str = "") -> int:
     changed = connection.execute(
         drop + "expires_at IS NOT NULL AND expires_at <= ?", (stamp,)
     ).rowcount
-    for kind, lifetime in EXPIRE_AFTER.items():  # the defaults, counted from when each message is due
+    for (
+        kind,
+        lifetime,
+    ) in EXPIRE_AFTER.items():  # the defaults, counted from when each message is due
         changed += connection.execute(
-            drop + "expires_at IS NULL AND kind = ? AND COALESCE(send_after, created_at) <= ?",
+            drop
+            + "expires_at IS NULL AND kind = ? AND COALESCE(send_after, created_at) <= ?",
             (kind, iso(parse_time(stamp) - lifetime)),
         ).rowcount
     # the files of a message that went, was withdrawn or is gone are not needed any more
@@ -2282,10 +2361,14 @@ def suppression(app: str) -> Callable[[SuppressionFn], SuppressionFn]:
 
 def bulk_mail(message: Mapping[str, Any]) -> bool:
     """Marketing mail (a newsletter), as opposed to a message a customer is waiting for."""
-    return bool(message.get("unsubscribe_url")) or message.get("kind") in MARKETING_KINDS
+    return (
+        bool(message.get("unsubscribe_url")) or message.get("kind") in MARKETING_KINDS
+    )
 
 
-def suppression_reason(connection: sqlite3.Connection, message: Mapping[str, Any]) -> str:
+def suppression_reason(
+    connection: sqlite3.Connection, message: Mapping[str, Any]
+) -> str:
     """Why this message must not go now ('' when it may): the address is on the do-not-contact list (any entry for
     bulk mail; a bounce for any mail), or an app's own check (an unsubscribe) refuses it."""
     from aira.leads import mail as transport
@@ -2361,7 +2444,9 @@ def check_form(
         return False
     age = (at or utcnow()).timestamp() - int(issued)
     if age > FORM_TICKET_SECONDS:
-        raise ValueError("This page has been open a long time. Reload it and send again.")
+        raise ValueError(
+            "This page has been open a long time. Reload it and send again."
+        )
     if age < FORM_MIN_SECONDS:
         raise ValueError("That was quick. Check your details, then send again.")
     return True
@@ -2506,7 +2591,9 @@ def _temporary(error: BaseException) -> bool:
         return True
     if isinstance(error, smtplib.SMTPResponseException):
         return 400 <= int(error.smtp_code) < 500
-    return isinstance(error, (smtplib.SMTPServerDisconnected, ConnectionError, TimeoutError))
+    return isinstance(
+        error, (smtplib.SMTPServerDisconnected, ConnectionError, TimeoutError)
+    )
 
 
 def _stops_the_pass(error: BaseException) -> bool:
@@ -2593,14 +2680,21 @@ def send_outbox(
             attempts = int(message.get("attempts") or 0) + 1
             reason = str(error)[:300]
             if _temporary(error) and attempts < MAX_ATTEMPTS:
-                retry_at = iso(utcnow() + timedelta(minutes=RETRY_MINUTES[attempts - 1]))
+                retry_at = iso(
+                    utcnow() + timedelta(minutes=RETRY_MINUTES[attempts - 1])
+                )
                 connection.execute(
                     "UPDATE suite_outbox SET attempts = ?, send_after = ?, error = ? WHERE id = ?",
                     (attempts, retry_at, reason, message["id"]),
                 )
                 result["retrying"] += 1
                 result["details"].append(
-                    {"id": message["id"], "status": "retrying", "error": reason, "retry_at": retry_at}
+                    {
+                        "id": message["id"],
+                        "status": "retrying",
+                        "error": reason,
+                        "retry_at": retry_at,
+                    }
                 )
             else:
                 if getattr(error, "bounced", False):
@@ -2636,7 +2730,9 @@ def send_outbox(
     return result
 
 
-def sent_message(connection: sqlite3.Connection, message_ids: Iterable[str]) -> dict[str, Any] | None:
+def sent_message(
+    connection: sqlite3.Connection, message_ids: Iterable[str]
+) -> dict[str, Any] | None:
     """The outbox message one of these Message-IDs belongs to (a reply's In-Reply-To or References), or None."""
     ensure_outbox(connection)
     for message_id in message_ids:

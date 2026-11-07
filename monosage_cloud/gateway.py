@@ -132,7 +132,9 @@ def machine_key(
             f"oauth:{client[:80]}" if client else f"oauth-anonymous:{request.client_ip}"
         )
     if kind == "scim":
-        token = authorization[7:].strip() if authorization[:7].lower() == "bearer " else ""
+        token = (
+            authorization[7:].strip() if authorization[:7].lower() == "bearer " else ""
+        )
         if token:
             return f"scim:{hashlib.sha256(token.encode('utf-8', 'ignore')).hexdigest()[:24]}"
         return f"scim-anonymous:{request.client_ip}"
@@ -269,7 +271,9 @@ class Gateway:
         logger.info(
             "%s %s -> %s",
             request.method,
-            redact_path(request.path),  # capability links (exports, invitations, public pages) never reach a log
+            redact_path(
+                request.path
+            ),  # capability links (exports, invitations, public pages) never reach a log
             response.status,
             extra={
                 "correlation_id": correlation,
@@ -301,11 +305,15 @@ class Gateway:
         config = self.app.config
         host = request.headers.get("host", "")
         # Orchestrator probes address the pod by IP; the two probe endpoints reveal nothing and use no host name.
-        probe = request.method == "GET" and request.path in {
-            "/api/health",
-            "/api/ready",
-            "/metrics",  # a scraper addresses the pod by IP too; the endpoint needs its bearer token
-        }
+        probe = (
+            request.method == "GET"
+            and request.path
+            in {
+                "/api/health",
+                "/api/ready",
+                "/metrics",  # a scraper addresses the pod by IP too; the endpoint needs its bearer token
+            }
+        )
         if not probe and not config.host_allowed(host):
             raise Forbidden(
                 "This host is not served by this deployment.", code="bad_host"
@@ -999,7 +1007,9 @@ class HostedServer(ThreadingHTTPServer):
         backlog: int = 128,
         large_body_slots: int = 8,
     ) -> None:
-        self.request_queue_size = max(5, int(backlog))  # read by server_activate, inside __init__
+        self.request_queue_size = max(
+            5, int(backlog)
+        )  # read by server_activate, inside __init__
         self.max_connections = max(1, int(max_connections))
         self.connection_slots = threading.BoundedSemaphore(self.max_connections)
         self.large_bodies = threading.BoundedSemaphore(max(1, int(large_body_slots)))
@@ -1057,8 +1067,12 @@ class HostedServer(ThreadingHTTPServer):
     def _refuse(self, request: Any) -> None:
         import ssl
 
-        if not isinstance(request, ssl.SSLSocket):  # no handshake yet: just close a TLS connection
-            body = b'{"error":"The server is busy. Try again in a moment.","code":"busy"}'
+        if not isinstance(
+            request, ssl.SSLSocket
+        ):  # no handshake yet: just close a TLS connection
+            body = (
+                b'{"error":"The server is busy. Try again in a moment.","code":"busy"}'
+            )
             try:
                 request.settimeout(2)
                 request.sendall(
@@ -1201,7 +1215,9 @@ class HostedHandler(BaseHTTPRequestHandler):
             if self.command != "HEAD":
                 self._write_stream(response)
                 return
-            _end_stream(response)  # a HEAD request gets the headers only; the stream still releases what it holds
+            _end_stream(
+                response
+            )  # a HEAD request gets the headers only; the stream still releases what it holds
         self.send_response(response.status)
         sent = {name.lower() for name, _ in response.headers}
         for name, value in response.headers:

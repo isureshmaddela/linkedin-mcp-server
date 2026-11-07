@@ -258,7 +258,9 @@ def create_case(
             stamp,
         ),
     )
-    kit.link_row(connection, "sv_cases", case_id)  # the customer's one record (aira.suite.customers)
+    kit.link_row(
+        connection, "sv_cases", case_id
+    )  # the customer's one record (aira.suite.customers)
     if description:
         _message(
             connection,
@@ -2291,7 +2293,10 @@ def tick(connection: sqlite3.Connection, now: datetime | None = None) -> dict[st
                     ref_id=row["id"],
                 )
                 notify_staff(
-                    connection, "sla_breach", store.case_row(dict(row)) or {}, now=moment
+                    connection,
+                    "sla_breach",
+                    store.case_row(dict(row)) or {},
+                    now=moment,
                 )
     cutoff = kit.iso(moment - timedelta(days=int(rules["auto_close_days"])))
     for row in kit.fetch_all(
@@ -2332,7 +2337,9 @@ def tick(connection: sqlite3.Connection, now: datetime | None = None) -> dict[st
 # telling the team: new cases, new chats, overdue cases
 # ---------------------------------------------------------------------------
 
-StaffChannel = Callable[[sqlite3.Connection, str, Mapping[str, Any], dict[str, Any]], None]
+StaffChannel = Callable[
+    [sqlite3.Connection, str, Mapping[str, Any], dict[str, Any]], None
+]
 # Other ways to reach the team (Web Push, chat apps) register here: fn(connection, kind, case, notice), where
 # ``notice`` is {"to", "subject", "body", "link"}. Email through the outbox is always the first channel.
 STAFF_CHANNELS: dict[str, StaffChannel] = {}
@@ -2478,8 +2485,10 @@ def notify_staff(
         raise ValueError(f"Unknown notice: {kind}.")
     if not store.settings(connection).get(f"notify_{kind}", True):
         return None
-    to = staff_address(connection, case) if kind != "new_chat" else staff_address(
-        connection, {"assignee": case.get("assignee", "")}
+    to = (
+        staff_address(connection, case)
+        if kind != "new_chat"
+        else staff_address(connection, {"assignee": case.get("assignee", "")})
     )
     notice = {"to": to, **_notice(connection, kind, case, origin, now)}
     message = None
@@ -2507,10 +2516,14 @@ def notify_staff(
 # ---------------------------------------------------------------------------
 
 
-def case_by_number(connection: sqlite3.Connection, number: int) -> dict[str, Any] | None:
+def case_by_number(
+    connection: sqlite3.Connection, number: int
+) -> dict[str, Any] | None:
     store.ensure(connection)
     return store.case_row(
-        kit.fetch_one(connection, "SELECT * FROM sv_cases WHERE number = ?", (int(number),))
+        kit.fetch_one(
+            connection, "SELECT * FROM sv_cases WHERE number = ?", (int(number),)
+        )
     )
 
 
@@ -2545,7 +2558,9 @@ def email_reply(
             connection,
             {
                 "subject": str(message.get("subject") or kept["subject"])[:200],
-                "description": f"Follow-up to {kept['reference']} (closed):\n\n{body}"[:10000],
+                "description": f"Follow-up to {kept['reference']} (closed):\n\n{body}"[
+                    :10000
+                ],
                 "name": message.get("from_name") or kept["customer_name"],
                 "email": message.get("from_email"),
             },
@@ -2568,7 +2583,9 @@ def email_to_case(
     store.ensure(connection)
     if not store.settings(connection).get("email_to_case", True):
         return None
-    subject = " ".join(str(message.get("subject") or "").split())[:200] or "(no subject)"
+    subject = (
+        " ".join(str(message.get("subject") or "").split())[:200] or "(no subject)"
+    )
     return create_case(
         connection,
         {

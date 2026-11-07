@@ -29,7 +29,9 @@ CAPABILITY_PREFIXES = (
     "#/recovery-cancel/",
 )
 _CAPABILITY_RE = re.compile(
-    "(" + "|".join(re.escape(prefix) for prefix in CAPABILITY_PREFIXES) + r")[^/?#\s\"'&]+"
+    "("
+    + "|".join(re.escape(prefix) for prefix in CAPABILITY_PREFIXES)
+    + r")[^/?#\s\"'&]+"
 )
 # Query parameters that carry a credential or a one-time code: ``token=`` and ``api_key=`` are covered above.
 _QUERY_SECRET_RE = re.compile(

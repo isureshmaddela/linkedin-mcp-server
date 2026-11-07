@@ -543,7 +543,13 @@ def recovery_cancel(req: Req):  # noqa: ANN201
     )
 
 
-@cloud_route("POST", r"/api/internal/launch/validate", auth="public", csrf=False, machine="signed")
+@cloud_route(
+    "POST",
+    r"/api/internal/launch/validate",
+    auth="public",
+    csrf=False,
+    machine="signed",
+)
 def launch_validate(req: Req):  # noqa: ANN201
     """The local installation asks who a launch token signs in (signed with the launch secret; once)."""
     try:

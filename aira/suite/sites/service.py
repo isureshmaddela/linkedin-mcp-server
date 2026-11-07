@@ -909,7 +909,9 @@ def business_links(
                 {
                     "kind": kind,
                     "label": label,
-                    "title": "" if kind in ("form", "storefront", "help_center") else str(row["title"] or "")[:120],
+                    "title": ""
+                    if kind in ("form", "storefront", "help_center")
+                    else str(row["title"] or "")[:120],
                     "url": kit.public_url(public.path_for(row["token"]), origin),
                 }
             )

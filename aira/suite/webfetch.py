@@ -25,7 +25,9 @@ import ssl
 import time
 from urllib.parse import urljoin, urlsplit
 
-ALLOW_LOCAL_ENV = "AIRA_SUITE_FETCH_ALLOW_LOCAL"  # tests only: plain http to the loopback address
+ALLOW_LOCAL_ENV = (
+    "AIRA_SUITE_FETCH_ALLOW_LOCAL"  # tests only: plain http to the loopback address
+)
 USER_AGENT = "Monosage/1.0 (+calendar reader)"
 TIMEOUT = 10.0
 MAX_BYTES = 4 * 1024 * 1024
@@ -164,7 +166,9 @@ def fetch(
                 )
             chunks: list[bytes] = []
             size = 0
-            while True:  # in pieces, so a server that answers slowly still stops at the time cap
+            while (
+                True
+            ):  # in pieces, so a server that answers slowly still stops at the time cap
                 piece = response.read(65536)
                 if not piece:
                     break
@@ -176,7 +180,9 @@ def fetch(
                 chunks.append(piece)
             return b"".join(chunks)
         except (OSError, http.client.HTTPException) as error:
-            raise FetchError(f"{host} did not answer ({type(error).__name__}).") from None
+            raise FetchError(
+                f"{host} did not answer ({type(error).__name__})."
+            ) from None
         finally:
             connection.close()
         if time.monotonic() > deadline:

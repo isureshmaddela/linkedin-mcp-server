@@ -430,7 +430,9 @@ def test_a_candidate_signed_in_to_the_account_opens_the_local_installation(
             page.goto(env.base + "/")
             page.wait_for_selector("#authScreen:not([hidden])")
             assert page.locator("#accountLinkBtn").count() == 0
-            assert "Sign in with your Monosage account" not in page.inner_text("#authForm")
+            assert "Sign in with your Monosage account" not in page.inner_text(
+                "#authForm"
+            )
             # the account's app launcher opens the installation: it redirects back with a token, and the local
             # build signs the person in
             page.goto(

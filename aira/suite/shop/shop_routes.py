@@ -328,7 +328,8 @@ def orders_list(request: Request) -> tuple[int, dict[str, Any]] | Raw:
 def _address(payload: dict[str, Any]) -> dict[str, str]:
     """The parts of a delivery address a zone is chosen by."""
     return {
-        key: str(payload.get(key) or "")[:60] for key in ("country", "region", "postcode")
+        key: str(payload.get(key) or "")[:60]
+        for key in ("country", "region", "postcode")
     }
 
 
@@ -498,13 +499,16 @@ def orders_remind(request: Request) -> tuple[int, dict[str, Any]]:
     order_id = request.match.group(1)
     with _open(request) as connection:
         order = store.get_order(connection, order_id)
-        if order["payment_status"] != "unpaid" or order["fulfilment_status"] == "cancelled":
+        if (
+            order["payment_status"] != "unpaid"
+            or order["fulfilment_status"] == "cancelled"
+        ):
             raise ValueError("Only an unpaid order needs a reminder.")
         if not order["customer_email"]:
             raise ValueError("This order has no email address to remind.")
-        link = public.link_for(connection, APP, "order", order_id) or service.order_link(
-            connection, order
-        )
+        link = public.link_for(
+            connection, APP, "order", order_id
+        ) or service.order_link(connection, order)
         queued = service.queue_message(
             connection,
             order,
@@ -813,7 +817,9 @@ def storefront_order(
     visitor: dict[str, Any],
 ) -> tuple[int, dict[str, Any]]:
     store.ensure(connection)
-    service.check_form(connection, payload)  # the hidden field is empty, the form was not filled by a bot
+    service.check_form(
+        connection, payload
+    )  # the hidden field is empty, the form was not filled by a bot
     allowed = {
         "items",
         "discount_code",

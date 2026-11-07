@@ -218,7 +218,9 @@ def _add_columns(connection: sqlite3.Connection) -> None:
                 connection.execute(
                     f"ALTER TABLE {table} ADD COLUMN {column} {definition}"
                 )
-            except sqlite3.OperationalError as error:  # another connection added it first
+            except (
+                sqlite3.OperationalError
+            ) as error:  # another connection added it first
                 if "duplicate column" not in str(error).lower():
                     raise
     connection.commit()
@@ -564,7 +566,11 @@ def mask_address(url: str) -> str:
     parts = urlsplit(str(url or ""))
     last = (parts.path or "").rstrip("/").rsplit("/", 1)[-1]
     tail = last if 0 < len(last) <= 24 and "@" not in last else "…"
-    return f"{parts.hostname or ''}/…/{tail}" if tail != "…" else f"{parts.hostname or ''}/…"
+    return (
+        f"{parts.hostname or ''}/…/{tail}"
+        if tail != "…"
+        else f"{parts.hostname or ''}/…"
+    )
 
 
 def calendar_feed(

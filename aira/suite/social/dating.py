@@ -918,7 +918,9 @@ def _make_match(
     return row(sc, "SELECT * FROM so_dating_matches WHERE id = ?", (match_id,)) or {}
 
 
-def transcript(sc: sqlite3.Connection, chat_id: str, a_id: str = "") -> list[dict[str, Any]]:
+def transcript(
+    sc: sqlite3.Connection, chat_id: str, a_id: str = ""
+) -> list[dict[str, Any]]:
     """A chat as a moderator reads it: who wrote each message (``a`` or ``b`` of the match), what, and when,
     including messages its author deleted or a moderator hid."""
     return [
@@ -1010,7 +1012,18 @@ def ended_chats(sc: sqlite3.Connection) -> list[dict[str, Any]]:
     ensure(sc)
     return [
         {
-            **{k: item[k] for k in ("id", "match_id", "a_id", "b_id", "reason", "ended_at", "purge_after")},
+            **{
+                k: item[k]
+                for k in (
+                    "id",
+                    "match_id",
+                    "a_id",
+                    "b_id",
+                    "reason",
+                    "ended_at",
+                    "purge_after",
+                )
+            },
             "transcript": store.loads(item["transcript"], []),
             "profiles": store.loads(item["profiles"], {}),
         }

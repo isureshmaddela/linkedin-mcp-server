@@ -583,7 +583,9 @@ def test_a_household_and_a_second_account_on_this_computer(env, api):
     )["post"]
     # a picture link from another website is refused: only photos uploaded from the device
     status, refused = pat.call(
-        "POST", "/api/social/posts", {"text": "x", "photos": ["https://img.example/g.jpg"]}
+        "POST",
+        "/api/social/posts",
+        {"text": "x", "photos": ["https://img.example/g.jpg"]},
     )
     assert status == 400 and "Upload the photo" in refused["error"]
     feed = ana.get("/api/social/feed")

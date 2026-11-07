@@ -711,17 +711,25 @@ def test_hosted_photos_follow_the_post_across_organizations(cloud):
     friend = sign_in(cloud, other.owner)
     status, joined = friend.call("POST", "/api/social/me", {"handle": "otherowner"})
     assert status == 201
-    status, uploaded = owner.call("POST", "/api/social/photos", {"data": b64(jpeg_with_exif())})
+    status, uploaded = owner.call(
+        "POST", "/api/social/photos", {"data": b64(jpeg_with_exif())}
+    )
     assert status == 201, uploaded
     photo = uploaded["photo"]
     status, body = owner.call("GET", photo["url"], raw=True)
     assert status == 200 and body.startswith(b"\xff\xd8") and b"GPS" not in body
-    status, made = owner.call("POST", "/api/social/posts", {"text": "Team day", "photos": [photo["ref"]], "audience": "friends"})
+    status, made = owner.call(
+        "POST",
+        "/api/social/posts",
+        {"text": "Team day", "photos": [photo["ref"]], "audience": "friends"},
+    )
     assert status == 201
     post_id = made["post"]["id"]
     # not friends yet: the other organization's member cannot see the post, so gets no address for its photo
     assert friend.call("GET", f"/api/social/posts/{post_id}")[0] == 404
-    owner_id = friend.call("GET", "/api/social/search?q=acmeowner")[1]["people"][0]["id"]
+    owner_id = friend.call("GET", "/api/social/search?q=acmeowner")[1]["people"][0][
+        "id"
+    ]
     friend.call("POST", f"/api/social/friends/{owner_id}", {})
     owner.call("POST", f"/api/social/friends/{joined['account']['id']}", {})
     status, seen = friend.call("GET", f"/api/social/posts/{post_id}")
@@ -729,6 +737,9 @@ def test_hosted_photos_follow_the_post_across_organizations(cloud):
     status, body = friend.call("GET", seen["post"]["photos"][0], raw=True)
     assert status == 200 and body.startswith(b"\xff\xd8")
     # a made-up signature is refused, and an organization without Social gets nothing
-    assert friend.call("GET", photo["url"].split("&s=")[0] + "&s=" + "0" * 32, raw=True)[0] == 404
+    assert (
+        friend.call("GET", photo["url"].split("&s=")[0] + "&s=" + "0" * 32, raw=True)[0]
+        == 404
+    )
     third = build_org(cloud, "Third Org", slug_email="third.test")
     assert sign_in(cloud, third.owner).call("GET", photo["url"], raw=True)[0] == 402

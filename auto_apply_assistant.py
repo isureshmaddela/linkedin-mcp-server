@@ -768,7 +768,9 @@ def _save_reset_mail(user: dict[str, Any], payload: Mapping[str, Any]) -> None:
     if not EMAIL_RE.fullmatch(from_email.lower()):
         raise ValueError("Enter the address the codes are sent from.")
     from_name = (
-        re.sub(r"[\r\n]", " ", str(payload.get("from_name") or "Monosage")).strip()[:100]
+        re.sub(r"[\r\n]", " ", str(payload.get("from_name") or "Monosage")).strip()[
+            :100
+        ]
         or "Monosage"
     )
     password = str(payload.get("password") or "")
@@ -986,7 +988,8 @@ def _validate_launch_token(token: str) -> dict[str, Any]:
             ) from None
         if error.code in {402, 403, 409}:
             raise PermissionError(
-                message or "Your Monosage account cannot open this installation right now."
+                message
+                or "Your Monosage account cannot open this installation right now."
             ) from None
         raise RuntimeError(
             f"The Monosage account answered HTTP {error.code}{': ' + message if message else ''}."
@@ -3026,7 +3029,9 @@ def _document_title(job: Mapping[str, Any], kind: str) -> str:
 def _document_layout(job: Mapping[str, Any], kind: str, text: str) -> Any:
     title = _document_title(job, kind)
     if kind == "resume":
-        return resume_render.layout_resume(text, contact=_document_contact(), title=title)
+        return resume_render.layout_resume(
+            text, contact=_document_contact(), title=title
+        )
     return resume_render.layout_cover_letter(
         text, contact=_document_contact(), title=title
     )
@@ -3189,7 +3194,9 @@ def _certification_suggestions(
                 if len(suggestions) >= 6:
                     break
         except Exception as error:  # noqa: BLE001 - the curated list still answers
-            logger.info("Certification suggestions from the model failed", exc_info=True)
+            logger.info(
+                "Certification suggestions from the model failed", exc_info=True
+            )
             note = f"The AI suggestions failed ({str(error)[:160]}); Monosage's own list is shown."
     return {"curated": curated, "ai": suggestions, "note": note}
 
@@ -3234,7 +3241,9 @@ def _interview_prep_build(
         note = "No AI model is set up, so this prep uses Monosage's own questions."
     elif use_ai:
         listed = "\n".join(f"- {q['question']}" for q in prep["questions"])
-        titles = "\n".join(f"- {story['title']}" for story in stories[:30]) or "(none yet)"
+        titles = (
+            "\n".join(f"- {story['title']}" for story in stories[:30]) or "(none yet)"
+        )
         facts = {
             "interview_type": interview.get("interview_type"),
             "company": interview.get("company") or (job or {}).get("company") or "",
@@ -3262,7 +3271,10 @@ def _interview_prep_build(
     with _connect() as connection:
         saved = interview_prep.save_prep(connection, interview_id, prep)
     _audit(
-        "interview.prep", "interview", interview_id, {"generated_by": saved["generated_by"]}
+        "interview.prep",
+        "interview",
+        interview_id,
+        {"generated_by": saved["generated_by"]},
     )
     return {"prep": saved, "stories": stories, "note": note, "ai_available": available}
 
@@ -3293,7 +3305,10 @@ def _bulk_jobs(payload: Mapping[str, Any]) -> dict[str, Any]:
     stage = str(payload.get("stage") or "")
     if action == "stage" and stage not in STAGES:
         raise ValueError("Choose the status to move the jobs to.")
-    reason = str(payload.get("reason") or "").strip()[:200] or "Changed for several jobs at once"
+    reason = (
+        str(payload.get("reason") or "").strip()[:200]
+        or "Changed for several jobs at once"
+    )
     results: list[dict[str, Any]] = []
     for job_id in ids:
         try:
@@ -3313,8 +3328,18 @@ def _bulk_jobs(payload: Mapping[str, Any]) -> dict[str, Any]:
         except (LookupError, ValueError, PermissionError) as error:
             results.append({"job_id": job_id, "ok": False, "error": str(error)})
     done = sum(1 for item in results if item["ok"])
-    _audit("jobs.bulk", "job", ids[0], {"action": action, "count": len(ids), "done": done, "stage": stage})
-    return {"action": action, "results": results, "done": done, "failed": len(results) - done}
+    _audit(
+        "jobs.bulk",
+        "job",
+        ids[0],
+        {"action": action, "count": len(ids), "done": done, "stage": stage},
+    )
+    return {
+        "action": action,
+        "results": results,
+        "done": done,
+        "failed": len(results) - done,
+    }
 
 
 def _bulk_runs(user: dict[str, Any], payload: Mapping[str, Any]) -> dict[str, Any]:
@@ -3334,7 +3359,12 @@ def _bulk_runs(user: dict[str, Any], payload: Mapping[str, Any]) -> dict[str, An
         except (LookupError, ValueError, PermissionError) as error:
             results.append({"run_id": run_id, "ok": False, "error": str(error)})
     done = sum(1 for item in results if item["ok"])
-    return {"action": action, "results": results, "done": done, "failed": len(results) - done}
+    return {
+        "action": action,
+        "results": results,
+        "done": done,
+        "failed": len(results) - done,
+    }
 
 
 def _draft_thread_reply(
@@ -4294,9 +4324,7 @@ def _inbox_payload(
     elif saved_total and (q or flt != "all"):
         message = "No conversations match your search or filter."
     elif connected:
-        message = (
-            "Your inbox is not saved in Monosage yet. Monosage is loading it from LinkedIn."
-        )
+        message = "Your inbox is not saved in Monosage yet. Monosage is loading it from LinkedIn."
     else:
         message = "LinkedIn is not connected, and no conversations are saved yet. Connect LinkedIn in Settings > Integrations."
     sync = _inbox_sync_status(user)
@@ -4793,6 +4821,7 @@ def _recruiter_outreach_view() -> dict[str, Any]:
         },
     }
 
+
 def _start_inbox_pass_now(user: dict[str, Any]) -> dict[str, Any]:
     """Run one inbox check (drafts plus allowed auto-replies) in the background."""
     if _linkedin_status(user)["state"] != "connected":
@@ -4945,7 +4974,9 @@ def _run_jobs_schedule(schedule: dict[str, Any]) -> str:
         if job["stage"] in {"discovered", "saved"} and not job["resume_draft"]
     ][: schedule["max_items"]]
     drafted = below_fit = failed = 0
-    model = _setting("default_model") or DEFAULT_MODEL  # the model the person chose, as for Review fit
+    model = (
+        _setting("default_model") or DEFAULT_MODEL
+    )  # the model the person chose, as for Review fit
     for index, job in enumerate(pending):
         if index:
             time.sleep(ITEM_DELAY_SECONDS)
@@ -5437,7 +5468,9 @@ def _open_notify_home(home: str) -> Iterator[sqlite3.Connection | None]:
 
 
 aira_notify.configure(
-    key_dir=lambda: DB_PATH.parent,  # the data directory: the VAPID key is made once and kept there
+    key_dir=lambda: (
+        DB_PATH.parent
+    ),  # the data directory: the VAPID key is made once and kept there
     home=_notify_home,
     open_home=_open_notify_home,
 )
@@ -5508,7 +5541,14 @@ _login_limiter = RateLimiter(limit=8, window_seconds=600, lockout_seconds=900)
 _api_limiter = RateLimiter(limit=600, window_seconds=60)
 # Routes that serve the web page and its static files (not rate limited).
 PAGE_ROUTES = frozenset(
-    {"ui_index", "ui_app_page", "ui_static", "ui_i18n", "ui_service_worker", "ui_manifest"}
+    {
+        "ui_index",
+        "ui_app_page",
+        "ui_static",
+        "ui_i18n",
+        "ui_service_worker",
+        "ui_manifest",
+    }
 )
 # The page and its static files are checked on every load (an edit on disk shows at once) but sent again only when
 # they changed: the ETag is the file's size and modification time, and a match answers 304 with no body. Text files
@@ -6191,7 +6231,11 @@ def _reopen_application(job_id: str) -> dict[str, Any]:
             "ORDER BY occurred_at DESC, rowid DESC LIMIT 1",
             (job_id, current),
         ).fetchall()
-    back = STAGE_ALIASES.get(rows[0]["previous_status"], rows[0]["previous_status"]) if rows else ""
+    back = (
+        STAGE_ALIASES.get(rows[0]["previous_status"], rows[0]["previous_status"])
+        if rows
+        else ""
+    )
     if back not in STAGES or back in CLOSED_STAGES:
         back = "applied" if job.get("applied_at") else "saved"
     label = current.replace("_", " ")
@@ -7211,7 +7255,9 @@ def _apply_with_engine(
     # Finish in browser (aira/handoff.py): the person opened this run in a window they see; the engine waits on a
     # CAPTCHA, sign-in or code step for them. Locally a held run keeps its cookies for that window.
     session = (
-        handoff_sessions.active(run_id, owner=str(getattr(_request_context, "user_id", "") or ""))
+        handoff_sessions.active(
+            run_id, owner=str(getattr(_request_context, "user_id", "") or "")
+        )
         if run_id
         else None
     )
@@ -8610,10 +8656,17 @@ def _autopilot_finish_in_browser(user: dict[str, Any], run_id: str) -> dict[str,
         raise ValueError(FINISH_IN_BROWSER_HOSTED)
     with _connect() as connection:
         run = autopilot.get_run(connection, run_id)
-        if run["status"] != "needs_review" or run.get("hold") not in handoff_sessions.HOLD_KINDS:
-            raise ValueError("This application is not waiting for a step in the browser.")
+        if (
+            run["status"] != "needs_review"
+            or run.get("hold") not in handoff_sessions.HOLD_KINDS
+        ):
+            raise ValueError(
+                "This application is not waiting for a step in the browser."
+            )
         if run["unanswered"]:
-            raise ValueError("Answer the questions first; then finish the rest in the browser.")
+            raise ValueError(
+                "Answer the questions first; then finish the rest in the browser."
+            )
         if connection.execute(
             "SELECT 1 FROM application_submissions WHERE job_id = ?", (run["job_id"],)
         ).fetchone():
@@ -9593,7 +9646,11 @@ class RequestHandler(BaseHTTPRequestHandler):
             key = name.lower()
             if key in own and (
                 key == "cache-control"
-                or (sandboxed and key in {"content-security-policy", "cross-origin-resource-policy"})
+                or (
+                    sandboxed
+                    and key
+                    in {"content-security-policy", "cross-origin-resource-policy"}
+                )
             ):
                 continue
             if sandboxed and key == "x-frame-options":
@@ -9730,7 +9787,9 @@ class RequestHandler(BaseHTTPRequestHandler):
         if length < 1 or length > 20_000_000:
             raise ValueError("Request body must be between 1 byte and 20 MB.")
         raw = self.rfile.read(length)
-        self._raw_body = raw  # a payment webhook checks its signature over these exact bytes
+        self._raw_body = (
+            raw  # a payment webhook checks its signature over these exact bytes
+        )
         kind = self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
         if kind == "application/x-www-form-urlencoded" and urlsplit(
             self.path
@@ -9869,7 +9928,9 @@ class RequestHandler(BaseHTTPRequestHandler):
                         if length <= 4_000_000:
                             self._discard_body()
                         self.close_connection = True
-                        self._send_json(413, {"error": "The webhook body is too large."})
+                        self._send_json(
+                            413, {"error": "The webhook body is too large."}
+                        )
                         return
                 # The page and its files are not counted: one page is about 90 files, and each app has its own
                 # address (/stocks) that a person may open in several tabs at once.
@@ -9877,7 +9938,8 @@ class RequestHandler(BaseHTTPRequestHandler):
                     allowed, retry_after = _api_limiter.check(self._client_key())
                     if not allowed:
                         self._reject(
-                            429, f"Too many requests. Try again in {retry_after} seconds."
+                            429,
+                            f"Too many requests. Try again in {retry_after} seconds.",
                         )
                         return
                     _api_limiter.hit(self._client_key())
@@ -10042,7 +10104,10 @@ class RequestHandler(BaseHTTPRequestHandler):
         self._send_static(target, STATIC_TYPES[target.suffix])
 
     def _send_page_file(
-        self, target: Path, content_type: str, extra: list[tuple[str, str]] | None = None
+        self,
+        target: Path,
+        content_type: str,
+        extra: list[tuple[str, str]] | None = None,
     ) -> None:
         """A file the page needs at the site's root (the service worker, the web manifest). The hosted build runs
         this handler through its capturing shim, which takes the bytes as they are (no revalidation there)."""
@@ -10053,7 +10118,10 @@ class RequestHandler(BaseHTTPRequestHandler):
                 self._send_json(404, {"error": "Not found."})
                 return
             self._write_headers(
-                200, content_type, len(data), [("Cache-Control", "no-cache"), *(extra or [])]
+                200,
+                content_type,
+                len(data),
+                [("Cache-Control", "no-cache"), *(extra or [])],
             )
             self.wfile.write(data)
             self._status = 200
@@ -10082,7 +10150,8 @@ class RequestHandler(BaseHTTPRequestHandler):
     ) -> None:
         """The web app manifest that makes Monosage installable."""
         self._send_page_file(
-            STATIC_DIR / "manifest.webmanifest", "application/manifest+json; charset=utf-8"
+            STATIC_DIR / "manifest.webmanifest",
+            "application/manifest+json; charset=utf-8",
         )
 
     @route("GET", r"/api/notify/stream")
@@ -10096,10 +10165,14 @@ class RequestHandler(BaseHTTPRequestHandler):
         """Live hints for this account's open pages, as Server-Sent Events (aira/notify/realtime.py): a heartbeat
         every few seconds, ``Last-Event-ID`` (or ``?last=``) resumes, and past the cap the page keeps polling."""
         if not aira_notify.live():
-            self._send_json(404, {"error": "Live updates are off here.", "code": "live_off"})
+            self._send_json(
+                404, {"error": "Live updates are off here.", "code": "live_off"}
+            )
             return
         channel = aira_notify.home_of(user)
-        last = str(self.headers.get("Last-Event-ID") or _query_str(query, "last") or "")[:64]
+        last = str(
+            self.headers.get("Last-Event-ID") or _query_str(query, "last") or ""
+        )[:64]
         hub = notify_realtime.HUB
         try:
             after, ticket = hub.open_stream(channel)
@@ -10111,7 +10184,9 @@ class RequestHandler(BaseHTTPRequestHandler):
         finally:
             hub.close(channel, ticket)
 
-    def _stream_events(self, channel: str, last: str, after: int, ticket: int = 0) -> None:
+    def _stream_events(
+        self, channel: str, last: str, after: int, ticket: int = 0
+    ) -> None:
         self.close_connection = True
         self.send_response(200)
         self.send_header("Content-Type", "text/event-stream; charset=utf-8")
@@ -11160,9 +11235,7 @@ class RequestHandler(BaseHTTPRequestHandler):
         if _job_row(match.group(1)) is None:
             raise LookupError("Job not found.")
         restored = _restore_archived(match.group(1))
-        self._send_json(
-            200, {"restored": restored, "job": _job_row(match.group(1))}
-        )
+        self._send_json(200, {"restored": restored, "job": _job_row(match.group(1))})
 
     @route("POST", rf"/api/jobs/({JOB_KEY_PATTERN})/reopen")
     def api_job_reopen(
@@ -11364,7 +11437,9 @@ class RequestHandler(BaseHTTPRequestHandler):
         user: dict[str, Any] | None,
     ) -> None:
         # {skills?: [...]}: drafts from the resume's bullets; nothing is saved until the person saves one.
-        skills = payload.get("skills") if isinstance(payload.get("skills"), list) else []
+        skills = (
+            payload.get("skills") if isinstance(payload.get("skills"), list) else []
+        )
         drafts = interview_prep.story_drafts(
             str(_profile_settings()["resume"] or ""),
             [str(skill)[:60] for skill in skills[:12]],
@@ -11703,9 +11778,7 @@ class RequestHandler(BaseHTTPRequestHandler):
     ) -> None:
         # {choice: done|give_up}: I'm done, or Give up, for the open Finish in browser window.
         assert user is not None
-        self._send_json(
-            200, _autopilot_finish_decide(user, match.group(1), payload)
-        )
+        self._send_json(200, _autopilot_finish_decide(user, match.group(1), payload))
 
     @route("POST", r"/api/autopilot/runs/bulk")
     def api_autopilot_runs_bulk(
@@ -12246,7 +12319,9 @@ class RequestHandler(BaseHTTPRequestHandler):
         user: dict[str, Any] | None,
     ) -> None:
         with _connect() as connection:
-            updated = recruiter_contacts.update_list(connection, match.group(1), payload)
+            updated = recruiter_contacts.update_list(
+                connection, match.group(1), payload
+            )
         self._send_json(200, {"list": updated})
 
     @route("DELETE", r"/api/recruiters/lists/([0-9a-f]{32})")
@@ -13583,7 +13658,9 @@ def _careers_person_check(handler: Any, route_name: str) -> None:
     if chosen is None:
         raise suite_life.ProfileRequired("Choose who is using Monosage.")
     if chosen["pin_hash"]:
-        with _connect() as connection:  # unlocks expire and lock when idle (aira/suite/life.py)
+        with (
+            _connect() as connection
+        ):  # unlocks expire and lock when idle (aira/suite/life.py)
             opened = suite_life.unlocked(connection, chosen, token)
         if not opened:
             raise suite_life.ProfileLocked(f"Enter {chosen['name']}'s PIN.")
@@ -13732,8 +13809,12 @@ aira_suite.set_gateway(_LeadsGateway())  # the industry apps share the writing m
 suite_public.set_default_index(
     _public_link_index
 )  # the hosted build installs its own (organization) index
-suite_kit.set_address_source(_bound_public_address)  # customers' links use the business's public address
-suite_kit.set_public_host_hook(_public_hosts.register)  # and the Host check lets that address reach them
+suite_kit.set_address_source(
+    _bound_public_address
+)  # customers' links use the business's public address
+suite_kit.set_public_host_hook(
+    _public_hosts.register
+)  # and the Host check lets that address reach them
 social_db.set_default_path(
     lambda: DB_PATH.parent / "social.sqlite3"
 )  # one Social network for every account on this computer

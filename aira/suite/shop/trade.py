@@ -140,7 +140,10 @@ def terms_values(
 
     if has("terms"):
         out["terms"] = kit.choice(
-            raw.get("terms"), "the payment terms", tuple(TRADE_TERMS), default=default_terms
+            raw.get("terms"),
+            "the payment terms",
+            tuple(TRADE_TERMS),
+            default=default_terms,
         )
     if has("discount_percent"):
         out["discount_percent"] = kit.integer(
@@ -169,7 +172,9 @@ def _insert(connection: sqlite3.Connection, row: dict[str, Any]) -> str:
     row = {**row, "id": account_id, "created_at": stamp, "updated_at": stamp}
     columns = ", ".join(row)
     marks = ", ".join(f":{key}" for key in row)
-    connection.execute(f"INSERT INTO sh_trade_accounts ({columns}) VALUES ({marks})", row)  # noqa: S608 - keys are ours
+    connection.execute(
+        f"INSERT INTO sh_trade_accounts ({columns}) VALUES ({marks})", row
+    )  # noqa: S608 - keys are ours
     return account_id
 
 
@@ -224,7 +229,9 @@ def create(
         connection, {**fields, **terms, "status": "pending", "source": "manual"}
     )
     connection.commit()
-    return approve(connection, account_id, origin=origin, send=kit.flag(raw.get("send")))
+    return approve(
+        connection, account_id, origin=origin, send=kit.flag(raw.get("send"))
+    )
 
 
 def update(
@@ -362,7 +369,9 @@ def open_balance(connection: sqlite3.Connection, account_id: str) -> int:
     return int(row[0] or 0)
 
 
-def credit(connection: sqlite3.Connection, account: Mapping[str, Any]) -> dict[str, Any]:
+def credit(
+    connection: sqlite3.Connection, account: Mapping[str, Any]
+) -> dict[str, Any]:
     limit = int(account.get("credit_limit_cents") or 0)
     owed = open_balance(connection, str(account["id"]))
     return {

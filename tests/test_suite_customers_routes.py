@@ -34,9 +34,15 @@ def _order(api, **customer):
 
 
 def test_customers_search_page_edit_merge_and_send_to_sales(env, api):
-    order = _order(api, email="ana@example.com", phone="+91 98765 43210", mark_paid=True)
+    order = _order(
+        api, email="ana@example.com", phone="+91 98765 43210", mark_paid=True
+    )
     assert "payments" in api.get(f"/api/shop/orders/{order['id']}")["order"]
-    api.post("/api/marketing/subscribers", {"email": "ANA@example.com", "name": "Ana"}, expect=201)
+    api.post(
+        "/api/marketing/subscribers",
+        {"email": "ANA@example.com", "name": "Ana"},
+        expect=201,
+    )
     other = _order(api, email="ana.silva@work.example")
     listed = api.get("/api/suite/customers")
     assert listed["total"] == 2 and set(listed["apps"]) == {"shop", "marketing"}
@@ -47,9 +53,15 @@ def test_customers_search_page_edit_merge_and_send_to_sales(env, api):
     kinds = {item["kind"] for item in page["timeline"]}
     assert {"order", "payment", "subscriber"} <= kinds
     assert page["paid"] == [{"currency": "USD", "cents": 1500}]
-    edited = api.call("PATCH", f"/api/suite/customers/{keep}", {"tags": "vip, wholesale", "notes": "Prefers calls"})
+    edited = api.call(
+        "PATCH",
+        f"/api/suite/customers/{keep}",
+        {"tags": "vip, wholesale", "notes": "Prefers calls"},
+    )
     assert edited[0] == 200 and edited[1]["contact"]["tags"] == ["vip", "wholesale"]
-    second = next(c for c in api.get("/api/suite/customers")["contacts"] if c["id"] != keep)
+    second = next(
+        c for c in api.get("/api/suite/customers")["contacts"] if c["id"] != keep
+    )
     merged = api.post(f"/api/suite/customers/{keep}/merge", {"other_id": second["id"]})
     assert merged["moved"] == 1 and merged["contact"]["id"] == keep
     assert api.get("/api/suite/customers")["total"] == 1
@@ -65,18 +77,33 @@ def test_customers_search_page_edit_merge_and_send_to_sales(env, api):
     assert again[0] == 200 and again[1]["deal"]["id"] == sent[1]["deal"]["id"]
     deals = api.get("/api/studio/deals")["deals"]
     assert [deal["id"] for deal in deals] == [sent[1]["deal"]["id"]]
-    assert api.get(f"/api/suite/customers/{keep}")["deals"][0]["ref"] == sent[1]["deal"]["id"]
-    nothing = api.get(f"/api/suite/sales/handoff?app=marketing&object_type=lead&object_id={'0' * 32}")
+    assert (
+        api.get(f"/api/suite/customers/{keep}")["deals"][0]["ref"]
+        == sent[1]["deal"]["id"]
+    )
+    nothing = api.get(
+        f"/api/suite/sales/handoff?app=marketing&object_type=lead&object_id={'0' * 32}"
+    )
     assert nothing["deal"] is None and nothing["sales_available"] is True
-    status, body = api.call("POST", "/api/suite/sales/handoff", {"app": "shop", "object_type": "order", "object_id": order["id"]})
+    status, body = api.call(
+        "POST",
+        "/api/suite/sales/handoff",
+        {"app": "shop", "object_type": "order", "object_id": order["id"]},
+    )
     assert status == 400
-    status, body = api.call("POST", f"/api/suite/customers/{keep}/merge", {"other_id": keep})
+    status, body = api.call(
+        "POST", f"/api/suite/customers/{keep}/merge", {"other_id": keep}
+    )
     assert status == 400
 
 
 def test_a_subscriber_who_has_confirmed_is_not_asked_again(env, api):
-    made = api.post("/api/marketing/subscribers", {"email": "sam@example.com"}, expect=201)["subscriber"]
-    status, body = api.call("POST", f"/api/marketing/subscribers/{made['id']}/confirm-again", {})
+    made = api.post(
+        "/api/marketing/subscribers", {"email": "sam@example.com"}, expect=201
+    )["subscriber"]
+    status, body = api.call(
+        "POST", f"/api/marketing/subscribers/{made['id']}/confirm-again", {}
+    )
     assert status == 400 and "not confirmed yet" in body["error"]
     counts = api.get("/api/marketing/subscribers")["counts"]
     assert counts == {"subscribed": 1, "unsubscribed": 0, "pending": 0}

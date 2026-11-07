@@ -368,7 +368,9 @@ def bookings_get(request: Request) -> tuple[int, dict[str, Any]]:
         from aira.payments import service as payments
 
         # its online payment links (Razorpay): the deposit, then the rest
-        booking["payments"] = payments.requests_for(connection, APP, "booking", booking["id"])
+        booking["payments"] = payments.requests_for(
+            connection, APP, "booking", booking["id"]
+        )
         return 200, {"booking": booking}
 
 
@@ -877,7 +879,7 @@ def booking_reschedule(
 
 @aira_route("GET", f"/api/public/{TOKEN}/calendar\\.ics", auth="public_link")
 def booking_calendar_file(request: Request) -> Raw:
-    """"Add to calendar" on a customer's booking page: the appointment as an ``.ics`` file (METHOD:PUBLISH, the
+    """ "Add to calendar" on a customer's booking page: the appointment as an ``.ics`` file (METHOD:PUBLISH, the
     same UID as the emailed invite, so adding both leaves one event)."""
     with closing(request.connect()) as connection:
         link = public.resolve(connection, request.match.group(1))

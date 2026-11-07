@@ -404,7 +404,11 @@ class BackupService:
             operator_label="scheduler",
             org_id=org_id,
             source="system",
-            detail={"file": target.name, "size": len(data), "kept": min(keep, len(archives))},
+            detail={
+                "file": target.name,
+                "size": len(data),
+                "kept": min(keep, len(archives)),
+            },
         )
         return {"file": str(target), "size": len(data)}
 

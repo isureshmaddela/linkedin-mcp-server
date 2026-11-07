@@ -368,14 +368,24 @@ def form_token(env, seconds_ago=10):
 
     connection = env.user_db()
     try:
-        return service.form_token(connection, moment=kit.utcnow() - timedelta(seconds=seconds_ago))
+        return service.form_token(
+            connection, moment=kit.utcnow() - timedelta(seconds=seconds_ago)
+        )
     finally:
         connection.close()
 
 
 def anonymous(env, method, path, body=None):
-    if method == "POST" and path.endswith("/place_order") and isinstance(body, dict) and "form_token" not in body:
-        body = {**body, "form_token": form_token(env)}  # a person took a while to fill the form in
+    if (
+        method == "POST"
+        and path.endswith("/place_order")
+        and isinstance(body, dict)
+        and "form_token" not in body
+    ):
+        body = {
+            **body,
+            "form_token": form_token(env),
+        }  # a person took a while to fill the form in
     data = json.dumps(body).encode() if body is not None else None
     request = urllib.request.Request(env.base + path, data=data, method=method)
     request.add_header("Content-Type", "application/json")

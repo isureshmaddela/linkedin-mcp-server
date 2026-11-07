@@ -109,7 +109,10 @@ def master_docx_template(
         if suffix not in UPLOAD_EXTENSIONS:
             continue
         if suffix != ".docx":
-            return None, "Your master resume is a PDF; upload a Word (.docx) resume to use your own template."
+            return (
+                None,
+                "Your master resume is a PDF; upload a Word (.docx) resume to use your own template.",
+            )
         try:
             _, data = store.read(
                 connection,
@@ -121,7 +124,10 @@ def master_docx_template(
             continue
         ok, reason = docx_template_status(data)
         return (data, "") if ok else (None, reason)
-    return None, "Upload your resume as a Word (.docx) file in Documents to use your own template."
+    return (
+        None,
+        "Upload your resume as a Word (.docx) file in Documents to use your own template.",
+    )
 
 
 def resume_for_upload(

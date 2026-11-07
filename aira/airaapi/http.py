@@ -144,7 +144,11 @@ def sandboxed(headers: tuple[tuple[str, str], ...] | list[tuple[str, str]]) -> b
 def extra_headers(outcome: Raw) -> tuple[tuple[str, str], ...]:
     """Headers to add to a :class:`Raw` response (the route's own plus page safety)."""
     kind = outcome.content_type.split(";", 1)[0].strip().lower()
-    if kind in {"text/html", "application/xhtml+xml", "image/svg+xml"} and not sandboxed(outcome.headers):
+    if kind in {
+        "text/html",
+        "application/xhtml+xml",
+        "image/svg+xml",
+    } and not sandboxed(outcome.headers):
         return (*UNTRUSTED_PAGE_HEADERS, *outcome.headers)
     return outcome.headers
 

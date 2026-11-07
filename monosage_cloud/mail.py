@@ -165,7 +165,9 @@ class Mailer:
             )
         return mail_id
 
-    def deliver_queued(self, mail_id: str, *, last_attempt: bool = False) -> dict[str, Any]:
+    def deliver_queued(
+        self, mail_id: str, *, last_attempt: bool = False
+    ) -> dict[str, Any]:
         """One delivery attempt of a queued message (the ``mail.deliver`` job). Raises to be retried."""
         with platform_scope(), self.db.read() as connection:
             row = one(
@@ -211,7 +213,8 @@ class Mailer:
             changed += max(
                 0,
                 connection.execute(
-                    "DELETE FROM mail_outbox WHERE created_at < ?", (now - days * 86_400,)
+                    "DELETE FROM mail_outbox WHERE created_at < ?",
+                    (now - days * 86_400,),
                 ).rowcount,
             )
         return changed

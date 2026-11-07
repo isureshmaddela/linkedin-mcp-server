@@ -101,7 +101,9 @@ def me_get(request: Request) -> tuple[int, dict[str, Any]]:
 @aira_route("POST", f"{BASE}/me")
 def me_create(request: Request) -> tuple[int, dict[str, Any]]:
     with _identity(request) as (sc, ident):
-        account = service.account_out(service.create_account(sc, ident, request.payload))
+        account = service.account_out(
+            service.create_account(sc, ident, request.payload)
+        )
     return 201, {"account": account}
 
 
@@ -109,7 +111,9 @@ def me_create(request: Request) -> tuple[int, dict[str, Any]]:
 def me_update(request: Request) -> tuple[int, dict[str, Any]]:
     with _open(request) as (sc, me):
         return 200, {
-            "account": service.account_out(service.update_account(sc, me, request.payload))
+            "account": service.account_out(
+                service.update_account(sc, me, request.payload)
+            )
         }
 
 
@@ -191,7 +195,10 @@ def person_get(request: Request) -> tuple[int, dict[str, Any]]:
             view["relation"] in ("self", "friends") or target["visibility"] == "public"
         )
         return 200, {
-            "person": {**view, "videos_channel": _videos_channel(target) if full else ""},
+            "person": {
+                **view,
+                "videos_channel": _videos_channel(target) if full else "",
+            },
             "posts": service.person_posts(sc, me, target) if full else [],
             "highlights": service.highlights(sc, me, target) if full else [],
         }
@@ -223,7 +230,9 @@ def person_grid(request: Request) -> tuple[int, dict[str, Any]]:
         view = service.profile_view(sc, me, target)
         if not view["full"]:
             return 200, {"tiles": []}
-        return 200, {"tiles": service.person_grid(sc, me, target, request.q("kind") or "photos")}
+        return 200, {
+            "tiles": service.person_grid(sc, me, target, request.q("kind") or "photos")
+        }
 
 
 @aira_route("GET", f"{BASE}/people/{ID}/follows")
@@ -337,7 +346,9 @@ def guardian_contacts(request: Request) -> tuple[int, dict[str, Any]]:
 def guardian_contacts_add(request: Request) -> tuple[int, dict[str, Any]]:
     """A guardian approves an adult (``{"handle": "@name"}`` or ``{"contact_id"}``)."""
     with _open(request) as (sc, me):
-        result = service.set_approved_contact(sc, me, _id(request), request.payload, True)
+        result = service.set_approved_contact(
+            sc, me, _id(request), request.payload, True
+        )
     request.audit("social.approved_contact_add", "account", _id(request))
     return 200, result
 
@@ -500,7 +511,9 @@ def chat_messages(request: Request) -> tuple[int, dict[str, Any]]:
 def chat_send(request: Request) -> tuple[int, dict[str, Any]]:
     with _open(request) as (sc, me):
         sent = service.send(sc, me, _id(request), request.payload)
-        notify_events.chat_message(sc, me, _id(request))  # live pages, and the others are told
+        notify_events.chat_message(
+            sc, me, _id(request)
+        )  # live pages, and the others are told
         return 201, sent
 
 
@@ -508,7 +521,9 @@ def chat_send(request: Request) -> tuple[int, dict[str, Any]]:
 def chat_read(request: Request) -> tuple[int, dict[str, Any]]:
     with _open(request) as (sc, me):
         service.mark_read(sc, me, _id(request))
-        notify_events.chat_changed(sc, _id(request))  # read receipts on the others' open chat
+        notify_events.chat_changed(
+            sc, _id(request)
+        )  # read receipts on the others' open chat
     return 200, {"read": True}
 
 

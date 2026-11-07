@@ -413,7 +413,9 @@ class Lifecycle:
         path = self.app.workspaces.org_api_path(org_id)
         if not path.exists():
             return None
-        source = sqlite3.connect(f"file:{path.as_posix()}?mode=ro", uri=True, timeout=15)
+        source = sqlite3.connect(
+            f"file:{path.as_posix()}?mode=ro", uri=True, timeout=15
+        )
         source.row_factory = sqlite3.Row
         try:
             names = [
@@ -1093,9 +1095,13 @@ class Lifecycle:
 
     def _delete_member_data(self, actor: Principal, membership: dict[str, Any]) -> None:
         org_id, member_id = membership["org_id"], membership["member_id"]
-        from monosage_cloud import erasure_hooks  # erase the person everywhere first (aira/erasure.py)
+        from monosage_cloud import (
+            erasure_hooks,
+        )  # erase the person everywhere first (aira/erasure.py)
 
-        erasure_hooks.member_deleted(self.app, org_id, member_id, actor_label=actor.email)
+        erasure_hooks.member_deleted(
+            self.app, org_id, member_id, actor_label=actor.email
+        )
         if membership["role"] == "candidate":
             self.app.workspaces.stop_automation(org_id, member_id)
             self.app.workspaces.delete(org_id, member_id)
@@ -1155,7 +1161,9 @@ class Lifecycle:
             summary["queue"] = self.app.scheduler.enqueue_due(renew=renew)
             summary["backups"] = self.app.backup.enqueue_due()
         finally:
-            self._renew("tick", holder, TICK_INTERVAL)  # the next pass starts no sooner than this
+            self._renew(
+                "tick", holder, TICK_INTERVAL
+            )  # the next pass starts no sooner than this
         return summary
 
     def _lease(self, name: str, seconds: int) -> str | None:

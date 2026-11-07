@@ -602,7 +602,10 @@ def test_search_hide_export_and_a_paid_newsletter_on_the_local_build(
     )
     paid = pat.post(f"/api/news/newsletter/subscribers/{reader['id']}/paid")
     status, full = _public(
-        env, "GET", f"/api/public/{token}/issues", headers={"Monosage-Secret": paid["code"]}
+        env,
+        "GET",
+        f"/api/public/{token}/issues",
+        headers={"Monosage-Secret": paid["code"]},
     )
     assert status == 200 and len(full["issues"][0]["stories"]) == 3
     status, sheet = pat.call(

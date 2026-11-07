@@ -378,8 +378,14 @@ def _invoice_describe(
         )
         or {}
     )
-    link = public.link_for(connection, "studio", "invoice", invoice_id) or public.create_link(
-        connection, "studio", "invoice", invoice_id, title=f"Invoice {invoice['number']}"
+    link = public.link_for(
+        connection, "studio", "invoice", invoice_id
+    ) or public.create_link(
+        connection,
+        "studio",
+        "invoice",
+        invoice_id,
+        title=f"Invoice {invoice['number']}",
     )
     return _due(
         amount=int(invoice["balance_cents"]),
@@ -413,7 +419,10 @@ def _invoice_paid(
         "SELECT id FROM st_payments WHERE invoice_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
         (invoice_id,),
     )
-    return {"source_type": "payment", "source_id": (payment or {}).get("id") or invoice_id}
+    return {
+        "source_type": "payment",
+        "source_id": (payment or {}).get("id") or invoice_id,
+    }
 
 
 payments.payable(

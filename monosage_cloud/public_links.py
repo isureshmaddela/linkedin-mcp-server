@@ -167,7 +167,9 @@ def run_public_link(
                 secret_store=local._airaapi_secret_store(),
                 key_index=app.hosting_key_index(org_id),
                 audit=local._audit,
-                body=bytes(request.body or b""),  # a webhook's signature is over these bytes
+                body=bytes(
+                    request.body or b""
+                ),  # a webhook's signature is over these bytes
             )
             outcome = entry.handler(request_object)
     except LookupError as error:

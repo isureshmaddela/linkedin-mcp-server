@@ -300,7 +300,9 @@ def upsert_customer(
         if name and not found["name"]:
             updates["name"] = name
         kit.update_row(connection, "bk_customers", found["id"], updates)
-        kit.link_row(connection, "bk_customers", found["id"])  # seen again: the one customer record moves on
+        kit.link_row(
+            connection, "bk_customers", found["id"]
+        )  # seen again: the one customer record moves on
         return {**found, **updates}
     customer = {
         "id": kit.new_id(),
@@ -774,7 +776,12 @@ def cancel(
             )
     # the customer is told either way: their calendar app takes the event out (the invite's METHOD:CANCEL)
     _message(
-        connection, updated, "booking_cancelled", None, None, by_customer=by == "customer"
+        connection,
+        updated,
+        "booking_cancelled",
+        None,
+        None,
+        by_customer=by == "customer",
     )
     _offer_opening(connection, booking, origin, now=now)
     connection.commit()

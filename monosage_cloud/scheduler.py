@@ -65,7 +65,9 @@ class Scheduler:
         return "|".join(parts)
 
     @staticmethod
-    def _unchanged(row: dict[str, Any], at: str, sig: str, current: str, now: int) -> bool:
+    def _unchanged(
+        row: dict[str, Any], at: str, sig: str, current: str, now: int
+    ) -> bool:
         return bool(
             row.get(at) is not None and int(row[at]) > now and row.get(sig) == current
         )
@@ -218,7 +220,9 @@ class Scheduler:
             org_id = org["org_id"]
             path = self.app.workspaces.org_api_path(org_id)
             sig = self.signature(path)
-            if self._unchanged(org, "monitors_check_at", "monitors_check_sig", sig, now):
+            if self._unchanged(
+                org, "monitors_check_at", "monitors_check_sig", sig, now
+            ):
                 continue
             if not path.exists():
                 self._mark_org(org_id, self._next_check(now, {}, None), sig)
@@ -302,7 +306,9 @@ class Scheduler:
         }
         if not path.exists():
             return result
-        result["next_any"] = []  # the soonest of everything (plans, retries, schedules, monitors)
+        result[
+            "next_any"
+        ] = []  # the soonest of everything (plans, retries, schedules, monitors)
         result["next_monitor"] = None
         try:
             connection = sqlite3.connect(

@@ -227,7 +227,9 @@ class JobQueue:
         self, org_id: str, per_kind_default: int, limits: dict[str, int]
     ) -> dict[str, Any]:
         """The organization's caps: one per job kind and one for all kinds together."""
-        if org_id in limits:  # an operator rate-limited it: one job at a time, whatever the kind
+        if (
+            org_id in limits
+        ):  # an operator rate-limited it: one job at a time, whatever the kind
             return {"total": limits[org_id], "kind": lambda _kind: limits[org_id]}
         configured = {**KIND_CAPS, **(self.app.config.kind_concurrency or {})}
         explicit = per_kind_default != self.app.config.per_org_concurrency

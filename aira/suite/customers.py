@@ -28,13 +28,17 @@ HANDOFF_SOURCES = {
     ("service", "case"): "Service case",
     ("suite", "contact"): "Customer",
 }
-DUPLICATE_WINDOW = timedelta(days=7)  # two payments of the same amount this close, in two apps, may be one
+DUPLICATE_WINDOW = timedelta(
+    days=7
+)  # two payments of the same amount this close, in two apps, may be one
 
 
 def _tables(connection: sqlite3.Connection) -> set[str]:
     return {
         str(row[0])
-        for row in connection.execute("SELECT name FROM sqlite_master WHERE type = 'table'")
+        for row in connection.execute(
+            "SELECT name FROM sqlite_master WHERE type = 'table'"
+        )
     }
 
 
@@ -76,11 +80,16 @@ def search(
     text = str(q or "").strip()[:80]
     if text:
         like = f"%{text}%"
-        clauses.append("(name LIKE ? OR email LIKE ? OR phone LIKE ? OR company LIKE ? OR tags LIKE ?)")
+        clauses.append(
+            "(name LIKE ? OR email LIKE ? OR phone LIKE ? OR company LIKE ? OR tags LIKE ?)"
+        )
         params += [like, like, like, like, like]
         digits = kit.phone_key(text)
         if digits:
-            clauses[-1] = clauses[-1][:-1] + " OR id IN (SELECT contact_id FROM suite_contact_keys WHERE key = ?))"
+            clauses[-1] = (
+                clauses[-1][:-1]
+                + " OR id IN (SELECT contact_id FROM suite_contact_keys WHERE key = ?))"
+            )
             params.append(f"p:{digits}")
     if app:
         clauses.append("apps LIKE ?")
@@ -91,11 +100,15 @@ def search(
         f"SELECT * FROM suite_contacts {where} ORDER BY last_seen DESC, created_at DESC LIMIT ?",  # noqa: S608
         (*params, max(1, min(int(limit), 1000))),
     )
-    total = kit.count(connection, f"SELECT COUNT(*) FROM suite_contacts {where}", params)  # noqa: S608
+    total = kit.count(
+        connection, f"SELECT COUNT(*) FROM suite_contacts {where}", params
+    )  # noqa: S608
     apps = sorted(
         {
             name
-            for row in kit.fetch_all(connection, "SELECT DISTINCT apps FROM suite_contacts")
+            for row in kit.fetch_all(
+                connection, "SELECT DISTINCT apps FROM suite_contacts"
+            )
             for name in (kit.loads(row["apps"], []) or [])
         }
     )
@@ -111,7 +124,9 @@ def get(connection: sqlite3.Connection, contact_id: str) -> dict[str, Any]:
     """The contact, everything that points at it, and its timeline."""
     contact = _contact(connection, contact_id)
     items = timeline(connection, contact_id)
-    counted = [item for item in items if item["kind"] == "payment" and item.get("counts")]
+    counted = [
+        item for item in items if item["kind"] == "payment" and item.get("counts")
+    ]
     totals: dict[str, int] = {}
     for item in items:
         if item["kind"] in ("payment", "refund") and item.get("counts"):
@@ -129,9 +144,13 @@ def get(connection: sqlite3.Connection, contact_id: str) -> dict[str, Any]:
                 (contact_id,),
             )
         ],
-        "paid": [{"currency": code, "cents": cents} for code, cents in sorted(totals.items())],
+        "paid": [
+            {"currency": code, "cents": cents} for code, cents in sorted(totals.items())
+        ],
         "payments": len(counted),
-        "possible_duplicates": sum(1 for item in items if item.get("possible_duplicate")),
+        "possible_duplicates": sum(
+            1 for item in items if item.get("possible_duplicate")
+        ),
         "deals": deals,
         "sales_available": _sales_available(connection),
     }
@@ -181,15 +200,21 @@ def timeline(connection: sqlite3.Connection, contact_id: str) -> list[dict[str, 
     tables = _ready(connection)
     home = kit.business(connection)["currency"]
     items: list[dict[str, Any]] = []
-    sources: list[tuple[str, str, str]] = []  # (app, source_type, source_id) of the ledger lines to look up
-    requests: list[tuple[str, str, str]] = []  # (app, object_type, object_id) of payment links
+    sources: list[
+        tuple[str, str, str]
+    ] = []  # (app, source_type, source_id) of the ledger lines to look up
+    requests: list[
+        tuple[str, str, str]
+    ] = []  # (app, object_type, object_id) of payment links
     emails: set[str] = set()
 
     def rows(sql: str, params: Iterable[Any] = ()) -> list[dict[str, Any]]:
         return kit.fetch_all(connection, sql, tuple(params))
 
     if "sh_orders" in tables:
-        for order in rows("SELECT * FROM sh_orders WHERE contact_id = ?", (contact_id,)):
+        for order in rows(
+            "SELECT * FROM sh_orders WHERE contact_id = ?", (contact_id,)
+        ):
             emails.add(str(order["customer_email"]).lower())
             items.append(
                 _item(
@@ -220,7 +245,11 @@ def timeline(connection: sqlite3.Connection, contact_id: str) -> list[dict[str, 
                     "booking",
                     f"Booking: {booking['service_name']}",
                     detail=f"{booking['reference']} · {str(booking['status']).replace('_', ' ')}"
-                    + (f" · {_money(booking['price_cents'], home)}" if booking["price_cents"] else ""),
+                    + (
+                        f" · {_money(booking['price_cents'], home)}"
+                        if booking["price_cents"]
+                        else ""
+                    ),
                     href=f"#/bookings?tab=appointments&booking={booking['id']}",
                     amount_cents=int(booking["price_cents"] or 0),
                     currency=home,
@@ -243,7 +272,11 @@ def timeline(connection: sqlite3.Connection, contact_id: str) -> list[dict[str, 
             (contact_id,),
         ):
             emails.add(str(lead["email"]).lower())
-            what = "Sponsorship request" if lead.get("source") == "media_kit" else f"Form: {lead.get('form_title') or 'a deleted form'}"
+            what = (
+                "Sponsorship request"
+                if lead.get("source") == "media_kit"
+                else f"Form: {lead.get('form_title') or 'a deleted form'}"
+            )
             items.append(
                 _item(
                     lead["created_at"],
@@ -251,8 +284,16 @@ def timeline(connection: sqlite3.Connection, contact_id: str) -> list[dict[str, 
                     "submission",
                     what,
                     detail=f"{lead['status']}"
-                    + (f" · {_money(lead['value_cents'], home)}" if lead.get("value_cents") else "")
-                    + (f" · {str(lead['message'])[:120]}" if lead.get("message") else ""),
+                    + (
+                        f" · {_money(lead['value_cents'], home)}"
+                        if lead.get("value_cents")
+                        else ""
+                    )
+                    + (
+                        f" · {str(lead['message'])[:120]}"
+                        if lead.get("message")
+                        else ""
+                    ),
                     href=f"#/marketing?open=submission:{lead['id']}",
                     status=str(lead["status"]),
                     ref=lead["id"],
@@ -261,7 +302,9 @@ def timeline(connection: sqlite3.Connection, contact_id: str) -> list[dict[str, 
             sources.append(("marketing", "lead", lead["id"]))
             requests.append(("marketing", "lead", lead["id"]))
     if "mk_subscribers" in tables:
-        for row in rows("SELECT * FROM mk_subscribers WHERE contact_id = ?", (contact_id,)):
+        for row in rows(
+            "SELECT * FROM mk_subscribers WHERE contact_id = ?", (contact_id,)
+        ):
             emails.add(str(row["email"]).lower())
             said = {
                 "subscribed": "Subscribed to your news",
@@ -270,7 +313,9 @@ def timeline(connection: sqlite3.Connection, contact_id: str) -> list[dict[str, 
             }.get(str(row["status"]), "On your email list")
             items.append(
                 _item(
-                    row.get("unsubscribed_at") if row["status"] == "unsubscribed" else row["created_at"],
+                    row.get("unsubscribed_at")
+                    if row["status"] == "unsubscribed"
+                    else row["created_at"],
                     "marketing",
                     "subscriber",
                     said,
@@ -296,7 +341,9 @@ def timeline(connection: sqlite3.Connection, contact_id: str) -> list[dict[str, 
                 )
             )
             if "sv_charges" in tables:
-                for charge in rows("SELECT id FROM sv_charges WHERE case_id = ?", (case["id"],)):
+                for charge in rows(
+                    "SELECT id FROM sv_charges WHERE case_id = ?", (case["id"],)
+                ):
                     sources.append(("service", "case_charge", charge["id"]))
     if "leads" in tables:
         for lead in rows("SELECT * FROM leads WHERE contact_id = ?", (contact_id,)):
@@ -307,7 +354,8 @@ def timeline(connection: sqlite3.Connection, contact_id: str) -> list[dict[str, 
                     "leads",
                     "lead",
                     f"Saved as a lead: {lead['name'] or lead['company'] or lead['email']}",
-                    detail=f"{lead['status']}" + (f" · {lead['title']}" if lead.get("title") else ""),
+                    detail=f"{lead['status']}"
+                    + (f" · {lead['title']}" if lead.get("title") else ""),
                     href=f"#/leads?tab=leads&open={lead['id']}",
                     status=str(lead["status"]),
                     ref=lead["id"],
@@ -315,7 +363,8 @@ def timeline(connection: sqlite3.Connection, contact_id: str) -> list[dict[str, 
             )
             if "lead_messages" in tables:
                 for message in rows(
-                    "SELECT * FROM lead_messages WHERE lead_id = ? AND status = 'sent'", (lead["id"],)
+                    "SELECT * FROM lead_messages WHERE lead_id = ? AND status = 'sent'",
+                    (lead["id"],),
                 ):
                     items.append(
                         _item(
@@ -342,7 +391,11 @@ def timeline(connection: sqlite3.Connection, contact_id: str) -> list[dict[str, 
                     "tickets",
                     f"Tickets: {order.get('event_title') or 'an event'}",
                     detail=f"{order['reference']} · {str(order['status']).replace('_', ' ')}"
-                    + (f" · {_money(order['total_cents'], home)}" if order["total_cents"] else ""),
+                    + (
+                        f" · {_money(order['total_cents'], home)}"
+                        if order["total_cents"]
+                        else ""
+                    ),
                     href=f"#/events?open=order:{order['id']}",
                     amount_cents=int(order["total_cents"] or 0),
                     currency=home,
@@ -382,7 +435,11 @@ def timeline(connection: sqlite3.Connection, contact_id: str) -> list[dict[str, 
                     "deal",
                     f"Sales deal: {deal['title']}",
                     detail=f"{deal['stage']}"
-                    + (f" · {_money(deal['value_cents'], deal['currency'])}" if deal["value_cents"] else ""),
+                    + (
+                        f" · {_money(deal['value_cents'], deal['currency'])}"
+                        if deal["value_cents"]
+                        else ""
+                    ),
                     href=f"#/studio?tab=deals&deal={deal['id']}",
                     amount_cents=int(deal["value_cents"] or 0),
                     currency=str(deal["currency"]),
@@ -391,13 +448,18 @@ def timeline(connection: sqlite3.Connection, contact_id: str) -> list[dict[str, 
                 )
             )
             if deal["invoice_id"] and "st_payments" in tables:
-                for payment in rows("SELECT id FROM st_payments WHERE invoice_id = ?", (deal["invoice_id"],)):
+                for payment in rows(
+                    "SELECT id FROM st_payments WHERE invoice_id = ?",
+                    (deal["invoice_id"],),
+                ):
                     sources.append(("studio", "payment", payment["id"]))
                 requests.append(("studio", "invoice", deal["invoice_id"]))
     items.extend(_payments(connection, sources, home))
     if "payment_requests" in tables:
         items.extend(_links(connection, requests))
-    contact = kit.fetch_one(connection, "SELECT email FROM suite_contacts WHERE id = ?", (contact_id,))
+    contact = kit.fetch_one(
+        connection, "SELECT email FROM suite_contacts WHERE id = ?", (contact_id,)
+    )
     if contact and contact["email"]:
         emails.add(str(contact["email"]).lower())
     emails.discard("")
@@ -425,7 +487,9 @@ def timeline(connection: sqlite3.Connection, contact_id: str) -> list[dict[str, 
 
 
 def _has_column(connection: sqlite3.Connection, table: str, column: str) -> bool:
-    return any(row[1] == column for row in connection.execute(f"PRAGMA table_info({table})"))
+    return any(
+        row[1] == column for row in connection.execute(f"PRAGMA table_info({table})")
+    )
 
 
 def _payments(
@@ -500,11 +564,16 @@ def _links(
 
 def _flag_duplicates(items: list[dict[str, Any]]) -> None:
     payments = [
-        item for item in items if item["kind"] == "payment" and item.get("counts") and item["at"]
+        item
+        for item in items
+        if item["kind"] == "payment" and item.get("counts") and item["at"]
     ]
     for index, first in enumerate(payments):
         for second in payments[index + 1 :]:
-            if first["app"] == second["app"] or first["amount_cents"] != second["amount_cents"]:
+            if (
+                first["app"] == second["app"]
+                or first["amount_cents"] != second["amount_cents"]
+            ):
                 continue
             if first["currency"] != second["currency"]:
                 continue
@@ -535,7 +604,9 @@ def update(
     if "tags" in raw:
         values["tags"] = kit.dumps(kit.tags(raw.get("tags"), limit=50))
     if "notes" in raw:
-        values["notes"] = kit.text(raw.get("notes"), "the notes", max_len=4000, multiline=True)
+        values["notes"] = kit.text(
+            raw.get("notes"), "the notes", max_len=4000, multiline=True
+        )
     if values:
         values["updated_at"] = kit.now()
         kit.update_row(connection, "suite_contacts", current["id"], values)
@@ -567,15 +638,25 @@ def merge(
     if "st_deals" in tables and _has_column(connection, "st_deals", "customer_id"):
         moved += int(
             connection.execute(
-                "UPDATE st_deals SET customer_id = ? WHERE customer_id = ?", (keep_id, other_id)
+                "UPDATE st_deals SET customer_id = ? WHERE customer_id = ?",
+                (keep_id, other_id),
             ).rowcount
             or 0
         )
     connection.execute(
-        "UPDATE suite_contact_keys SET contact_id = ? WHERE contact_id = ?", (keep_id, other_id)
+        "UPDATE suite_contact_keys SET contact_id = ? WHERE contact_id = ?",
+        (keep_id, other_id),
     )
-    consents = [value for value in (keep["email_consent"], other["email_consent"]) if value is not None]
-    sms = [value for value in (keep["sms_consent"], other["sms_consent"]) if value is not None]
+    consents = [
+        value
+        for value in (keep["email_consent"], other["email_consent"])
+        if value is not None
+    ]
+    sms = [
+        value
+        for value in (keep["sms_consent"], other["sms_consent"])
+        if value is not None
+    ]
     notes = "\n\n".join(part for part in (keep["notes"], other["notes"]) if part)[:4000]
     values = {
         "name": keep["name"] or other["name"],
@@ -586,7 +667,10 @@ def merge(
         "apps": kit.dumps(list(dict.fromkeys([*keep["apps"], *other["apps"]]))[:20]),
         "email_consent": None if not consents else int(all(consents)),
         "sms_consent": None if not sms else int(all(sms)),
-        "consent_at": max(str(keep.get("consent_at") or ""), str(other.get("consent_at") or "")) or None,
+        "consent_at": max(
+            str(keep.get("consent_at") or ""), str(other.get("consent_at") or "")
+        )
+        or None,
         "notes": notes,
         "first_seen": min(keep["first_seen"], other["first_seen"]),
         "last_seen": max(keep["last_seen"], other["last_seen"]),
@@ -665,7 +749,9 @@ def _handoff_source(
             "source": "referral",
             "note": contact["notes"],
         }
-    raise ValueError("Only a Marketing form lead, a Service case or a customer can be sent to Sales.")
+    raise ValueError(
+        "Only a Marketing form lead, a Service case or a customer can be sent to Sales."
+    )
 
 
 def send_to_sales(
@@ -687,13 +773,19 @@ def send_to_sales(
     from aira.suite.studio import store as studio_store
 
     if (app, object_type) not in HANDOFF_SOURCES:
-        raise ValueError("Only a Marketing form lead, a Service case or a customer can be sent to Sales.")
+        raise ValueError(
+            "Only a Marketing form lead, a Service case or a customer can be sent to Sales."
+        )
     if not suite.app_enabled("studio"):
-        raise PermissionError("Sales is not part of your plan. Turn on Sales to keep a pipeline of deals.")
+        raise PermissionError(
+            "Sales is not part of your plan. Turn on Sales to keep a pipeline of deals."
+        )
     raw = raw or {}
     studio_store.ensure(connection)
     sales.ensure(connection)
-    ref = f"{app}:{object_type}:{object_id}" if app != "suite" else f"contact:{object_id}"
+    ref = (
+        f"{app}:{object_type}:{object_id}" if app != "suite" else f"contact:{object_id}"
+    )
     existing = sales.handoff_of(connection, ref)
     if existing:
         return {"deal": existing, "created": False}
@@ -720,7 +812,11 @@ def send_to_sales(
         client = studio.create_client(
             connection,
             {
-                "name": source["company"] or source["name"] or source["email"] or source["phone"] or "New client",
+                "name": source["company"]
+                or source["name"]
+                or source["email"]
+                or source["phone"]
+                or "New client",
                 "company": source["company"],
                 "email": email,
                 "phone": kit.text(source["phone"], "the phone", max_len=40),
@@ -750,7 +846,8 @@ def send_to_sales(
     deal = sales.create_deal(
         connection,
         {
-            "title": kit.text(raw.get("title"), "the deal's name", max_len=160) or source["title"][:160],
+            "title": kit.text(raw.get("title"), "the deal's name", max_len=160)
+            or source["title"][:160],
             "client_id": client["id"],
             "contact_id": studio_contact,
             "value_cents": source["value_cents"] if value in (None, "") else value,
@@ -786,7 +883,9 @@ def handoff_for(
         return None
     from aira.suite.studio import sales
 
-    ref = f"{app}:{object_type}:{object_id}" if app != "suite" else f"contact:{object_id}"
+    ref = (
+        f"{app}:{object_type}:{object_id}" if app != "suite" else f"contact:{object_id}"
+    )
     deal = sales.handoff_of(connection, ref)
     if not deal:
         return None

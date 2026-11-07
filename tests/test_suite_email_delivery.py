@@ -441,7 +441,9 @@ def test_time_bound_messages_expire_and_are_dropped_unsent(db):
         body="b",
         send_after=soon,
     )
-    assert kit.expiry_of(reminder) == kit.iso(kit.parse_time(soon) + timedelta(hours=23))
+    assert kit.expiry_of(reminder) == kit.iso(
+        kit.parse_time(soon) + timedelta(hours=23)
+    )
     # an app that moves the reminder (an event rescheduled) moves its expiry with it
     moved = kit.iso(kit.utcnow() + timedelta(days=5))
     db.execute(

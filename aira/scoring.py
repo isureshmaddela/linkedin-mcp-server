@@ -2712,4 +2712,6 @@ def skill_evidenced(skill: str, skills: set[str], resume_text: str) -> bool:
     """Whether a job's skill is evidenced (also free-form skills outside the lexicon, by phrase)."""
     if skill in skills:
         return True
-    return skill not in SKILL_LEXICON and _phrase_in_text(skill, _normalize_text(resume_text))
+    return skill not in SKILL_LEXICON and _phrase_in_text(
+        skill, _normalize_text(resume_text)
+    )

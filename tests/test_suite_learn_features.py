@@ -646,7 +646,10 @@ def test_selling_a_deck_on_the_local_build(env, api, local_index):
     )
     paid = pat.post(f"/api/learn/sales/{listed['sales'][0]['id']}/paid", {})
     status, full = _public(
-        env, "GET", f"/api/public/{token}/cards", headers={"Monosage-Secret": paid["code"]}
+        env,
+        "GET",
+        f"/api/public/{token}/cards",
+        headers={"Monosage-Secret": paid["code"]},
     )
     assert status == 200 and len(full["cards"]) == 10
     assert pat.get("/api/learn/sales?status=paid")["summary"]["earned_cents"] == 350

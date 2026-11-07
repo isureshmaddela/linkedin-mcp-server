@@ -2058,10 +2058,14 @@ def create_idea(
             )
     holding = str(raw.get("holding") or "").strip().lower()
     if access == "paid" and not holding:
-        raise ValueError("Say whether you hold this stock: paid ideas must tell subscribers.")
+        raise ValueError(
+            "Say whether you hold this stock: paid ideas must tell subscribers."
+        )
     if holding:
         holding = kit.choice(holding, "what you hold", tuple(HOLDINGS))
-    holding_note = kit.text(raw.get("holding_note"), "a note about what you hold", max_len=200)
+    holding_note = kit.text(
+        raw.get("holding_note"), "a note about what you hold", max_len=200
+    )
     if (
         kit.count(
             connection,
@@ -2100,7 +2104,9 @@ def create_idea(
         ),
     )
     disclosed = kit.fetch_one(
-        connection, "SELECT sebi_number FROM stk_disclosures WHERE owner_id = ?", (me["id"],)
+        connection,
+        "SELECT sebi_number FROM stk_disclosures WHERE owner_id = ?",
+        (me["id"],),
     )
     connection.execute(
         "INSERT INTO stk_idea_disclosures (idea_id, sebi_number, holding, note) VALUES (?, ?, ?, ?)",
@@ -2244,7 +2250,9 @@ def ideas_csv(connection: sqlite3.Connection, me: dict[str, Any]) -> bytes:
 # ---------------------------------------------------------------------------
 
 
-SEBI_RA = re.compile(r"^INH\d{9}$")  # a SEBI research analyst's registration number, e.g. INH000012345
+SEBI_RA = re.compile(
+    r"^INH\d{9}$"
+)  # a SEBI research analyst's registration number, e.g. INH000012345
 NOT_REGISTERED = "Not SEBI-registered"
 HOLDINGS = {
     "none": "The analyst does not hold this stock.",
@@ -2766,9 +2774,17 @@ def analyst_page(connection: sqlite3.Connection, owner_id: str) -> dict[str, Any
             )
         },
         "record": track_record(rows),
-        "free": [_disclose(connection, _public_idea(r)) for r in open_rows if r["access"] == "free"],
+        "free": [
+            _disclose(connection, _public_idea(r))
+            for r in open_rows
+            if r["access"] == "free"
+        ],
         "paid_open": sum(1 for r in open_rows if r["access"] == "paid"),
-        "closed": [_disclose(connection, _public_idea(r)) for r in rows if r["status"] != "open"][:60],
+        "closed": [
+            _disclose(connection, _public_idea(r))
+            for r in rows
+            if r["status"] != "open"
+        ][:60],
         "subscribers": kit.count(
             connection,
             "SELECT COUNT(*) FROM stk_subscribers WHERE analyst_id = ? AND status = 'active' AND paid_until >= ?",

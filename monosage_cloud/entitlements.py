@@ -137,7 +137,9 @@ def validate_pricing(values: Any) -> dict[str, Any]:
     for name, value in values.items():
         if name == "seat_cents_month":
             clean[name] = whole(name, value, MAX_SEAT_CENTS)
-        elif name == "inr_seat_paise_month":  # the Razorpay price (plans.plan_inr_paise)
+        elif (
+            name == "inr_seat_paise_month"
+        ):  # the Razorpay price (plans.plan_inr_paise)
             clean[name] = whole(name, value, MAX_SEAT_CENTS * 100)
         elif name == "min_seats":
             clean[name] = whole(name, value, 100_000)
@@ -1036,7 +1038,9 @@ class EntitlementService:
         )
         expires = now + self.config.entitlement_cache_seconds
         if status == "trialing" and sub["trial_end"] and sub["trial_end"] > now:
-            expires = min(expires, int(sub["trial_end"]))  # the trial's end is seen at once
+            expires = min(
+                expires, int(sub["trial_end"])
+            )  # the trial's end is seen at once
         with self._lock:
             self._cache[org_id] = (expires, entitlements)
         return entitlements
@@ -1429,7 +1433,9 @@ class UsageService:
                 "INSERT INTO usage_counters (org_id, period, metric, value) VALUES (?, ?, ?, ?) ON CONFLICT(org_id, period, metric) DO UPDATE SET value = usage_counters.value + excluded.value",
                 (org_id, month_key(now), metric, amount),
             )
-            if metric.endswith(":overage"):  # overage counted directly is billed in its period too
+            if metric.endswith(
+                ":overage"
+            ):  # overage counted directly is billed in its period too
                 _count_overage(
                     connection, org_id, metric.removesuffix(":overage"), now, amount
                 )

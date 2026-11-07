@@ -84,16 +84,22 @@ def test_a_business_pays_trade_prices_with_price_breaks_and_its_own_discount(db)
     assert consumer["buyer_type"] == "consumer" and consumer["subtotal_cents"] == 4000
 
     # 10 at the trade price, 10% off: 13.50 each
-    ten = service.price(db, [{"product_id": beans["id"], "quantity": 10}], account=account)
+    ten = service.price(
+        db, [{"product_id": beans["id"], "quantity": 10}], account=account
+    )
     assert ten["buyer_type"] == "business" and ten["lines"][0]["unit_cents"] == 1350
     assert ten["savings_cents"] == 20000 - 13500
     # 50 reach the best break: 12.00 less 10% = 10.80
-    fifty = service.price(db, [{"product_id": beans["id"], "quantity": 50}], account=account)
+    fifty = service.price(
+        db, [{"product_id": beans["id"], "quantity": 50}], account=account
+    )
     assert fifty["lines"][0]["unit_cents"] == 1080
     # below the minimum quantity, and the cap on a consumer's quantity does not apply to businesses
     with pytest.raises(ValueError, match="least a business can order"):
         service.price(db, [{"product_id": beans["id"], "quantity": 4}], account=account)
-    assert service.price(db, [{"product_id": beans["id"], "quantity": 500}], account=account)
+    assert service.price(
+        db, [{"product_id": beans["id"], "quantity": 500}], account=account
+    )
     with pytest.raises(ValueError, match="at most 99"):
         service.price(db, [{"product_id": beans["id"], "quantity": 500}])
 
@@ -117,7 +123,10 @@ def test_options_keep_their_difference_and_breaks_count_every_option(db):
         account=account,
     )
     units = {line["option"]: line["unit_cents"] for line in quote["lines"]}
-    assert units == {"S": 1000, "XL": 1400}  # 10 tees reach the break; XL stays 4.00 more
+    assert units == {
+        "S": 1000,
+        "XL": 1400,
+    }  # 10 tees reach the break; XL stays 4.00 more
 
 
 def test_who_a_product_is_for_and_the_business_minimum_order(db):
@@ -131,14 +140,19 @@ def test_who_a_product_is_for_and_the_business_minimum_order(db):
     store.save_settings(db, {"trade_min_order_cents": 50000})
     with pytest.raises(ValueError, match="Business orders start at"):
         service.price(db, [{"product_id": trade_only["id"]}], account=account)
-    assert service.price(db, [{"product_id": trade_only["id"], "quantity": 2}], account=account)
+    assert service.price(
+        db, [{"product_id": trade_only["id"], "quantity": 2}], account=account
+    )
 
 
 def test_a_reseller_pays_no_tax(db):
     kit.save_business(db, {"tax_rate_bp": 1000})
     beans = product(db)
     reseller, _ = business(db, tax_exempt=True)
-    assert service.price(db, [{"product_id": beans["id"]}], account=reseller)["tax_cents"] == 0
+    assert (
+        service.price(db, [{"product_id": beans["id"]}], account=reseller)["tax_cents"]
+        == 0
+    )
     assert service.price(db, [{"product_id": beans["id"]}])["tax_cents"] == 200
 
 
@@ -167,7 +181,9 @@ def test_net_terms_set_a_due_date_and_the_credit_limit_holds(db):
     # 10 more would take it to 300.00, over its 250.00 limit
     with pytest.raises(ValueError, match="over its credit limit"):
         service.place_order(
-            db, {"items": [{"product_id": beans["id"], "quantity": 10}]}, account=account
+            db,
+            {"items": [{"product_id": beans["id"], "quantity": 10}]},
+            account=account,
         )
     service.mark_paid(db, first["id"])
     assert service.place_order(
@@ -187,7 +203,10 @@ def test_receivables_show_what_is_late_and_reminders_go_out(db, monkeypatch):
     assert later["orders"][0]["days_late"] == 23
     assert later["accounts"][0]["company"] == "Corner Cafe"
     confirmation = next(m for m in kit.outbox(db) if m["kind"] == "order_confirmation")
-    assert "Business: Corner Cafe" in confirmation["body"] and "Net 7" in confirmation["body"]
+    assert (
+        "Business: Corner Cafe" in confirmation["body"]
+        and "Net 7" in confirmation["body"]
+    )
     link = service.order_link(db, placed)
     service.queue_message(db, placed, "payment_reminder", link_path=link["path"])
     reminder = next(m for m in kit.outbox(db) if m["kind"] == "payment_reminder")
@@ -207,7 +226,11 @@ def test_overview_splits_business_and_consumer_sales(db):
         db,
         service.place_order(
             db,
-            {"items": [{"product_id": beans["id"]}], "name": "Ana", "email": "ana@example.com"},
+            {
+                "items": [{"product_id": beans["id"]}],
+                "name": "Ana",
+                "email": "ana@example.com",
+            },
         )["id"],
     )
     data = service.overview(db)
@@ -274,7 +297,9 @@ def test_a_purchase_order_number_can_be_required(db):
     beans = product(db)
     account, _ = business(db)
     with pytest.raises(ValueError, match="purchase-order"):
-        service.place_order(db, {"items": [{"product_id": beans["id"]}]}, account=account)
+        service.place_order(
+            db, {"items": [{"product_id": beans["id"]}]}, account=account
+        )
     assert service.place_order(
         db, {"items": [{"product_id": beans["id"]}], "po_number": "A1"}, account=account
     )
@@ -285,24 +310,39 @@ def test_a_purchase_order_number_can_be_required(db):
 # ---------------------------------------------------------------------------
 
 
-def test_a_business_signs_in_on_the_storefront_and_orders_on_terms(env, api, local_index):
+def test_a_business_signs_in_on_the_storefront_and_orders_on_terms(
+    env, api, local_index
+):
     kit.forget_schema()
     api.post("/api/suite/business", {"name": "Bean Co", "sell_to": "both"})
     beans = api.post(
         "/api/shop/products",
-        {"name": "Coffee 1kg", "price_cents": 2000, "status": "active", "wholesale_cents": 1500, "min_quantity": 5},
+        {
+            "name": "Coffee 1kg",
+            "price_cents": 2000,
+            "status": "active",
+            "wholesale_cents": 1500,
+            "min_quantity": 5,
+        },
         expect=201,
     )["product"]
     sack = api.post(
         "/api/shop/products",
-        {"name": "Sack 20kg", "price_cents": 30000, "status": "active", "audience": "businesses"},
+        {
+            "name": "Sack 20kg",
+            "price_cents": 30000,
+            "status": "active",
+            "audience": "businesses",
+        },
         expect=201,
     )["product"]
     token = token_of(api.post("/api/shop/storefront/link")["link"]["path"])
 
     status, page = anonymous(env, "GET", f"/api/public/{token}")
     assert status == 200 and page["page"]["business_buyers"]["enabled"] is True
-    assert [p["name"] for p in page["page"]["products"]] == ["Coffee 1kg"]  # the sack is for businesses
+    assert [p["name"] for p in page["page"]["products"]] == [
+        "Coffee 1kg"
+    ]  # the sack is for businesses
 
     status, asked = anonymous(
         env,
@@ -321,73 +361,127 @@ def test_a_business_signs_in_on_the_storefront_and_orders_on_terms(env, api, loc
     assert approved["account"]["terms"] == "net30"
 
     status, wrong = anonymous(
-        env, "POST", f"/api/public/{token}/trade_sign_in", {"email": "orders@corner.example", "code": "AAAA-BBBB-CCCC"}
+        env,
+        "POST",
+        f"/api/public/{token}/trade_sign_in",
+        {"email": "orders@corner.example", "code": "AAAA-BBBB-CCCC"},
     )
     assert status == 403, wrong
     status, signed = anonymous(
-        env, "POST", f"/api/public/{token}/trade_sign_in", {"email": "orders@corner.example", "code": code}
+        env,
+        "POST",
+        f"/api/public/{token}/trade_sign_in",
+        {"email": "orders@corner.example", "code": code},
     )
     assert status == 200 and signed["page"]["account"]["company"] == "Corner Cafe"
     shown = {p["name"]: p for p in signed["page"]["products"]}
-    assert shown["Coffee 1kg"]["price_cents"] == 1500 and shown["Coffee 1kg"]["min_quantity"] == 5
+    assert (
+        shown["Coffee 1kg"]["price_cents"] == 1500
+        and shown["Coffee 1kg"]["min_quantity"] == 5
+    )
     assert "Sack 20kg" in shown
 
     signed_in = {"trade_email": "orders@corner.example", "trade_code": code}
     status, quote = anonymous(
-        env, "POST", f"/api/public/{token}/quote", {"items": [{"product_id": beans["id"], "quantity": 10}], **signed_in}
+        env,
+        "POST",
+        f"/api/public/{token}/quote",
+        {"items": [{"product_id": beans["id"], "quantity": 10}], **signed_in},
     )
     assert status == 200 and quote["quote"]["subtotal_cents"] == 15000
     status, placed = anonymous(
         env,
         "POST",
         f"/api/public/{token}/place_order",
-        {"items": [{"product_id": sack["id"], "quantity": 2}], "po_number": "PO-9", **signed_in},
+        {
+            "items": [{"product_id": sack["id"], "quantity": 2}],
+            "po_number": "PO-9",
+            **signed_in,
+        },
     )
     assert status == 201, placed
-    assert placed["order"]["company"] == "Corner Cafe" and placed["order"]["po_number"] == "PO-9"
+    assert (
+        placed["order"]["company"] == "Corner Cafe"
+        and placed["order"]["po_number"] == "PO-9"
+    )
     assert placed["order"]["terms_label"].startswith("Net 30")
     # a consumer cannot buy the sack, nor pretend to be the business
     status, refused = anonymous(
-        env, "POST", f"/api/public/{token}/place_order", {"items": [{"product_id": sack["id"]}], "name": "Ana", "email": "a@example.com"}
+        env,
+        "POST",
+        f"/api/public/{token}/place_order",
+        {
+            "items": [{"product_id": sack["id"]}],
+            "name": "Ana",
+            "email": "a@example.com",
+        },
     )
     assert status == 400 and "business buyers only" in refused["error"]
     status, _ = anonymous(
-        env, "POST", f"/api/public/{token}/quote", {"items": [{"product_id": beans["id"], "quantity": 10}], "trade_email": "orders@corner.example", "trade_code": "nope"}
+        env,
+        "POST",
+        f"/api/public/{token}/quote",
+        {
+            "items": [{"product_id": beans["id"], "quantity": 10}],
+            "trade_email": "orders@corner.example",
+            "trade_code": "nope",
+        },
     )
     assert status == 403
 
     owed = api.get("/api/shop/receivables")
-    assert owed["open_cents"] == 60000 and owed["accounts"][0]["company"] == "Corner Cafe"
+    assert (
+        owed["open_cents"] == 60000 and owed["accounts"][0]["company"] == "Corner Cafe"
+    )
     business_orders = api.get("/api/shop/orders?buyer=business")["orders"]
     assert [o["po_number"] for o in business_orders] == ["PO-9"]
     assert api.get("/api/shop/orders?buyer=consumer")["orders"] == []
-    assert api.post(f"/api/shop/orders/{business_orders[0]['id']}/remind")["queued"] is True
+    assert (
+        api.post(f"/api/shop/orders/{business_orders[0]['id']}/remind")["queued"]
+        is True
+    )
 
 
 def test_a_shop_for_businesses_only_hides_prices_until_sign_in(env, api, local_index):
     kit.forget_schema()
     api.post("/api/suite/business", {"name": "Wholesale Ltd", "sell_to": "businesses"})
     beans = api.post(
-        "/api/shop/products", {"name": "Coffee 1kg", "price_cents": 2000, "status": "active"}, expect=201
+        "/api/shop/products",
+        {"name": "Coffee 1kg", "price_cents": 2000, "status": "active"},
+        expect=201,
     )["product"]
     token = token_of(api.post("/api/shop/storefront/link")["link"]["path"])
     page = anonymous(env, "GET", f"/api/public/{token}")[1]["page"]
     assert page["business_buyers"]["only"] is True
     assert page["products"][0]["price_cents"] is None
     status, refused = anonymous(
-        env, "POST", f"/api/public/{token}/place_order", {"items": [{"product_id": beans["id"]}], "name": "Ana", "email": "a@example.com"}
+        env,
+        "POST",
+        f"/api/public/{token}/place_order",
+        {
+            "items": [{"product_id": beans["id"]}],
+            "name": "Ana",
+            "email": "a@example.com",
+        },
     )
     assert status == 403 and "businesses only" in refused["error"]
 
 
 def test_a_consumer_shop_offers_no_trade_accounts(env, api, local_index):
     kit.forget_schema()
-    api.post("/api/suite/business", {"name": "Corner Gifts"})  # sells to consumers, as before
+    api.post(
+        "/api/suite/business", {"name": "Corner Gifts"}
+    )  # sells to consumers, as before
     token = token_of(api.post("/api/shop/storefront/link")["link"]["path"])
     page = anonymous(env, "GET", f"/api/public/{token}")[1]["page"]
-    assert page["business_buyers"]["enabled"] is False and page["sell_to"] == "consumers"
+    assert (
+        page["business_buyers"]["enabled"] is False and page["sell_to"] == "consumers"
+    )
     status, _ = anonymous(
-        env, "POST", f"/api/public/{token}/trade_apply", {"company": "X", "email": "x@example.com"}
+        env,
+        "POST",
+        f"/api/public/{token}/trade_apply",
+        {"company": "X", "email": "x@example.com"},
     )
     assert status == 403
 
@@ -402,7 +496,12 @@ def test_hosted_trade_accounts_follow_the_shop_roles(cloud):
     org = build_org(cloud)
     cloud.billing.subscribe_app(org.owner, "shop")
     owner = sign_in(cloud, org.owner)
-    assert owner.call("POST", "/api/suite/business", {"name": "Org Shop", "sell_to": "both"})[0] == 200
+    assert (
+        owner.call(
+            "POST", "/api/suite/business", {"name": "Org Shop", "sell_to": "both"}
+        )[0]
+        == 200
+    )
     status, made = owner.call(
         "POST",
         "/api/shop/trade-accounts",
@@ -411,9 +510,17 @@ def test_hosted_trade_accounts_follow_the_shop_roles(cloud):
     assert status == 201 and made["code"] and made["account"]["status"] == "approved"
     auditor = sign_in(cloud, org.auditor)
     assert auditor.call("GET", "/api/shop/trade-accounts")[0] == 200
-    assert auditor.call("POST", f"/api/shop/trade-accounts/{made['account']['id']}/code", {})[0] == 403
+    assert (
+        auditor.call(
+            "POST", f"/api/shop/trade-accounts/{made['account']['id']}/code", {}
+        )[0]
+        == 403
+    )
     other = build_org(cloud, "Other Org", slug_email="other.test")
     cloud.billing.subscribe_app(other.owner, "shop")
     stranger = sign_in(cloud, other.owner)
-    assert stranger.call("GET", f"/api/shop/trade-accounts/{made['account']['id']}")[0] == 404
+    assert (
+        stranger.call("GET", f"/api/shop/trade-accounts/{made['account']['id']}")[0]
+        == 404
+    )
     assert isinstance(Browser(cloud), Browser)

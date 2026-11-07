@@ -444,7 +444,10 @@ def ensure_schema(connection: sqlite3.Connection) -> None:
         }
         if "email_apply" not in columns:
             dbutil.add_column(
-                connection, "autopilot_plans", "email_apply", "INTEGER NOT NULL DEFAULT 0"
+                connection,
+                "autopilot_plans",
+                "email_apply",
+                "INTEGER NOT NULL DEFAULT 0",
             )
 
 

@@ -254,7 +254,9 @@ POLICY: dict[str, Rule] = {
     "api_recruiter_dnc_add": write(),
     "api_recruiter_dnc_remove": write(),
     # LinkedIn drafts for a list only fill reply boxes; the candidate sends each one from Messages.
-    "api_recruiter_list_linkedin_preview": write("messages.send"),  # records opt-outs it finds
+    "api_recruiter_list_linkedin_preview": write(
+        "messages.send"
+    ),  # records opt-outs it finds
     "api_recruiter_list_linkedin_drafts": write("messages.send"),
     # Recruiter email from a list goes out through the organization's Business hub > Email (monosage_cloud/outreach_mail.py:
     # the candidate's name, Reply-To their own address), skipping the candidate's and the organization's
@@ -265,7 +267,9 @@ POLICY: dict[str, Rule] = {
     "api_recruiter_outreach_save": write(
         "messages.send", kind="recruiter_outreach_settings"
     ),
-    "api_recruiter_list_email_preview": write("messages.send"),  # records opt-outs it finds
+    "api_recruiter_list_email_preview": write(
+        "messages.send"
+    ),  # records opt-outs it finds
     "api_recruiter_list_email_send": write(
         "messages.send", kind="recruiter_email_send", audit=True
     ),

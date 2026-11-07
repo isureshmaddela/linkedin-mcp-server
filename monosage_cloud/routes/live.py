@@ -24,7 +24,10 @@ def notify_stream(req: Req) -> Any:
         return 404, {"error": "Live updates are off here.", "code": "live_off"}
     channel = str(getattr(req.principal, "org_id", "") or "")
     if not channel:
-        return 403, {"error": "Live updates need a member of an organization.", "code": "forbidden"}
+        return 403, {
+            "error": "Live updates need a member of an organization.",
+            "code": "forbidden",
+        }
     last = str(req.request.headers.get("last-event-id") or req.q("last") or "")[:64]
     try:
         after, ticket = realtime.HUB.open_stream(channel)

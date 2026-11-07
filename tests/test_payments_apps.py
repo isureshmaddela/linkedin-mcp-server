@@ -220,7 +220,10 @@ def test_a_studio_invoice_is_paid_online_and_refunded(db, rzp):
     client = studio.create_client(db, {"name": "Ravi", "email": "ravi@example.com"})
     invoice = studio.create_invoice(
         db,
-        {"client_id": client["id"], "items": [{"description": "Logo", "quantity": "1", "unit_cents": 250000}]},
+        {
+            "client_id": client["id"],
+            "items": [{"description": "Logo", "quantity": "1", "unit_cents": 250000}],
+        },
         today=kit.today(),
     )
     with pytest.raises(ValueError, match="Send this invoice"):
@@ -228,15 +231,27 @@ def test_a_studio_invoice_is_paid_online_and_refunded(db, rzp):
     studio.mark_sent(db, invoice["id"])
     studio.add_payment(db, invoice["id"], {"amount_cents": 50000}, today=kit.today())
     info = payments.spec_for("studio", "invoice").describe(db, invoice["id"])
-    assert info["amount_cents"] == 200000 and info["customer"]["email"] == "ravi@example.com"
-    assert info["return_path"].startswith("/p/")  # the client's invoice page, where Razorpay sends them back
+    assert (
+        info["amount_cents"] == 200000
+        and info["customer"]["email"] == "ravi@example.com"
+    )
+    assert info["return_path"].startswith(
+        "/p/"
+    )  # the client's invoice page, where Razorpay sends them back
     made = pay_through(db, rzp, "studio", "invoice", invoice["id"])
     paid = studio.get_invoice(db, invoice["id"], kit.today())
     assert paid["status"] == "paid" and len(paid["payments"]) == 2
     assert "Razorpay" in paid["payments"][-1]["note"]
     assert kit.revenue(db, app="studio")["total_cents"] == 250000
     request = payments.get(db, made["id"])
-    assert request["revenue_type"] == "payment" and request["revenue_id"] == paid["payments"][-1]["id"]
-    assert not payments.spec_for("studio", "invoice").describe(db, invoice["id"])["payable"]
+    assert (
+        request["revenue_type"] == "payment"
+        and request["revenue_id"] == paid["payments"][-1]["id"]
+    )
+    assert not payments.spec_for("studio", "invoice").describe(db, invoice["id"])[
+        "payable"
+    ]
     payments.refund(db, made["id"], amount_cents=50000, note="Partly")
-    assert kit.revenue(db, app="studio")["total_cents"] == 200000  # the refund is a negative line
+    assert (
+        kit.revenue(db, app="studio")["total_cents"] == 200000
+    )  # the refund is a negative line

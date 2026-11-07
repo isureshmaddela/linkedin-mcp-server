@@ -75,7 +75,9 @@ OVERAGE_METRICS: dict[str, tuple[str, str]] = {
     "api_searches:overage": ("api_search_cents", "API searches"),
     "pooled_searches:overage": ("pooled_search_cents", "pooled SerpApi searches"),
 }
-OVERAGE_CLAIM_SECONDS = 3600  # a claim older than this was left by a tick that died: it may be taken again
+OVERAGE_CLAIM_SECONDS = (
+    3600  # a claim older than this was left by a tick that died: it may be taken again
+)
 OVERAGE_MAX_ATTEMPTS = 10
 UPGRADE_PENDING_SECONDS = DAY  # Stripe drops an unpaid pending update after 23 hours
 # Neutral events that change the subscription's state: one older than the newest applied is ignored.
@@ -1072,7 +1074,9 @@ class Billing:
                 at_cycle_end=False,
             )
         except Exception:  # noqa: BLE001 - keep our state moving; reconcile reports the drift
-            logger.exception("Could not sync the provider subscription for %s", sub["org_id"])
+            logger.exception(
+                "Could not sync the provider subscription for %s", sub["org_id"]
+            )
 
     def cancel_pending_change(self, actor: Principal) -> None:
         self.app.authz.require(actor, "billing.manage")
@@ -1663,7 +1667,11 @@ class Billing:
             "usd",
             subscription_id=subscription["billing_subscription_id"],
             idempotency_key=f"aira-topup-{topup_id}",
-            metadata={"org_id": actor.org_id, "kind": "ads_topup", "topup_id": topup_id},
+            metadata={
+                "org_id": actor.org_id,
+                "kind": "ads_topup",
+                "topup_id": topup_id,
+            },
         )
         status = "scheduled" if charge.get("status") == "scheduled" else "open"
         with self.db.write() as connection:
@@ -2567,7 +2575,11 @@ class Billing:
         if kind == "invoice.payment_failed":
             if self._fail_topups(org_id, invoice_id, "failed"):
                 return "topup_failed"
-            if upgrade and upgrade.get("invoice_id") and invoice_id == upgrade["invoice_id"]:
+            if (
+                upgrade
+                and upgrade.get("invoice_id")
+                and invoice_id == upgrade["invoice_id"]
+            ):
                 self._drop_upgrade(org_id, upgrade, "the card was declined")
                 return "upgrade_failed"
             if self._is_one_off(neutral):
@@ -2588,12 +2600,18 @@ class Billing:
         if kind == "invoice.voided":
             if self._fail_topups(org_id, invoice_id, "void"):
                 return "topup_void"
-            if upgrade and upgrade.get("invoice_id") and invoice_id == upgrade["invoice_id"]:
+            if (
+                upgrade
+                and upgrade.get("invoice_id")
+                and invoice_id == upgrade["invoice_id"]
+            ):
                 self._drop_upgrade(org_id, upgrade, "the payment expired")
                 return "upgrade_failed"
             return "ignored"
         if kind == "payment.refunded":
-            return "topup_refunded" if self._reverse_topups(org_id, neutral) else "ignored"
+            return (
+                "topup_refunded" if self._reverse_topups(org_id, neutral) else "ignored"
+            )
         if kind == "subscription.update_expired":
             if upgrade:
                 self._drop_upgrade(org_id, upgrade, "the payment was not completed")
@@ -2718,7 +2736,8 @@ class Billing:
                     provider.cancel_subscription(subscription_id, at_period_end=False)
                 except Exception:  # noqa: BLE001 - reported below; an operator cancels it by hand
                     logger.exception(
-                        "Could not cancel the duplicate subscription %s", subscription_id
+                        "Could not cancel the duplicate subscription %s",
+                        subscription_id,
                     )
             self._close_checkout(session_id, "duplicate")
             self.app.audit.record(
@@ -3331,9 +3350,7 @@ class Billing:
 
     # -- metered overage, per provider billing period ----------------------------------------
 
-    def _close_period(
-        self, org_id: str, start: int | None, end: int | None
-    ) -> bool:
+    def _close_period(self, org_id: str, start: int | None, end: int | None) -> bool:
         """A billing period is over: its overage can be billed once. Nothing is kept for a period with no overage."""
         if not start or not end or int(end) <= int(start):
             return False

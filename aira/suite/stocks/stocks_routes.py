@@ -28,7 +28,9 @@ def _open(request: Request) -> tuple[Any, dict[str, Any]]:
     try:
         store.ensure(connection)
         me = life.current(request, connection)
-        life.require_app(connection, me, "stocks")  # a guardian may turn Stocks off for a child or a teen
+        life.require_app(
+            connection, me, "stocks"
+        )  # a guardian may turn Stocks off for a child or a teen
     except Exception:
         connection.close()
         raise

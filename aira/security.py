@@ -60,7 +60,9 @@ class RateLimiter:
         for key in [k for k, until in self._locked_until.items() if until <= current]:
             del self._locked_until[key]
         for key in [
-            k for k, events in self._events.items() if not events or events[-1] <= horizon
+            k
+            for k, events in self._events.items()
+            if not events or events[-1] <= horizon
         ]:
             if key not in self._locked_until:
                 del self._events[key]

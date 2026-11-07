@@ -213,7 +213,9 @@ def credit_once(
 ) -> dict[str, Any]:
     """Credit a settled payment once: a second call with the same ``reference`` (the provider delivering the same
     payment twice) changes nothing. Hosted, this is the only way a top-up reaches the balance."""
-    account(sc, home)  # made (and committed) first, so the check and the credit share one write lock
+    account(
+        sc, home
+    )  # made (and committed) first, so the check and the credit share one write lock
     if sc.in_transaction:
         sc.commit()
     sc.execute("BEGIN IMMEDIATE")
@@ -269,7 +271,15 @@ def reverse_once(
         moment = stamp()
         sc.execute(
             "INSERT INTO ad_ledger (id, home, kind, amount_micros, reference, note, created_by, created_at) VALUES (?, ?, 'reversal', ?, ?, ?, ?, ?)",
-            (new_id(), home, -amount_micros, reference[:200], note[:300], by[:120], moment),
+            (
+                new_id(),
+                home,
+                -amount_micros,
+                reference[:200],
+                note[:300],
+                by[:120],
+                moment,
+            ),
         )
         sc.execute(
             "UPDATE ad_accounts SET balance_micros = balance_micros - ?, updated_at = ? WHERE home = ?",
@@ -307,7 +317,9 @@ def _owing_homes_sql() -> str:
 def _release_held(sc: sqlite3.Connection, home: str) -> None:
     """The advertiser paid what it owed: the creators' earnings held for its ads are confirmed."""
     balance = int(
-        store.scalar(sc, "SELECT balance_micros FROM ad_accounts WHERE home = ?", (home,))
+        store.scalar(
+            sc, "SELECT balance_micros FROM ad_accounts WHERE home = ?", (home,)
+        )
         or 0
     )
     if balance >= 0:
@@ -2259,7 +2271,9 @@ def request_payout(
     videos._active(ch)
     saved = store.payout_details(sc, ch["id"])
     given = str(raw.get("details") or "").strip()
-    if not given or given == store.mask_payout(saved):  # the masked value shown back means "the saved details"
+    if not given or given == store.mask_payout(
+        saved
+    ):  # the masked value shown back means "the saved details"
         given = saved
     details = kit.text(
         given,

@@ -382,7 +382,9 @@ class StripeProvider:
     ) -> None:
         self.config = config
         self.clock = clock
-        self.db = db  # caches the Price objects upgrades use, and which product is which plan
+        self.db = (
+            db  # caches the Price objects upgrades use, and which product is which plan
+        )
         self._prices: dict[str, str] = {}
 
     def _call(
@@ -629,7 +631,8 @@ class StripeProvider:
         items: list[dict[str, Any]] = [{"id": plan_item, **price}]
         for app_id, addon in wanted.items():
             addon_product = self._product(
-                f"Monosage {addon['name']} add-on (per candidate seat)", {"app_id": app_id}
+                f"Monosage {addon['name']} add-on (per candidate seat)",
+                {"app_id": app_id},
             )
             entry = self._addon_item(addon, currency, addon_product)
             if app_id in by_app:
@@ -809,7 +812,11 @@ class StripeProvider:
             status = "paid" if paid.get("status") == "paid" else "open"
         except Unavailable as error:  # declined or needs authentication: the invoice stays open and is retried
             logger.info("Top-up invoice %s is not paid yet: %s", invoice_id, error)
-        return {"id": invoice_id, "item_id": str(item.get("id") or ""), "status": status}
+        return {
+            "id": invoice_id,
+            "item_id": str(item.get("id") or ""),
+            "status": status,
+        }
 
     def verify_webhook(self, payload: bytes, signature: str) -> dict[str, Any]:
         if not self.config.stripe_webhook_secret:
@@ -916,7 +923,9 @@ class StripeProvider:
                 "payment_id": payment.get("id", "")
                 if isinstance(payment, dict)
                 else str(payment or ""),
-                "amount_cents": int(obj.get("amount_refunded") or obj.get("amount") or 0),
+                "amount_cents": int(
+                    obj.get("amount_refunded") or obj.get("amount") or 0
+                ),
                 "currency": str(obj.get("currency") or "usd").lower(),
             }
         if kind == "customer.subscription.pending_update_expired":
@@ -1322,9 +1331,7 @@ class RazorpayProvider:
             return {
                 **base,
                 "type": "invoice.paid",
-                "invoice_id": str(
-                    payment.get("invoice_id") or invoice.get("id") or ""
-                ),
+                "invoice_id": str(payment.get("invoice_id") or invoice.get("id") or ""),
                 "payment_id": str(payment.get("id") or invoice.get("payment_id") or ""),
                 "paid_at": payment.get("created_at") or invoice.get("paid_at"),
                 "amount_cents": int(
@@ -1333,13 +1340,17 @@ class RazorpayProvider:
                 "currency": str(
                     payment.get("currency") or invoice.get("currency") or "INR"
                 ).lower(),
-                "period_start": sub.get("current_start") or invoice.get("billing_start"),
+                "period_start": sub.get("current_start")
+                or invoice.get("billing_start"),
                 "period_end": sub.get("current_end") or invoice.get("billing_end"),
                 "addon_ids": [
                     str(line.get("ref_id") or line.get("item_id") or "")
                     for line in invoice.get("line_items") or []
                     if isinstance(line, dict)
-                    and (line.get("ref_type") == "addon" or str(line.get("ref_id") or "").startswith("ao_"))
+                    and (
+                        line.get("ref_type") == "addon"
+                        or str(line.get("ref_id") or "").startswith("ao_")
+                    )
                 ],
             }
         if kind in {"subscription.pending", "subscription.halted", "payment.failed"}:
@@ -1353,7 +1364,11 @@ class RazorpayProvider:
                 "halted": kind == "subscription.halted",
             }
         if kind in {"subscription.cancelled", "subscription.completed"}:
-            return {**base, "type": "subscription.deleted", "status": kind.split(".")[1]}
+            return {
+                **base,
+                "type": "subscription.deleted",
+                "status": kind.split(".")[1],
+            }
         if kind == "subscription.updated":
             return {
                 **base,
@@ -1373,8 +1388,12 @@ class RazorpayProvider:
                 "type": "payment.refunded",
                 "payment_id": str(refund.get("payment_id") or payment.get("id") or ""),
                 "invoice_id": str(payment.get("invoice_id") or ""),
-                "amount_cents": int(refund.get("amount") or payment.get("amount_refunded") or 0),
-                "currency": str(refund.get("currency") or payment.get("currency") or "INR").lower(),
+                "amount_cents": int(
+                    refund.get("amount") or payment.get("amount_refunded") or 0
+                ),
+                "currency": str(
+                    refund.get("currency") or payment.get("currency") or "INR"
+                ).lower(),
             }
         return None
 

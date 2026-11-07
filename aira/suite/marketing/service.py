@@ -91,7 +91,9 @@ NEWSLETTER_CAP = 500
 # it is saved, so one that saves can always be queued.
 NEWSLETTER_GREETING_ROOM = len("Hi ,\n\n") + 120
 NEWSLETTER_LINK_ROOM = 400
-CONFIRM_AGAIN_AFTER = timedelta(hours=1)  # a sign-up sent again within this gets no second confirmation email
+CONFIRM_AGAIN_AFTER = timedelta(
+    hours=1
+)  # a sign-up sent again within this gets no second confirmation email
 MAX_CENTS = 10_000_000_00  # the kit's own ceiling for an amount
 PILLARS = (
     ("tip", "A practical tip"),
@@ -230,7 +232,9 @@ def _insert(connection: sqlite3.Connection, table: str, values: dict[str, Any]) 
     marks = ", ".join(f":{column}" for column in row)
     connection.execute(f"INSERT INTO {table} ({columns}) VALUES ({marks})", row)  # noqa: S608 - fixed names
     if table in CONTACT_TABLES:
-        kit.link_row(connection, table, row_id)  # a lead or a subscriber is one of the business's contacts
+        kit.link_row(
+            connection, table, row_id
+        )  # a lead or a subscriber is one of the business's contacts
     return row_id
 
 
@@ -245,7 +249,9 @@ def _update(
         connection, table, row_id, {**_store_values(values), "updated_at": kit.now()}
     )
     if table == "mk_subscribers" and "status" in values:
-        kit.link_row(connection, table, row_id)  # confirmed or unsubscribed: the contact's email consent follows
+        kit.link_row(
+            connection, table, row_id
+        )  # confirmed or unsubscribed: the contact's email consent follows
 
 
 def roi_percent(revenue_cents: int, spend_cents: int) -> int | None:
@@ -1742,7 +1748,9 @@ def request_confirmation(
         )
         row_id = current["id"]
         last = current.get("confirm_sent_at")
-        recent = bool(last) and kit.parse_time(last) > kit.utcnow() - CONFIRM_AGAIN_AFTER
+        recent = (
+            bool(last) and kit.parse_time(last) > kit.utcnow() - CONFIRM_AGAIN_AFTER
+        )
         if current["status"] == "subscribed" or recent:
             if commit:
                 connection.commit()
@@ -1834,7 +1842,8 @@ def resend_confirmation(
             "The confirmation email went to them less than an hour ago. Try again later."
         )
     connection.execute(
-        "UPDATE mk_subscribers SET confirm_sent_at = NULL WHERE id = ?", (subscriber_id,)
+        "UPDATE mk_subscribers SET confirm_sent_at = NULL WHERE id = ?",
+        (subscriber_id,),
     )
     request_confirmation(
         connection,

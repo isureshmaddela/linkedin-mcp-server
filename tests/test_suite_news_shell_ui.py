@@ -309,7 +309,12 @@ def test_headlines_show_as_a_grid_or_a_list_and_the_choice_stays(browser, env):
     page.wait_for_selector("#main .nw-list article")
     columns = "() => getComputedStyle(document.querySelector('.nw-list')).gridTemplateColumns.split(' ').length"
     switch = page.locator("#main .page-head .nw-layout[role='radiogroup']")
-    assert switch.locator("[role='radio'][aria-checked='true']").get_attribute("aria-label") == "Grid"
+    assert (
+        switch.locator("[role='radio'][aria-checked='true']").get_attribute(
+            "aria-label"
+        )
+        == "Grid"
+    )
     assert page.evaluate(columns) >= 2
     switch.locator("[aria-label='List']").click()
     assert page.evaluate(columns) == 1

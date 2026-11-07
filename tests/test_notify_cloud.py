@@ -74,7 +74,9 @@ def test_the_app_files_and_a_members_notifications_through_the_gateway(cloud, pu
     realtime.publish(org.org_id, "chat", {"chat": "c1"}, person="p:1")
     sent: list[str] = []
     response.stream(sent.append, lambda: any("c1" in text for text in sent))
-    assert sent[0].startswith("retry:") and any('"topic":"chat"' in text for text in sent)
+    assert sent[0].startswith("retry:") and any(
+        '"topic":"chat"' in text for text in sent
+    )
     assert realtime.HUB.stats()["streams"] == 0  # the stream gave its slot back
     browser = Browser.new(push)
     status, saved = member.call(
@@ -149,7 +151,9 @@ def test_the_hosted_server_streams_live_updates_over_a_socket(cloud):
             while b"retry:" not in received:
                 received += sock.recv(4096)
             head = received.split(b"\r\n\r\n", 1)[0].decode()
-            assert head.startswith("HTTP/1.0 200") or head.startswith("HTTP/1.1 200"), head
+            assert head.startswith("HTTP/1.0 200") or head.startswith("HTTP/1.1 200"), (
+                head
+            )
             assert "text/event-stream" in head and "Content-Length" not in head
             deadline = time.monotonic() + 5
             while realtime.HUB.stats()["streams"] == 0 and time.monotonic() < deadline:

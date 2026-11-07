@@ -406,7 +406,9 @@ def _bydays(rule: Mapping[str, str]) -> list[tuple[int, int]]:
     return out
 
 
-def _month_days(year: int, month: int, rule: Mapping[str, str], base_day: int) -> list[int]:
+def _month_days(
+    year: int, month: int, rule: Mapping[str, str], base_day: int
+) -> list[int]:
     """The days of one month a MONTHLY (or YEARLY) rule picks, in order."""
     last = calendar.monthrange(year, month)[1]
     picked: set[int] = set()
@@ -421,7 +423,11 @@ def _month_days(year: int, month: int, rule: Mapping[str, str], base_day: int) -
                 picked.add(day)
     elif rule.get("BYDAY"):
         for ordinal, weekday in _bydays(rule):
-            days = [d for d in range(1, last + 1) if date(year, month, d).weekday() == weekday]
+            days = [
+                d
+                for d in range(1, last + 1)
+                if date(year, month, d).weekday() == weekday
+            ]
             if ordinal == 0:
                 picked.update(days)
             elif 0 < ordinal <= len(days):
@@ -475,7 +481,9 @@ def expand(
                 until_wall = until.wall
     base = start.wall
     clock = base.time()
-    weekdays = sorted({weekday for _ordinal, weekday in _bydays(rule)}) or [base.weekday()]
+    weekdays = sorted({weekday for _ordinal, weekday in _bydays(rule)}) or [
+        base.weekday()
+    ]
     seen = 0
     # Without COUNT the periods before the window cannot matter: start a little before it.
     first_period = 0
@@ -495,24 +503,36 @@ def expand(
     for period in range(first_period, first_period + MAX_PERIODS):
         if freq == "DAILY":
             day = base.date() + timedelta(days=period * interval)
-            candidates = [day] if not rule.get("BYDAY") or day.weekday() in weekdays else []
+            candidates = (
+                [day] if not rule.get("BYDAY") or day.weekday() in weekdays else []
+            )
         elif freq == "WEEKLY":
             week_start = base.date() - timedelta(days=(base.weekday() - wkst) % 7)
             week_start += timedelta(weeks=period * interval)
             candidates = sorted(
-                week_start + timedelta(days=(weekday - wkst) % 7) for weekday in weekdays
+                week_start + timedelta(days=(weekday - wkst) % 7)
+                for weekday in weekdays
             )
         elif freq == "MONTHLY":
             year, month = _add_months(base.year, base.month, period * interval)
-            candidates = [date(year, month, d) for d in _month_days(year, month, rule, base.day)]
+            candidates = [
+                date(year, month, d) for d in _month_days(year, month, rule, base.day)
+            ]
         else:
             year = base.year + period * interval
             month_rule = rule.get("BYMONTH", "")
-            months = [int(m) for m in month_rule.split(",") if m.isdigit() and 1 <= int(m) <= 12] or [base.month]
+            months = [
+                int(m)
+                for m in month_rule.split(",")
+                if m.isdigit() and 1 <= int(m) <= 12
+            ] or [base.month]
             candidates = []
             for month in months:
                 if rule.get("BYDAY") or rule.get("BYMONTHDAY"):
-                    candidates += [date(year, month, d) for d in _month_days(year, month, rule, base.day)]
+                    candidates += [
+                        date(year, month, d)
+                        for d in _month_days(year, month, rule, base.day)
+                    ]
                 elif base.day <= calendar.monthrange(year, month)[1]:
                     candidates.append(date(year, month, base.day))
             candidates.sort()
@@ -524,7 +544,10 @@ def expand(
                 continue
             if until_wall is not None and moment > until_wall:
                 return
-            if until_instant is not None and _localise(moment, start.zone) > until_instant:
+            if (
+                until_instant is not None
+                and _localise(moment, start.zone) > until_instant
+            ):
                 return
             if moment > end_wall:
                 return
@@ -562,7 +585,10 @@ def _busy_of(
     moved: Mapping[str, set[datetime]],
     moved_days: Mapping[str, set[date]],
 ) -> Iterator[tuple[datetime, datetime]]:
-    if _value(event, "STATUS") == "CANCELLED" or _value(event, "TRANSP") == "TRANSPARENT":
+    if (
+        _value(event, "STATUS") == "CANCELLED"
+        or _value(event, "TRANSP") == "TRANSPARENT"
+    ):
         return
     start_prop = event.first("DTSTART")
     if start_prop is None:
@@ -591,7 +617,9 @@ def _busy_of(
         return  # a moment, not a span of time
     excluded, excluded_days = _exclusions(event, fallback)
     override = event.first("RECURRENCE-ID") is not None
-    if not override:  # the occurrences moved elsewhere (or cancelled) by their own VEVENT
+    if (
+        not override
+    ):  # the occurrences moved elsewhere (or cancelled) by their own VEVENT
         excluded |= moved.get(event.uid, set())
         excluded_days |= moved_days.get(event.uid, set())
     rule_prop = event.first("RRULE")
@@ -660,7 +688,9 @@ def busy_times(
             moved.setdefault(event.uid, set()).add(when.instant())
     ranges: list[tuple[datetime, datetime]] = []
     for event in found:
-        for busy in _busy_of(event, fallback, window_start, window_end, moved, moved_days):
+        for busy in _busy_of(
+            event, fallback, window_start, window_end, moved, moved_days
+        ):
             ranges.append(busy)
             if len(ranges) >= limit * 2:
                 break

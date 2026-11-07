@@ -281,7 +281,9 @@ class _PinnedSMTPSSL(smtplib.SMTP_SSL):
         raw = socket.create_connection(
             (self._pinned, port), timeout, self.source_address
         )
-        return self.context.wrap_socket(raw, server_hostname=host)  # the name, not the address
+        return self.context.wrap_socket(
+            raw, server_hostname=host
+        )  # the name, not the address
 
 
 def sender_domain(settings: Mapping[str, Any]) -> str:
@@ -400,7 +402,9 @@ def _suppression_key(value: str) -> tuple[str, str, str]:
 
 def add_suppression(connection: Any, value: str, reason: str = "") -> dict[str, Any]:
     key, kind, normalized = _suppression_key(value)
-    connection.execute(_SUPPRESSIONS_DDL)  # an incoming "unsubscribe" may come before Leads was ever opened
+    connection.execute(
+        _SUPPRESSIONS_DDL
+    )  # an incoming "unsubscribe" may come before Leads was ever opened
     connection.execute(
         "INSERT OR REPLACE INTO lead_suppressions (key, kind, value, reason, created_at) VALUES (?, ?, ?, ?, ?)",
         (key, kind, normalized, store.clean(reason, 200), store.now()),

@@ -754,7 +754,9 @@ def generate_deck(
         + "Reply only with JSON: "
         '{"title": "a short deck title", "cards": [{"front": "...", "back": "...", "hint": ""}]}'
     )
-    use_model = life.app_allowed(connection, profile, "ai")  # a guardian may turn AI off
+    use_model = life.app_allowed(
+        connection, profile, "ai"
+    )  # a guardian may turn AI off
     result = (
         kit.draft(prompt, {"title": fallback["title"], "cards": fallback["cards"]})
         if use_model

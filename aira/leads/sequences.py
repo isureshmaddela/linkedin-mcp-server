@@ -252,7 +252,9 @@ STOP_LABELS = {
 }
 
 
-def lead_enrollments(connection: sqlite3.Connection, lead_id: str) -> list[dict[str, Any]]:
+def lead_enrollments(
+    connection: sqlite3.Connection, lead_id: str
+) -> list[dict[str, Any]]:
     """Every sequence this lead is (or was) in: where it is, when the next email is due, and when and why it
     stopped. Shown in the lead's drawer."""
     if not _has_leads(connection):
@@ -272,7 +274,9 @@ def lead_enrollments(connection: sqlite3.Connection, lead_id: str) -> list[dict[
             {
                 **row,
                 "steps_total": len(steps),
-                "stop_label": STOP_LABELS.get(reason, reason[:1].upper() + reason[1:] if reason else ""),
+                "stop_label": STOP_LABELS.get(
+                    reason, reason[:1].upper() + reason[1:] if reason else ""
+                ),
                 "stopped_at": row["updated_at"] if row["status"] == "stopped" else "",
                 "finished_at": row["updated_at"] if row["status"] == "finished" else "",
             }

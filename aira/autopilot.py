@@ -1257,7 +1257,9 @@ def execute_run(
         # nothing is tried again behind the person's back. The run waits for them with the step it waits for.
         status, next_try = "needs_review", None
         hold = hold or str(run.get("hold") or "")
-        outcome["error"] = f"Finish in browser did not finish: {outcome['error']}"[:1000]
+        outcome["error"] = f"Finish in browser did not finish: {outcome['error']}"[
+            :1000
+        ]
     handoff_record: dict[str, Any] | None = None
     if handoff:
         waits = outcome["handoffs"]

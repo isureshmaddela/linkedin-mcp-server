@@ -705,7 +705,11 @@ def prometheus_text(app) -> str:  # noqa: ANN001
     family("aira_events_total", "counter", "Named counters.")
     for name, value in sorted(snapshot["counters"].items()):
         lines.append(f'aira_events_total{{name="{_label(name)}"}} {value}')
-    family("aira_integration_up", "gauge", "Whether the last check of an integration passed.")
+    family(
+        "aira_integration_up",
+        "gauge",
+        "Whether the last check of an integration passed.",
+    )
     for name, state in sorted(snapshot["integrations"].items()):
         lines.append(
             f'aira_integration_up{{name="{_label(name)}"}} {1 if state.get("ok") else 0}'
@@ -716,7 +720,9 @@ def prometheus_text(app) -> str:  # noqa: ANN001
         lines.append(f"aira_http_connections {server.active}")
         family("aira_http_connections_max", "gauge", "The connection cap.")
         lines.append(f"aira_http_connections_max {server.max_connections}")
-        family("aira_http_refused_total", "counter", "Connections answered 503 at the cap.")
+        family(
+            "aira_http_refused_total", "counter", "Connections answered 503 at the cap."
+        )
         lines.append(f"aira_http_refused_total {server.refused}")
         family("aira_draining", "gauge", "1 while the process drains after SIGTERM.")
         lines.append(f"aira_draining {1 if server.draining.is_set() else 0}")
@@ -729,13 +735,21 @@ def prometheus_text(app) -> str:  # noqa: ANN001
         lines.append(
             f'aira_queue_ready_jobs{{kind="{_label(row["kind"])}",status="{_label(row["status"])}"}} {row["n"]}'
         )
-    family("aira_queue_oldest_wait_seconds", "gauge", "How long the oldest due job has waited.")
+    family(
+        "aira_queue_oldest_wait_seconds",
+        "gauge",
+        "How long the oldest due job has waited.",
+    )
     lines.append(f"aira_queue_oldest_wait_seconds {queue['oldest_wait_seconds']}")
-    family("aira_queue_organizations_waiting", "gauge", "Organizations with jobs waiting.")
+    family(
+        "aira_queue_organizations_waiting", "gauge", "Organizations with jobs waiting."
+    )
     lines.append(
         f"aira_queue_organizations_waiting {sum(1 for row in queue['by_org'] if int(row['queued'] or 0))}"
     )
-    family("aira_workers", "gauge", "Worker processes that reported in the last minute.")
+    family(
+        "aira_workers", "gauge", "Worker processes that reported in the last minute."
+    )
     lines.append(f"aira_workers {len(queue['workers'])}")
     family("aira_worker_capacity", "gauge", "Job threads across workers.")
     lines.append(f"aira_worker_capacity {queue['worker_capacity']}")
@@ -793,7 +807,9 @@ def recovery_request(req: Req):  # noqa: ANN201
     )
 
 
-@cloud_route("POST", r"/api/platform/recoveries/([0-9a-f]{32})/complete", auth="operator")
+@cloud_route(
+    "POST", r"/api/platform/recoveries/([0-9a-f]{32})/complete", auth="operator"
+)
 def recovery_complete(req: Req):  # noqa: ANN201
     return 200, req.app.identity.complete_recovery(req.principal, req.group())
 

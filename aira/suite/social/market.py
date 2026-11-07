@@ -178,7 +178,9 @@ def _values(
             merged.get("condition"), "the condition", CONDITIONS, default="used"
         ),
         "place": kit.text(merged.get("place"), "where to pick it up", max_len=80),
-        "photos": store.dumps(service._photos(merged.get("photos"), sc=sc, owner=owner)),
+        "photos": store.dumps(
+            service._photos(merged.get("photos"), sc=sc, owner=owner)
+        ),
         "audience": kit.choice(
             merged.get("audience"), "who can see it", AUDIENCES, default="public"
         ),
@@ -616,7 +618,9 @@ def public_page(
             "category": listing["category"],
             "condition": listing["condition"],
             "place": listing["place"],
-            "photos": photos.display_list(store.loads(listing["photos"], []), token=token),
+            "photos": photos.display_list(
+                store.loads(listing["photos"], []), token=token
+            ),
             "status": listing["status"],
             "payment_link": payment_link(listing)
             if listing["status"] != "sold"

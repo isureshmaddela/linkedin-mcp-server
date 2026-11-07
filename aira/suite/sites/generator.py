@@ -91,13 +91,13 @@ BUYER_NOTES = {
     "businesses": (
         "The business sells to other businesses (B2B). Write for business buyers: what it supplies, trade or "
         "wholesale terms, bulk and repeat orders, minimum orders, delivery and account (invoice) terms, proof such "
-        "as client logos, case studies and certifications, and a clear call to action such as \"Request a quote\" "
-        "or \"Apply for a trade account\"."
+        'as client logos, case studies and certifications, and a clear call to action such as "Request a quote" '
+        'or "Apply for a trade account".'
     ),
     "both": (
         "The business sells to consumers and to other businesses (B2C and B2B). Serve both: the main path is for "
         "consumers, with a clear section for business buyers (wholesale and trade accounts, bulk orders, "
-        "invoices) and its own call to action, such as \"Trade and wholesale\"."
+        'invoices) and its own call to action, such as "Trade and wholesale".'
     ),
 }
 

@@ -20,7 +20,15 @@ from monosage_cloud.config import DAY
 from monosage_cloud.db import loads, many, one
 from monosage_cloud.errors import Forbidden
 from monosage_cloud.plans import month_key
-from monosage_cloud.rbac import AUDITOR, BILLING, CANDIDATE, COACH, OWNER, ADMIN, Principal
+from monosage_cloud.rbac import (
+    AUDITOR,
+    BILLING,
+    CANDIDATE,
+    COACH,
+    OWNER,
+    ADMIN,
+    Principal,
+)
 from monosage_cloud.workspace import STAGES, _to_epoch
 
 if TYPE_CHECKING:

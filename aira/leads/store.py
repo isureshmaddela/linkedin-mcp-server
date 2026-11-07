@@ -156,7 +156,9 @@ def ensure_schema(connection: sqlite3.Connection) -> None:
     )
     from aira.suite import kit
 
-    kit.contact_columns(connection, "leads")  # each lead points at the suite's one customer record
+    kit.contact_columns(
+        connection, "leads"
+    )  # each lead points at the suite's one customer record
 
 
 def _link_contact(connection: sqlite3.Connection, lead_id: str) -> None:
@@ -730,7 +732,9 @@ def save_enrichment(
         ),
     )
     if (email and not current["email"]) or (phone and not current["phone"]):
-        _link_contact(connection, lead_id)  # found an email or phone: now it can join its contact
+        _link_contact(
+            connection, lead_id
+        )  # found an email or phone: now it can join its contact
     connection.commit()
     return get_lead(connection, lead_id)
 

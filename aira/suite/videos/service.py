@@ -125,7 +125,9 @@ def home_of(request: Any) -> str:
 
 def identity(request: Any, connection: sqlite3.Connection) -> dict[str, Any]:
     profile = life.current(request, connection)
-    life.require_app(connection, profile, "videos")  # a guardian may turn Videos off for a child or a teen
+    life.require_app(
+        connection, profile, "videos"
+    )  # a guardian may turn Videos off for a child or a teen
     user = getattr(request, "user", None) or {}
     hosted = bool(profile.get("member_ref"))
     owner = bool(profile.get("owner")) and not hosted
@@ -267,7 +269,9 @@ def update_channel(
             max_len=500,
             multiline=True,
         )
-        if not (details and details == ch.get("payout_details")):  # the mask sent back unchanged keeps them
+        if not (
+            details and details == ch.get("payout_details")
+        ):  # the mask sent back unchanged keeps them
             changes["payout_details"] = store.seal_payout(details)
     if changes:
         store.update(sc, "vi_channels", ch["id"], {**changes, "updated_at": stamp()})
@@ -432,7 +436,9 @@ def can_watch(
     return video["rating"] in me_["ratings"]
 
 
-def _asked_of(sc: sqlite3.Connection, me_: dict[str, Any], video: dict[str, Any]) -> bool:
+def _asked_of(
+    sc: sqlite3.Connection, me_: dict[str, Any], video: dict[str, Any]
+) -> bool:
     """A grown-up of the household may watch a teen's private video that waits for their yes."""
     if not adult(me_) or not me_.get("home"):
         return False
@@ -547,7 +553,9 @@ def video_view(
         "avatar": "🙂",
     }
     mine = bool(me_ and video["channel_id"] == me_["id"])
-    watcher = str(me_["id"]) if me_ and me_.get("id") else ""  # signed into its media addresses
+    watcher = (
+        str(me_["id"]) if me_ and me_.get("id") else ""
+    )  # signed into its media addresses
     out: dict[str, Any] = {
         "id": video["id"],
         "kind": video["kind"],
@@ -583,7 +591,9 @@ def video_view(
                 "description": video["description"],
                 "tags": store.loads(video["tags"], []),
                 "credits": store.loads(video["credits"], []),
-                "stream_url": "" if shut else media.signed_url(sc, video["file_id"], viewer=watcher),
+                "stream_url": ""
+                if shut
+                else media.signed_url(sc, video["file_id"], viewer=watcher),
                 "captions_url": ""
                 if shut
                 else media.signed_url(sc, video["captions_file_id"], viewer=watcher),
@@ -842,7 +852,9 @@ def ask_public(sc: sqlite3.Connection, ch: dict[str, Any], video_id: str) -> boo
     return bool(grown_ups)
 
 
-def public_requests(sc: sqlite3.Connection, me_: dict[str, Any]) -> list[dict[str, Any]]:
+def public_requests(
+    sc: sqlite3.Connection, me_: dict[str, Any]
+) -> list[dict[str, Any]]:
     """The household's teens' videos waiting for a grown-up's yes before they go public (empty for anyone else)."""
     if not adult(me_) or not me_.get("home"):
         return []
@@ -874,11 +886,16 @@ def answer_public(
     )
     if not found or not adult(me_) or found["home"] != me_.get("home"):
         raise LookupError("That request was not found.")
-    sc.execute("DELETE FROM vi_public_requests WHERE video_id = ?", (found["video_id"],))
+    sc.execute(
+        "DELETE FROM vi_public_requests WHERE video_id = ?", (found["video_id"],)
+    )
     video = _video_row(sc, found["video_id"])
     if approve:
         store.update(
-            sc, "vi_videos", video["id"], {"visibility": "public", "updated_at": stamp()}
+            sc,
+            "vi_videos",
+            video["id"],
+            {"visibility": "public", "updated_at": stamp()},
         )
     notify(
         sc,
@@ -891,7 +908,10 @@ def answer_public(
         ref_id=video["id"],
     )
     sc.commit()
-    return {"approved": approve, "visibility": "public" if approve else video["visibility"]}
+    return {
+        "approved": approve,
+        "visibility": "public" if approve else video["visibility"],
+    }
 
 
 def _check_shape(kind: str, duration: float, width: int, height: int) -> None:

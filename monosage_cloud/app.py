@@ -195,7 +195,9 @@ class CloudApp:
         self.workspaces = WorkspaceManager(self)
         self.storage = StorageService(self)
         self.queue = JobQueue(self)
-        self.mail.queue = self.queue  # with SMTP, platform mail is delivered by the job queue (mail.deliver)
+        self.mail.queue = (
+            self.queue
+        )  # with SMTP, platform mail is delivered by the job queue (mail.deliver)
         self.agents = AgentClient(self)
         self.linkedin = LinkedInSessions(self)
         self.launch = LaunchTokens(self)

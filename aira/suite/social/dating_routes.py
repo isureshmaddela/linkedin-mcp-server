@@ -223,7 +223,9 @@ def dating_messages(request: Request) -> tuple[int, dict[str, Any]]:
 def dating_send(request: Request) -> tuple[int, dict[str, Any]]:
     with _open(request) as (sc, ident, me):
         sent = dating.chat_send(sc, ident, me, _id(request), request.payload)
-        notify_events.dating_message(sc, me, _id(request))  # live pages; the match is told (no names)
+        notify_events.dating_message(
+            sc, me, _id(request)
+        )  # live pages; the match is told (no names)
         return 201, sent
 
 

@@ -503,8 +503,9 @@ def update(
         }  # a member's address is their sign-in
     values = _clean(raw, target)
     birthday_changed = values["birthday"] != (target.get("birthday") or "")
-    group_changed = values["age_group"] != target["age_group"] and not (
-        values["age_group"] in GROWN_UPS and target["age_group"] in GROWN_UPS
+    group_changed = (
+        values["age_group"] != target["age_group"]
+        and not (values["age_group"] in GROWN_UPS and target["age_group"] in GROWN_UPS)
     )  # adult and senior differ only in how the screens look: a grown-up switches freely
     if birthday_changed or group_changed:
         first_hosted_birthday = (
@@ -525,7 +526,9 @@ def update(
         connection, "life_profiles", profile_id, {**values, "updated_at": kit.now()}
     )
     if values["age_group"] != target["age_group"]:
-        end_unlocks(connection, profile_id)  # the new group's unlock rules apply from the next PIN
+        end_unlocks(
+            connection, profile_id
+        )  # the new group's unlock rules apply from the next PIN
     connection.commit()
     return get(connection, profile_id)
 
@@ -554,7 +557,9 @@ def remove(
 
 def archived(connection: sqlite3.Connection) -> list[dict[str, Any]]:
     """People removed with "Archive": hidden everywhere, their data kept until someone erases it."""
-    return [p for p in profiles(connection, include_archived=True) if p.get("archived_at")]
+    return [
+        p for p in profiles(connection, include_archived=True) if p.get("archived_at")
+    ]
 
 
 def erase(
@@ -679,7 +684,9 @@ def _write_pin(connection: sqlite3.Connection, profile_id: str, pin: str) -> Non
             "updated_at": kit.now(),
         },
     )
-    end_unlocks(connection, profile_id)  # every browser that had it open asks for the new PIN
+    end_unlocks(
+        connection, profile_id
+    )  # every browser that had it open asks for the new PIN
     connection.commit()
 
 
@@ -808,9 +815,7 @@ def lock(connection: sqlite3.Connection, profile_id: str, token: str) -> None:
 # ---------------------------------------------------------------------------
 
 
-def controls(
-    connection: sqlite3.Connection, profile: dict[str, Any]
-) -> dict[str, Any]:
+def controls(connection: sqlite3.Connection, profile: dict[str, Any]) -> dict[str, Any]:
     """Which controlled apps are on for this person, and what is always off. Grown-ups have everything on."""
     ensure(connection)
     young = is_young(profile)
@@ -823,8 +828,7 @@ def controls(
         )
         stored = (kit.loads(found["apps"], {}) or {}) if found else {}
     apps = {
-        app: (bool(stored.get(app, True)) if young else True)
-        for app in CONTROLLED_APPS
+        app: (bool(stored.get(app, True)) if young else True) for app in CONTROLLED_APPS
     }
     always_off = list(ALWAYS_OFF_FOR_YOUNG) if young else []
     return {

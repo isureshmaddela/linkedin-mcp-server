@@ -62,7 +62,9 @@ def run(connection: sqlite3.Connection, secret_store: Any) -> dict[str, Any]:
         polled = inbound_mail.poll(connection, secret_store)
         if polled.get("ran"):
             result["inbound"] = {
-                key: polled[key] for key in ("read", "handled", "error") if key in polled
+                key: polled[key]
+                for key in ("read", "handled", "error")
+                if key in polled
             }
     except Exception:  # noqa: BLE001 - a mailbox problem must not stop the apps or the outbox
         suite.logger.exception("Reading incoming mail failed")
@@ -97,7 +99,9 @@ def run(connection: sqlite3.Connection, secret_store: Any) -> dict[str, Any]:
         connection, only=("medicine", "bookings", "stocks")
     )
     settings = kit.email_settings(connection)
-    kit.expire_outbox(connection)  # reminders that can no longer be sent in time are dropped, set up or not
+    kit.expire_outbox(
+        connection
+    )  # reminders that can no longer be sent in time are dropped, set up or not
     # its own mail server, or (hosted, a member's own space) the organization's it is lent
     if (settings.get("smtp_host") and settings.get("from_email")) or kit.lent_mail():
         due = connection.execute(

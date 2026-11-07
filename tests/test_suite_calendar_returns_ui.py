@@ -34,11 +34,37 @@ def test_a_staff_calendar_and_add_to_calendar_in_the_browser(browser, env, feeds
     public.set_index(local._public_link_index)
     context, page, problems = signed_in_page(browser, env)
     call = caller(context, env)
-    call("POST", "/api/suite/business", {"name": "Glow Studio", "email": "owner@glow.example", "timezone": "UTC"})
-    person = call("POST", "/api/bookings/staff", {"name": "Ana", "hours": [{"weekday": d, "start": "09:00", "end": "17:00"} for d in range(7)]})["person"]
-    cut = call("POST", "/api/bookings/services", {"name": "Cut", "minutes": 60, "staff_ids": [person["id"]]})["service"]
+    call(
+        "POST",
+        "/api/suite/business",
+        {"name": "Glow Studio", "email": "owner@glow.example", "timezone": "UTC"},
+    )
+    person = call(
+        "POST",
+        "/api/bookings/staff",
+        {
+            "name": "Ana",
+            "hours": [
+                {"weekday": d, "start": "09:00", "end": "17:00"} for d in range(7)
+            ],
+        },
+    )["person"]
+    cut = call(
+        "POST",
+        "/api/bookings/services",
+        {"name": "Cut", "minutes": 60, "staff_ids": [person["id"]]},
+    )["service"]
     day = datetime.now(timezone.utc).date() + timedelta(days=4)
-    url = feeds.put("/ana/basic.ics", calendar(event("busy@x", f"DTSTART:{stamp(day, '09:00')}Z", f"DTEND:{stamp(day, '12:00')}Z")))
+    url = feeds.put(
+        "/ana/basic.ics",
+        calendar(
+            event(
+                "busy@x",
+                f"DTSTART:{stamp(day, '09:00')}Z",
+                f"DTEND:{stamp(day, '12:00')}Z",
+            )
+        ),
+    )
 
     go(page, env, "bookings?tab=staff")
     page.wait_for_selector("text=Not connected")
@@ -46,13 +72,23 @@ def test_a_staff_calendar_and_add_to_calendar_in_the_browser(browser, env, feeds
     page.wait_for_selector(".drawer >> text=Private iCal address")
     page.locator(".drawer input[type='url']").fill(url)
     page.locator(".drawer").get_by_role("button", name="Connect", exact=True).click()
-    until(page, lambda: "Not yet" not in page.locator(".drawer").inner_text() and "127.0.0.1/…/basic.ics" in page.locator(".drawer").inner_text(), what="the calendar to be read")
+    until(
+        page,
+        lambda: (
+            "Not yet" not in page.locator(".drawer").inner_text()
+            and "127.0.0.1/…/basic.ics" in page.locator(".drawer").inner_text()
+        ),
+        what="the calendar to be read",
+    )
     assert url not in page.locator(".drawer").inner_text()
     page.keyboard.press("Escape")
     go(page, env, "bookings?tab=staff")
     page.wait_for_selector(".suite-table >> text=synced")
     assert "1 busy time" in page.locator(".suite-table").inner_text()
-    slots = call("GET", f"/api/bookings/slots?service_id={cut['id']}&day={day.isoformat()}&days=1")["days"][0]["slots"]
+    slots = call(
+        "GET",
+        f"/api/bookings/slots?service_id={cut['id']}&day={day.isoformat()}&days=1",
+    )["days"][0]["slots"]
     assert slots[0]["local"] == "12:00"
 
     link = call("POST", "/api/bookings/page-link", {})["link"]
@@ -70,8 +106,12 @@ def test_a_staff_calendar_and_add_to_calendar_in_the_browser(browser, env, feeds
     add = visitor.get_by_role("link", name="Add to calendar", exact=True)
     href = add.get_attribute("href")
     assert href.startswith("/api/public/") and href.endswith("/calendar.ics")
-    google = visitor.get_by_role("link", name="Add to Google Calendar").get_attribute("href")
-    assert google.startswith("https://calendar.google.com/calendar/render?action=TEMPLATE")
+    google = visitor.get_by_role("link", name="Add to Google Calendar").get_attribute(
+        "href"
+    )
+    assert google.startswith(
+        "https://calendar.google.com/calendar/render?action=TEMPLATE"
+    )
     file = context.request.get(env.base + href)
     assert file.status == 200 and "METHOD:PUBLISH" in file.text()
     visitor.get_by_role("link", name="Manage your booking").click()
@@ -87,9 +127,26 @@ def test_zones_tracking_and_a_return_in_the_browser(browser, env):
     public.set_index(local._public_link_index)
     context, page, problems = signed_in_page(browser, env)
     call = caller(context, env)
-    call("POST", "/api/suite/business", {"name": "Chai Co", "currency": "INR", "email": "hi@chai.example"})
-    call("POST", "/api/shop/settings", {"deliver_elsewhere": False, "pickup_enabled": True})
-    call("POST", "/api/shop/products", {"name": "Masala tea", "price_cents": 20000, "status": "active", "weight_grams": 250})["product"]
+    call(
+        "POST",
+        "/api/suite/business",
+        {"name": "Chai Co", "currency": "INR", "email": "hi@chai.example"},
+    )
+    call(
+        "POST",
+        "/api/shop/settings",
+        {"deliver_elsewhere": False, "pickup_enabled": True},
+    )
+    call(
+        "POST",
+        "/api/shop/products",
+        {
+            "name": "Masala tea",
+            "price_cents": 20000,
+            "status": "active",
+            "weight_grams": 250,
+        },
+    )["product"]
 
     # The shop adds a zone in Settings.
     go(page, env, "shop?tab=settings")
@@ -121,7 +178,9 @@ def test_zones_tracking_and_a_return_in_the_browser(browser, env):
     shopper.get_by_label("Delivery address").fill("Road 12, Banjara Hills")
     shopper.get_by_role("button", name="Place order").click()
     shopper.wait_for_selector("text=Order placed")
-    order_path = shopper.get_by_role("link", name="See your order").get_attribute("href")
+    order_path = shopper.get_by_role("link", name="See your order").get_attribute(
+        "href"
+    )
     order = call("GET", "/api/shop/orders")["orders"][0]
     assert order["delivery_cents"] == 3000 and order["delivery_zone"] == "Hyderabad"
     call("POST", f"/api/shop/orders/{order['id']}/paid", {})
@@ -133,11 +192,17 @@ def test_zones_tracking_and_a_return_in_the_browser(browser, env):
     page.get_by_label("Carrier").select_option("delhivery")
     page.get_by_label("Tracking number").fill("DL998877")
     page.get_by_role("button", name="Mark shipped").click()
-    until(page, lambda: "Delhivery · DL998877" in page.locator(".drawer").inner_text(), what="the carrier to show")
+    until(
+        page,
+        lambda: "Delhivery · DL998877" in page.locator(".drawer").inner_text(),
+        what="the carrier to show",
+    )
 
     shopper.goto(env.base + order_path)
     shopper.wait_for_selector("text=Sent with Delhivery")
-    assert "delhivery.com/track/package/DL998877" in shopper.get_by_role("link", name="Track your parcel").get_attribute("href")
+    assert "delhivery.com/track/package/DL998877" in shopper.get_by_role(
+        "link", name="Track your parcel"
+    ).get_attribute("href")
     shopper.get_by_role("button", name="Return items").click()
     shopper.get_by_label("Masala tea", exact=False).fill("1")
     shopper.get_by_label("Why are you returning it?").select_option("damaged")

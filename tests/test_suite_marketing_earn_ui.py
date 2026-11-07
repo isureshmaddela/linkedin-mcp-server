@@ -50,7 +50,10 @@ def test_drafts_without_a_date_and_a_paid_lead(browser, env):
         "POST",
         f"/api/public/{token}/submit",
         {
-            "started": started(call(context, env, "GET", f"/api/public/{token}")),"name": "Ana", "email": "ana@example.com"},
+            "started": started(call(context, env, "GET", f"/api/public/{token}")),
+            "name": "Ana",
+            "email": "ana@example.com",
+        },
     )
 
     go(page, env, "marketing?tab=calendar")

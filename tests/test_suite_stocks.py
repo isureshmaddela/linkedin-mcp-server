@@ -1440,7 +1440,12 @@ def test_the_analyst_page_works_for_a_visitor_without_an_account(env, api, local
     )
     assert (
         "members only" not in json.dumps(page)
-        and page["actions"] == ["pay_online", "pay_return", "subscribe"]  # online payment (Razorpay) and its return
+        and page["actions"]
+        == [
+            "pay_online",
+            "pay_return",
+            "subscribe",
+        ]  # online payment (Razorpay) and its return
         and page["queries"] == ["paid"]
     )
     status, asked = _anonymous(

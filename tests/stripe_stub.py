@@ -156,7 +156,10 @@ class StripeStub:
                             record["last_update"] = params
                             if params.get("cancel_at_period_end") == "true":
                                 record["cancel_at_period_end"] = True
-                            if params.get("payment_behavior") == "pending_if_incomplete":
+                            if (
+                                params.get("payment_behavior")
+                                == "pending_if_incomplete"
+                            ):
                                 return self._reply(
                                     200,
                                     {

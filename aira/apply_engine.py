@@ -1132,7 +1132,11 @@ class _Runner:
             self._step_done_check(held.hold),
             lambda milliseconds: page.wait_for_timeout(milliseconds),
         )
-        seconds = int((handoff.waits[-1] if getattr(handoff, "waits", None) else {}).get("seconds", 0))
+        seconds = int(
+            (handoff.waits[-1] if getattr(handoff, "waits", None) else {}).get(
+                "seconds", 0
+            )
+        )
         self.handoffs.append({"kind": held.hold, "outcome": result, "seconds": seconds})
         if result in ("cleared", "done"):
             self.step(
@@ -1143,7 +1147,9 @@ class _Runner:
             # The time spent waiting for the person does not count against the run's own time limit.
             self.deadline = time.monotonic() + max(5, int(self.request.timeout_seconds))
             try:
-                page.wait_for_load_state("domcontentloaded", timeout=SETTLE_SECONDS * 1000)
+                page.wait_for_load_state(
+                    "domcontentloaded", timeout=SETTLE_SECONDS * 1000
+                )
             except Exception:  # noqa: BLE001
                 pass
             return True
@@ -1281,9 +1287,14 @@ class _Runner:
         }
         state = self.request.storage_state_path
         if state and Path(state).is_file():
-            options["storage_state"] = state  # the held run's cookies and storage (Finish in browser)
+            options["storage_state"] = (
+                state  # the held run's cookies and storage (Finish in browser)
+            )
         if self.request.handoff is not None:
-            options["viewport"] = {"width": 1280, "height": 900}  # a window the person can see whole
+            options["viewport"] = {
+                "width": 1280,
+                "height": 900,
+            }  # a window the person can see whole
         context = browser.new_context(**options)
         page = context.new_page()
         # Never work in a second tab: anything that opens one is closed at once.

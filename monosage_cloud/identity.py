@@ -140,7 +140,12 @@ class Identity:
         )
         for limiter, key, cap, what in (
             (self.signup_ip_limiter, f"signup-ip:{ip}", None, "from this network"),
-            (self.signup_domain_limiter, f"signup-domain:{domain}", limit, f"with @{domain} addresses"),
+            (
+                self.signup_domain_limiter,
+                f"signup-domain:{domain}",
+                limit,
+                f"with @{domain} addresses",
+            ),
         ):
             allowed, retry = limiter.check(key, limit=cap)
             if not allowed:
@@ -1222,7 +1227,9 @@ class Identity:
             )
         member = self.app.tenancy.member(org_id, member_id)
         if member["role"] != OWNER or member["status"] != "active":
-            raise ValidationFailed("Only an active owner's second factor is recovered here.")
+            raise ValidationFailed(
+                "Only an active owner's second factor is recovered here."
+            )
         if not member.get("mfa_enabled_at"):
             raise ValidationFailed("This owner has no second factor to recover.")
         with self.db.read() as connection:
@@ -1242,7 +1249,9 @@ class Identity:
                 code="other_owner",
             )
         if pending:
-            raise Conflict("A recovery is already waiting for this owner.", code="recovery_pending")
+            raise Conflict(
+                "A recovery is already waiting for this owner.", code="recovery_pending"
+            )
         recovery_id, token = new_id(), crypto.new_token()
         available = self.now + int(self.app.config.recovery_delay_seconds)
         with self.db.write() as connection:
@@ -1276,7 +1285,11 @@ class Identity:
             org_id=org_id,
             target_type="member",
             target_id=member_id,
-            detail={"recovery_id": recovery_id, "reason": reason, "available_at": available},
+            detail={
+                "recovery_id": recovery_id,
+                "reason": reason,
+                "available_at": available,
+            },
         )
         org = self.app.tenancy.org(org_id)
         self.app.mail.send(
@@ -1288,7 +1301,11 @@ class Identity:
             available_on=_day(available),
             link=f"{self.app.config.base_url}/#/recovery-cancel/{token}",
         )
-        return {"recovery_id": recovery_id, "status": "pending", "available_at": available}
+        return {
+            "recovery_id": recovery_id,
+            "status": "pending",
+            "available_at": available,
+        }
 
     def cancel_recovery(
         self,
@@ -1341,7 +1358,9 @@ class Identity:
         )
         return {"recovery_id": row["recovery_id"], "status": "cancelled"}
 
-    def complete_recovery(self, operator: Principal, recovery_id: str) -> dict[str, Any]:
+    def complete_recovery(
+        self, operator: Principal, recovery_id: str
+    ) -> dict[str, Any]:
         """After the waiting period: remove the owner's second factor and end everything signed in as them. They
         sign in with their password (or reset it by email) and set up a new authenticator."""
         self.app.authz.require(operator, "platform.tenants.manage")

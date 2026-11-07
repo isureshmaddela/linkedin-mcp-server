@@ -318,7 +318,9 @@ def test_consent_adds_a_subscriber_and_the_owner_is_notified(db):
     subscribers = service.list_subscribers(db)
     assert [s["email"] for s in subscribers] == ["bo@b.example"]
     # double opt-in: Bo waits for his confirmation email before any newsletter reaches him
-    assert subscribers[0]["tags"] == ["consult"] and subscribers[0]["status"] == "pending"
+    assert (
+        subscribers[0]["tags"] == ["consult"] and subscribers[0]["status"] == "pending"
+    )
     notes = kit.outbox(db, app="marketing")
     assert sorted((m["kind"], m["recipient"]) for m in notes) == [
         ("form_submission", "owner@glow.example"),
@@ -545,9 +547,9 @@ def test_a_business_captures_leads_tracks_clicks_and_sends_a_newsletter(
         if m["kind"] == "newsletter_confirm"
     )
     assert confirmation["recipient"] == "ana@example.com"
-    confirm_token = re.search(
-        r"/p/([A-Za-z0-9_-]{40,64})", confirmation["body"]
-    ).group(1)
+    confirm_token = re.search(r"/p/([A-Za-z0-9_-]{40,64})", confirmation["body"]).group(
+        1
+    )
     status, page = _anonymous(env, "GET", f"/api/public/{confirm_token}")
     assert status == 200 and page["page"]["subscribed"] is False
     assert _anonymous(env, "POST", f"/api/public/{confirm_token}/confirm", {})[1] == {

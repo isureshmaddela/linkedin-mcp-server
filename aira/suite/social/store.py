@@ -401,7 +401,9 @@ def migrate(connection: sqlite3.Connection) -> None:
     """Add the columns of :data:`COLUMNS` that an older database does not have yet."""
     for table, column, definition in COLUMNS:
         have = {r[1] for r in connection.execute(f"PRAGMA table_info({table})")}  # noqa: S608 - fixed names
-        if have and column not in have:  # (a table made later, such as Dating's, gets it when it is made)
+        if (
+            have and column not in have
+        ):  # (a table made later, such as Dating's, gets it when it is made)
             dbutil.add_column(connection, table, column, definition)
     # the key that signs photo addresses (photos.py), made here so a view never writes while it reads
     connection.execute(
@@ -411,9 +413,7 @@ def migrate(connection: sqlite3.Connection) -> None:
     clear_external_pictures(connection)
 
 
-EXTERNAL = (
-    "lower({c}) LIKE 'http:%' OR lower({c}) LIKE 'https:%' OR {c} LIKE '//%' OR lower({c}) LIKE 'data:%'"
-)
+EXTERNAL = "lower({c}) LIKE 'http:%' OR lower({c}) LIKE 'https:%' OR {c} LIKE '//%' OR lower({c}) LIKE 'data:%'"
 
 
 def clear_external_pictures(connection: sqlite3.Connection) -> None:
