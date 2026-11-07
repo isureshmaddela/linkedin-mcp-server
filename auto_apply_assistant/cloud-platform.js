@@ -1160,5 +1160,5 @@
     put(stage, pageHead("Operators", "Who can sign in to the platform console.", h("button", { type: "button", class: "btn", text: "Add operator", onclick: create })), section("", table(["Name", "Email", "Role", "State", "MFA", "Last sign-in", ""], rows)));
   };
 
-  window.AiraPlatformLogic = { FEATURES, LIMIT_FIELDS };
+  window.AiraPlatformLogic = { LIMIT_FIELDS };
 })();
