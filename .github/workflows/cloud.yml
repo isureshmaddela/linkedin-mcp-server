@@ -42,10 +42,10 @@ jobs:
       - run: uv sync --locked --group dev --extra cloud
 
       - name: Ruff
-        run: uv run ruff check monosage_cloud tests/test_cloud_*.py tests/cloud_support.py
+        run: uv run ruff check monosage_cloud tests/cloud/ tests/cloud_support.py
 
       - name: Ruff format
-        run: uv run ruff format --check monosage_cloud tests/test_cloud_*.py tests/cloud_support.py
+        run: uv run ruff format --check monosage_cloud tests/cloud/ tests/cloud_support.py
         continue-on-error: true   # formatting is advisory until the package is formatted once
 
       - name: Type check
@@ -71,7 +71,7 @@ jobs:
 
       - name: Hosted-build tests (isolation, roles, billing, SSO, legal)
         # The browser ones run in ci.yml's test-browser job, which installs Chromium.
-        run: uv run python -m pytest tests/test_cloud_*.py -m "not browser" -n auto -v
+        run: uv run python -m pytest tests/cloud/ -m "not browser" -n auto -v
 
       - name: Deployment files parse
         run: |
@@ -113,7 +113,7 @@ jobs:
       - run: uv sync --locked --group dev --extra cloud
 
       - name: Hosted-build tests on PostgreSQL
-        run: uv run python -m pytest tests/test_cloud_*.py -m "not browser" -n 4 -v
+        run: uv run python -m pytest tests/cloud/ -m "not browser" -n 4 -v
 
       - run: uv cache prune --ci
 
@@ -151,7 +151,7 @@ jobs:
       - run: uv run patchright install --with-deps chromium
 
       - name: Stripe adapter against stripe-mock, Keycloak sign-in
-        run: uv run python -m pytest tests/test_cloud_stripe_mock.py tests/test_cloud_keycloak.py -v
+        run: uv run python -m pytest tests/cloud/test_cloud_stripe_mock.py tests/cloud/test_cloud_keycloak.py -v
 
       - run: uv cache prune --ci
 

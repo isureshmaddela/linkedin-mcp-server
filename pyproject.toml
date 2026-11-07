@@ -86,6 +86,8 @@ exclude = ["assets*", "tests*"]
 [tool.setuptools.package-data]
 linkedin_mcp_server = ["py.typed"]
 "aira.airaapi" = ["catalog/*.json"]
+# each app's screens sit next to its code (aira/suite/<app>/web/, aira/leads/web/ ...; aira/webfiles.py)
+"*" = ["web/*.js", "web/*.css"]
 auto_apply_assistant = ["*.html", "*.css", "*.js"]
 "auto_apply_assistant.i18n" = ["*.json"]
 "docs.legal" = ["*.md"]

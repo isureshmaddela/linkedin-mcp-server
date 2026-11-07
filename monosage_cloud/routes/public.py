@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from aira import webfiles
 from aira.apps import PAGE_PATH_PATTERN
 from monosage_cloud import __version__
 from monosage_cloud.db import loads, one
@@ -54,10 +55,10 @@ def ui_app_page(req: Req):  # noqa: ANN201
 @cloud_route("GET", r"/static/([A-Za-z0-9_.-]+)", auth="public")
 def ui_static(req: Req):  # noqa: ANN201
     local = _local()
-    name = req.group()
-    target = (local.STATIC_DIR / name).resolve()
+    # the shell's files and each app's own (aira/suite/<app>/web/ ...): only files in that index can be served
+    target = webfiles.find(req.group())
     if (
-        local.STATIC_DIR.resolve() not in target.parents
+        target is None
         or target.suffix not in local.STATIC_TYPES
         or not target.is_file()
     ):

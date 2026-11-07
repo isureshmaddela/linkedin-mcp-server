@@ -26,15 +26,17 @@ aira/suite/<id>/store.py             SCHEMA (CREATE TABLE IF NOT EXISTS ...), en
 aira/suite/<id>/service.py           domain logic (pricing, availability, stock, progress, ...)
 aira/suite/<id>/<id>_routes.py       HTTP routes (@aira_route), public pages (@public.page / @public.action),
                                      @kit.checklist / @kit.summary registrations
-auto_apply_assistant/views-<id>.js   the app's screen (#/<id>, tabs in ?tab=)
-auto_apply_assistant/public-<id>.js  renderers for the app's public pages (AiraPublic.register)
-tests/test_suite_<id>.py             unit, single-user server and hosted gateway tests
+aira/suite/<id>/web/views-<id>.js    the app's screen (#/<id>, tabs in ?tab=)
+aira/suite/<id>/web/public-<id>.js   renderers for the app's public pages (AiraPublic.register)
+aira/suite/<id>/web/app-<id>.css     the app's styles, if it has any
+tests/<id>/test_suite_<id>.py        unit, single-user server and hosted gateway tests
 docs/apps/<id>.md                    what the app does, for the people who use it
 ```
 
 The route module **must** be named `<id>_routes.py` (route handler names are `airaapi__<id>_routes__<fn>`).
 `aira/suite/__init__.py` already imports `aira.suite.<id>.<id>_routes` when it exists; `index.html` and
-`public.html` already load `views-<id>.js` and `public-<id>.js`. Do not edit shared files (`app.js`,
+`public.html` already load `views-<id>.js` and `public-<id>.js`. The browser asks for every file as
+`/static/<name>` wherever it lives (`aira/webfiles.py` finds it), so file names must be unique across the project. Do not edit shared files (`app.js`,
 `index.html`, `public.html`, `app.css`, `suite-kit.js`, `public.js`, `public.css`, `kit.py`, `public.py`,
 `suite_routes.py`, `aira/apps.py`, `monosage_cloud/*`). Put app-only styles in your view file as inline style objects,
 or use the kit's classes. If you need a platform change, say so in your report instead of making it.

@@ -1,4 +1,4 @@
-// Logic tests for auto_apply_assistant/views-playground.js (Aira.playground: example values and URL state).
+// Logic tests for aira/airaapi/web/views-playground.js (Aira.playground: example values and URL state).
 // No browser: the file runs in a vm context with a minimal Aira, the kit's logic object and the real catalog.
 //
 //   node tests/js/playground.test.mjs
@@ -20,7 +20,7 @@ const engines = readdirSync(catalogDir)
 
 const Aira = { views: {}, h: () => null, fmt: {}, ui: {}, toast: () => {}, serp: { logic: L, humanize: L.humanize } };
 const context = vm.createContext({ Aira, navigator: { platform: "test", userAgent: "node" }, console });
-vm.runInContext(readFileSync(join(root, "auto_apply_assistant", "views-playground.js"), "utf8"), context, { filename: "views-playground.js" });
+vm.runInContext(readFileSync(join(root, "aira", "airaapi", "web", "views-playground.js"), "utf8"), context, { filename: "views-playground.js" });
 const P = Aira.playground;
 
 let passed = 0;

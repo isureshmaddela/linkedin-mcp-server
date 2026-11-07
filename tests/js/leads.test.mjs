@@ -1,4 +1,4 @@
-// Pure-logic tests for auto_apply_assistant/views-leads.js (Aira.leads.logic).
+// Pure-logic tests for aira/leads/web/views-leads.js (Aira.leads.logic).
 // No dependencies, no browser: node:assert and a tiny runner.
 //
 //   node tests/js/leads.test.mjs
@@ -11,7 +11,7 @@ import { fileURLToPath } from "node:url";
 
 const here = dirname(fileURLToPath(import.meta.url));
 const require = createRequire(import.meta.url);
-const L = require(join(here, "..", "..", "auto_apply_assistant", "views-leads.js"));
+const L = require(join(here, "..", "..", "aira", "leads", "web", "views-leads.js"));
 
 let passed = 0;
 let failed = 0;

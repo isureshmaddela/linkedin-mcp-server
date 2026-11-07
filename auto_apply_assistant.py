@@ -141,6 +141,7 @@ from aira.airaapi import careers_tracker
 from aira.leads import mail as leads_mail
 from aira.leads import service as leads_service
 from aira import notify as aira_notify
+from aira import webfiles as aira_webfiles
 from aira.notify import realtime as notify_realtime
 from aira import suite as aira_suite
 from aira.suite import kit as suite_kit
@@ -10092,13 +10093,10 @@ class RequestHandler(BaseHTTPRequestHandler):
         query: dict[str, list[str]],
         user: dict[str, Any] | None,
     ) -> None:
-        name = match.group(1)
-        target = (STATIC_DIR / name).resolve()
-        if (
-            STATIC_DIR.resolve() not in target.parents
-            or target.suffix not in STATIC_TYPES
-            or not target.is_file()
-        ):
+        # The shell's files and each app's own (aira/suite/<app>/web/...): one index of known files, so a name can
+        # only ever reach a file that is meant to be served (aira/webfiles.py).
+        target = aira_webfiles.find(match.group(1))
+        if target is None or target.suffix not in STATIC_TYPES or not target.is_file():
             self.send_error(404)
             return
         self._send_static(target, STATIC_TYPES[target.suffix])

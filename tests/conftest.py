@@ -3,8 +3,10 @@ import os
 import re
 import sys
 from functools import cache
+from pathlib import Path
 
 import pytest
+
 
 os.environ.setdefault(
     "AIRA_SUITE_STRICT", "1"
@@ -14,6 +16,19 @@ os.environ.setdefault(
 )  # Stocks: seeded offline prices; no test reaches Yahoo Finance
 
 from cloud_support import cloud  # noqa: F401  (the hosted-shell fixture, available to every test module)
+
+# Tests live in one folder per app (tests/<app>/: careers, shop, cloud, shared ...), helpers and stubs in tests/.
+# Tests import helpers and each other's fixtures by bare module name (`from test_careers import env`), so every
+# app folder is on the import path, after tests/ itself.
+_TESTS = Path(__file__).resolve().parent
+for _folder in sorted(_TESTS.iterdir()):
+    if (
+        _folder.is_dir()
+        and not _folder.name.startswith((".", "_"))
+        and _folder.name not in {"js", "fixtures"}
+        and str(_folder) not in sys.path
+    ):
+        sys.path.append(str(_folder))
 
 # --- markers -------------------------------------------------------------------------------------------------------
 # `browser` is applied automatically to every test that drives a real Chromium, so `pytest -m "not browser"` is the

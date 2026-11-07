@@ -1,7 +1,7 @@
 """Collect every English string a person can see into auto_apply_assistant/i18n/catalog.json.
 
 Sources:
-* the browser screens (``auto_apply_assistant/*.js``): string and template literals that read as text;
+* the browser screens (``auto_apply_assistant/*.js`` and each app's ``web/*.js``): string and template literals that read as text;
   ``${...}`` in a template becomes ``{0}``, ``{1}``...
 * the server (``aira/``, ``monosage_cloud/``, ``auto_apply_assistant.py``): error messages people read, and the
   values of keys and arguments that are shown on screen (``title``, ``text``, ``label``, ``empty`` ...);
@@ -505,7 +505,14 @@ NOT_SCREEN_TEXT = {"aira/suite/sites/designer.py"}
 
 def collect() -> list[str]:
     strings: set[str] = set()
-    for path in sorted(STATIC.glob("*.js")):
+    # the shell's scripts and each app's own (aira/suite/<app>/web/, aira/leads/web/ ...: aira/webfiles.py)
+    app_scripts = [
+        path
+        for folder in (ROOT / "aira").rglob("web")
+        if folder.is_dir()
+        for path in folder.glob("*.js")
+    ]
+    for path in sorted([*STATIC.glob("*.js"), *app_scripts]):
         for text in from_js(path):
             if looks_like_text(text):
                 strings.add(text.strip())
