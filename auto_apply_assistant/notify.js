@@ -153,7 +153,8 @@
   }
 
   function startOnce() {
-    if (started || !Aira.state.user) return;
+    // Not in the operator console: an operator has no notification centre (only members do).
+    if (started || !Aira.state.user || String(location.hash).startsWith("#/platform")) return;
     started = true;
     register().then(checkPush).then(redraw).catch(() => {});
     refreshCount();

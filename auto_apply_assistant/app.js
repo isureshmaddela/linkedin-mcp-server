@@ -156,7 +156,9 @@ async function api(path, { method = "GET", body, raw = false, silent = false } =
     const data = await response.json().catch(() => ({}));
     if (!response.ok && Aira.cloud && Aira.cloud.onApiError) Aira.cloud.onApiError(response.status, data, path);
     if (!response.ok && Aira.onApiError) Aira.onApiError(response.status, data, path);
-    if (response.status === 401 && !path.startsWith("/api/auth/") && !path.startsWith("/api/platform/auth/") && !path.startsWith("/api/invites/") && !path.startsWith("/api/cloud/")) {
+    // The notification badge and stream run on every page, the operator console's too (no member session there):
+    // their 401 never ends anyone's session.
+    if (response.status === 401 && !path.startsWith("/api/auth/") && !path.startsWith("/api/platform/auth/") && !path.startsWith("/api/invites/") && !path.startsWith("/api/cloud/") && !path.startsWith("/api/notify/")) {
       Aira.showAuth();
       throw new ApiError("Your session ended. Sign in again.", 401, requestId);
     }
