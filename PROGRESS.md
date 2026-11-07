@@ -737,3 +737,40 @@ Built on `feature/careers-ai` (three branches merged: main session, reliability 
 - **Translations**: Hindi and Telugu complete (19,303 strings).
 - **Open (round 2)**: Finish in browser for CAPTCHA/sign-in holds, multi-step generic forms, bulk actions, email and
   browser notifications, AI research and interview prep; Workday and Easy Apply success wording is still English only.
+
+## Platform hardening and Razorpay (2026-11-06 to 11-07)
+Request: implement the platform review (`docs/platform-review.md`), fix every risk, and add Razorpay payments. Built on
+`feature/platform-hardening` from 13 parallel branches plus integration fixes; not pushed.
+- **Urgent fixes (all 15 P0s):** children cannot make themselves adults (age follows the birthday; PIN rules; expiring
+  unlocks); Dating keeps evidence before a match ends; profile photos are uploads only; ad credit only after payment;
+  payout details encrypted; 14-day trial instead of free All access; the stand-in billing refuses public URLs; overage
+  billed per provider period with claims and idempotency keys (February was skipped); signed machine routes off the
+  sign-in limiter; capability tokens masked in logs; password change revokes PATs and OAuth tokens; send-time
+  suppression, RFC 8058 one-click unsubscribe and double opt-in; unpaid shop orders expire and return stock; one SQLite
+  writer in Kubernetes; dependency audit 82 -> 0; personal data out of the tests.
+- **Razorpay:** business payments (`aira/payments/`, `docs/payments-razorpay.md`): payment links with UPI, cards and
+  netbanking for Shop, Bookings (deposits), Courses, Events, Marketing, Sites, Learn, News, Stocks, Play and Studio
+  invoices; signed, idempotent webhook; amount and currency checked; refunds as negative ledger lines; manual UPI link.
+  Plan billing (`AIRA_CLOUD_BILLING=razorpay`, `docs/billing-razorpay.md`): subscriptions, add-ons, INR prices.
+- **Shared services:** notifications (in-app centre, Web Push, email; installable app; server-side reminders), live
+  updates over SSE in both builds (the hosted gateway streams; a new page takes the oldest stream's slot), inbound
+  mail (helpdesk, leads replies, bounces), transactional mail on by default with retries and expiry, one customer
+  record with Send to Sales, revenue per currency and GST, a public address for customer links, the erase-person job
+  (`aira/erasure.py`, legal hold for open reports).
+- **Hosted:** connection cap, socket timeout, drain on SIGTERM, fair job queue, mail through the queue, SSRF-safe
+  outbound calls, idle timeout, sign-up limits and 18+ attestation, owner recovery, `/metrics`, per-app rate buckets,
+  model-call budget, business data in the org export, LinkedIn automation behind `AIRA_CLOUD_LINKEDIN_AUTOMATION`.
+- **Careers:** formatted resume PDFs (or the person's own Word layout), ATS score, missing keywords, skill gaps, STAR
+  stories and interview prep, bulk actions, Workable and Recruitee sources, Finish in browser (local build, F14).
+- **Apps:** Bookings calendar invites and staff iCal free/busy; Shop delivery zones, weights, returns and tracking;
+  Academy lesson files for enrolled learners only; Leads sequences; Sites contact forms to Marketing.
+- **Engineering:** CI on ubuntu-24.04 with Chromium, the cloud extra, JS tests and a blocking audit; `browser`/`slow`
+  markers; coverage of aira and monosage_cloud; ruff format; ty clean; race-safe lazy column migrations
+  (`aira/dbutil.py`); wheel includes the server and its static files.
+- **Migrations:** local `aira/schema.py` 23 (STAR stories, interview prep) and 24 (run hand-over); hosted 11 (billing)
+  and 12 (operations).
+- **Running it:** tests run from a separate venv (`UV_PROJECT_ENVIRONMENT=<scratch venv>`) while 8780 runs, because the
+  server locks `.venv`. `.env.cloud` sets `AIRA_CLOUD_LINKEDIN_AUTOMATION=1` for the local hosted build.
+- **Open:** split the server monolith, one migration runner, one model client, media CDN and HLS, hosted households
+  with parental consent, Social and Videos on Postgres, passkeys, hosted Finish in browser, lazy-loading app scripts;
+  a live Razorpay and Stripe test-mode run, penetration test and legal review.
