@@ -139,6 +139,7 @@
   let counting = null;
   async function refreshCount() {
     if (counting) return counting;
+    if (Aira.state.user && Aira.state.user.kind === "operator") return null;  // the console: no centre to count
     counting = Aira.api(`${BASE}/items?unread=1&limit=1`, { silent: true })
       .then((data) => { N.unread = data.unread || 0; drawBadge(); redraw(); })
       .catch(() => { /* signed out, or a profile to pick first */ })
@@ -154,7 +155,7 @@
 
   function startOnce() {
     // Not in the operator console: an operator has no notification centre (only members do).
-    if (started || !Aira.state.user || String(location.hash).startsWith("#/platform")) return;
+    if (started || !Aira.state.user || Aira.state.user.kind === "operator") return;
     started = true;
     register().then(checkPush).then(redraw).catch(() => {});
     refreshCount();

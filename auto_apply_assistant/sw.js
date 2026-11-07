@@ -8,10 +8,13 @@
  * (the server revalidates every file by ETag). Only when the network fails does a copy of the page shell from this
  * version's cache answer, so Monosage opens offline and says so. The API is never cached. A new sw.js (any change
  * to VERSION) deletes the caches of older versions when it takes over.
+ *
+ * While the device is online, opening a page is left to the browser entirely (the worker does not answer it), so
+ * the page is exactly what the server sent; the worker answers a page only when the device is offline.
  */
 "use strict";
 
-const VERSION = "2026-11-06.1";
+const VERSION = "2026-11-07.1";
 const CACHE = `monosage-shell-${VERSION}`;
 const SHELL = ["/", "/static/app.css", "/static/app.js", "/static/icon-192.png", "/manifest.webmanifest"];
 const OFFLINE = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Monosage</title></head>
@@ -44,6 +47,7 @@ self.addEventListener("fetch", (event) => {
   const { request } = event;
   const kind = kindOf(request);
   if (!kind) return; // the browser handles it as if there were no service worker
+  if (kind === "shell" && self.navigator.onLine !== false) return; // online: the page comes straight from the server
   const key = kind === "shell" ? "/" : request;
   event.respondWith((async () => {
     try {

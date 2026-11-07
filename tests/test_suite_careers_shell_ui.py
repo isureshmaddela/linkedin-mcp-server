@@ -401,7 +401,7 @@ def test_the_left_menu_follows_a_job_search_and_old_links_still_work(browser, en
     page.wait_for_url(re.compile(r"#/profile\?tab=resume"))
 
     page.click("#primaryNav a[data-section='interviews']")
-    assert folders(page, "interviews") == ["Upcoming", "Past", "All"]
+    assert folders(page, "interviews") == ["Upcoming", "Past", "All", "STAR stories"]
     page.locator(".shell-subnav[data-section='interviews'] a", has_text="Past").click()
     page.wait_for_url(re.compile(r"#/interviews\?tab=past"))
     page.wait_for_selector("#main .empty:has-text('No past interviews')")

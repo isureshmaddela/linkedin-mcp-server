@@ -969,7 +969,8 @@
       subtitle: tabId === "search" ? "Leads, subscribers, posts, campaigns, forms, links and newsletters that match, and your saved sales leads." : meta.about,
       actions: tabId === "overview" && canCreate() ? [S.button("Write with AI", () => writeWithAi(), { kind: "secondary", icon: "ai" }), S.button("New post", () => editPost({ status: "draft" }), { icon: "plus" })] : [],
     });
-    document.title = `${title} · Marketing · Monosage`;
+    // Only while Marketing is still the open page: a quick move to Leads must keep its own title.
+    if (String(location.hash).startsWith("#/marketing")) document.title = `${title} · Marketing · Monosage`;
     const tab = S.tabs(body, route, "marketing", TABS, tabId);
     const panel = h("div", { class: "suite-body" });
     body.append(panel);
