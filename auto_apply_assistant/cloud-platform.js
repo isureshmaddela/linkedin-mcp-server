@@ -386,7 +386,7 @@
     const invoices = (inv.invoices || []).map((i) => h("tr", {}, td(fmt.date(i.created_at)), td(titleCase(i.kind)), td(dollars(i.amount_cents), "num"), td(chip(i.status, i.status === "paid" ? "ok" : "warn")), td(isAdmin() && i.status !== "paid" ? h("button", { type: "button", class: "btn sm secondary", text: "Mark paid", onclick: async () => { if (await Aira.confirm({ title: "Mark this invoice paid?", message: `${dollars(i.amount_cents)} ${i.kind} invoice. A past-due organization becomes active again.`, confirmLabel: "Mark paid" })) { await post("invoice-paid", { invoice_id: i.invoice_id }); done("Invoice marked paid."); } } }) : null)));
     const audit = (t.operator_audit || []).map((e) => h("tr", {}, td(ts(e.at)), td(e.operator_label || "system"), td(e.action), td(h("code", { class: "cp-detail", text: JSON.stringify(e.detail) }))));
 
-    put(stage, 
+    put(stage,
       h("div", { class: "page-head" }, h("div", {}, h("a", { href: "#/platform/tenants", class: "muted", text: "← All tenants" }), h("h1", { text: t.name }), h("p", { class: "muted", text: `${t.slug} · ${t.region} · created ${fmt.date(t.created_at)}` })), h("div", { class: "cp-head-state" }, statusBadge(t.status), t.org_status === "suspended" ? chip("suspended", "danger") : null, flagChips(t.flags))),
       readonlyNote(),
       h("div", { class: "grid cols-4 cp-tiles" },

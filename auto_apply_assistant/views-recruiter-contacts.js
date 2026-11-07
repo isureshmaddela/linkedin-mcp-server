@@ -17,7 +17,7 @@
   Aira.renderRecruiterFind = async (host) => {
     const results = h("div", { class: "panel" });
     const again = h("button", { type: "button", class: "btn secondary sm", text: "Look again" });
-    put(host, 
+    put(host,
       h("div", { class: "card rcx-intro" },
         h("h3", { text: "Find recruiters" }),
         h("p", { class: "muted", text: "Monosage reads your saved LinkedIn conversations, imported emails and interview participants, and proposes new contacts or updates to the ones you have. Every detail comes from that text. Nothing is looked up or guessed, so a person without an email address in the text stays without one." }),
@@ -81,7 +81,7 @@
       }));
       const all = h("button", { type: "button", class: "btn ghost sm", text: "Select all", onclick: () => { boxes.forEach((box) => { box.checked = true; }); count(); } });
       const none = h("button", { type: "button", class: "btn ghost sm", text: "Select none", onclick: () => { boxes.forEach((box) => { box.checked = false; }); count(); } });
-      put(results, 
+      put(results,
         h("div", { class: "panel-head" }, h("h3", { text: "People found" }), h("small", { class: "muted", text: String(data.proposals.length) })),
         summary,
         h("div", { class: "btn-row rcx-toolbar" }, all, none, saveButton),
@@ -113,7 +113,7 @@
     let data;
     const reload = () => router.render();
     try { data = await api("/api/recruiters/lists"); } catch (error) { put(host, ui.error(error, reload)); return; }
-    put(side, 
+    put(side,
       h("div", { class: "panel-head" }, h("h3", { text: "Start from" })),
       h("div", { class: "panel-body" },
       h("p", { class: "muted small", style: { marginTop: "0" }, text: "A list is a saved filter. It updates by itself as your contacts change." }),
@@ -141,7 +141,7 @@
         h("td", {}, ...sourceBadges(p.sources)),
         h("td", { text: p.last_contact_at ? fmt.date(p.last_contact_at) : "—" }))))) : ui.empty("Nobody matches this list yet", "Change the filters, or add contacts from Find recruiters.");
     const withEmail = people.filter((p) => p.email).length;
-    put(box, 
+    put(box,
       h("div", { class: "panel-head" }, h("h3", { text: list.name }), h("small", { class: "muted", text: fmt.plural(people.length, "contact") })),
       h("p", { class: "muted small", text: `${filterText(list.filters)}. ${people.length - withEmail ? `${people.length - withEmail} of them have no email address and are LinkedIn only.` : ""}`.trim() }),
       h("div", { class: "btn-row rcx-toolbar" },
@@ -226,7 +226,7 @@
             item.reason ? h("p", { class: "small muted", text: item.reason }) : null,
             item.body ? h("details", { class: "rcx-letter" }, h("summary", { text: item.subject }), h("pre", { text: item.body })) : null));
       });
-      put(results, 
+      put(results,
         h("p", { class: "small", role: "status", text: `${plan.ready} ready · ${plan.skipped} skipped · ${plan.later} for tomorrow · ${plan.linkedin_only} LinkedIn only. Sent today: ${plan.sent_today} of ${plan.daily_limit}.` }),
         plan.linkedin_only ? h("p", { class: "muted small", text: "LinkedIn-only contacts have no email address in your records. Monosage does not look addresses up or guess them; use LinkedIn drafts for them." }) : null,
         h("div", { class: "list" }, ...rows));
@@ -268,7 +268,7 @@
     previewButton.addEventListener("click", () => withBusy(previewButton, async () => {
       const plan = await api(`/api/recruiters/lists/${list.list_id}/linkedin/preview`, { method: "POST", body: { body: text.value } });
       boxes = [];
-      put(results, 
+      put(results,
         h("p", { class: "small", role: "status", text: `${plan.ready} ready · ${plan.skipped} skipped.` }),
         h("div", { class: "list" }, ...plan.items.map((item) => {
           const box = item.status === "ready" ? h("input", { type: "checkbox", checked: true, "aria-label": `Draft for ${item.name}`, dataset: { id: item.recruiter_id } }) : null;
@@ -289,7 +289,7 @@
       const ids = boxes.filter((box) => box.checked).map((box) => box.dataset.id);
       const result = await api(`/api/recruiters/lists/${list.list_id}/linkedin/drafts`, { method: "POST", body: { body: text.value, recruiter_ids: ids } });
       toast(`Saved ${fmt.plural(result.drafted, "draft")}. Nothing was sent.`, "success");
-      put(results, 
+      put(results,
         h("p", { class: "small", role: "status", text: "Open each conversation, read the draft and press Send yourself. Monosage never sends these for you." }),
         h("ul", { class: "inline-list rcx-drafted" }, ...result.drafts.map((d) => h("li", {}, h("a", { href: d.link, text: `${d.name}: open conversation`, onclick: () => closeDialog() })))));
       boxes = [];
@@ -321,7 +321,7 @@
         drawSummary(result.summary || summary, result.message, result.model_ready);
         if (result.message) toast(result.message, "error");
       }));
-      put(summaryBox, 
+      put(summaryBox,
         summary ? h("div", { class: "rcx-summary-text" },
           h("p", {}, h("strong", { text: "Relationship: " }), summary.relationship || "—"),
           h("p", {}, h("strong", { text: "Next step: " }), summary.next_step || "—"),
