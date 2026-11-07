@@ -505,6 +505,11 @@ def erase_videos(org_id: str, member_ids: tuple[str, ...] = ()) -> int:
             count = videos.erase_channels(sc, ids)
             if not member_ids:
                 ads.erase_advertiser(sc, org_id)
+                from aira.suite.academy import files as lesson_files
+
+                # its courses' lesson files are media files too
+                lesson_files.erase_home(sc, org_id)
+                sc.commit()
             return count
     except Exception:  # noqa: BLE001 - deletion presses on
         logger.exception("Could not remove Videos data for organization %s", org_id)

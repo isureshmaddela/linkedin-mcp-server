@@ -8,6 +8,8 @@
  * academy/certificate  a certificate anyone can verify, ready to print
  * academy/catalog      every published course and upcoming event of the business on one page (passes ?ref on)
  * academy/partner      a referral partner's page: their links to share, what they earned and were paid
+ * A lesson's uploaded files (videos, audio, PDFs) come with private addresses that work for a few hours and only
+ * while the student may have the lesson (aira/suite/academy/files.py); they play here, a PDF opens in a new tab.
  * Errors from a form show next to that form and clear on the next try. DOM is built with ctx.h and text only.
  */
 "use strict";
@@ -18,6 +20,14 @@
 
   const paragraphs = (h, text) => String(text || "").split(/\n\s*\n/).map((part) => part.trim()).filter(Boolean).map((part) => h("p", { class: "pub-pre", text: part }));
   const https = (url) => /^https:\/\//i.test(String(url || ""));
+  // Only this server's own signed lesson-file addresses are played or linked.
+  const ownFile = (url) => /^\/api\/public\/[A-Za-z0-9_-]{40,64}\/lesson-file\/[0-9a-f]{32}\?e=\d+&s=[0-9a-f]{32}$/.test(String(url || ""));
+  const lessonFiles = (h, files) => (files || []).filter((file) => ownFile(file.url)).map((file) => {
+    const label = h("div", { class: "pub-muted pub-hint", style: wrap, text: file.name || "" });
+    if (file.kind === "video") return h("div", { style: { display: "grid", gap: "4px" } }, h("video", { src: file.url, controls: true, preload: "metadata", playsinline: true, controlsList: "nodownload", "aria-label": file.name || "Lesson video", style: { width: "100%", maxHeight: "70vh", borderRadius: "8px", background: "#000" } }), label);
+    if (file.kind === "audio") return h("div", { style: { display: "grid", gap: "4px" } }, h("audio", { src: file.url, controls: true, preload: "metadata", controlsList: "nodownload", "aria-label": file.name || "Lesson audio", style: { width: "100%" } }), label);
+    return h("a", { class: "pub-btn secondary", href: file.url, target: "_blank", rel: "noopener noreferrer", style: wrap, text: `Open the PDF${file.name ? `: ${file.name}` : ""}` });
+  });
   const level = (value) => ({ beginner: "Beginner", intermediate: "Intermediate", advanced: "Advanced" })[value] || "All levels";
   const progressBar = (h, percent) => h("div", { class: "pub-progress", role: "progressbar", "aria-valuemin": "0", "aria-valuemax": "100", "aria-valuenow": String(percent), "aria-label": `${percent}% complete` }, h("span", { style: { width: `${percent}%` } }));
   const starText = (rating) => { const n = Math.max(0, Math.min(5, Math.round(Number(rating) || 0))); return "★".repeat(n) + "☆".repeat(5 - n); };
@@ -80,7 +90,7 @@
       for (const lesson of module.lessons) {
         const item = h("li", {}, h("span", { text: lesson.title }), lesson.minutes ? h("span", { class: "pub-muted", text: ` · ${lesson.minutes} min` }) : null, lesson.has_quiz ? h("span", { class: "pub-muted", text: " · quiz" }) : null);
         if (lesson.preview) {
-          const body = h("div", { hidden: true, style: { marginTop: "6px" } }, ...paragraphs(h, lesson.body), https(lesson.video_url) ? h("a", { href: lesson.video_url, target: "_blank", rel: "noopener noreferrer", text: "Watch the video" }) : null);
+          const body = h("div", { hidden: true, style: { marginTop: "6px", display: "grid", gap: "8px" } }, ...paragraphs(h, lesson.body), ...lessonFiles(h, lesson.files), https(lesson.video_url) ? h("a", { href: lesson.video_url, target: "_blank", rel: "noopener noreferrer", text: "Watch the video" }) : null);
           const toggle = h("button", { type: "button", class: "pub-btn ghost", "aria-expanded": "false", style: { minHeight: "30px", padding: "2px 10px", marginLeft: "8px" }, text: "Free preview", onclick: () => { body.hidden = !body.hidden; toggle.setAttribute("aria-expanded", String(!body.hidden)); } });
           item.append(toggle, body);
         }
@@ -200,7 +210,7 @@
     const block = h("div", { class: "pub-item" }, header);
     if (lesson.locked) return block;
     const body = h("div", { class: "pub-form", hidden: openLesson !== lesson.id });
-    body.append(...paragraphs(h, lesson.body));
+    body.append(...paragraphs(h, lesson.body), ...lessonFiles(h, lesson.files));
     if (https(lesson.video_url)) body.append(h("a", { class: "pub-btn secondary", href: lesson.video_url, target: "_blank", rel: "noopener noreferrer", text: "Watch the video" }));
     if (learning) {
       if (lesson.questions && lesson.questions.length) body.append(quiz(h, ctx, lesson));

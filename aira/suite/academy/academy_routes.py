@@ -1,8 +1,16 @@
 """Academy routes (``/api/academy/*``), its public pages (a course page, a student's own page, a certificate)
-and its Business hub checklist and numbers. Loaded by :func:`aira.suite.load_apps`."""
+and its Business hub checklist and numbers. Loaded by :func:`aira.suite.load_apps`.
+
+A lesson's uploaded files (aira.suite.academy.files) are sent only through signed addresses: the editor's under
+``/api/academy/lesson-files/<id>`` (a signed-in member of the business), a visitor's under
+``/api/public/<token>/lesson-file/<id>`` (a student's own page or, for free previews, the course page)."""
 
 from __future__ import annotations
 
+import base64
+import binascii
+from collections.abc import Iterator
+from contextlib import closing, contextmanager
 from typing import Any
 
 from aira.airaapi.http import Raw, Request, aira_route
@@ -16,10 +24,12 @@ from aira.suite.academy import (
     service,
     store,
 )
+from aira.suite.academy import files as lesson_files
 from aira.suite.academy.store import APP
 
 BASE = "/api/academy"
 ID = "([0-9a-f]{32})"
+TOKEN = f"({public.TOKEN_PATTERN})"
 
 
 def _open(request: Request) -> Any:
@@ -85,7 +95,9 @@ def courses_create(request: Request) -> tuple[int, dict[str, Any]]:
 @aira_route("GET", f"{BASE}/courses/{ID}")
 def course_get(request: Request) -> tuple[int, dict[str, Any]]:
     with _open(request) as connection:
-        return 200, service.course_detail(connection, request.match.group(1))
+        return 200, service.course_detail(
+            connection, request.match.group(1), home=lesson_files.home_of(request)
+        )
 
 
 @aira_route("PATCH", f"{BASE}/courses/{ID}")
@@ -227,6 +239,167 @@ def lesson_quiz(request: Request) -> tuple[int, dict[str, Any]]:
 def quiz_draft(request: Request) -> tuple[int, dict[str, Any]]:
     with _open(request) as connection:
         return 200, service.quiz_draft(connection, request.match.group(1))
+
+
+# ---------------------------------------------------------------------------
+# a lesson's files: uploaded in parts (the media store of Videos), sent only through signed addresses
+# ---------------------------------------------------------------------------
+
+
+@contextmanager
+def _media(request: Request) -> Iterator[tuple[Any, Any, str]]:
+    """(the account's database, the media store's database, the account the files count against)."""
+    from aira.suite.videos import db as videos_db
+
+    with closing(_open(request)) as connection, closing(videos_db.connect()) as sc:
+        yield connection, sc, lesson_files.home_of(request)
+
+
+@aira_route("POST", f"{BASE}/lessons/{ID}/uploads")
+def lesson_upload_start(request: Request) -> tuple[int, dict[str, Any]]:
+    """Begin uploading a video, audio or a PDF to a lesson: ``{kind, filename, size}``; the parts follow."""
+    with _media(request) as (connection, sc, home):
+        upload = lesson_files.start(
+            connection,
+            sc,
+            home,
+            request.match.group(1),
+            request.payload.get("kind"),
+            request.payload.get("filename"),
+            request.payload.get("size"),
+        )
+    return 201, {"upload": upload}
+
+
+@aira_route("GET", f"{BASE}/lessons/{ID}/uploads/{ID}")
+def lesson_upload_get(request: Request) -> tuple[int, dict[str, Any]]:
+    from aira.suite.videos import media
+
+    with _media(request) as (connection, sc, home):
+        store.lesson(connection, request.match.group(1))
+        return 200, {
+            "upload": media.upload(
+                sc, request.match.group(2), lesson_files.owner_key(home)
+            )
+        }
+
+
+def _wrong_file(sc: Any, upload_id: str, owner: str, payload: Any) -> str:
+    """Why the first part is not the kind of file the upload was started as ('' when it is, or cannot be told yet),
+    asked before the part is written (as Ads does) so the browser hears it at once instead of retrying the part."""
+    from aira.suite.videos import media
+
+    if str(payload.get("offset")) != "0":
+        return ""
+    try:
+        head = base64.b64decode(str(payload.get("data") or "")[:88], validate=True)
+    except (ValueError, binascii.Error):
+        return ""  # writing the part says what is wrong with it
+    try:
+        media.sniff(head[:64], media.upload(sc, upload_id, owner)["kind"])
+    except ValueError as error:
+        return str(error)
+    return ""
+
+
+@aira_route("POST", f"{BASE}/lessons/{ID}/uploads/{ID}/chunk")
+def lesson_upload_chunk(request: Request) -> tuple[int, dict[str, Any]]:
+    from aira.suite.videos import media
+
+    upload_id = request.match.group(2)
+    with _media(request) as (connection, sc, home):
+        store.lesson(connection, request.match.group(1))
+        owner = lesson_files.owner_key(home)
+        wrong = _wrong_file(sc, upload_id, owner, request.payload)
+        if wrong:
+            # 422, not 400: the shared uploader retries a 400 but stops at once on any other refusal
+            media.cancel(sc, upload_id, owner)
+            return 422, {"error": wrong, "code": "wrong_file"}
+        return 200, {
+            "upload": media.append(
+                sc,
+                upload_id,
+                owner,
+                request.payload.get("offset"),
+                request.payload.get("data"),
+            )
+        }
+
+
+@aira_route("POST", f"{BASE}/lessons/{ID}/uploads/{ID}/complete")
+def lesson_upload_complete(request: Request) -> tuple[int, dict[str, Any]]:
+    """Finish the upload and add the file to the lesson."""
+    lesson_id = request.match.group(1)
+    with _media(request) as (connection, sc, home):
+        found = lesson_files.attach(
+            connection, sc, home, lesson_id, request.match.group(2)
+        )
+    request.audit(
+        "academy.lesson_file_add", "lesson", lesson_id, {"kind": found["kind"]}
+    )
+    return 201, {"file": found}
+
+
+@aira_route("DELETE", f"{BASE}/lessons/{ID}/uploads/{ID}")
+def lesson_upload_cancel(request: Request) -> tuple[int, dict[str, Any]]:
+    from aira.suite.videos import media
+
+    with _media(request) as (connection, sc, home):
+        store.lesson(connection, request.match.group(1))
+        media.cancel(sc, request.match.group(2), lesson_files.owner_key(home))
+    return 200, {"cancelled": True}
+
+
+@aira_route("DELETE", f"{BASE}/lesson-files/{ID}")
+def lesson_file_delete(request: Request) -> tuple[int, dict[str, Any]]:
+    with closing(_open(request)) as connection:
+        found = lesson_files.remove(connection, request.match.group(1))
+    request.audit("academy.lesson_file_remove", "lesson", found["lesson_id"])
+    return 200, {"deleted": True}
+
+
+def _file_response(sc: Any, found: dict[str, Any], request: Request) -> Raw:
+    status, body, mime, headers = lesson_files.send(sc, found, request.header("Range"))
+    return Raw(status, body, mime, headers=headers)
+
+
+@aira_route("GET", f"{BASE}/lesson-files/{ID}")
+def lesson_file_get(request: Request) -> Raw:
+    """A lesson's file for the business's own editor, by the signed address the course view gave (a <video> sends
+    no profile header). In HTTP ranges, so seeking works."""
+    with _media(request) as (connection, sc, home):
+        found = lesson_files.for_staff(
+            connection,
+            sc,
+            home,
+            request.match.group(1),
+            request.q("e"),
+            request.q("s"),
+        )
+        return _file_response(sc, found, request)
+
+
+@aira_route("GET", f"/api/public/{TOKEN}/lesson-file/{ID}", auth="public_link")
+def public_lesson_file(request: Request) -> Raw:
+    """A lesson's file for a visitor: on a student's own page while their enrolment gives them the lesson, on the
+    course page for a free preview. The signed address says who it was made for and until when; the enrolment,
+    the link and the lesson are checked again on every request."""
+    from aira.suite.videos import db as videos_db
+
+    with closing(request.connect()) as connection, closing(videos_db.connect()) as sc:
+        link = public.resolve(connection, request.match.group(1))
+        if link["app"] != APP:
+            raise LookupError(lesson_files.NOT_FOUND)
+        store.ensure(connection)
+        found = lesson_files.for_visitor(
+            connection,
+            sc,
+            link,
+            request.match.group(2),
+            request.q("e"),
+            request.q("s"),
+        )
+        return _file_response(sc, found, request)
 
 
 @aira_route("POST", f"{BASE}/outline-draft")
@@ -664,7 +837,7 @@ def _partner_page(connection: Any, link: dict[str, Any]) -> dict[str, Any]:
 def _course_page(connection: Any, link: dict[str, Any]) -> dict[str, Any]:
     store.ensure(connection)
     return {
-        **service.course_page(connection, link["ref_id"]),
+        **service.course_page(connection, link["ref_id"], link["token"]),
         "ref_scope": partners.ref_scope(connection),
     }
 
@@ -706,7 +879,7 @@ def _course_enrol(
 @public.page(APP, "student")
 def _student_page(connection: Any, link: dict[str, Any]) -> dict[str, Any]:
     store.ensure(connection)
-    return service.student_view(connection, link["ref_id"])
+    return service.student_view(connection, link["ref_id"], link["token"])
 
 
 @public.action(APP, "student", "complete")

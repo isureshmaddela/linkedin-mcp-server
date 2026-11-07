@@ -10,6 +10,8 @@
 .ac-lesson-main { display: grid; gap: 2px; min-width: 0; }
 .ac-module { display: grid; gap: 10px; }
 .ac-module-head { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; align-items: center; }
+.ac-file { display: flex; justify-content: space-between; gap: 10px; flex-wrap: wrap; align-items: center; padding: 8px 10px; }
+.ac-file strong { overflow-wrap: anywhere; }
 .ac-progress { height: 8px; border-radius: 999px; background: var(--surface-2); overflow: hidden; }
 .ac-progress > span { display: block; height: 100%; background: var(--brand); }
 

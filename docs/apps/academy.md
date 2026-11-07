@@ -10,8 +10,14 @@ coaches manage it, auditors can read it.
    optionally an **enrolment code** (students must type it: useful for a class or a partner) and a number of
    **seats**.
    Or **Draft with AI**: give a topic and Aira drafts modules and lessons (a template when no writing model runs).
-2. In the course, add **modules** and **lessons**: text (blank lines start a paragraph), a video link, minutes and
-   a **free preview** flag (anyone can read a preview on the course page). Move modules and lessons with the arrows.
+2. In the course, add **modules** and **lessons**: text (blank lines start a paragraph), minutes and a **free
+   preview** flag (anyone can read a preview on the course page). Move modules and lessons with the arrows.
+   **Add files** uploads a lesson's videos (MP4, MOV, WebM, up to 2 GB), audio (MP3, M4A, Ogg, WAV, FLAC, up to
+   500 MB) and PDFs (up to 50 MB), at most 10 per lesson. They are for the course's students only: each opens
+   through a private address that lasts a few hours and is checked again on every request, so a refunded student
+   or a student whose link was turned off loses it at once (a free preview's files also show on the course page).
+   A lesson may still link to a video elsewhere; the editor marks it **external link**, since anyone with that link
+   can watch it.
 3. Add a **quiz** to any lesson: multiple choice, 2 to 6 options, one right answer, an explanation and a pass
    mark. **Draft from the lesson** writes questions from the lesson text. Quizzes are graded on the server: the
    right options are never sent to the student's browser, and are shown only once the quiz is passed.
@@ -62,3 +68,10 @@ Everything the screen does is under `/api/academy/*` (courses, modules, lessons,
 students, cohorts, announcements, nudges, overview). Public pages: `academy/course` (action `enrol`, with an optional
 partner `ref`), `academy/student` (actions `complete`, `quiz`, `review`), `academy/certificate`, `academy/catalog`
 and `academy/partner`.
+
+Lesson files (`aira/suite/academy/files.py`) use the resumable uploads of Videos under
+`/api/academy/lessons/<id>/uploads` (start, `/<upload>`, `/<upload>/chunk`, `/<upload>/complete`, cancel) and are
+removed with `DELETE /api/academy/lesson-files/<id>`. They are served, with HTTP ranges, only at signed addresses:
+`GET /api/academy/lesson-files/<id>?e=&s=` for the editor and `GET /api/public/<token>/lesson-file/<id>?e=&s=` on
+a student's page or, for free previews, the course page. The signature is an HMAC over the file, who the address was
+made for (an enrolment, a course page or the account, never a name or an email) and its expiry.
