@@ -312,6 +312,11 @@ POLICY: dict[str, Rule] = {
     "api_autopilot_run_submit": write(
         "applications.submit", kind="automation", audit=True
     ),
+    # Finish in browser opens a visible window on the person's own computer (aira/handoff.py). A hosted run's
+    # browser lives on a worker the sign-in broker cannot attach to (docs/careers-maturity-scope.md, F14): hosted
+    # Needs you links to the employer's page instead.
+    "api_autopilot_run_finish": DENY,
+    "api_autopilot_run_finish_decision": DENY,
     "api_job_auto_apply": write("search.run", kind="auto_apply", audit=True),
     "api_preparation_approve": write("applications.submit", audit=True),
     "api_job_apply": write("applications.submit", audit=True),

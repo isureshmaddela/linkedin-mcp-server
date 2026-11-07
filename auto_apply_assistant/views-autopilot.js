@@ -18,6 +18,18 @@
     skipped: ["Skipped", ""],
     interrupted: ["Check the site", "warn"],
   };
+  // Steps only the person can do (F14 Finish in browser), by the run's hold.
+  const HOLD_TEXT = {
+    captcha: ["A CAPTCHA is on the form.", "Monosage filled everything else. It never solves CAPTCHAs itself."],
+    sign_in: ["The site asks you to sign in.", "Monosage never signs in to employer sites for you."],
+    verification: ["The site sent you a code.", "It wants a code it sent to your email or phone. Monosage never reads your messages."],
+  };
+  const HOLD_STEP = { captcha: "the CAPTCHA", sign_in: "the sign-in", verification: "the code" };
+  const HANDOFF_ENDED = {
+    gave_up: "You gave up on Finish in browser last time.",
+    timed_out: "Finish in browser timed out last time: the window closes after 15 minutes.",
+    closed: "The browser window was closed before the step was done.",
+  };
   const intervalLabel = (minutes) => (INTERVALS.find(([value]) => value === minutes) || [0, `Every ${minutes} minutes`])[1];
   const statusBadge = (status) => { const [label, tone] = STATUS[status] || [fmt.stage(status), ""]; return h("span", { class: `badge aap-status ${tone}`, text: label }); };
   // A run waiting for a retry says when; any run tried more than once says which try it is on.
@@ -128,11 +140,12 @@
     function openCard(run) {
       const actions = h("div", { class: "btn-row" });
       const body = h("div", { class: "aap-open-body" });
-      const head = h("header", {}, h("div", {}, h("button", { type: "button", class: "aap-job-link", text: jobLabel(run), onclick: () => Aira.openJob(run.job_id) }), h("div", { class: "aap-meta" }, statusBadge(run.status), run.score != null ? h("span", { class: "badge", text: `${Math.round(run.score)}% match` }) : null, run.ats ? h("span", { class: "badge source", text: run.ats }) : null, h("small", { class: "muted", text: fmt.ago(run.finished_at || run.created_at) }))));
+      const head = h("header", {}, h("div", {}, h("button", { type: "button", class: "aap-job-link", text: jobLabel(run), onclick: () => Aira.openJob(run.job_id) }), h("div", { class: "aap-meta" }, run.handoff_live ? h("span", { class: "badge aap-status info", text: "In the browser window" }) : run.status === "needs_review" && HOLD_TEXT[run.hold] && !(run.unanswered || []).length ? h("span", { class: "badge aap-status warn", text: "A step needs you" }) : statusBadge(run.status), run.score != null ? h("span", { class: "badge", text: `${Math.round(run.score)}% match` }) : null, run.ats ? h("span", { class: "badge source", text: run.ats }) : null, h("small", { class: "muted", text: fmt.ago(run.finished_at || run.created_at) }))));
       const skip = h("button", { type: "button", class: "btn ghost sm", text: "Skip this job", onclick: (event) => withBusy(event.currentTarget, async () => { await api(`${BASE}/runs/${run.run_id}/skip`, { method: "POST", body: {} }); toast("Skipped. Monosage will not apply to it.", "success"); load(); }) });
       const site = run.application_url ? h("a", { class: "btn secondary sm", href: run.application_url, target: "_blank", rel: "noopener noreferrer", text: "Open the application ↗" }) : null;
       const applied = h("button", { type: "button", class: "btn secondary sm", text: "I applied", onclick: () => appliedDialog(run) });
       const details = h("button", { type: "button", class: "btn ghost sm", text: "Details", onclick: () => runDrawer(run.run_id) });
+      if (run.handoff_live) return liveCard(run, head, details);
       if (run.status === "interrupted") {
         body.append(h("p", { class: "note warn", text: run.error || "Monosage could not confirm whether this was sent; check the site, then choose I applied or Try again." }));
         const again = h("button", { type: "button", class: "btn sm", text: "Try again" });
@@ -160,6 +173,7 @@
         actions.append(submit, run.screenshot_document_id ? h("button", { type: "button", class: "btn secondary sm", text: "See the filled form", onclick: () => runDrawer(run.run_id) }) : null, skip);
       } else {
         const questions = (run.unanswered || []).filter((q) => q.label);
+        if (HOLD_TEXT[run.hold] && !questions.length) return holdCard(run, head, { applied, details, skip });
         const drafted = questions.filter((q) => q.draft && q.draft.value);
         if (run.error && !questions.length) body.append(h("p", { class: "note warn", text: run.error }));
         if (drafted.length) body.append(h("p", { class: "note", text: `Monosage drafted ${drafted.length} answer${drafted.length === 1 ? "" : "s"} from your resume. Check and edit ${drafted.length === 1 ? "it" : "them"}, then approve.` }));
@@ -193,6 +207,54 @@
         actions.append(h("a", { class: "btn secondary sm", href: run.application_url || "#", target: "_blank", rel: "noopener noreferrer", text: "Apply on the site ↗" }), applied, details, skip);
       }
       return h("article", { class: `aap-open ${run.status}`, "aria-label": jobLabel(run) }, head, body, actions);
+    }
+
+    // A run held for a step only the person can do (F14). Locally: Finish in browser opens the filled form in a
+    // window on this computer and carries on once the step is done. Hosted: the employer's page, then I applied.
+    function holdCard(run, head, { applied, details, skip }) {
+      const [title, detail] = HOLD_TEXT[run.hold];
+      const step = HOLD_STEP[run.hold];
+      const last = run.handoff || {};
+      const body = h("div", { class: "aap-open-body" }, h("p", { class: "note warn" }, h("strong", { text: title }), " ", h("span", { text: detail })));
+      if (last.result === "needs_review" && HANDOFF_ENDED[last.outcome]) body.append(h("p", { class: "muted aap-handoff-last", text: HANDOFF_ENDED[last.outcome] }));
+      const employer = run.application_url ? h("a", { class: "btn secondary sm", href: run.application_url, target: "_blank", rel: "noopener noreferrer", text: "Open the employer's page ↗" }) : null;
+      const actions = h("div", { class: "btn-row" });
+      if (data.status.finish_in_browser) {
+        body.append(h("p", { class: "muted", text: `Finish in browser opens the filled form in a window on this computer. Do ${step} there; Monosage notices and submits the application.` }));
+        const finish = h("button", { type: "button", class: "btn", text: "Finish in browser" });
+        finish.addEventListener("click", () => withBusy(finish, async () => {
+          if (!(await Aira.confirm({ title: "Finish in a browser window?", message: `${jobLabel(run)}. Monosage opens the employer's form in a window on this computer, fills it again and waits while you do ${step}. Then it submits the application. The window closes after 15 minutes.`, confirmLabel: "Open the window" }))) return;
+          await api(`${BASE}/runs/${run.run_id}/finish`, { method: "POST", body: {} });
+          afterStart("Opening the browser window…");
+        }));
+        actions.append(finish, employer, applied, details, skip);
+      } else {
+        body.append(h("p", { class: "muted", text: `Open the employer's page, do ${step} and submit there, then choose I applied.` }));
+        if (employer) employer.className = "btn sm";
+        actions.append(employer, applied, details, skip);
+      }
+      return h("article", { class: `aap-open ${run.status} hold`, "aria-label": jobLabel(run), "data-hold": run.hold }, head, body, actions);
+    }
+
+    // Finish in browser is open: the window waits for the person, with I'm done and Give up as fallbacks.
+    function liveCard(run, head, details) {
+      const live = run.handoff_live;
+      const step = HOLD_STEP[live.kind] || HOLD_STEP[run.hold] || "the step";
+      const minutes = Math.max(1, Math.ceil((live.seconds_left || 0) / 60));
+      const text = live.state === "waiting" ? `Waiting for you in the browser window: do ${step} there. Monosage carries on by itself once it is done (about ${minutes} min left).`
+        : live.state === "resuming" ? "Carrying on with the application…" : "Opening the browser window with your filled form…";
+      const body = h("div", { class: "aap-open-body" }, h("p", { class: "note aap-handoff-live", role: "status", text }));
+      const decide = (choice) => api(`${BASE}/runs/${run.run_id}/finish/decision`, { method: "POST", body: { choice } });
+      const done = h("button", { type: "button", class: "btn sm", text: "I'm done", disabled: live.state !== "waiting" });
+      done.addEventListener("click", () => withBusy(done, async () => { await decide("done"); toast("Monosage carries on with the application.", "success"); load({ quiet: true }); }));
+      const giveUp = h("button", { type: "button", class: "btn ghost sm", text: "Give up" });
+      giveUp.addEventListener("click", () => withBusy(giveUp, async () => {
+        if (!(await Aira.confirm({ title: "Give up on this step?", message: "Monosage closes the window. Nothing is submitted; the application waits here for you.", confirmLabel: "Give up" }))) return;
+        await decide("give_up");
+        toast("Closing the window. The application waits here.", "success");
+        load({ quiet: true });
+      }));
+      return h("article", { class: `aap-open handoff ${live.state}`, "aria-label": jobLabel(run), "data-handoff": live.state }, head, body, h("div", { class: "btn-row" }, done, giveUp, details));
     }
 
     // "I applied": the person applied on the site; Monosage records it with the day (today unless they change it).

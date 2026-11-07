@@ -1,5 +1,5 @@
-"""Media files for Videos and Ads: chunked, resumable uploads, type checks by content, a free-space reserve,
-range reads for playback and signed addresses.
+"""Media files for Videos, Ads and Courses' lesson files: chunked, resumable uploads, type checks by content, a
+free-space reserve, range reads for playback and signed addresses.
 
 * **Where files live.** ``AIRA_MEDIA_DIR`` when it is set, otherwise the folder the host chose (the single-user
   build: ``media`` next to its databases; the hosted build: ``media`` in its data folder). Files are stored as
@@ -9,7 +9,9 @@ range reads for playback and signed addresses.
 * **Uploads** come in parts of up to :data:`CHUNK_BYTES` (base64 in JSON, so every build's request handling and
   limits apply unchanged). The first part is checked by its leading bytes: MP4 and MOV (ISO base media), WebM
   and Matroska for video; JPEG, PNG and WebP for pictures; WebVTT for captions. A part must start where the last
-  one ended, so an interrupted upload resumes from ``received``. Nothing is ever held whole in memory.
+  one ended, so an interrupted upload resumes from ``received``. Nothing is ever held whole in memory. Videos
+  and Ads take :data:`KINDS`; Courses also takes ``audio`` (MP3, M4A, Ogg, WAV, FLAC, WebM audio) and
+  ``document`` (PDF) for its lessons (``start(..., kinds=...)``, aira.suite.academy.files).
 * **Space.** An upload is refused when it would leave less than ``AIRA_MEDIA_RESERVE_BYTES`` (2 GB) free on the
   drive, with a message naming ``AIRA_MEDIA_DIR``; the hosted build adds the organization's storage limit
   (:func:`set_quota`).
@@ -40,7 +42,14 @@ GB = 1024 * MB
 CHUNK_BYTES = 8 * MB
 RANGE_BYTES = 4 * MB
 KINDS = ("video", "image", "captions")
-DEFAULT_LIMITS = {"video": 2 * GB, "image": 10 * MB, "captions": 1 * MB}
+# Kinds only an app that asks for them takes (start's ``kinds``): a lesson's audio and PDF files in Courses.
+DEFAULT_LIMITS = {
+    "video": 2 * GB,
+    "image": 10 * MB,
+    "captions": 1 * MB,
+    "audio": 500 * MB,
+    "document": 50 * MB,
+}
 DEFAULT_RESERVE = 2 * GB
 OPEN_UPLOADS = 5  # unfinished uploads one person may have at a time
 STALE_HOURS = 48  # an upload nobody touched for this long is removed
@@ -53,7 +62,16 @@ EXTENSIONS = {
     "image/png": ".png",
     "image/webp": ".webp",
     "text/vtt": ".vtt",
+    "audio/mpeg": ".mp3",
+    "audio/mp4": ".m4a",
+    "audio/ogg": ".ogg",
+    "audio/wav": ".wav",
+    "audio/flac": ".flac",
+    "audio/webm": ".weba",
+    "application/pdf": ".pdf",
 }
+# ISO base media files whose place of filming (or recording) is taken out, and whose length is read.
+ISO_MEDIA = ("video/mp4", "video/quicktime", "audio/mp4")
 # What plays where: Aira serves files as they were uploaded.
 PLAYBACK = {
     "video/mp4": "Plays in every modern browser (H.264 video with AAC sound).",
@@ -178,6 +196,28 @@ def sniff(head: bytes, kind: str) -> str:
         if text[:6] == b"WEBVTT":
             return "text/vtt"
         raise ValueError("Captions must be a WebVTT file (it starts with WEBVTT).")
+    if kind == "audio":
+        if head[:3] == b"ID3" or (
+            len(head) >= 2 and head[0] == 0xFF and head[1] & 0xE6 in (0xE2, 0xE4, 0xE6)
+        ):
+            return "audio/mpeg"  # an ID3 tag, or an MPEG audio frame (layer I, II or III, not AAC)
+        if len(head) >= 12 and head[4:8] == b"ftyp" and head[8:12] != b"qt  ":
+            return "audio/mp4"
+        if head[:4] == b"OggS":
+            return "audio/ogg"
+        if head[:4] == b"RIFF" and head[8:12] == b"WAVE":
+            return "audio/wav"
+        if head[:4] == b"fLaC":
+            return "audio/flac"
+        if head[:4] == b"\x1a\x45\xdf\xa3" and b"webm" in head[:64]:
+            return "audio/webm"
+        raise ValueError(
+            "This file is not audio Monosage can keep: use MP3, M4A, Ogg, WAV, FLAC or WebM audio."
+        )
+    if kind == "document":
+        if head[:5] == b"%PDF-":
+            return "application/pdf"
+        raise ValueError("This file is not a PDF (it must start with %PDF-).")
     raise ValueError("Choose what you are uploading: a video, a picture or captions.")
 
 
@@ -436,9 +476,12 @@ def start(
     kind: str,
     filename: str,
     size: Any,
+    *,
+    kinds: tuple[str, ...] = KINDS,
 ) -> dict[str, Any]:
-    """Begin an upload of ``size`` bytes; the parts follow with :func:`append`."""
-    if kind not in KINDS:
+    """Begin an upload of ``size`` bytes; the parts follow with :func:`append`. ``kinds``: what the app takes
+    (Videos and Ads: :data:`KINDS`; a lesson in Courses also takes audio and PDFs)."""
+    if kind not in kinds or kind not in DEFAULT_LIMITS:
         raise ValueError(
             "Choose what you are uploading: a video, a picture or captions."
         )
@@ -566,11 +609,11 @@ def complete(sc: sqlite3.Connection, upload_id: str, owner_key: str) -> dict[str
     target.parent.mkdir(parents=True, exist_ok=True)
     os.replace(part, target)
     size = found["size"]
-    if mime in ("video/mp4", "video/quicktime"):
+    if mime in ISO_MEDIA:
         strip_location(target)  # where it was filmed: blanked in place, so the file keeps its size
     elif found["kind"] == "image":
         size = _clean_picture(target)
-    info = mp4_info(target) if mime in ("video/mp4", "video/quicktime") else {}
+    info = mp4_info(target) if mime in ISO_MEDIA else {}
     sc.execute(
         """INSERT INTO vi_files (id, owner_key, home, kind, mime, size, path, duration, width, height, created_at)
         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)""",

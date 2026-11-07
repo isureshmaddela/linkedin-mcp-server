@@ -11,6 +11,7 @@ from datetime import datetime, timedelta
 from typing import Any
 
 from aira.suite import kit, public
+from aira.suite.academy import files as lesson_files
 from aira.suite.academy import partners, store
 from aira.suite.academy.store import APP
 
@@ -169,6 +170,7 @@ def delete_course(connection: sqlite3.Connection, course_id: str) -> None:
         connection.execute(
             "DELETE FROM ac_questions WHERE lesson_id = ?", (lesson["id"],)
         )
+    uploaded = lesson_files.forget(connection, course_id=course_id)
     connection.execute("DELETE FROM ac_lessons WHERE course_id = ?", (course_id,))
     connection.execute("DELETE FROM ac_modules WHERE course_id = ?", (course_id,))
     connection.execute("DELETE FROM ac_cohorts WHERE course_id = ?", (course_id,))
@@ -184,6 +186,7 @@ def delete_course(connection: sqlite3.Connection, course_id: str) -> None:
         ref_id=course_id,
     )
     connection.commit()
+    lesson_files.discard(uploaded)  # the lessons' uploaded files, from the disk too
 
 
 def curriculum(
@@ -205,10 +208,24 @@ def curriculum(
     return out
 
 
-def course_detail(connection: sqlite3.Connection, course_id: str) -> dict[str, Any]:
+def course_detail(
+    connection: sqlite3.Connection, course_id: str, *, home: str = ""
+) -> dict[str, Any]:
+    """The editor's view of a course. ``home`` (the account, lesson_files.home_of) signs the uploaded files'
+    addresses for the editor's own preview."""
     course = store.course(connection, course_id)
     modules = curriculum(connection, course_id)
     lessons = [lesson for module in modules for lesson in module["lessons"]]
+    uploaded = lesson_files.views(
+        lesson_files.by_lesson(connection, course_id),
+        [lesson["id"] for lesson in lessons],
+        lesson_files.staff_viewer(home),
+        lesson_files.STAFF_BASE,
+    )
+    for lesson in lessons:
+        lesson["files"] = uploaded.get(lesson["id"], [])
+        # an outside link: anyone who has it can watch, enrolled or not (uploaded files are for students only)
+        lesson["video_external"] = bool(lesson["video_url"])
     return {
         "course": course,
         "modules": modules,
@@ -281,13 +298,15 @@ def rename_module(
 
 def delete_module(connection: sqlite3.Connection, module_id: str) -> None:
     module = kit.require_row(connection, "ac_modules", module_id, "module")
+    uploaded: list[str] = []
     for lesson in kit.fetch_all(
         connection, "SELECT id FROM ac_lessons WHERE module_id = ?", (module_id,)
     ):
-        _delete_lesson_rows(connection, lesson["id"])
+        uploaded += _delete_lesson_rows(connection, lesson["id"])
     connection.execute("DELETE FROM ac_modules WHERE id = ?", (module_id,))
     _touch_course(connection, module["course_id"])
     connection.commit()
+    lesson_files.discard(uploaded)
 
 
 def _clean_lesson(
@@ -347,17 +366,21 @@ def update_lesson(
     return store.lesson(connection, lesson_id)
 
 
-def _delete_lesson_rows(connection: sqlite3.Connection, lesson_id: str) -> None:
+def _delete_lesson_rows(connection: sqlite3.Connection, lesson_id: str) -> list[str]:
+    """Delete a lesson's rows (not committed); returns its uploaded files for lesson_files.discard after the commit."""
     connection.execute("DELETE FROM ac_questions WHERE lesson_id = ?", (lesson_id,))
     connection.execute("DELETE FROM ac_progress WHERE lesson_id = ?", (lesson_id,))
+    uploaded = lesson_files.forget(connection, lesson_id=lesson_id)
     connection.execute("DELETE FROM ac_lessons WHERE id = ?", (lesson_id,))
+    return uploaded
 
 
 def delete_lesson(connection: sqlite3.Connection, lesson_id: str) -> None:
     lesson = store.lesson(connection, lesson_id)
-    _delete_lesson_rows(connection, lesson_id)
+    uploaded = _delete_lesson_rows(connection, lesson_id)
     _touch_course(connection, lesson["course_id"])
     connection.commit()
+    lesson_files.discard(uploaded)  # the lesson's uploaded files, from the disk too
 
 
 def reorder(
@@ -1293,15 +1316,34 @@ def verify_code(connection: sqlite3.Connection, code: Any) -> dict[str, Any] | N
 # ---------------------------------------------------------------------------
 
 
-def student_view(connection: sqlite3.Connection, enrolment_id: str) -> dict[str, Any]:
+def student_view(
+    connection: sqlite3.Connection, enrolment_id: str, token: str = ""
+) -> dict[str, Any]:
+    """A student's own page; ``token`` (their link's) makes the addresses of the lessons' uploaded files."""
     enrolment = store.enrolment(connection, enrolment_id)
     course = store.course(connection, enrolment["course_id"])
     learning = can_learn(enrolment)
     done = store.completed_lessons(connection, enrolment_id)
     passed = store.passed_quizzes(connection, enrolment_id)
     best = store.best_scores(connection, enrolment_id)
+    outline = curriculum(connection, course["id"], answers=False)
+    uploaded = (
+        lesson_files.views(
+            lesson_files.by_lesson(connection, course["id"]),
+            [
+                lesson["id"]
+                for module in outline
+                for lesson in module["lessons"]
+                if learning or lesson["preview"]
+            ],
+            lesson_files.student_viewer(enrolment_id),
+            lesson_files.public_base(token),
+        )
+        if token
+        else {}
+    )
     modules = []
-    for module in curriculum(connection, course["id"], answers=False):
+    for module in outline:
         lessons = []
         for lesson in module["lessons"]:
             unlocked = learning or lesson["preview"]
@@ -1320,6 +1362,7 @@ def student_view(connection: sqlite3.Connection, enrolment_id: str) -> dict[str,
             if unlocked:
                 item["body"] = lesson["body"]
                 item["video_url"] = lesson["video_url"]
+                item["files"] = uploaded.get(lesson["id"], [])
                 if lesson["question_count"] and learning:
                     item["questions"] = [
                         {"prompt": question["prompt"], "options": question["options"]}
@@ -1367,13 +1410,32 @@ def student_view(connection: sqlite3.Connection, enrolment_id: str) -> dict[str,
     }
 
 
-def course_page(connection: sqlite3.Connection, course_id: str) -> dict[str, Any]:
+def course_page(
+    connection: sqlite3.Connection, course_id: str, token: str = ""
+) -> dict[str, Any]:
+    """The public course page; ``token`` (the page's link) makes the addresses of free-preview lessons' files."""
     course = store.course(connection, course_id)
     if course["status"] != "published":
         raise LookupError("This course is not available.")
+    outline = curriculum(connection, course_id, answers=False)
+    uploaded = (
+        lesson_files.views(
+            lesson_files.by_lesson(connection, course_id),
+            [
+                lesson["id"]
+                for module in outline
+                for lesson in module["lessons"]
+                if lesson["preview"]
+            ],
+            lesson_files.course_viewer(course_id),
+            lesson_files.public_base(token),
+        )
+        if token
+        else {}
+    )
     modules = []
     minutes = 0
-    for module in curriculum(connection, course_id, answers=False):
+    for module in outline:
         lessons = []
         for lesson in module["lessons"]:
             minutes += int(lesson["minutes"] or 0)
@@ -1384,7 +1446,11 @@ def course_page(connection: sqlite3.Connection, course_id: str) -> dict[str, Any
                 "has_quiz": bool(lesson["question_count"]),
             }
             if lesson["preview"]:
-                item.update(body=lesson["body"], video_url=lesson["video_url"])
+                item.update(
+                    body=lesson["body"],
+                    video_url=lesson["video_url"],
+                    files=uploaded.get(lesson["id"], []),
+                )
             lessons.append(item)
         modules.append({"title": module["title"], "lessons": lessons})
     seats_left = None

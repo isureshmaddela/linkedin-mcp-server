@@ -138,10 +138,32 @@ REVIEW_SCHEMA = (
 REVIEW_STATUSES = ("published", "hidden")
 
 
+# Added later: files uploaded to a lesson (a video, audio or a PDF). The bytes are media files of Videos
+# (aira.suite.videos.media, ``file_id``); this row says which lesson has them (aira.suite.academy.files).
+FILE_SCHEMA = (
+    """CREATE TABLE IF NOT EXISTS ac_lesson_files (
+        id TEXT PRIMARY KEY,
+        lesson_id TEXT NOT NULL,
+        course_id TEXT NOT NULL,
+        file_id TEXT NOT NULL,
+        kind TEXT NOT NULL,
+        name TEXT NOT NULL DEFAULT '',
+        mime TEXT NOT NULL,
+        size INTEGER NOT NULL DEFAULT 0,
+        duration REAL,
+        position INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS ac_lesson_files_lesson ON ac_lesson_files (lesson_id, position)",
+    "CREATE INDEX IF NOT EXISTS ac_lesson_files_course ON ac_lesson_files (course_id)",
+)
+
+
 def ensure(connection: sqlite3.Connection) -> None:
     kit.ensure_core(connection)
     kit.ensure(connection, "academy.v1", SCHEMA)
     kit.ensure(connection, "academy.reviews.v1", REVIEW_SCHEMA)
+    kit.ensure(connection, "academy.files.v1", FILE_SCHEMA)
     kit.contact_columns(connection, "ac_enrolments")
 
 

@@ -1,7 +1,8 @@
 # Careers: maturity scope
 
-Status: round 1 built and tested (2026-11-06, R1.1 to R1.8); round 2 partly built (R2.1 to R2.4: formatted
-documents, resume intelligence, F16 bulk actions, F18 interview prep); F14, F15 and F17 next. This document records what the Careers app is missing, why it
+Status: round 1 built and tested (2026-11-06, R1.1 to R1.8); round 2 partly built (R2.1 to R2.5: formatted
+documents, resume intelligence, F16 bulk actions, F18 interview prep, F14 Finish in browser, local build); F15 and F17
+next. This document records what the Careers app is missing, why it
 matters, and what each round builds. Every item lists the evidence it came from (file:line at the time of the review)
 and how it is accepted.
 
@@ -45,7 +46,7 @@ and how it is accepted.
 | F11 | Google Jobs takes the first apply option whatever its host (often an aggregator) | `aira/job_sources.py:639-649` | 1 |
 | F12 | The automatic path skips the approved packet and the Greenhouse question API (`fields=[]`) | `auto_apply_assistant.py:6578,6026` | 1 |
 | F13 | Accepted, rejected and withdrawn have no way back; archived jobs cannot be restored from the UI | `auto_apply_assistant.py:296-298,5559` | 1 |
-| F14 | Holds without questions (CAPTCHA, sign-in, Workday email check) close the browser; the person redoes the form elsewhere | `aira/apply_engine.py:873-879`; `views-autopilot.js:116-147` | 2 |
+| F14 | Holds without questions (CAPTCHA, sign-in, Workday email check) close the browser; the person redoes the form elsewhere (built locally: R2.5) | `aira/apply_engine.py:873-879`; `views-autopilot.js:116-147` | 2 |
 | F15 | The generic form engine handles one page only (no Next/Continue) and native controls only | `aira/apply_engine.py:1239-1245` | 2 |
 | F16 | No bulk actions in Jobs, Applications or Needs you (built: R2.3) | `views-jobs.js:277`; `views-applications.js` | 2 |
 | F17 | Reminders and follow-ups are in-app only (no email or browser notification); no installable app | `auto_apply_assistant.py:7825`; `app.js` | 2 |
@@ -148,13 +149,36 @@ Added by the platform review (`platform-review.md` section 3) alongside the roun
   brief, marked as AI, when asked. It replaces the free-text Preparation box (kept as "Your own prep notes").
 - Accepted: `tests/test_interview_prep.py`.
 
+### R2.5 Finish in browser (F14)
+- Built (local build): a run held for a CAPTCHA, a sign-in or a code the site sent names the step
+  (`application_runs.hold`, migration 24) and keeps its browser cookies. Needs you offers **Finish in browser**: the
+  run starts again in a visible window from those cookies, fills the form the same way and waits on the step
+  (`aira/handoff.py`). It carries on by itself once the CAPTCHA or sign-in is gone, a CAPTCHA has its answer, a code
+  field is gone or the page moved on, and submits; **I'm done** and **Give up** are the fallbacks, and the window
+  closes after 15 minutes. Every ending is recorded on the run (`application_runs.handoff`), in the job's history and
+  in the activity log; anything but a submission puts the run back in Needs you for the same step (never a silent
+  retry). If the person pressed Submit in the window, the confirmation counts; a page that moved on without one is
+  `interrupted`. The generic engine and Workday (CAPTCHA, account sign-in, email verification) both hand over.
+  Details: `docs/auto-apply-spec.md` section 8.
+- Hosted: not built; Needs you links to the employer's page ("do this step and submit there, then choose I
+  applied"), and the two routes are `DENY` in `monosage_cloud/policy.py`. Why the sign-in broker does not carry it:
+  - the broker never attaches to a running browser. It launches its own Chromium on a LinkedIn profile directory
+    that the web tier names when it validates a one-time token (`Session._launch`, `AppClient.validate`), ends when
+    LinkedIn's session cookie appears and then exports that profile. A run's browser is a patchright sync context
+    inside a worker process, created and closed per queue job (`aira/apply_engine.py:run`), with no CDP endpoint;
+  - attaching would mean giving each hosted worker's Chromium a CDP port, pinning the broker session to the worker
+    host that holds the run (queue jobs go to any worker), a second token kind with its own validate route, an
+    allowlist per run (the employer's apply host and its CAPTCHA and sign-in providers), a completion signal from the
+    worker instead of the LinkedIn cookie, and "I'm done" and "Give up" carried from the web tier to the worker while
+    the queue lease is held for up to 15 minutes;
+  - handing over cookies instead (the worker exports the held page's state, the broker opens it, the person finishes,
+    the broker returns the state) avoids the CDP port but still needs the new token kind, the per-run allowlist, a
+    broker-side check for each step (the engine's detection would move into the broker) and a storage-state round trip
+    between hosts that carries the employer site's session cookies. It is the smaller route and the one to build
+    next; it is more than a clean extension of the broker as it stands.
+- Accepted: `tests/test_finish_in_browser.py`.
+
 ### Next in round 2
-- F14 Finish in browser: when a run is held for a CAPTCHA, a sign-in or an email check, the local build opens a
-  visible browser on that step and resumes after it. Hosted, the sign-in broker (`monosage_cloud/streaming.py`:
-  a private Chromium streamed over a WebSocket with CDP screencast, input replay, allowlisted navigation and audit)
-  can carry the same single step: the worker hands the held page's state (cookies and URL) to a broker session
-  whose allowlist is the employer's apply host, the person finishes the step, and the broker returns the session
-  state for the worker to resume the run. Not built yet.
 - F15 multi-step generic forms; F17 email and browser notifications (the platform notification service).
 
 ## Later rounds

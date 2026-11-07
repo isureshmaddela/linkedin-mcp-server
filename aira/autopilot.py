@@ -49,6 +49,7 @@ from typing import Any
 
 from aira import dbutil
 from aira import answer_drafts
+from aira.handoff import HOLD_KINDS
 from aira.hosting import HOOKS
 
 __all__ = [
@@ -107,6 +108,12 @@ RUN_TIME_LIMIT = timedelta(minutes=30)
 # Tries per run (the first plus two retries) and the wait before each retry.
 MAX_ATTEMPTS = 3
 RETRY_DELAYS = (timedelta(minutes=15), timedelta(hours=2))
+# What a run held for a step only the person can do asks of them (aira.handoff.HOLD_KINDS).
+HOLD_NOTES = {
+    "captcha": "a CAPTCHA on the form needs you; the rest is filled.",
+    "sign_in": "the site asks you to sign in.",
+    "verification": "the site sent a code to your email or phone.",
+}
 INTERRUPTED_MESSAGE = (
     "Monosage could not confirm whether this was sent; check the site, then choose I applied "
     "or Try again."
@@ -182,6 +189,10 @@ def _loads(text: Any, default: Any) -> Any:
 _RUN_COLUMNS = {
     "attempts": "INTEGER NOT NULL DEFAULT 0",
     "next_try_at": "TEXT",
+    # Finish in browser (migration 24, autopilot_handoff): the step a person must do that holds the run
+    # (aira.handoff.HOLD_KINDS) and how the last Finish in browser session went.
+    "hold": "TEXT NOT NULL DEFAULT ''",
+    "handoff": "TEXT NOT NULL DEFAULT '{}'",
 }
 
 
@@ -233,7 +244,8 @@ def ensure_schema(connection: sqlite3.Connection) -> None:
     connection.execute(
         "CREATE INDEX IF NOT EXISTS idx_application_runs_status ON application_runs(status, created_at)"
     )
-    # Tries so far and when the next retry is due (migration 21, autopilot_reliability).
+    # Tries so far and when the next retry is due (migration 21, autopilot_reliability); the step that holds a run
+    # for a person and the last Finish in browser session (migration 24, autopilot_handoff).
     have = {row[1] for row in connection.execute("PRAGMA table_info(application_runs)")}
     for name, declaration in _RUN_COLUMNS.items():
         if name not in have:
@@ -577,6 +589,7 @@ _JSON_RUN_FIELDS = {
     "unanswered": "[]",
     "answers": "{}",
     "steps": "[]",
+    "handoff": "{}",
 }
 
 
@@ -725,6 +738,8 @@ def update_run(
         "mode",
         "attempts",
         "next_try_at",
+        "hold",
+        "handoff",
     }
     bad = set(fields) - allowed
     if bad:
@@ -1000,6 +1015,16 @@ def normalize_outcome(raw: Mapping[str, Any]) -> dict[str, Any]:
         "evidence_document_id": raw.get("evidence_document_id"),
         "screenshot_document_id": raw.get("screenshot_document_id"),
         "url": str(raw.get("url") or ""),
+        "hold": str(raw.get("hold") or "") if raw.get("hold") in HOLD_KINDS else "",
+        "handoffs": [
+            {
+                "kind": str(item.get("kind") or ""),
+                "outcome": str(item.get("outcome") or ""),
+                "seconds": int(item.get("seconds") or 0),
+            }
+            for item in list(raw.get("handoffs") or [])[:10]
+            if isinstance(item, Mapping)
+        ],
     }
 
 
@@ -1063,15 +1088,24 @@ def execute_run(
     answers: Mapping[str, str] | None = None,
     submit: bool | None = None,
     plan: Mapping[str, Any] | None = None,
+    handoff: bool = False,
 ) -> dict[str, Any]:
     """Apply for one run and record what happened. ``submit`` defaults to the run's mode.
 
     Only a ``queued`` or ``ready`` run is applied for, and it is claimed with a compare-and-set first: a second
     worker, or a queue job delivered again after its worker vanished, finds the run running or finished and
     returns it unchanged.
+
+    ``handoff``: Finish in browser (aira.handoff). The person resumes a run held for a step they must do; the
+    services apply in a window they see. A failure then is never retried on its own: the run waits for them again.
     """
-    # The person's answers also resume a run held for them (the answer route queues it first; callers may not).
-    claimable = (*CLAIMABLE_STATUSES, "needs_review") if answers else CLAIMABLE_STATUSES
+    # The person's answers also resume a run held for them (the answer route queues it first; callers may not),
+    # and so does Finish in browser.
+    claimable = (
+        (*CLAIMABLE_STATUSES, "needs_review")
+        if answers or handoff
+        else CLAIMABLE_STATUSES
+    )
     with services.connect() as connection:
         run = get_run(connection, run_id)
     if run["status"] not in claimable:
@@ -1148,6 +1182,7 @@ def execute_run(
     used_drafts: dict[str, dict[str, Any]] = {}
     if (
         services.draft_answers is not None
+        and not handoff  # the person is at the window: questions come back to them, not to a second window
         and outcome["status"] == "needs_review"
         and outcome["unanswered"]
     ):
@@ -1192,6 +1227,7 @@ def execute_run(
         )
     next_try: str | None = None
     attempt = int(run.get("attempts") or 1)
+    hold = outcome["hold"]
     if status == "failed" and do_submit and _sent_unconfirmed(outcome):
         # Submit was pressed but no confirmation came: it may have been sent. Ask the person; never resend.
         status = "interrupted"
@@ -1216,6 +1252,24 @@ def execute_run(
                 *outcome["steps"],
                 f"Stopped after {MAX_ATTEMPTS} tries.",
             ][-STEPS_KEPT:]
+    if handoff and status in ("failed", "unsupported", "queued"):
+        # Finish in browser did not get through (no window could open, the site failed): nothing was sent, and
+        # nothing is tried again behind the person's back. The run waits for them with the step it waits for.
+        status, next_try = "needs_review", None
+        hold = hold or str(run.get("hold") or "")
+        outcome["error"] = f"Finish in browser did not finish: {outcome['error']}"[:1000]
+    handoff_record: dict[str, Any] | None = None
+    if handoff:
+        waits = outcome["handoffs"]
+        handoff_record = {
+            "at": _iso(services.now()),
+            "kind": hold
+            or (waits[-1]["kind"] if waits else str(run.get("hold") or "")),
+            "outcome": waits[-1]["outcome"] if waits else "",
+            "result": status,
+            "waits": waits,
+            "seconds": sum(item["seconds"] for item in waits),
+        }
     with services.connect() as connection:
         updated = update_run(
             connection,
@@ -1236,6 +1290,8 @@ def execute_run(
                 "application_url": outcome["url"] or run["application_url"],
                 "answers": merged_answers,
                 "finished_at": None if status == "queued" else _iso(services.now()),
+                "hold": hold if status == "needs_review" else "",
+                **({"handoff": handoff_record} if handoff_record is not None else {}),
             },
         )
     label = _job_label(job)
@@ -1251,7 +1307,11 @@ def execute_run(
         services.notify(
             "Ready to submit" if status == "ready" else "Auto-apply needs you",
             (
-                f"{label}: {len(outcome['unanswered'])} question(s) need your answer."
+                f"{label}: {HOLD_NOTES[updated['hold']]}"
+                if status == "needs_review"
+                and updated.get("hold") in HOLD_NOTES
+                and not outcome["unanswered"]
+                else f"{label}: {len(outcome['unanswered'])} question(s) need your answer."
                 if status == "needs_review"
                 else f"{label}: the form is filled and waits for your OK."
                 if status == "ready"

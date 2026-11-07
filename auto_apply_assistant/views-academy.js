@@ -49,6 +49,8 @@
   const LEVELS = [["all", "All levels"], ["beginner", "Beginner"], ["intermediate", "Intermediate"], ["advanced", "Advanced"]];
   const STUDENT_STATUSES = [["", "Any status"], ["pending_payment", "Waiting for payment"], ["active", "Learning"], ["completed", "Completed"], ["refunded", "Refunded"]];
   const TONES = { pending_payment: "warn", active: "info", completed: "good", refunded: "bad", published: "good", draft: "", archived: "", hidden: "" };
+  // A lesson's video link to another site works, but nothing checks who opens it (uploaded files are checked).
+  const EXTERNAL_WARNING = "External link: anyone with the link can view it, enrolled or not. Upload the file instead (Add files) to keep it for your students only.";
   const go = (query) => Aira.router.go(["academy"], query);
   const toolbar = (...children) => h("div", { class: "btn-row xp-toolbar" }, ...children.filter(Boolean));
   const plural = (n, word) => `${n} ${word}${n === 1 ? "" : "s"}`;
@@ -502,17 +504,20 @@
     const lessonFields = [
       { name: "title", label: "Title", required: true },
       { name: "body", label: "Lesson text", type: "textarea", rows: 10, hint: "Plain text. Blank lines start a new paragraph." },
-      { name: "video_url", label: "Video link", type: "url", placeholder: "https://youtube.com/..." },
+      { name: "video_url", label: "External video link (optional)", type: "url", placeholder: "https://youtube.com/...", hint: EXTERNAL_WARNING },
       { name: "minutes", label: "Minutes", type: "number", min: 0 },
       { name: "preview", label: "Free preview (anyone can read it on the course page)", type: "checkbox" },
     ];
     const blocks = modules.map((module, mi) => {
+      const files = (lesson) => lesson.files || [];
       const lessons = module.lessons.map((lesson, li) => h("li", { class: "ac-lesson" },
-        h("div", { class: "ac-lesson-main" }, h("strong", { text: `${li + 1}. ${lesson.title}` }), h("span", { class: "muted small", text: [lesson.minutes ? `${lesson.minutes} min` : "", lesson.preview ? "free preview" : "", lesson.question_count ? `quiz: ${lesson.question_count} questions, pass ${lesson.pass_mark}%` : "", lesson.video_url ? "video" : ""].filter(Boolean).join(" · ") })),
+        h("div", { class: "ac-lesson-main" }, h("strong", { text: `${li + 1}. ${lesson.title}` }), h("span", { class: "muted small", text: [lesson.minutes ? `${lesson.minutes} min` : "", lesson.preview ? "free preview" : "", lesson.question_count ? `quiz: ${lesson.question_count} questions, pass ${lesson.pass_mark}%` : "", files(lesson).length ? plural(files(lesson).length, "uploaded file") : ""].filter(Boolean).join(" · ") }),
+          lesson.video_external ? h("span", { class: "muted small", title: EXTERNAL_WARNING }, S.pill("external link", { "external link": "warn" }), h("span", { text: " Anyone with the link can view it." })) : null),
         h("div", { class: "btn-row" },
           li > 0 ? S.button("Move up", () => { const map = lessonMap(); map[module.id] = swap(map[module.id], li, li - 1); return order(null, map); }, { kind: "ghost sm", title: "Move this lesson up" }) : null,
           li < module.lessons.length - 1 ? S.button("Move down", () => { const map = lessonMap(); map[module.id] = swap(map[module.id], li, li + 1); return order(null, map); }, { kind: "ghost sm", title: "Move this lesson down" }) : null,
           S.button("Edit", async () => { if (await S.edit({ title: "Lesson", wide: true, fields: lessonFields, values: lesson, onSave: (values) => api(`/lessons/${lesson.id}`, { method: "PATCH", body: values }) })) reload(); }, { kind: "secondary sm" }),
+          S.button(files(lesson).length ? `Files (${files(lesson).length})` : "Add files", () => filesEditor(lesson, reload), { kind: "secondary sm", title: "Upload videos, audio or PDFs for this lesson's students" }),
           S.button(lesson.question_count ? "Quiz" : "Add quiz", () => quizEditor(lesson, reload), { kind: "secondary sm" }),
           S.button("Delete", async () => { if (await S.confirmDelete(`the lesson “${lesson.title}”`)) { await api(`/lessons/${lesson.id}`, { method: "DELETE" }); reload(); } }, { kind: "ghost sm" }))));
       return h("div", { class: "card ac-module" },
@@ -529,6 +534,83 @@
       ...blocks,
       h("div", { class: "btn-row" }, S.button("Add module", async () => { if (await S.edit({ title: "New module", fields: [{ name: "title", label: "Title", required: true }], submitLabel: "Add module", onSave: (values) => api(`/courses/${courseId}/modules`, { method: "POST", body: values }) })) reload(); }, { kind: "secondary" })),
     );
+  }
+
+  // ------------------------------------------------------------------ a lesson's uploaded files
+  // Uploaded in parts through the same resumable uploader as Videos (Aira.videos.uploadFile); served only through
+  // private addresses that check the student's enrolment on every request (aira/suite/academy/files.py).
+  const FILE_KINDS = {
+    video: { label: "Video", accept: ["video/mp4", "video/quicktime", "video/webm", ".mp4", ".m4v", ".mov", ".webm"], extensions: [".mp4", ".m4v", ".mov", ".webm"] },
+    audio: { label: "Audio", accept: ["audio/*", ".mp3", ".m4a", ".ogg", ".oga", ".opus", ".wav", ".flac", ".weba"], extensions: [".mp3", ".m4a", ".ogg", ".oga", ".opus", ".wav", ".flac", ".weba", ".webm"] },
+    document: { label: "PDF", accept: ["application/pdf", ".pdf"], extensions: [".pdf"] },
+  };
+  const fileKind = (file) => {
+    const name = String(file.name || "").toLowerCase();
+    const type = String(file.type || "").toLowerCase();
+    if (type === "application/pdf" || name.endsWith(".pdf")) return "document";
+    if (type.startsWith("audio/")) return "audio";
+    if (type.startsWith("video/")) return "video";
+    return Object.keys(FILE_KINDS).find((kind) => FILE_KINDS[kind].extensions.some((ext) => name.endsWith(ext))) || "";
+  };
+  const bytes = (value) => {
+    const n = Number(value || 0);
+    if (n >= 1024 ** 3) return `${Number((n / 1024 ** 3).toFixed(1))} GB`;
+    if (n >= 1024 ** 2) return `${Number((n / 1024 ** 2).toFixed(1))} MB`;
+    return `${Math.max(1, Math.round(n / 1024))} KB`;
+  };
+
+  function filesEditor(lesson, reload) {
+    const items = [...(lesson.files || [])];
+    let changed = false;
+    const list = h("div", { class: "suite-body" });
+    const status = h("p", { class: "muted", role: "status", "aria-live": "polite" });
+    const error = h("p", { class: "form-error", role: "alert", hidden: true });
+    const showError = (text) => { error.textContent = text; error.hidden = !text; };
+    const render = () => {
+      list.replaceChildren(...items.map((file, index) => h("div", { class: "card ac-file" },
+        h("div", {}, h("strong", { text: file.name || FILE_KINDS[file.kind]?.label || "File" }), h("div", { class: "muted small", text: [FILE_KINDS[file.kind]?.label || "", bytes(file.size)].filter(Boolean).join(" · ") })),
+        h("div", { class: "btn-row" },
+          file.url ? h("a", { class: "btn ghost sm", href: file.url, target: "_blank", rel: "noopener noreferrer", text: "Open" }) : null,
+          S.button("Remove", async () => {
+            if (!(await S.confirmDelete(`the file “${file.name}”`))) return;
+            await api(`/lesson-files/${file.id}`, { method: "DELETE" });
+            items.splice(index, 1);
+            changed = true;
+            render();
+          }, { kind: "ghost sm" })))));
+      if (!items.length) list.append(h("p", { class: "muted", text: "No files yet. Upload a video, audio or a PDF for this lesson." }));
+    };
+    render();
+    const input = h("input", { type: "file", accept: Object.values(FILE_KINDS).flatMap((kind) => kind.accept).join(","), "aria-label": "A video, audio or PDF file" });
+    const upload = S.button("Upload", async () => {
+      showError("");
+      const chosen = input.files && input.files[0];
+      if (!chosen) { showError("Choose a video, audio or PDF file first."); return; }
+      const kind = fileKind(chosen);
+      if (!kind) { showError("This kind of file cannot be added to a lesson: use MP4, MOV or WebM for a video, MP3, M4A, Ogg, WAV or FLAC for audio, or a PDF."); return; }
+      if (!Aira.videos || !Aira.videos.uploadFile) { showError("Uploading needs the Videos screen, which is not loaded."); return; }
+      try {
+        const file = await Aira.videos.uploadFile(chosen, kind, { base: `/api/academy/lessons/${lesson.id}`, onProgress: (part) => { status.textContent = `Uploading ${Math.round(part * 100)}%`; } });
+        items.push(file);
+        changed = true;
+        input.value = "";
+        status.textContent = "Uploaded.";
+        render();
+      } catch (err) { status.textContent = ""; showError(err && err.message ? err.message : String(err)); }
+    }, { kind: "primary sm" });
+    Aira.modal({
+      title: `Files: ${lesson.title}`,
+      wide: true,
+      onClose: () => { if (changed) reload(); },
+      body: h("div", { class: "suite-body" },
+        h("p", { class: "muted", text: "Uploaded files are for this course's students only: each one opens through a private address that stops working if a student is refunded or their link is turned off. On a free-preview lesson they also show on the course page." }),
+        lesson.video_external ? h("p", { class: "sensitive-note", role: "note" }, S.pill("external link", { "external link": "warn" }), h("span", { text: EXTERNAL_WARNING })) : null,
+        list,
+        Aira.ui.field("Add a file", input, "A video (MP4, MOV or WebM, up to 2 GB), audio (MP3, M4A, Ogg, WAV or FLAC, up to 500 MB) or a PDF (up to 50 MB). A lesson can have 10 files."),
+        h("div", { class: "btn-row" }, upload),
+        status, error),
+      actions: [{ label: "Done", kind: "primary" }],
+    });
   }
 
   function quizEditor(lesson, reload) {

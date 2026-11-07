@@ -305,6 +305,15 @@ def _choose(value: str, options: list[_Option]) -> _Option | None:
     return None
 
 
+# The holds a person can finish in the browser window (aira.handoff), by the screenshot label of the hold.
+_HOLD_KINDS = {
+    "captcha": "captcha",
+    "verify-email": "verification",
+    "sign-in": "sign_in",
+    "create-account": "sign_in",
+}
+
+
 @dataclass(slots=True)
 class _Dropdown:
     ref: str
@@ -363,7 +372,12 @@ class _WorkdayRunner(_Runner):
             )
 
     def _hold(self, message: str, label: str) -> ApplyOutcome:
-        return self.outcome("needs_review", message, screenshot=self.screenshot(label))
+        return self.outcome(
+            "needs_review",
+            message,
+            screenshot=self.screenshot(label),
+            hold=_HOLD_KINDS.get(label, ""),
+        )
 
     # -- page helpers ----------------------------------------------------------
 
@@ -468,6 +482,14 @@ class _WorkdayRunner(_Runner):
     def _auth_visible(self) -> bool:
         return any(self._visible(selector) is not None for selector in _AUTH_SELECTORS)
 
+    def _step_present(self, kind: str) -> bool:
+        # Workday's sign-in is its account form; its check is an email it sent (the notice stays until it is done).
+        if kind == "sign_in":
+            return self._auth_visible()
+        if kind == "verification":
+            return self._says(_VERIFY_PHRASES)
+        return super()._step_present(kind)
+
     def _checkpoint(self) -> ApplyOutcome | None:
         """Stops that can appear on any page: already applied, a CAPTCHA."""
         if self._says(("already applied", "already submitted an application")):
@@ -511,20 +533,22 @@ class _WorkdayRunner(_Runner):
         self._settle()
         self.step(f"Opened the Workday site at {host}")
         stop = self._checkpoint()
-        if stop is not None:
+        if stop is not None and not self._handed_over(stop):
             return stop
         self._start_application()
         if not self._wait_for_flow():
             stop = self._checkpoint()
-            if stop is not None:
+            if stop is not None and not self._handed_over(stop):
                 return stop
-            self.step("No Workday application or sign-in appeared")
-            return self.outcome(
-                "unsupported",
-                "Monosage could not find the Workday application on this page. Open the "
-                "posting and apply yourself.",
-                screenshot=self.screenshot("no-form"),
-            )
+            # After the person's CAPTCHA the flow may appear now; otherwise there is none.
+            if stop is None or not self._wait_for_flow():
+                self.step("No Workday application or sign-in appeared")
+                return self.outcome(
+                    "unsupported",
+                    "Monosage could not find the Workday application on this page. Open the "
+                    "posting and apply yourself.",
+                    screenshot=self.screenshot("no-form"),
+                )
 
         signed_in = False
         last_step = ""
@@ -534,15 +558,24 @@ class _WorkdayRunner(_Runner):
                 break
             stop = self._checkpoint()
             if stop is not None:
+                if self._handed_over(stop):
+                    continue  # the person did the CAPTCHA in the window
                 return stop
             if self._auth_visible():
                 if signed_in:
-                    return self._hold(
+                    held = self._hold(
                         f"Workday asked to sign in again on {host}. Open the job and sign in yourself.",
                         "sign-in",
                     )
+                    if self._handed_over(held) and not self._auth_visible():
+                        continue
+                    return held
                 held = self._authenticate()
                 if held is not None:
+                    if self._handed_over(held):
+                        # Signed in by the person, or (a CAPTCHA, a verified email) the account form again.
+                        signed_in = not self._auth_visible()
+                        continue
                     return held
                 signed_in = True
                 continue
@@ -920,7 +953,7 @@ class _WorkdayRunner(_Runner):
         self.step(f"Filled {filled} of {len(questions)} questions on {name}")
 
         stop = self._checkpoint()
-        if stop is not None:
+        if stop is not None and not self._handed_over(stop):
             return stop
         held = [
             q
