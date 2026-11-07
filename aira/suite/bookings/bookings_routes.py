@@ -1,4 +1,5 @@
-"""Bookings routes (``/api/bookings/*``), its public pages (``booking_page``, ``booking``) and its hub numbers.
+"""Bookings routes (``/api/bookings/*``), its public pages (``booking_page``, ``booking``, and the booking's
+``.ics`` at ``/api/public/<token>/calendar.ics``), its background task (staff calendars) and its hub numbers.
 
 Loaded by :func:`aira.suite.load_apps`. Every handler opens the account's database (the person's own locally,
 the organization's shared one hosted) and creates the Bookings tables on first use.
@@ -6,17 +7,19 @@ the organization's shared one hosted) and creates the Bookings tables on first u
 
 from __future__ import annotations
 
+from contextlib import closing
 from datetime import date
 from typing import Any
 
 from aira.airaapi.http import Raw, Request, aira_route
-from aira.suite import kit, public
-from aira.suite.bookings import service, store
+from aira.suite import background, kit, public
+from aira.suite.bookings import calendars, service, store
 from aira.suite.bookings.store import APP
 from aira.suite.shop import access
 
 BASE = "/api/bookings"
 ID = "([0-9a-f]{32})"
+TOKEN = f"({public.TOKEN_PATTERN})"
 
 
 def _open(request: Request) -> Any:
@@ -206,6 +209,34 @@ def staff_hours(request: Request) -> tuple[int, dict[str, Any]]:
         )
     request.audit("bookings.hours", "staff", request.match.group(1))
     return 200, {"hours": hours}
+
+
+@aira_route("POST", f"{BASE}/staff/{ID}/calendar")
+def staff_calendar_set(request: Request) -> tuple[int, dict[str, Any]]:
+    """Connect a person's own calendar (its private iCal address) and read it at once."""
+    with _open(request) as connection:
+        feed = calendars.set_feed(
+            connection, request.match.group(1), request.payload.get("url")
+        )
+    request.audit("bookings.calendar_connect", "staff", request.match.group(1))
+    return 200, {"calendar": feed}
+
+
+@aira_route("POST", f"{BASE}/staff/{ID}/calendar/sync")
+def staff_calendar_sync(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as connection:
+        kit.require_row(connection, "bk_staff", request.match.group(1), "person")
+        result = calendars.sync_feed(connection, request.match.group(1))
+        feed = store.calendar_feed(connection, request.match.group(1))
+    return 200, {"result": result, "calendar": feed}
+
+
+@aira_route("DELETE", f"{BASE}/staff/{ID}/calendar")
+def staff_calendar_remove(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as connection:
+        removed = calendars.remove_feed(connection, request.match.group(1))
+    request.audit("bookings.calendar_remove", "staff", request.match.group(1))
+    return 200, {"removed": removed}
 
 
 @aira_route("GET", f"{BASE}/time-off")
@@ -844,9 +875,42 @@ def booking_reschedule(
     return 200, {"booking": service.public_booking(connection, updated)}
 
 
+@aira_route("GET", f"/api/public/{TOKEN}/calendar\\.ics", auth="public_link")
+def booking_calendar_file(request: Request) -> Raw:
+    """"Add to calendar" on a customer's booking page: the appointment as an ``.ics`` file (METHOD:PUBLISH, the
+    same UID as the emailed invite, so adding both leaves one event)."""
+    with closing(request.connect()) as connection:
+        link = public.resolve(connection, request.match.group(1))
+        if link["app"] != APP or link["kind"] != service.BOOKING_KIND:
+            raise LookupError("This link is no longer available.")
+        booking = _own_booking(connection, link)
+        body = service.invite(
+            connection,
+            booking,
+            manage_url=kit.public_url(public.path_for(link["token"]), request),
+            download=True,
+        )
+    return Raw(
+        200,
+        body,
+        "text/calendar; charset=utf-8",
+        filename=f"{booking['reference']}.ics",
+    )
+
+
 # ---------------------------------------------------------------------------
 # the Business hub
 # ---------------------------------------------------------------------------
+
+
+@background.task(APP)
+def _tick(connection: Any) -> dict[str, Any]:
+    """Each person's own calendar is read again every half hour (calendars.SYNC_MINUTES)."""
+    if not connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'bk_calendar_feeds'"
+    ).fetchone():
+        return {"synced": 0, "failed": 0}
+    return calendars.sync_due(connection)
 
 
 @kit.checklist(APP)

@@ -1812,6 +1812,7 @@ MAX_BODY = 20000  # the longest message the outbox keeps, footer included
 MESSAGE_KINDS: dict[str, tuple[str, str, bool]] = {
     "order_confirmation": ("Shop: order confirmations", "transactional", True),
     "order_shipped": ("Shop: order shipped", "transactional", True),
+    "return_update": ("Shop: returns and refunds", "transactional", True),
     "payment_receipt": ("Payment receipts", "transactional", True),
     "ticket": ("Events: tickets", "transactional", True),
     "booking_confirmation": ("Bookings: confirmations", "transactional", True),
@@ -1873,9 +1874,109 @@ OUTBOX_COLUMNS = (
 )
 
 
+# Files a message carries (a booking's calendar invite). Kept beside the outbox until the message is sent, then
+# dropped: what was sent is in the recipient's mailbox, and the business keeps no second copy of it.
+OUTBOX_FILES_SCHEMA = (
+    """CREATE TABLE IF NOT EXISTS suite_outbox_files (
+        id TEXT PRIMARY KEY,
+        message_id TEXT NOT NULL,
+        filename TEXT NOT NULL,
+        content_type TEXT NOT NULL,
+        data BLOB NOT NULL,
+        created_at TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS suite_outbox_files_message ON suite_outbox_files (message_id)",
+)
+MAX_ATTACHMENTS = 5
+MAX_ATTACHMENT_BYTES = 1_000_000  # every file of one message together
+_CONTENT_TYPE = re.compile(
+    r"^[a-z]+/[a-z0-9.+-]{1,60}(?:; ?[a-z-]{1,30}=[A-Za-z0-9._-]{1,40}){0,4}$"
+)
+_FILENAME_BAD = re.compile(r"[^A-Za-z0-9._ -]")
+
+
+def clean_attachments(attachments: Iterable[Any]) -> list[dict[str, Any]]:
+    """``[{"filename", "content_type", "data"}]`` (or ``(filename, content_type, data)`` tuples) checked: at most
+    :data:`MAX_ATTACHMENTS`, :data:`MAX_ATTACHMENT_BYTES` together, a plain file name and a MIME type."""
+    out: list[dict[str, Any]] = []
+    total = 0
+    for item in attachments or ():
+        if isinstance(item, Mapping):
+            filename, content_type, data = (
+                item.get("filename"),
+                item.get("content_type"),
+                item.get("data"),
+            )
+        else:
+            filename, content_type, data = item
+        if isinstance(data, str):
+            data = data.encode("utf-8")
+        if not isinstance(data, (bytes, bytearray)) or not data:
+            raise ValueError("An attachment needs its contents.")
+        name = _FILENAME_BAD.sub("_", str(filename or "").strip())[:100].strip(" .")
+        if not name:
+            raise ValueError("An attachment needs a file name.")
+        main, sep, rest = str(content_type or "").strip().partition(";")
+        kind = main.strip().lower() + (sep + rest if sep else "")
+        if not _CONTENT_TYPE.match(kind):
+            raise ValueError(f"{name} does not have a usable type.")
+        total += len(data)
+        out.append({"filename": name, "content_type": kind, "data": bytes(data)})
+    if len(out) > MAX_ATTACHMENTS:
+        raise ValueError(f"A message can carry at most {MAX_ATTACHMENTS} files.")
+    if total > MAX_ATTACHMENT_BYTES:
+        raise ValueError("The files are too large to send by email.")
+    return out
+
+
+def outbox_files(
+    connection: sqlite3.Connection, message_id: str
+) -> list[dict[str, Any]]:
+    """A message's files, in the order they were added (with their bytes)."""
+    ensure_outbox(connection)
+    return fetch_all(
+        connection,
+        "SELECT filename, content_type, data FROM suite_outbox_files WHERE message_id = ? ORDER BY rowid",
+        (message_id,),
+    )
+
+
+def _file_names(
+    connection: sqlite3.Connection, message_ids: Sequence[str]
+) -> dict[str, list[dict[str, Any]]]:
+    names: dict[str, list[dict[str, Any]]] = {}
+    for start in range(0, len(message_ids), 500):
+        chunk = list(message_ids[start : start + 500])
+        if not chunk:
+            continue
+        for row in connection.execute(
+            f"SELECT message_id, filename, content_type, length(data) FROM suite_outbox_files WHERE message_id IN ({', '.join('?' for _ in chunk)}) ORDER BY rowid",  # noqa: S608
+            chunk,
+        ):
+            names.setdefault(row[0], []).append(
+                {"filename": row[1], "content_type": row[2], "size": int(row[3] or 0)}
+            )
+    return names
+
+
+def drop_orphan_files(connection: sqlite3.Connection) -> int:
+    """Files whose message is gone (an erasure removed it)."""
+    if not connection.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'suite_outbox_files'"
+    ).fetchone():
+        return 0
+    return int(
+        connection.execute(
+            "DELETE FROM suite_outbox_files WHERE message_id NOT IN (SELECT id FROM suite_outbox)"
+        ).rowcount
+        or 0
+    )
+
+
 def ensure_outbox(connection: sqlite3.Connection) -> None:
     """The shared tables plus the outbox columns added later (safe on any database, old or new)."""
     ensure_core(connection)
+    ensure(connection, "suite.outbox.files.v1", OUTBOX_FILES_SCHEMA)
     marker = (_db_file(connection), "suite.outbox.v2")
     if marker in _ensured:
         return
@@ -2046,21 +2147,24 @@ def queue_email(
     send_after: str = "",
     expires_at: str = "",
     unsubscribe_url: str = "",
+    attachments: Iterable[Any] = (),
 ) -> dict[str, Any] | None:
     """Prepare a message to a customer. It waits in the outbox for approval unless the business sends this kind
     automatically. Returns None when there is no address to send to.
 
     ``expires_at``: a time-bound message (a reminder) is dropped if it is still unsent then; kinds in
     :data:`EXPIRE_AFTER` get one by default. ``unsubscribe_url``: bulk mail (a newsletter) carries the RFC 8058
-    one-click unsubscribe headers, and is checked against unsubscribes again when it is sent."""
+    one-click unsubscribe headers, and is checked against unsubscribes again when it is sent. ``attachments``:
+    files it carries (:func:`clean_attachments`: a booking's ``.ics`` invite), kept until it is sent."""
     ensure_outbox(connection)
     recipient = email(to) if to else ""
     if not recipient:
         return None
+    files = clean_attachments(attachments)
     automatic = kind in ALWAYS_SEND or kind in auto_send_kinds(
         email_settings(connection)
     )
-    message = {
+    message: dict[str, Any] = {
         "id": new_id(),
         "app": app,
         "kind": kind[:40],
@@ -2083,6 +2187,27 @@ def queue_email(
         :expires_at, :unsubscribe_url, :created_at, :approved_at)""",
         message,
     )
+    for file in files:
+        connection.execute(
+            "INSERT INTO suite_outbox_files (id, message_id, filename, content_type, data, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                new_id(),
+                message["id"],
+                file["filename"],
+                file["content_type"],
+                file["data"],
+                message["created_at"],
+            ),
+        )
+    if files:
+        message["attachments"] = [
+            {
+                "filename": f["filename"],
+                "content_type": f["content_type"],
+                "size": len(f["data"]),
+            }
+            for f in files
+        ]
     return message
 
 
@@ -2131,7 +2256,12 @@ def expire_outbox(connection: sqlite3.Connection, at: str = "") -> int:
             drop + "expires_at IS NULL AND kind = ? AND COALESCE(send_after, created_at) <= ?",
             (kind, iso(parse_time(stamp) - lifetime)),
         ).rowcount
-    if changed:
+    # the files of a message that went, was withdrawn or is gone are not needed any more
+    dropped = connection.execute(
+        """DELETE FROM suite_outbox_files WHERE NOT EXISTS (SELECT 1 FROM suite_outbox o
+        WHERE o.id = suite_outbox_files.message_id AND o.status NOT IN ('sent', 'cancelled'))"""
+    ).rowcount
+    if changed or dropped:
         connection.commit()
     return int(changed or 0)
 
@@ -2249,11 +2379,15 @@ def outbox(
         clauses.append("app = ?")
         params.append(app)
     where = f"WHERE {' AND '.join(clauses)}" if clauses else ""
-    return fetch_all(
+    rows = fetch_all(
         connection,
         f"SELECT * FROM suite_outbox {where} ORDER BY created_at DESC LIMIT ?",  # noqa: S608
         (*params, max(1, min(limit, 1000))),
     )
+    files = _file_names(connection, [row["id"] for row in rows])
+    for row in rows:
+        row["attachments"] = files.get(row["id"], [])
+    return rows
 
 
 def outbox_counts(connection: sqlite3.Connection) -> dict[str, int]:
@@ -2308,7 +2442,10 @@ def edit_outbox(
 
 
 def _transactional(
-    settings: Mapping[str, Any], profile: Mapping[str, Any], message: Mapping[str, Any]
+    settings: Mapping[str, Any],
+    profile: Mapping[str, Any],
+    message: Mapping[str, Any],
+    files: Sequence[Mapping[str, Any]] = (),
 ) -> Any:
     from email.message import EmailMessage
     from email.utils import formataddr, formatdate, make_msgid
@@ -2343,6 +2480,21 @@ def _transactional(
     ]
     footer = ("\n\n--\n" + "\n".join(footer_bits)) if footer_bits else ""
     mail.set_content(str(message["body"]).replace("\r\n", "\n").rstrip() + footer)
+    for file in files:
+        kind, _sep, rest = str(file["content_type"]).partition(";")
+        maintype, _slash, subtype = kind.strip().partition("/")
+        params = {}
+        for part in rest.split(";"):
+            key, eq, value = part.strip().partition("=")
+            if eq and key:
+                params[key.strip()] = value.strip()
+        mail.add_attachment(
+            bytes(file["data"]),
+            maintype=maintype,
+            subtype=subtype,
+            filename=str(file["filename"]),
+            params=params or None,
+        )
     return mail
 
 
@@ -2433,7 +2585,9 @@ def send_outbox(
             )
             continue
         try:
-            built = _transactional(settings, profile, message)
+            built = _transactional(
+                settings, profile, message, outbox_files(connection, message["id"])
+            )
             send(settings, password, built)
         except Exception as error:  # noqa: BLE001 - one failure must not stop the rest
             attempts = int(message.get("attempts") or 0) + 1
@@ -2472,6 +2626,9 @@ def send_outbox(
                     str(built["Message-ID"] or "")[:300],
                     message["id"],
                 ),
+            )
+            connection.execute(
+                "DELETE FROM suite_outbox_files WHERE message_id = ?", (message["id"],)
             )
             result["sent"] += 1
             result["details"].append({"id": message["id"], "status": "sent"})

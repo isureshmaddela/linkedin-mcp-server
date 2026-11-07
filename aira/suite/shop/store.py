@@ -147,6 +147,50 @@ SCHEMA_V3 = (
     )""",
     "CREATE INDEX IF NOT EXISTS sh_trade_accounts_status ON sh_trade_accounts (status)",
 )
+# Added for delivery zones and returns: where the shop delivers and at what rate (each zone matches countries,
+# states or regions, and postcode or PIN prefixes; the shop's flat fee is the default zone for everywhere else),
+# and customers' returns (requested from the order page, approved or rejected, received, refunded).
+ZONE_RATES = ("flat", "weight", "free_over")
+RETURN_STATUSES = ("requested", "approved", "rejected", "received", "refunded")
+SCHEMA_V4 = (
+    """CREATE TABLE IF NOT EXISTS sh_delivery_zones (
+        id TEXT PRIMARY KEY,
+        name TEXT NOT NULL,
+        countries TEXT NOT NULL DEFAULT '[]',
+        regions TEXT NOT NULL DEFAULT '[]',
+        postcodes TEXT NOT NULL DEFAULT '[]',
+        rate_type TEXT NOT NULL DEFAULT 'flat',
+        fee_cents INTEGER NOT NULL DEFAULT 0,
+        free_over_cents INTEGER NOT NULL DEFAULT 0,
+        bands TEXT NOT NULL DEFAULT '[]',
+        active INTEGER NOT NULL DEFAULT 1,
+        position INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS sh_returns (
+        id TEXT PRIMARY KEY,
+        number INTEGER NOT NULL UNIQUE,
+        order_id TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'requested',
+        items TEXT NOT NULL DEFAULT '[]',
+        reason TEXT NOT NULL DEFAULT '',
+        details TEXT NOT NULL DEFAULT '',
+        shop_note TEXT NOT NULL DEFAULT '',
+        value_cents INTEGER NOT NULL DEFAULT 0,
+        refund_cents INTEGER NOT NULL DEFAULT 0,
+        refund_error TEXT NOT NULL DEFAULT '',
+        restocked INTEGER NOT NULL DEFAULT 0,
+        history TEXT NOT NULL DEFAULT '[]',
+        decided_at TEXT,
+        received_at TEXT,
+        refunded_at TEXT,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS sh_returns_order ON sh_returns (order_id)",
+    "CREATE INDEX IF NOT EXISTS sh_returns_status ON sh_returns (status, created_at)",
+)
 ADDED_COLUMNS = (
     ("sh_products", "audience", "TEXT NOT NULL DEFAULT 'all'"),
     ("sh_products", "wholesale_cents", "INTEGER NOT NULL DEFAULT 0"),  # 0 = businesses pay the price
@@ -171,12 +215,22 @@ ADDED_COLUMNS = (
     ("sh_orders", "tax_lines", "TEXT NOT NULL DEFAULT '[]'"),
     ("sh_orders", "prices_include_tax", "INTEGER NOT NULL DEFAULT 0"),
     ("sh_products", "hsn_sac", "TEXT NOT NULL DEFAULT ''"),  # HSN (goods) or SAC (services) code on invoices
+    # Delivery zones: a product's weight, the order's weight, where it goes and the zone that priced it.
+    ("sh_products", "weight_grams", "INTEGER NOT NULL DEFAULT 0"),
+    ("sh_orders", "weight_grams", "INTEGER NOT NULL DEFAULT 0"),
+    ("sh_orders", "ship_country", "TEXT NOT NULL DEFAULT ''"),
+    ("sh_orders", "ship_region", "TEXT NOT NULL DEFAULT ''"),
+    ("sh_orders", "ship_postcode", "TEXT NOT NULL DEFAULT ''"),
+    ("sh_orders", "delivery_zone", "TEXT NOT NULL DEFAULT ''"),
+    # A shipment's carrier and tracking number (the tracking link is built from them, or typed).
+    ("sh_orders", "carrier", "TEXT NOT NULL DEFAULT ''"),
+    ("sh_orders", "tracking_number", "TEXT NOT NULL DEFAULT ''"),
 )
 
 
 def _add_columns(connection: sqlite3.Connection) -> None:
     """Add the business columns to a database made by an older Shop (safe to run any number of times)."""
-    marker = (kit._db_file(connection), "shop.columns.v4")  # noqa: SLF001 - kit.ensure's own marker,
+    marker = (kit._db_file(connection), "shop.columns.v5")  # noqa: SLF001 - kit.ensure's own marker,
     if marker in kit._ensured:  # noqa: SLF001 - so kit.forget_schema() resets it too
         return
     tables: dict[str, set[str]] = {}
@@ -203,6 +257,7 @@ def ensure(connection: sqlite3.Connection) -> None:
     kit.ensure(connection, "shop.v1", SCHEMA)
     kit.ensure(connection, "shop.v2", SCHEMA_V2)
     kit.ensure(connection, "shop.v3", SCHEMA_V3)
+    kit.ensure(connection, "shop.v4", SCHEMA_V4)
     _add_columns(connection)
     kit.contact_columns(connection, "sh_orders")
 
@@ -438,8 +493,18 @@ SETTINGS_DEFAULTS: dict[str, Any] = {
     "pickup_enabled": True,
     "pickup_instructions": "",
     "delivery_enabled": True,
+    # The default zone: everywhere the delivery zones (sh_delivery_zones) do not cover, at this fee (free over the
+    # threshold). Without zones it is the shop's one delivery fee; turned off, the shop delivers only to its zones.
     "delivery_fee_cents": 0,
     "free_delivery_over_cents": 0,  # 0 = no free-delivery threshold
+    "deliver_elsewhere": True,
+    "default_country": "",  # the country the checkout starts with ("IN"), when the shop has zones
+    # Returns: within this many days of delivery (0 = the shop takes no returns online), with what to do
+    # next in the approval email ("Pack it and drop it at ..."), and the shop's own tracking page for a carrier
+    # not in the list ("https://track.example.com/?awb={number}").
+    "return_window_days": 7,
+    "return_instructions": "",
+    "custom_tracking_url": "",
     "notice": "",  # shown at the top of the storefront
     "closed_message": "We are not taking orders right now. Please check back soon.",
     # Share and earn: a customer who paid gets a code; a new customer using it gets a percent off their first
@@ -582,7 +647,29 @@ def save_settings(
             ),
         }
     )
-    if 0 < clean["unpaid_expiry_online_minutes"] < 16:
+    clean.update(
+        {
+            "deliver_elsewhere": kit.flag(merged["deliver_elsewhere"]),
+            "default_country": country_key(
+                kit.text(merged["default_country"], "the default country", max_len=60)
+            ),
+            "return_window_days": kit.integer(
+                merged["return_window_days"],
+                "the return window (days)",
+                default=7,
+                minimum=0,
+                maximum=365,
+            ),
+            "return_instructions": kit.text(
+                merged["return_instructions"],
+                "the return instructions",
+                max_len=1000,
+                multiline=True,
+            ),
+            "custom_tracking_url": tracking_template(merged["custom_tracking_url"]),
+        }
+    )
+    if 0 < int(clean["unpaid_expiry_online_minutes"]) < 16:
         raise ValueError(
             "An online order waits at least 16 minutes for payment (Razorpay keeps a link open at least 15)."
         )
@@ -616,3 +703,87 @@ def amount(value: Any, label: str, *, default: int = 0) -> int:
             raise ValueError(f"{label[:1].upper()}{label[1:]} must be whole cents.")
         return amount(int(value), label)
     return kit.cents(value, label)
+
+
+# ---------------------------------------------------------------------------
+# delivery addresses and tracking links (the helpers settings and zones share)
+# ---------------------------------------------------------------------------
+
+# Country names people type, as the two-letter code a zone may use (anything else is compared as typed).
+COUNTRY_ALIASES = {
+    "INDIA": "IN",
+    "BHARAT": "IN",
+    "UNITED STATES": "US",
+    "UNITED STATES OF AMERICA": "US",
+    "USA": "US",
+    "AMERICA": "US",
+    "UNITED KINGDOM": "GB",
+    "UK": "GB",
+    "GREAT BRITAIN": "GB",
+    "BRITAIN": "GB",
+    "ENGLAND": "GB",
+    "SCOTLAND": "GB",
+    "WALES": "GB",
+    "UNITED ARAB EMIRATES": "AE",
+    "UAE": "AE",
+    "CANADA": "CA",
+    "AUSTRALIA": "AU",
+    "NEW ZEALAND": "NZ",
+    "SINGAPORE": "SG",
+    "MALAYSIA": "MY",
+    "SRI LANKA": "LK",
+    "NEPAL": "NP",
+    "BANGLADESH": "BD",
+    "PAKISTAN": "PK",
+    "GERMANY": "DE",
+    "FRANCE": "FR",
+    "IRELAND": "IE",
+    "NETHERLANDS": "NL",
+    "SPAIN": "ES",
+    "ITALY": "IT",
+    "SAUDI ARABIA": "SA",
+    "QATAR": "QA",
+    "KUWAIT": "KW",
+    "OMAN": "OM",
+    "BAHRAIN": "BH",
+    "SOUTH AFRICA": "ZA",
+    "KENYA": "KE",
+    "NIGERIA": "NG",
+    "JAPAN": "JP",
+}
+
+
+def country_key(value: Any) -> str:
+    """A country as zones compare it: "India", "india" and "IN" are all ``IN``."""
+    text = " ".join(str(value or "").replace(".", " ").split()).upper()
+    return COUNTRY_ALIASES.get(text, text)[:60]
+
+
+def region_key(value: Any) -> str:
+    """A state or region as zones compare it: an Indian state by its GST code ("Telangana", "36"), else lower case."""
+    text = " ".join(str(value or "").split())
+    if not text:
+        return ""
+    try:
+        code = kit.state_code(text)
+    except ValueError:
+        code = ""
+    return f"gst:{code}" if code else text.lower()[:60]
+
+
+def postcode_key(value: Any) -> str:
+    """A postcode or PIN code without spaces or dashes, upper case ("sw1a 1aa" is ``SW1A1AA``)."""
+    return "".join(ch for ch in str(value or "").upper() if ch.isalnum())[:20]
+
+
+def tracking_template(value: Any) -> str:
+    """A shop's own tracking page: an https address with ``{number}`` where the tracking number goes."""
+    text = kit.text(value, "the tracking page address", max_len=300)
+    if not text:
+        return ""
+    if not text.lower().startswith("https://") or "{number}" not in text:
+        raise ValueError(
+            "The tracking page address starts with https:// and has {number} where the tracking number goes."
+        )
+    kit.url(text.replace("{number}", "0"), "the tracking page address")
+    return text

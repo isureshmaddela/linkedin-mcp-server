@@ -639,6 +639,10 @@ def erase_outbox(connection: sqlite3.Connection, person: Person) -> dict[str, in
             ),
         ),
     )
+    from aira.suite import kit
+
+    # the files those messages carried (a booking's calendar invite names its customer)
+    tally.add("suite_outbox_files", kit.drop_orphan_files(connection))
     return tally.counts
 
 
@@ -973,7 +977,17 @@ def erase_shop(connection: sqlite3.Connection, person: Person) -> dict[str, int]
                 "note": None,
                 "internal_notes": None,
                 "client_key": None,
+                "ship_region": None,
+                "ship_postcode": None,
+                "tracking_number": None,
             },
+        ),
+    )
+    # what they wrote when they sent items back
+    tally.add(
+        "sh_returns",
+        blank(
+            connection, "sh_returns", "order_id", orders, {"details": None, "shop_note": None}
         ),
     )
     trade = _rows(

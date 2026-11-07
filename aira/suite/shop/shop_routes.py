@@ -2,6 +2,8 @@
 
 Business buyers (B2B) have their own routes: ``/api/shop/trade-accounts`` (apply, approve, terms, codes) and
 ``/api/shop/receivables`` (what businesses owe); on the storefront they apply and sign in with a trade code.
+Delivery zones are ``/api/shop/zones`` (delivery.py) and returns ``/api/shop/returns`` (returns.py); a customer
+asks for a return on their order page (action ``request_return``).
 
 Loaded by :func:`aira.suite.load_apps`. Every handler opens the account's database (the person's own locally, the
 organization's hosted); the hosted rules come from :func:`monosage_cloud.policy.suite_rules` (GET = ``suite.read``,
@@ -14,7 +16,7 @@ from typing import Any
 
 from aira.airaapi.http import Raw, Request, aira_route
 from aira.suite import background, kit, public
-from aira.suite.shop import access, service, store, trade
+from aira.suite.shop import access, delivery, returns, service, store, trade
 from aira.suite.shop.store import APP
 
 BASE = "/api/shop"
@@ -140,6 +142,8 @@ def _order_view(connection: Any, order: dict[str, Any]) -> dict[str, Any]:
         "link": public.link_for(connection, APP, "order", order["id"]),
         # its payment links (Razorpay): open, paid, refunded, or a mismatch the shop must look at
         "payments": payments.requests_for(connection, APP, "order", order["id"]),
+        "returns": returns.for_order(connection, order["id"]),
+        "carrier_name": delivery.carrier_name(str(order.get("carrier") or "")),
     }
 
 
@@ -157,9 +161,11 @@ def overview(request: Request) -> tuple[int, dict[str, Any]]:
 @aira_route("GET", f"{BASE}/settings")
 def settings_get(request: Request) -> tuple[int, dict[str, Any]]:
     with _open(request) as connection:
+        shop = store.settings(connection)
         return 200, {
-            "settings": store.settings(connection),
+            "settings": shop,
             "business": kit.business(connection),
+            "carriers": delivery.carriers(shop),
         }
 
 
@@ -319,6 +325,13 @@ def orders_list(request: Request) -> tuple[int, dict[str, Any]] | Raw:
         return 200, {"orders": rows}
 
 
+def _address(payload: dict[str, Any]) -> dict[str, str]:
+    """The parts of a delivery address a zone is chosen by."""
+    return {
+        key: str(payload.get(key) or "")[:60] for key in ("country", "region", "postcode")
+    }
+
+
 def _account_for(connection: Any, payload: dict[str, Any]) -> dict[str, Any] | None:
     """The approved trade account an order the shop enters is for (``trade_account_id``), or None."""
     account_id = str(payload.get("trade_account_id") or "")
@@ -341,6 +354,8 @@ def quote(request: Request) -> tuple[int, dict[str, Any]]:
             delivery_method=str(payload.get("delivery_method") or "pickup"),
             include_drafts=True,
             account=_account_for(connection, payload),
+            address=_address(payload),
+            strict_delivery=False,
         )
 
 
@@ -424,6 +439,8 @@ def _order_action(request: Request, action: str) -> tuple[int, dict[str, Any]]:
                 order_id,
                 str(payload.get("status") or ""),
                 tracking_url=str(payload.get("tracking_url") or ""),
+                carrier=str(payload.get("carrier") or ""),
+                tracking_number=str(payload.get("tracking_number") or ""),
                 note=note,
                 origin=request.base_url(),
             )
@@ -782,6 +799,8 @@ def storefront_quote(
         delivery_method=str(payload.get("delivery_method") or "pickup"),
         account=service.storefront_buyer(connection, payload),
         customer_state=str(payload.get("customer_state") or "")[:60],
+        address=_address(payload),
+        strict_delivery=False,
     )
     return 200, {"quote": _quote_view(quote_data)}
 
@@ -806,6 +825,9 @@ def storefront_order(
         "note",
         "po_number",
         "customer_state",
+        "country",
+        "region",
+        "postcode",
     }
     order = service.place_order(
         connection,
@@ -848,7 +870,10 @@ def storefront_notify_me(
 
 def _public_order(connection: Any, order_id: str) -> dict[str, Any]:
     order = store.get_order(connection, order_id)
-    return service.public_order(order, service.order_referral(connection, order))
+    return {
+        **service.public_order(order, service.order_referral(connection, order)),
+        "returns": returns.public_view(connection, order),
+    }
 
 
 @public.page(APP, "order")
@@ -867,6 +892,151 @@ def order_notify_paid(
     store.ensure(connection)
     service.customer_says_paid(connection, link["ref_id"], payload)
     return 200, {"order": _public_order(connection, link["ref_id"])}
+
+
+@public.action(APP, "order", "request_return")
+def order_request_return(
+    connection: Any,
+    link: dict[str, Any],
+    payload: dict[str, Any],
+    visitor: dict[str, Any],
+) -> tuple[int, dict[str, Any]]:
+    """The customer asks to send items back (within the shop's return window)."""
+    store.ensure(connection)
+    returns.request(
+        connection,
+        link["ref_id"],
+        {k: payload.get(k) for k in ("items", "reason", "details")},
+        origin=str(visitor.get("base_url") or ""),
+    )
+    return 201, {"order": _public_order(connection, link["ref_id"])}
+
+
+# ---------------------------------------------------------------------------
+# delivery zones
+# ---------------------------------------------------------------------------
+
+
+def _zones_view(connection: Any) -> dict[str, Any]:
+    shop = store.settings(connection)
+    currency = kit.business(connection)["currency"]
+    rows = [
+        {**zone, "rate_text": delivery.describe(zone, currency)}
+        for zone in delivery.list_zones(connection)
+    ]
+    fallback = delivery.default_zone(shop)
+    return {
+        "zones": rows,
+        "default": {**fallback, "rate_text": delivery.describe(fallback, currency)},
+        "rates": list(store.ZONE_RATES),
+    }
+
+
+@aira_route("GET", f"{BASE}/zones")
+def zones_list(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as connection:
+        return 200, _zones_view(connection)
+
+
+@aira_route("POST", f"{BASE}/zones")
+def zones_create(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as connection:
+        zone = delivery.create_zone(connection, request.payload)
+    request.audit("shop.zone_create", "zone", zone["id"])
+    return 201, {"zone": zone}
+
+
+@aira_route("PATCH", f"{BASE}/zones/{ID}")
+def zones_update(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as connection:
+        zone = delivery.update_zone(connection, request.match.group(1), request.payload)
+    request.audit("shop.zone_update", "zone", zone["id"])
+    return 200, {"zone": zone}
+
+
+@aira_route("DELETE", f"{BASE}/zones/{ID}")
+def zones_delete(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as connection:
+        delivery.delete_zone(connection, request.match.group(1))
+    request.audit("shop.zone_delete", "zone", request.match.group(1))
+    return 200, {"deleted": True}
+
+
+# ---------------------------------------------------------------------------
+# returns
+# ---------------------------------------------------------------------------
+
+
+@aira_route("GET", f"{BASE}/returns")
+def returns_list(request: Request) -> tuple[int, dict[str, Any]]:
+    with _open(request) as connection:
+        return 200, {
+            "returns": returns.list_returns(connection, status=request.q("status")),
+            "counts": returns.counts(connection),
+        }
+
+
+def _return_action(request: Request, action: str) -> tuple[int, dict[str, Any]]:
+    return_id = request.match.group(1)
+    payload = request.payload
+    note = str(payload.get("note") or "")
+    from aira.payments import service as payments
+
+    # a refund of an order paid online goes back through Razorpay with the business's key secret
+    with _open(request) as connection, payments.secrets(request.secret_store):
+        if action in ("approve", "reject"):
+            entry = returns.decide(
+                connection,
+                return_id,
+                action == "approve",
+                note=note,
+                actor=_actor(request),
+                origin=request.base_url(),
+            )
+        elif action == "receive":
+            entry = returns.receive(
+                connection,
+                return_id,
+                restock=kit.flag(payload.get("restock", True)),
+                amount_cents=payload.get("amount_cents"),
+                note=note,
+                secret_store=request.secret_store,
+                actor=_actor(request),
+                origin=request.base_url(),
+            )
+        else:
+            entry = returns.refund(
+                connection,
+                return_id,
+                amount_cents=payload.get("amount_cents"),
+                note=note,
+                secret_store=request.secret_store,
+                actor=_actor(request),
+                origin=request.base_url(),
+            )
+        order = _order_view(connection, store.get_order(connection, entry["order_id"]))
+    request.audit(f"shop.return_{action}", "return", return_id)
+    return 200, {"return": entry, "order": order}
+
+
+@aira_route("POST", f"{BASE}/returns/{ID}/approve")
+def returns_approve(request: Request) -> tuple[int, dict[str, Any]]:
+    return _return_action(request, "approve")
+
+
+@aira_route("POST", f"{BASE}/returns/{ID}/reject")
+def returns_reject(request: Request) -> tuple[int, dict[str, Any]]:
+    return _return_action(request, "reject")
+
+
+@aira_route("POST", f"{BASE}/returns/{ID}/receive")
+def returns_receive(request: Request) -> tuple[int, dict[str, Any]]:
+    return _return_action(request, "receive")
+
+
+@aira_route("POST", f"{BASE}/returns/{ID}/refund")
+def returns_refund(request: Request) -> tuple[int, dict[str, Any]]:
+    return _return_action(request, "refund")
 
 
 # ---------------------------------------------------------------------------

@@ -179,6 +179,52 @@ SCHEMA_V3 = (
 )
 
 
+# Added later: each person's own calendar (the private iCal address Google Calendar or Outlook gives), read on a
+# schedule; its busy times inside the booking window are kept here and taken out of that person's free times.
+SCHEMA_V4 = (
+    """CREATE TABLE IF NOT EXISTS bk_calendar_feeds (
+        staff_id TEXT PRIMARY KEY,
+        url TEXT NOT NULL,
+        last_attempt_at TEXT,
+        last_synced_at TEXT,
+        last_error TEXT NOT NULL DEFAULT '',
+        busy_count INTEGER NOT NULL DEFAULT 0,
+        created_at TEXT NOT NULL,
+        updated_at TEXT NOT NULL
+    )""",
+    """CREATE TABLE IF NOT EXISTS bk_calendar_busy (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        staff_id TEXT NOT NULL,
+        start_at TEXT NOT NULL,
+        end_at TEXT NOT NULL
+    )""",
+    "CREATE INDEX IF NOT EXISTS bk_calendar_busy_staff ON bk_calendar_busy (staff_id, start_at)",
+)
+ADDED_COLUMNS = (
+    # goes up with every change a customer's calendar must follow (RFC 5545 SEQUENCE of the invite)
+    ("bk_bookings", "ics_sequence", "INTEGER NOT NULL DEFAULT 0"),
+)
+
+
+def _add_columns(connection: sqlite3.Connection) -> None:
+    """Add the later columns to a database made by an older Bookings (safe to run any number of times)."""
+    marker = (kit._db_file(connection), "bookings.columns.v1")  # noqa: SLF001 - kit.ensure's own marker,
+    if marker in kit._ensured:  # noqa: SLF001 - so kit.forget_schema() resets it too
+        return
+    for table, column, definition in ADDED_COLUMNS:
+        have = {row[1] for row in connection.execute(f"PRAGMA table_info({table})")}
+        if column not in have:
+            try:
+                connection.execute(
+                    f"ALTER TABLE {table} ADD COLUMN {column} {definition}"
+                )
+            except sqlite3.OperationalError as error:  # another connection added it first
+                if "duplicate column" not in str(error).lower():
+                    raise
+    connection.commit()
+    kit._ensured.add(marker)  # noqa: SLF001
+
+
 def cents_field(
     value: Any, name: str, *, default: int | None = 0, minimum: int = 0
 ) -> int:
@@ -193,6 +239,8 @@ def ensure(connection: sqlite3.Connection) -> None:
     kit.ensure(connection, "bookings.v1", SCHEMA)
     kit.ensure(connection, "bookings.v2", SCHEMA_V2)
     kit.ensure(connection, "bookings.v3", SCHEMA_V3)
+    kit.ensure(connection, "bookings.v4", SCHEMA_V4)
+    _add_columns(connection)
     kit.contact_columns(connection, "bk_customers")
 
 
@@ -505,7 +553,37 @@ def _staff_out(connection: sqlite3.Connection, row: dict[str, Any]) -> dict[str,
     row["active"] = bool(row["active"])
     row["hours"] = get_hours(connection, row["id"])
     row["commission_percent"] = commission_bp(connection, row["id"]) / 100
+    row["calendar"] = calendar_feed(connection, row["id"])
     return row
+
+
+def mask_address(url: str) -> str:
+    """A private calendar address as it is shown again: its host and file name, never the secret between them."""
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(str(url or ""))
+    last = (parts.path or "").rstrip("/").rsplit("/", 1)[-1]
+    tail = last if 0 < len(last) <= 24 and "@" not in last else "…"
+    return f"{parts.hostname or ''}/…/{tail}" if tail != "…" else f"{parts.hostname or ''}/…"
+
+
+def calendar_feed(
+    connection: sqlite3.Connection, staff_id: str
+) -> dict[str, Any] | None:
+    """A person's connected calendar as the app shows it (the address masked), or None."""
+    row = kit.fetch_one(
+        connection, "SELECT * FROM bk_calendar_feeds WHERE staff_id = ?", (staff_id,)
+    )
+    if not row:
+        return None
+    return {
+        "address": mask_address(row["url"]),
+        "last_attempt_at": row["last_attempt_at"],
+        "last_synced_at": row["last_synced_at"],
+        "last_error": row["last_error"],
+        "busy_count": int(row["busy_count"] or 0),
+        "ok": bool(row["last_synced_at"]) and not row["last_error"],
+    }
 
 
 def commission_bp(connection: sqlite3.Connection, staff_id: str) -> int:
@@ -671,6 +749,8 @@ def delete_staff(connection: sqlite3.Connection, staff_id: str) -> dict[str, Any
         ("bk_hours", "staff_id"),
         ("bk_service_staff", "staff_id"),
         ("bk_time_off", "staff_id"),
+        ("bk_calendar_feeds", "staff_id"),
+        ("bk_calendar_busy", "staff_id"),
     ):
         connection.execute(f"DELETE FROM {table} WHERE {column} = ?", (staff_id,))  # noqa: S608 - fixed names
     connection.commit()

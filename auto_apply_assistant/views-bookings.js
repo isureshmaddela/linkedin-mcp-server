@@ -330,6 +330,42 @@
       return { weekday, start, end };
     });
   }
+  // A person's own calendar (Google, Outlook): its private iCal address, read every half hour, so a time they are
+  // busy there is not offered to customers. The address is a secret, so it only ever comes back masked.
+  function calendarStatus(feed) {
+    if (!feed) return h("span", { class: "muted", text: "Not connected" });
+    if (feed.last_error) return h("span", { class: "cm-stack" }, S.pill("problem", { problem: "bad" }), h("span", { class: "muted small", text: feed.last_error }));
+    if (!feed.last_synced_at) return S.pill("waiting", { waiting: "warn" });
+    return h("span", { class: "cm-stack" }, S.pill("synced", { synced: "good" }), h("span", { class: "muted small", text: `${Aira.fmt.ago(feed.last_synced_at)} · ${feed.busy_count} busy time${feed.busy_count === 1 ? "" : "s"}` }));
+  }
+  function calendarDrawer(person, rerender) {
+    const address = h("input", { type: "url", placeholder: "https://calendar.google.com/calendar/ical/…/basic.ics", autocomplete: "off", spellcheck: "false" });
+    const status = h("div", {});
+    const show = (feed) => {
+      status.replaceChildren(feed
+        ? Aira.ui.kv([["Address", feed.address], ["Last read", feed.last_synced_at ? S.when(feed.last_synced_at) : "Not yet"], ["Last tried", feed.last_attempt_at ? S.when(feed.last_attempt_at) : ""], ["Busy times", feed.last_synced_at ? String(feed.busy_count) : ""], ["Problem", feed.last_error ? h("span", { class: "bad", text: feed.last_error }) : ""]])
+        : h("p", { class: "muted", text: "No calendar connected yet." }));
+    };
+    show(person.calendar);
+    const after = async (feed, message) => { person.calendar = feed; show(feed); Aira.toast(message, feed && feed.last_error ? "error" : "success"); if (rerender) rerender(); };
+    Aira.drawer({
+      title: `${person.name}'s calendar`,
+      subtitle: "Busy times in their own calendar are not offered to customers.",
+      body: h("div", { class: "suite-body" },
+        h("p", { class: "muted", text: "Paste the calendar's private address in iCal format. Google Calendar: Settings, pick the calendar, then \"Secret address in iCal format\". Outlook: Settings, Calendar, Shared calendars, Publish a calendar, then the ICS link. It is read every half hour; only busy times are kept, never what the events are." }),
+        S.section("Now", status),
+        Aira.ui.field(person.calendar ? "Replace with another address" : "Private iCal address", address),
+        h("div", { class: "btn-row" },
+          S.button(person.calendar ? "Replace" : "Connect", async () => {
+            if (!address.value.trim()) { address.focus(); throw new Error("Paste the calendar's address first."); }
+            const out = await call(`/staff/${person.id}/calendar`, { method: "POST", body: { url: address.value.trim() } });
+            address.value = "";
+            await after(out.calendar, out.calendar && out.calendar.last_error ? `Saved, but it could not be read: ${out.calendar.last_error}` : "Connected and read.");
+          }),
+          person.calendar ? S.button("Sync now", async () => { const out = await call(`/staff/${person.id}/calendar/sync`, { method: "POST", body: {} }); await after(out.calendar, out.result.ok ? "Read again." : `It could not be read: ${out.result.error}`); }, { kind: "secondary" }) : null,
+          person.calendar ? S.button("Disconnect", async () => { await call(`/staff/${person.id}/calendar`, { method: "DELETE" }); await after(null, "Disconnected."); Aira.closeDrawer(); }, { kind: "ghost" }) : null)),
+    });
+  }
   async function staffTab(body) {
     const { staff } = learnDay(await call("/staff"));
     const { time_off: timeOff } = await call(`/time-off?from=${today()}`);
@@ -366,7 +402,9 @@
           { key: "name", label: "Name", render: (p) => h("span", {}, h("span", { style: { display: "inline-block", width: "10px", height: "10px", borderRadius: "50%", background: p.color, marginRight: "6px" } }), p.name) },
           { key: "hours", label: "Hours", render: (p) => (p.hours.length ? WEEKDAYS.map((d, i) => (rangesText(p.hours, i) ? `${d.slice(0, 3)} ${rangesText(p.hours, i)}` : "")).filter(Boolean).join(" · ") : h("span", { class: "muted", text: "No hours yet: nobody can book them" })) },
           { key: "commission_percent", label: "Commission", num: true, render: (p) => (p.commission_percent ? `${p.commission_percent}%` : "") },
+          { key: "calendar", label: "Calendar", render: (p) => calendarStatus(p.calendar) },
           { key: "active", label: "", render: (p) => (p.active ? S.pill("active") : S.pill("archived")) },
+          { key: "cal", label: "", render: (p) => S.button(p.calendar ? "Calendar" : "Connect calendar", (event) => { if (event) event.stopPropagation(); calendarDrawer(p, rerender); }, { kind: "ghost sm" }) },
           { key: "x", label: "", render: (p) => S.button("Remove", async () => { if (await S.confirmDelete(p.name)) { const out = await call(`/staff/${p.id}`, { method: "DELETE" }); Aira.toast(out.deactivated ? "They have past bookings, so they were made inactive." : "Removed.", "success"); rerender(); } }, { kind: "ghost sm" }) },
         ],
         rows: staff,
