@@ -125,7 +125,7 @@ def test_the_screens_follow_the_chosen_language(browser, env):
     assert menu_text(page, "#/today") == "Today"
     page.click("#langBtn")
     page.click(".lang-menu button[lang='te']")
-    page.wait_for_function("document.documentElement.lang === 'te'")
+    page.wait_for_selector("html[lang='te']", state="attached")
     assert menu_text(page, "#/today") == "ఈరోజు"
     assert page.locator("#langBtn .lang-name").inner_text() == "తెలుగు"
     # patterns put the number (and a known word) into the translation; unknown text stays as written
@@ -173,13 +173,13 @@ def test_the_screens_follow_the_chosen_language(browser, env):
     )
     # the choice is kept on this browser and with the person's profile
     page.reload()
-    page.wait_for_function("document.documentElement.lang === 'te'")
+    page.wait_for_selector("html[lang='te']", state="attached")
     me = context.request.get(env.base + "/api/life/me").json()
     assert me["profile"]["prefs"]["language"] == "te"
     # back to English restores the original text
     page.click("#langBtn")
     page.click(".lang-menu button[lang='en']")
-    page.wait_for_function("document.documentElement.lang === 'en'")
+    page.wait_for_selector("html[lang='en']", state="attached")
     assert menu_text(page, "#/today") == "Today"
     assert not [p for p in problems if "status of 401" not in p], problems
     context.close()

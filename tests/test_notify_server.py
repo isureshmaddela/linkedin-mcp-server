@@ -36,6 +36,7 @@ def live(monkeypatch):
     monkeypatch.setattr(notify, "_live", True)
     yield
     realtime.HUB.shutdown()  # every open stream ends, so the server can stop
+    realtime.HUB.reset()  # the next test in this process gets a working hub again
     notify.flush(5)
     dispatch.DISPATCHER.clear()
 

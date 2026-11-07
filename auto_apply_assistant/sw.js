@@ -4,66 +4,37 @@
  * (that page shows it itself). A click focuses an open Monosage window and moves it to the notification's page,
  * or opens one.
  *
- * Caching, carefully: the network always comes first, so after a deploy the browser gets the new files at once
- * (the server revalidates every file by ETag). Only when the network fails does a copy of the page shell from this
- * version's cache answer, so Monosage opens offline and says so. The API is never cached. A new sw.js (any change
- * to VERSION) deletes the caches of older versions when it takes over.
- *
- * While the device is online, opening a page is left to the browser entirely (the worker does not answer it), so
- * the page is exactly what the server sent; the worker answers a page only when the device is offline.
+ * No caching: while the device is online the worker answers nothing, so every page and file comes straight from
+ * the server (revalidated by ETag) and a deploy is seen at once. Offline, opening a Monosage page shows a short
+ * "You are offline" page instead of the browser's error. A new sw.js (any change to VERSION) removes the caches an
+ * older version kept.
  */
 "use strict";
 
-const VERSION = "2026-11-07.1";
-const CACHE = `monosage-shell-${VERSION}`;
-const SHELL = ["/", "/static/app.css", "/static/app.js", "/static/icon-192.png", "/manifest.webmanifest"];
+const VERSION = "2026-11-07.2";
 const OFFLINE = `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Monosage</title></head>
 <body style="font-family:system-ui,sans-serif;display:grid;place-items:center;min-height:100vh;margin:0;background:#0c4932;color:#fff;text-align:center">
 <main><p style="font-size:42px;margin:0;color:#d7f066">M</p><h1 style="font-size:22px">You are offline</h1><p>Monosage opens again when this device is back online.</p></main></body></html>`;
 
-self.addEventListener("install", (event) => {
-  event.waitUntil(
-    caches.open(CACHE).then((cache) => Promise.all(SHELL.map((path) => cache.add(new Request(path, { cache: "reload" })).catch(() => null)))).then(() => self.skipWaiting()),
-  );
-});
+self.addEventListener("install", () => self.skipWaiting());
 
 self.addEventListener("activate", (event) => {
   event.waitUntil(
-    caches.keys().then((names) => Promise.all(names.filter((name) => name.startsWith("monosage-shell-") && name !== CACHE).map((name) => caches.delete(name)))).then(() => self.clients.claim()),
+    caches.keys().then((names) => Promise.all(names.filter((name) => name.startsWith("monosage-")).map((name) => caches.delete(name)))).then(() => self.clients.claim()),
   );
 });
 
-// What this worker answers: the page itself (the root and an app's own address such as /stocks, one shell), its
-// static files and the manifest. Everything else (the API, public links, other pages) goes straight to the network.
-function kindOf(request) {
+// Only a Monosage page opened while offline: the root and an app's own address such as /stocks.
+function offlinePage(request) {
   const url = new URL(request.url);
-  if (url.origin !== self.location.origin || request.method !== "GET") return "";
-  if (request.mode === "navigate") return /^\/(?:[a-z0-9-]+\/?)?$/.test(url.pathname) ? "shell" : "";
-  if (url.pathname.startsWith("/static/") || url.pathname === "/manifest.webmanifest") return "file";
-  return "";
+  return url.origin === self.location.origin && request.method === "GET" && request.mode === "navigate"
+    && /^\/(?:[a-z0-9-]+\/?)?$/.test(url.pathname);
 }
 
 self.addEventListener("fetch", (event) => {
   const { request } = event;
-  const kind = kindOf(request);
-  if (!kind) return; // the browser handles it as if there were no service worker
-  if (kind === "shell" && self.navigator.onLine !== false) return; // online: the page comes straight from the server
-  const key = kind === "shell" ? "/" : request;
-  event.respondWith((async () => {
-    try {
-      const fresh = await fetch(request);
-      if (fresh.ok && fresh.type === "basic") {
-        const copy = fresh.clone();
-        caches.open(CACHE).then((cache) => cache.put(key, copy)).catch(() => null);
-      }
-      return fresh;
-    } catch (error) {
-      const kept = await (await caches.open(CACHE)).match(key);
-      if (kept) return kept;
-      if (kind === "shell") return new Response(OFFLINE, { headers: { "Content-Type": "text/html; charset=utf-8" } });
-      throw error;
-    }
-  })());
+  if (!offlinePage(request) || self.navigator.onLine !== false) return; // the browser handles it as if there were no worker
+  event.respondWith(fetch(request).catch(() => new Response(OFFLINE, { headers: { "Content-Type": "text/html; charset=utf-8" } })));
 });
 
 self.addEventListener("push", (event) => {

@@ -27,6 +27,7 @@ def live(monkeypatch):
     monkeypatch.setattr(notify, "_live", True)
     yield
     realtime.HUB.shutdown()
+    realtime.HUB.reset()  # the next test in this process gets a working hub again
 
 
 def test_the_notifications_page_updates_live_and_the_app_installs(browser, env):
