@@ -381,3 +381,47 @@ Tests: `tests/test_autopilot_reliability.py` (the claim and a two-worker race, l
 failures are retried and when, failures after Submit, Needs you, I applied and Try again, migration 21, HTTP journeys
 with the real engine against a server error after Submit and a rate-limited page, the local tick after a restart, a
 hosted job delivered twice, and the hosted scheduler waking for retries).
+
+## 8. As built: Finish in browser (2026-11-06)
+
+Round 2 item F14 of `docs/careers-maturity-scope.md`. Code in `aira/handoff.py` (the live session), the form engine
+(`aira/apply_engine.py`) and Workday (`aira/workday.py`), `aira/autopilot.py` (migration 24 `autopilot_handoff`:
+`application_runs.hold`, `application_runs.handoff`), the glue in `auto_apply_assistant.py`
+(`_autopilot_finish_in_browser`, `_autopilot_finish_decide`, `_record_handoff`) and `views-autopilot.js`.
+
+**Holds a person finishes.** The engine names the step that held a run in `ApplyOutcome.hold`: `captcha` (a
+reCAPTCHA, hCaptcha, Turnstile or other CAPTCHA widget on the form, after everything else was filled), `sign_in` (a
+password field before the form; Workday: its account form when the saved account cannot open it) or `verification`
+(a one-time code field; Workday: "verify your email"). Ordinary questions keep `hold = ""`. A held run keeps its
+browser cookies and storage (`keep_state_path`, next to the account's database in `handoff-state/`, removed once the
+run is submitted, skipped or marked I applied).
+
+**Finish in browser** (`POST /api/autopilot/runs/{id}/finish`, 202) takes a `needs_review` run with a hold and no
+unanswered questions, checks the daily limit and starts `execute_run(..., submit=True, handoff=True)` in the account's
+automation slot. The engine runs headed (`FINISH_IN_BROWSER_HEADLESS` is for tests), starts from the kept cookies,
+fills the form the same way and, on the held step, calls `Handoff.wait`: it polls the page every 500 ms until the step
+is done (the CAPTCHA or sign-in is gone, a CAPTCHA has its answer token, a code field is gone, the URL moved on, or a
+confirmation appeared), the person chooses **I'm done** or **Give up**
+(`POST /api/autopilot/runs/{id}/finish/decision {choice: done|give_up}`), the window is closed, or 15 minutes
+(`TIMEOUT_SECONDS`) pass. Done: the run carries on (sign-in, then the form, then perhaps a CAPTCHA, at most
+`MAX_HANDOFFS` steps) and submits. If the person pressed Submit in the window themselves, the confirmation is the
+result; if the page moved on without one, nothing is pressed again and the run is `interrupted`. Anything else (gave
+up, timed out, window closed, the window could not open) returns the run to Needs you held for the same step, never
+queued for a retry. The time spent waiting does not count against the run's own time limit.
+
+**Recorded.** `application_runs.handoff` keeps `{at, kind, outcome, result, waits, seconds}`; the job's history gets
+"Finish in browser: you did the CAPTCHA; Monosage submitted the application." (or gave up, timed out, window closed),
+and the activity log a `finish_in_browser` entry; the starts and decisions are audited.
+
+**Needs you** shows a held run as "A step needs you" with what the step is, Finish in browser, Open the employer's
+page, I applied, Details and Skip; while the window is open the item stays (status `running`, `handoff_live` with
+`state` opening/waiting/resuming, the step and the seconds left) with I'm done and Give up. After a timeout or Give up
+it says so and offers Finish in browser again.
+
+**Hosted.** Not offered: `api_autopilot_run_finish` and `api_autopilot_run_finish_decision` are `DENY` in
+`monosage_cloud/policy.py`, `status.finish_in_browser` is false, and the card links to the employer's page ("do this
+step and submit there, then choose I applied"). See the scope document for why the sign-in broker does not carry it.
+
+Tests: `tests/test_finish_in_browser.py` (a stand-in CAPTCHA the test solves and the run submits with the held run's
+cookies, a sign-in wall, the time limit, Give up, I'm done, the session registry, the Needs you item through held,
+waiting and submitted, timed out and gave up, refusals, the hosted rules, migration 24).

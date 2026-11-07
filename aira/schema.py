@@ -760,6 +760,13 @@ MIGRATIONS: tuple[Migration, ...] = (
         "likely questions (with linked stories and practice notes) and a company research brief.",
         _interview_prep,
     ),
+    Migration(
+        24,
+        "autopilot_handoff",
+        "Finish in browser: an Auto-apply run held for a step only the person can do (a CAPTCHA, a sign-in, an "
+        "email or phone code) names that step, and keeps how the last Finish in browser session went.",
+        _autopilot,
+    ),
 )
 
 

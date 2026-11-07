@@ -123,6 +123,8 @@ MAX_PAGE_TEXT = 20_000
 ACTION_TIMEOUT_SECONDS = 15
 SETTLE_SECONDS = 5
 POLL_MILLISECONDS = 250
+# Finish in browser: steps one session waits on at most (a sign-in, then a CAPTCHA, then a code, ...).
+MAX_HANDOFFS = 4
 
 
 # --------------------------------------------------------------------------- #
@@ -148,6 +150,13 @@ class ApplyRequest:
     extra_answers: Mapping[str, str] = field(default_factory=dict)
     # Workday only: the tenant's candidate account (aira.workday.WorkdayAccount), or None.
     workday_account: Any = None
+    # Finish in browser (an aira.handoff.Handoff): a CAPTCHA, sign-in or code step waits for the person in the
+    # window instead of ending the run; None holds the run as before.
+    handoff: Any = None
+    # The cookies and storage to start from (kept by the held run), and where to keep this run's when it is held
+    # for a step a person must do, so Finish in browser starts from the same browser state.
+    storage_state_path: str | None = None
+    keep_state_path: str | None = None
 
 
 @dataclass(slots=True)
@@ -182,6 +191,11 @@ class ApplyOutcome:
     evidence: ApplyEvidence
     error: str
     steps: list[str]
+    # The step a person must do that held the run ("captcha", "sign_in", "verification"; aira.handoff.HOLD_KINDS),
+    # "" for every other outcome. Needs you offers Finish in browser for these.
+    hold: str = ""
+    # How each Finish in browser wait of this attempt ended ({kind, outcome, seconds}).
+    handoffs: list[dict[str, Any]] = field(default_factory=list)
 
 
 # --------------------------------------------------------------------------- #
@@ -566,6 +580,28 @@ _CAPTCHA_SELECTORS = (
     "[id*='captcha' i]",
     "[class*='captcha' i]",
 )
+# Where a solved CAPTCHA leaves its answer (reCAPTCHA, hCaptcha, Turnstile): a value here means the person did it.
+_CAPTCHA_ANSWER_SELECTORS = (
+    "textarea[name='g-recaptcha-response']",
+    "textarea[name='h-captcha-response']",
+    "input[name='cf-turnstile-response']",
+)
+# A step that asks for a code the site sent to the person's email or phone. Monosage never reads those messages.
+_VERIFICATION_SELECTORS = (
+    "input[autocomplete='one-time-code']",
+    "input[name='otp' i]",
+    "input[id='otp' i]",
+    "input[name^='otp_' i]",
+    "input[name^='otp-' i]",
+    "input[name*='verification' i][name*='code' i]",
+    "input[id*='verification' i][id*='code' i]",
+)
+# What each hold asks of the person, and what the run says when Finish in browser ends without it.
+_HANDOFF_ENDINGS = {
+    "gave_up": "You stopped Finish in browser.",
+    "timed_out": "Finish in browser timed out: the step was not done within {minutes} minutes, so the window closed.",
+    "closed": "The browser window was closed before the step was done.",
+}
 _BASE_LABEL_SELECTORS = (
     "label",
     "legend",
@@ -766,6 +802,9 @@ _CAPTCHA_JS = r"""
   return "";
 }
 """
+_ANSWERED_JS = r"""
+(selector) => Array.from(document.querySelectorAll(selector)).some((el) => String(el.value || "").trim().length > 0)
+"""
 
 
 # --------------------------------------------------------------------------- #
@@ -825,6 +864,18 @@ def _first_line(text: str) -> str:
 
 def _contains_phrase(haystack: str, needle: str) -> bool:
     return f" {needle} " in f" {haystack} "
+
+
+def _moved_on(before: str, after: str) -> bool:
+    """Whether the page left ``before`` for another address (the query and fragment do not count)."""
+    if not before or not after:
+        return False
+    old, new = urlsplit(before), urlsplit(after)
+    return (old.scheme, old.netloc, old.path.rstrip("/")) != (
+        new.scheme,
+        new.netloc,
+        new.path.rstrip("/"),
+    )
 
 
 def extract_confirmation_number(text: str) -> str:
@@ -945,6 +996,7 @@ class _Runner:
         self.document_status: int | None = None
         self.cleanups: list[Callable[[], None]] = []
         self.url = adapter.apply_url(request.application_url)
+        self.handoffs: list[dict[str, Any]] = []
 
     # -- outcome plumbing --------------------------------------------------
 
@@ -1009,6 +1061,7 @@ class _Runner:
         self, status: str, error: str = "", **evidence_kwargs: Any
     ) -> ApplyOutcome:
         screenshot = evidence_kwargs.pop("screenshot", None)
+        hold = str(evidence_kwargs.pop("hold", "") or "")
         return ApplyOutcome(
             status=status,
             ats=self.adapter.name,
@@ -1017,7 +1070,204 @@ class _Runner:
             evidence=self.evidence(screenshot=screenshot, **evidence_kwargs),
             error=error,
             steps=list(self.steps),
+            hold=hold if status == "needs_review" else "",
+            handoffs=list(self.handoffs),
         )
+
+    # -- Finish in browser (aira.handoff) ------------------------------------
+
+    def _step_done_check(self, kind: str) -> Callable[[], bool]:
+        """Whether the page shows the person did the step: it is gone, answered, or the page moved on."""
+        assert self.page is not None
+        page = self.page
+        try:
+            start_url = page.url
+        except Exception:  # noqa: BLE001
+            start_url = ""
+
+        def check() -> bool:
+            from aira.handoff import HandoffClosed
+
+            if page.is_closed():
+                raise HandoffClosed
+            try:
+                url = page.url
+            except Exception:  # noqa: BLE001 - mid-navigation
+                return False
+            if _moved_on(start_url, url):
+                return True
+            if self._confirmation_marker():
+                return True
+            return not self._step_present(kind)
+
+        return check
+
+    def _step_present(self, kind: str) -> bool:
+        """Whether the page still shows the step a person must do."""
+        if kind == "captcha":
+            return bool(self._visible_captcha()) and not self._captcha_answered()
+        if kind == "sign_in":
+            return self._password_wall()
+        if kind == "verification":
+            return self._verification_step()
+        return True
+
+    def _handed_over(self, held: ApplyOutcome) -> bool:
+        """Finish in browser: wait for the person on the step ``held`` is for.
+
+        True when the step is done (the page shows it, or the person said so): the run carries on from here. False
+        when there is no session or the person gave up, the time ran out or the window was closed; ``held`` then
+        says so and is the result.
+        """
+        handoff = self.request.handoff
+        if handoff is None or not held.hold or self.page is None:
+            return False
+        if len(self.handoffs) >= MAX_HANDOFFS:
+            return False
+        page = self.page
+        self.step("Waiting for you to finish this step in the browser window")
+        result = handoff.wait(
+            held.hold,
+            held.error,
+            self._step_done_check(held.hold),
+            lambda milliseconds: page.wait_for_timeout(milliseconds),
+        )
+        seconds = int((handoff.waits[-1] if getattr(handoff, "waits", None) else {}).get("seconds", 0))
+        self.handoffs.append({"kind": held.hold, "outcome": result, "seconds": seconds})
+        if result in ("cleared", "done"):
+            self.step(
+                "You finished the step; Monosage carries on"
+                if result == "cleared"
+                else "You said the step is done; Monosage carries on"
+            )
+            # The time spent waiting for the person does not count against the run's own time limit.
+            self.deadline = time.monotonic() + max(5, int(self.request.timeout_seconds))
+            try:
+                page.wait_for_load_state("domcontentloaded", timeout=SETTLE_SECONDS * 1000)
+            except Exception:  # noqa: BLE001
+                pass
+            return True
+        minutes = max(1, round(float(getattr(handoff, "timeout_seconds", 900)) / 60))
+        ending = _HANDOFF_ENDINGS.get(result, "").format(minutes=minutes)
+        self.step(ending or "Finish in browser ended")
+        held.error = f"{ending} {held.error}".strip()
+        held.steps = list(self.steps)
+        held.handoffs = list(self.handoffs)
+        return False
+
+    def _after_person(self, form_url: str) -> ApplyOutcome | None:
+        """After the person's step on the form: None to carry on, or what they did themselves.
+
+        The person may have pressed Submit in the window. Then the confirmation is the result; when the page moved
+        on without one, nothing is pressed again (it may have been sent).
+        """
+        page = self.page
+        assert page is not None
+        marker = self._confirmation_marker()
+        if marker:
+            self.step("You submitted the form in the browser window")
+            return self._submitted_outcome(marker)
+        try:
+            url = page.url
+        except Exception:  # noqa: BLE001
+            url = ""
+        try:
+            form_gone = self.form is None or self.form.count() == 0
+        except Exception:  # noqa: BLE001 - the document was replaced
+            form_gone = True
+        if not _moved_on(form_url, url) and not form_gone:
+            return None
+        limit = time.monotonic() + SETTLE_SECONDS * 2
+        while time.monotonic() < limit:
+            page.wait_for_timeout(POLL_MILLISECONDS)
+            marker = self._confirmation_marker()
+            if marker:
+                self.step("You submitted the form in the browser window")
+                return self._submitted_outcome(marker)
+        self.step(
+            "No confirmation appeared after the page moved on in the browser window"
+        )
+        return self.outcome(
+            "failed",
+            "The page moved on while you finished the step, and Monosage found no confirmation. "
+            "Check the site, then choose I applied or Try again.",
+            screenshot=self.screenshot("moved-on"),
+        )
+
+    def _captcha_answered(self) -> bool:
+        selector = ", ".join(_CAPTCHA_ANSWER_SELECTORS)
+        for frame in self._frames():
+            try:
+                if frame.evaluate(_ANSWERED_JS, selector):
+                    return True
+            except Exception:  # noqa: BLE001
+                continue
+        return False
+
+    def _verification_step(self) -> bool:
+        selector = ", ".join(f"{item}:visible" for item in _VERIFICATION_SELECTORS)
+        for frame in self._frames():
+            try:
+                if frame.locator(selector).count():
+                    return True
+            except Exception:  # noqa: BLE001 - detached frames
+                continue
+        return False
+
+    def _confirmation_marker(self) -> str:
+        """The success wording or URL the ATS shows once an application went through, or ""."""
+        if self.page is None:
+            return ""
+        try:
+            url = self.page.url
+        except Exception:  # noqa: BLE001
+            url = ""
+        lowered = _phrase_text(self.page_text())
+        success_phrases = _SUCCESS_PHRASES + self.adapter.success_phrases
+        marker = next((p for p in success_phrases if p in lowered), "")
+        if marker:
+            return marker
+        return next(
+            (
+                f"URL {pattern}"
+                for pattern in self.adapter.success_url_patterns
+                if re.search(pattern, url, re.IGNORECASE)
+            ),
+            "",
+        )
+
+    def _submitted_outcome(self, marker: str) -> ApplyOutcome:
+        text = self.page_text()
+        submitted_at = _now_iso()
+        number = extract_confirmation_number(text)
+        self.step(f"Confirmation appeared ({marker})")
+        if number:
+            self.step(f"Confirmation number {number}")
+        screenshot = self.screenshot("submitted")
+        return self.outcome(
+            "submitted",
+            "",
+            screenshot=screenshot,
+            confirmation_text=" ".join(text.split())[:2_000],
+            confirmation_number=number,
+            submitted_at=submitted_at,
+        )
+
+    def _keep_state(self, context: Any, result: ApplyOutcome) -> None:
+        """Keep this run's cookies and storage for Finish in browser when it is held for a person's step."""
+        path = self.request.keep_state_path
+        if not path or not result.hold:
+            return
+        try:
+            target = Path(path)
+            target.parent.mkdir(parents=True, exist_ok=True)
+            context.storage_state(path=str(target))
+            try:
+                target.chmod(0o600)
+            except OSError:
+                pass
+        except Exception as error:  # noqa: BLE001 - Finish in browser still works from a fresh browser
+            self.step(f"Could not keep the browser state: {_first_line(str(error))}")
 
     # -- browser session ---------------------------------------------------
 
@@ -1025,9 +1275,16 @@ class _Runner:
         from patchright.sync_api import Error as PlaywrightError
         from patchright.sync_api import TimeoutError as PlaywrightTimeout
 
-        context = browser.new_context(
-            accept_downloads=False, viewport={"width": 1280, "height": 1800}
-        )
+        options: dict[str, Any] = {
+            "accept_downloads": False,
+            "viewport": {"width": 1280, "height": 1800},
+        }
+        state = self.request.storage_state_path
+        if state and Path(state).is_file():
+            options["storage_state"] = state  # the held run's cookies and storage (Finish in browser)
+        if self.request.handoff is not None:
+            options["viewport"] = {"width": 1280, "height": 900}  # a window the person can see whole
+        context = browser.new_context(**options)
         page = context.new_page()
         # Never work in a second tab: anything that opens one is closed at once.
         # Registered after the main page exists, because "page" also fires for it.
@@ -1039,7 +1296,9 @@ class _Runner:
         page.on("response", self._track_response)
         self.page = page
         try:
-            return self._drive()
+            result = self._drive()
+            self._keep_state(context, result)
+            return result
         except PlaywrightTimeout as error:
             self.step("The browser timed out")
             return self.outcome(
@@ -1048,6 +1307,18 @@ class _Runner:
                 screenshot=self.screenshot("timeout"),
             )
         except PlaywrightError as error:
+            if (
+                self.request.handoff is not None
+                and page.is_closed()
+                and not any(step.startswith("Clicked ") for step in self.steps)
+            ):
+                # The person closed the Finish in browser window: the run waits for them again.
+                self.step("The browser window was closed")
+                return self.outcome(
+                    "needs_review",
+                    _HANDOFF_ENDINGS["closed"],
+                    hold=self.handoffs[-1]["kind"] if self.handoffs else "",
+                )
             self.step("The browser reported an error")
             return self.outcome(
                 "failed",
@@ -1110,12 +1381,44 @@ class _Runner:
             )
         if self._password_wall():
             self.step("The page asks for a sign-in")
-            return self.outcome(
+            held = self.outcome(
                 "needs_review",
                 "The page asks for a sign-in. Monosage never signs in to employer sites; "
-                "apply manually or sign in yourself first.",
+                "sign in yourself (Finish in browser), or apply on the site.",
                 screenshot=self.screenshot("sign-in"),
+                hold="sign_in",
             )
+            if not self._handed_over(held):
+                return held
+            if self._password_wall():
+                self.step("The page still asks for a sign-in")
+                return self.outcome(
+                    "needs_review",
+                    "The page still asks for a sign-in. Sign in on the site, then try again.",
+                    screenshot=self.screenshot("sign-in"),
+                    hold="sign_in",
+                )
+            marker = self._confirmation_marker()
+            if marker:
+                return self._submitted_outcome(marker)
+        if self._verification_step():
+            self.step("The page asks for a code sent to your email or phone")
+            held = self.outcome(
+                "needs_review",
+                "The site asks for a code it sent to your email or phone. Monosage never reads your "
+                "messages; enter the code yourself (Finish in browser), or apply on the site.",
+                screenshot=self.screenshot("verification"),
+                hold="verification",
+            )
+            if not self._handed_over(held):
+                return held
+            if self._verification_step():
+                return self.outcome(
+                    "needs_review",
+                    "The page still asks for the code. Enter it on the site, then try again.",
+                    screenshot=self.screenshot("verification"),
+                    hold="verification",
+                )
         if not self._locate_form():
             self.step("No application form was found on the page")
             return self.outcome(
@@ -1135,12 +1438,22 @@ class _Runner:
         captcha = self._visible_captcha()
         if captcha:
             self.step(f"A verification step is on the form ({captcha})")
-            return self.outcome(
+            held = self.outcome(
                 "needs_review",
                 "A CAPTCHA or verification step is on the form. Monosage never bypasses "
-                "these; complete it yourself and submit.",
+                "these; complete it yourself (Finish in browser) and Monosage submits.",
                 screenshot=self.screenshot("captcha"),
+                hold="captcha",
             )
+            # Questions nobody answered come first: the person would otherwise do the CAPTCHA for nothing.
+            if self.request.handoff is None or self.unanswered():
+                return held
+            form_url = page.url
+            if not self._handed_over(held):
+                return held
+            moved = self._after_person(form_url)
+            if moved is not None:
+                return moved
         unanswered = self.unanswered()
         if unanswered:
             labels = ", ".join(question.label for question in unanswered[:6])

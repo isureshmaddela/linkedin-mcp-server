@@ -157,6 +157,7 @@ from aira.airaapi import service as airaapi_service
 from aira.airaapi import store as airaapi_store
 from aira.airaapi.client import SerpApiError
 from aira import answer_drafts, autopilot
+from aira import handoff as handoff_sessions
 from aira import ai_instructions, ai_instructions_routes, email_apply, model_provider
 from aira.apply_engine import ApplyRequest, detect_ats
 from aira.apply_engine import run as run_apply_engine
@@ -7202,8 +7203,22 @@ def _apply_with_engine(
     source: str,
     answers: Mapping[str, str],
     submit: bool,
+    *,
+    run_id: str = "",
 ) -> dict[str, Any]:
     job = _with_approved_documents(job)  # upload the newest approved resume and letter
+    # Finish in browser (aira/handoff.py): the person opened this run in a window they see; the engine waits on a
+    # CAPTCHA, sign-in or code step for them. Locally a held run keeps its cookies for that window.
+    session = (
+        handoff_sessions.active(run_id, owner=str(getattr(_request_context, "user_id", "") or ""))
+        if run_id
+        else None
+    )
+    state_path = (
+        str(_handoff_state_path(run_id))
+        if run_id and _finish_in_browser_available()
+        else None
+    )
     state = _profile_state()
     profile = dict(state["candidate_profile"])
     profile.setdefault(
@@ -7253,7 +7268,9 @@ def _apply_with_engine(
                 cover_letter_path=str(letter_path) if letter_path else None,
                 cover_letter_text=str(job.get("cover_letter") or ""),
                 submit=submit,
-                headless=_setting("apply_show_browser") != "1",
+                headless=FINISH_IN_BROWSER_HEADLESS
+                if session is not None
+                else _setting("apply_show_browser") != "1",
                 screenshot_dir=str(shots),
                 timeout_seconds=min(
                     150,
@@ -7268,6 +7285,9 @@ def _apply_with_engine(
                     source=source,
                     profile_email=str(profile.get("email") or ""),
                 ),
+                handoff=session,
+                storage_state_path=state_path if session is not None else None,
+                keep_state_path=state_path,
             )
         )
         shot_id = None
@@ -7306,6 +7326,8 @@ def _apply_with_engine(
             "evidence_document_id": text_id,
             "screenshot_document_id": shot_id,
             "url": outcome.evidence.url or url,
+            "hold": outcome.hold,
+            "handoffs": list(outcome.handoffs),
         }
     finally:
         resume_cleanup()
@@ -7884,7 +7906,9 @@ def _autopilot_apply(
     _autopilot_progress(
         f"{'Applying to' if submit else 'Filling the form for'} {job.get('title') or 'the job'}{' at ' + job['company'] if job.get('company') else ''}"
     )
-    return _apply_with_engine(job, url, source, answers, submit)
+    return _apply_with_engine(
+        job, url, source, answers, submit, run_id=str(run.get("run_id") or "")
+    )
 
 
 def _move_stage_along(job_id: str, target: str, reason: str) -> None:
@@ -8197,6 +8221,21 @@ def _autopilot_overview(user: dict[str, Any]) -> dict[str, Any]:
         today = autopilot.counts_today(connection)
         standard = standard_answers_map(connection)
         remembered = autopilot.list_custom_answers(connection)
+        # A run open in Finish in browser stays in Needs you while it runs (with I'm done and Give up).
+        live = {
+            session.run_id: session.view()
+            for session in handoff_sessions.sessions_for(str(user["user_id"]))
+        }
+        listed = {run["run_id"] for run in open_runs}
+        for run_id in live:
+            if run_id not in listed:
+                try:
+                    open_runs.insert(0, autopilot.get_run(connection, run_id))
+                except LookupError:
+                    continue
+    for run in [*open_runs, *recent]:
+        if run["run_id"] in live:
+            run["handoff_live"] = live[run["run_id"]]
     # A run is shown once: in Needs you when it waits there, otherwise in the activity list.
     open_ids = {run["run_id"] for run in open_runs}
     for run in recent:
@@ -8227,6 +8266,8 @@ def _autopilot_overview(user: dict[str, Any]) -> dict[str, Any]:
             "remaining_today": None if not limit else max(0, limit - sent_today),
             "auto_today": today.get("submitted", 0),
             "show_browser": _setting("apply_show_browser") == "1",
+            # Finish in browser opens a window on this computer: the local build only (see aira/handoff.py).
+            "finish_in_browser": _finish_in_browser_available(),
             "review_drafts": _setting("review_drafted_answers") != "0",
             "running": running,
         },
@@ -8380,6 +8421,7 @@ def _autopilot_skip(run_id: str) -> dict[str, Any]:
             },
         )
     _audit("autopilot.skip", "application_run", run_id, {})
+    _drop_handoff_state(run_id)
     return updated
 
 
@@ -8470,12 +8512,162 @@ def _autopilot_mark_applied(run_id: str, payload: dict[str, Any]) -> dict[str, A
     if not submission.get("duplicate"):
         _move_stage_along(job["job_id"], "applied", "You applied on the site")
         _after_submission(job, "Applied on the site by you")
+    _drop_handoff_state(run_id)
     return {
         "run": updated,
         "submission": {
             k: submission.get(k) for k in ("submission_id", "submitted_at", "method")
         },
     }
+
+
+# ---------------------------------------------------------------------------
+# Finish in browser (F14, aira/handoff.py): a run held for a CAPTCHA, a sign-in or a code the site sent opens in a
+# visible window on this computer with the form filled again; Monosage carries on once the person did the step.
+# ---------------------------------------------------------------------------
+
+# A visible window for people; the tests set True (no screen in CI).
+FINISH_IN_BROWSER_HEADLESS = False
+FINISH_IN_BROWSER_HOSTED = (
+    "Finish in browser works in Monosage on your own computer. Here, open the employer's page, do this step "
+    "and submit there, then choose I applied."
+)
+_HANDOFF_STEP_NAMES = {
+    "captcha": "the CAPTCHA",
+    "sign_in": "the sign-in",
+    "verification": "the code check",
+}
+
+
+def _finish_in_browser_available() -> bool:
+    """Only where the browser runs on the person's own computer (not a hosted worker)."""
+    return HOSTING.start_background is None
+
+
+def _handoff_state_path(run_id: str) -> Path:
+    """Where a held run keeps its cookies and storage for Finish in browser (next to the account's database)."""
+    data = Path(getattr(_request_context, "data_path", DB_PATH))
+    return data.parent / "handoff-state" / f"{data.stem}-{run_id}.json"
+
+
+def _drop_handoff_state(run_id: str) -> None:
+    try:
+        _handoff_state_path(run_id).unlink(missing_ok=True)
+    except OSError:
+        logger.info("Could not remove the kept browser state of %s", run_id)
+
+
+def _handoff_reason(run: Mapping[str, Any]) -> str:
+    record = run.get("handoff") or {}
+    step = _HANDOFF_STEP_NAMES.get(str(record.get("kind") or ""), "the step")
+    outcome = str(record.get("outcome") or "")
+    status = run.get("status")
+    if status == "submitted":
+        how = "you did" if outcome != "done" else "you said you did"
+        return f"Finish in browser: {how} {step}; Monosage submitted the application."
+    if status == "interrupted":
+        return "Finish in browser: the page moved on without a confirmation; check the site."
+    minutes = max(1, round(handoff_sessions.TIMEOUT_SECONDS / 60))
+    return {
+        "gave_up": f"Finish in browser: you gave up on {step}; the application waits in Needs you.",
+        "timed_out": f"Finish in browser timed out after {minutes} minutes; the application waits in Needs you.",
+        "closed": "Finish in browser: the window was closed; the application waits in Needs you.",
+    }.get(
+        outcome,
+        f"Finish in browser ended ({_status_words(str(status))}); the application waits in Needs you."
+        if status == "needs_review"
+        else f"Finish in browser ended ({_status_words(str(status))}).",
+    )
+
+
+def _status_words(status: str) -> str:
+    return status.replace("_", " ")
+
+
+def _record_handoff(run: dict[str, Any]) -> None:
+    """Write how Finish in browser went on the application: its history and the activity log."""
+    reason = _handoff_reason(run)
+    if run["status"] != "needs_review":
+        _drop_handoff_state(run["run_id"])
+    job = _job_row(run["job_id"])
+    if job is None:
+        return
+    with _connect() as connection:
+        _append_application_event(connection, job["job_id"], None, job["stage"], reason)
+        connection.commit()
+    _record_activity(
+        "finish_in_browser",
+        job.get("title") or job["job_id"],
+        "ok" if run["status"] == "submitted" else "held",
+        reason,
+    )
+
+
+def _autopilot_finish_in_browser(user: dict[str, Any], run_id: str) -> dict[str, Any]:
+    """Finish in browser: run the held application again in a visible window and wait there for the person."""
+    if not _finish_in_browser_available():
+        raise ValueError(FINISH_IN_BROWSER_HOSTED)
+    with _connect() as connection:
+        run = autopilot.get_run(connection, run_id)
+        if run["status"] != "needs_review" or run.get("hold") not in handoff_sessions.HOLD_KINDS:
+            raise ValueError("This application is not waiting for a step in the browser.")
+        if run["unanswered"]:
+            raise ValueError("Answer the questions first; then finish the rest in the browser.")
+        if connection.execute(
+            "SELECT 1 FROM application_submissions WHERE job_id = ?", (run["job_id"],)
+        ).fetchone():
+            raise ValueError("Monosage already recorded an application for this job.")
+    plan = _autopilot_plan_or_none(run["plan_id"]) if run.get("plan_id") else None
+    services = _autopilot_services(user)
+    remaining = services.daily_remaining()
+    if remaining is not None and remaining <= 0:
+        raise ValueError(
+            "The daily application limit is reached. Raise it, or finish this tomorrow."
+        )
+    session = handoff_sessions.open_session(run_id, owner=str(user["user_id"]))
+
+    def work() -> None:
+        try:
+            result = autopilot.execute_run(
+                services, run_id, submit=True, plan=plan, handoff=True
+            )
+        finally:
+            handoff_sessions.close(run_id, session)
+        _record_handoff(result)
+
+    _audit(
+        "autopilot.finish_in_browser",
+        "application_run",
+        run_id,
+        {"hold": run["hold"]},
+    )
+    try:
+        # No queue spec: the window opens in this process, on this computer.
+        started = _autopilot_start(user, "Finishing in the browser", work)
+    except Exception:
+        handoff_sessions.close(run_id, session)
+        raise
+    return {**started, "handoff": session.view()}
+
+
+def _autopilot_finish_decide(
+    user: dict[str, Any], run_id: str, payload: Mapping[str, Any]
+) -> dict[str, Any]:
+    """I'm done (``done``) or Give up (``give_up``) for the open Finish in browser window."""
+    choice = str(payload.get("choice") or "")
+    with _connect() as connection:
+        autopilot.get_run(connection, run_id)  # the run is this account's
+    session = handoff_sessions.active(run_id, owner=str(user["user_id"]))
+    if session is None:
+        raise ValueError("Finish in browser is not open for this application.")
+    session.decide(choice)
+    _audit(
+        "autopilot.finish_in_browser_" + choice,
+        "application_run",
+        run_id,
+        {"kind": session.kind},
+    )
+    return {"handoff": session.view()}
 
 
 def _autopilot_apply_job_now(
@@ -11426,6 +11618,11 @@ class RequestHandler(BaseHTTPRequestHandler):
                 "job_url",
             )
         }
+        live = handoff_sessions.active(
+            run["run_id"], owner=str((user or {}).get("user_id") or "")
+        )
+        if live is not None:
+            run["handoff_live"] = live.view()
         self._send_json(200, {"run": run})
 
     @route("POST", r"/api/autopilot/runs/([0-9a-f]{32})/answer")
@@ -11480,6 +11677,32 @@ class RequestHandler(BaseHTTPRequestHandler):
         user: dict[str, Any] | None,
     ) -> None:
         self._send_json(200, _autopilot_mark_applied(match.group(1), payload))
+
+    @route("POST", r"/api/autopilot/runs/([0-9a-f]{32})/finish")
+    def api_autopilot_run_finish(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        # Finish in browser: a visible window on the held step (a CAPTCHA, a sign-in, a code); local build only.
+        assert user is not None
+        self._send_json(202, _autopilot_finish_in_browser(user, match.group(1)))
+
+    @route("POST", r"/api/autopilot/runs/([0-9a-f]{32})/finish/decision")
+    def api_autopilot_run_finish_decision(
+        self,
+        match: re.Match[str],
+        payload: dict[str, Any],
+        query: dict[str, list[str]],
+        user: dict[str, Any] | None,
+    ) -> None:
+        # {choice: done|give_up}: I'm done, or Give up, for the open Finish in browser window.
+        assert user is not None
+        self._send_json(
+            200, _autopilot_finish_decide(user, match.group(1), payload)
+        )
 
     @route("POST", r"/api/autopilot/runs/bulk")
     def api_autopilot_runs_bulk(

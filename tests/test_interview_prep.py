@@ -43,7 +43,7 @@ def ok(client, method, path, body=None, expect=(200, 201)):
 def test_migration_23_creates_the_story_and_prep_tables():
     connection = sqlite3.connect(":memory:")
     applied = schema.migrate(connection)
-    assert 23 in applied and schema.LATEST_VERSION == 23
+    assert 23 in applied and schema.LATEST_VERSION >= 23
     tables = {
         row[0]
         for row in connection.execute(
@@ -51,7 +51,7 @@ def test_migration_23_creates_the_story_and_prep_tables():
         )
     }
     assert {"star_stories", "interview_prep"} <= tables
-    assert schema.describe()[-1]["name"] == "interview_prep"
+    assert any(item["name"] == "interview_prep" for item in schema.describe())
 
 
 def test_story_drafts_come_from_resume_bullets_and_leave_the_context_to_the_person():

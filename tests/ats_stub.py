@@ -52,7 +52,17 @@ by redirect), ``GET /captcha-frame`` (what the CAPTCHA placeholder embeds).
 ``es_marker``        ``/submit`` answers 200 with Spanish success wording only
 ``de_marker``        ``/submit`` answers 200 with German success wording only
 ``de_applied``       the form is replaced by a German "already applied" notice
+``captcha_step``     a reCAPTCHA-style widget the *person* solves (Finish in browser): the page
+                     polls ``GET /captcha-state`` and, once ``stub.solve_captcha()`` was called,
+                     puts a token in ``g-recaptcha-response`` as a solved reCAPTCHA does;
+                     ``/submit`` refuses the form without that token
+``signin_step``      a sign-in page (email and password) until ``stub.sign_in()`` was called;
+                     the page polls ``GET /signin-state`` and reloads into the form
 ===================  =============================================================
+
+Every form visit without a ``stub_session`` cookie gets a new one, and each submission
+records the cookie it came with (``Submission.cookie``), so a test sees which browser
+state a run used.
 
 ``stub.submissions`` holds one :class:`Submission` per accepted POST (fields as
 ``{name: [values]}``, files as ``{name: UploadedFile}`` with the raw bytes) and
@@ -82,6 +92,8 @@ VARIANTS = (
     "es_marker",
     "de_marker",
     "de_applied",
+    "captcha_step",
+    "signin_step",
 )
 # Confirmation pages and an "already applied" notice in other languages (aira.apply_engine.CONFIRMATION_PHRASES).
 _LOCALE_CONFIRMATION = {
@@ -131,6 +143,27 @@ _CAPTCHA_HTML = (
     '<div class="g-recaptcha" data-sitekey="stub-site-key" style="margin:16px 0">'
     '<iframe title="reCAPTCHA" src="/captcha-frame" width="304" height="78"'
     ' role="presentation" style="border:0"></iframe></div>'
+)
+# A CAPTCHA a person solves: the widget keeps its place, as reCAPTCHA's does, and gets its answer when the test
+# says the person solved it.
+_CAPTCHA_STEP_HTML = (
+    '<div class="g-recaptcha" id="stub-captcha" data-sitekey="stub-site-key" style="margin:16px 0">'
+    '<iframe title="reCAPTCHA" src="/captcha-frame" width="304" height="78"'
+    ' role="presentation" style="border:0"></iframe>'
+    '<textarea name="g-recaptcha-response" style="display:none"></textarea></div>'
+    "<script>(function poll(){fetch('/captcha-state').then(function(r){return r.text();})"
+    ".then(function(t){if(t.trim()==='solved'){document.querySelector(\"textarea[name='g-recaptcha-response']\")"
+    ".value='stub-captcha-token';}else{setTimeout(poll,150);}})"
+    ".catch(function(){setTimeout(poll,300);});})();</script>"
+)
+_SIGNIN_PAGE = (
+    "<h1>Sign in to continue</h1><p>Sign in to your candidate account to apply.</p>"
+    '<form id="signin" onsubmit="return false"><p><label for="si-email">Email</label>'
+    '<input type="email" id="si-email" name="email"></p><p><label for="si-password">Password</label>'
+    '<input type="password" id="si-password" name="password"></p><button type="submit">Sign in</button></form>'
+    "<script>(function poll(){fetch('/signin-state').then(function(r){return r.text();})"
+    ".then(function(t){if(t.trim()==='signed-in'){location.reload();}else{setTimeout(poll,150);}})"
+    ".catch(function(){setTimeout(poll,300);});})();</script>"
 )
 _CAPTCHA_FRAME = (
     '<!doctype html><html><body style="font-family:Arial;border:1px solid #c1c1c1;'
@@ -271,6 +304,7 @@ class Submission:
     reference: str
     fields: dict[str, list[str]] = field(default_factory=dict)
     files: dict[str, UploadedFile] = field(default_factory=dict)
+    cookie: str = ""
 
     def value(self, name: str) -> str:
         """The single value of a field (``""`` when absent)."""
@@ -314,6 +348,14 @@ def _parse_body(
     return fields, files
 
 
+def _cookie(handler: BaseHTTPRequestHandler, name: str) -> str:
+    for part in str(handler.headers.get("Cookie") or "").split(";"):
+        key, _, value = part.strip().partition("=")
+        if key == name:
+            return value
+    return ""
+
+
 def _page(title: str, body: str) -> bytes:
     return (
         '<!doctype html><html lang="en"><head><meta charset="utf-8"><title>'
@@ -326,6 +368,9 @@ class AtsStub:
     def __init__(self) -> None:
         self.submissions: list[Submission] = []
         self.requests: list[tuple[str, str]] = []
+        self.captcha_solved = False
+        self.signed_in = False
+        self.sessions_issued: list[str] = []
         self._lock = threading.Lock()
         self._server: ThreadingHTTPServer | None = None
         self._thread: threading.Thread | None = None
@@ -391,6 +436,17 @@ class AtsStub:
         with self._lock:
             self.submissions.clear()
             self.requests.clear()
+            self.sessions_issued.clear()
+            self.captcha_solved = False
+            self.signed_in = False
+
+    def solve_captcha(self) -> None:
+        """What the person does in the window: the ``captcha_step`` widget gets its answer."""
+        self.captcha_solved = True
+
+    def sign_in(self) -> None:
+        """What the person does in the window: the ``signin_step`` page lets them through to the form."""
+        self.signed_in = True
 
     # -- pages ----------------------------------------------------------------
 
@@ -414,8 +470,15 @@ class AtsStub:
                 name=SENSITIVE_FIELD[ats], label=SENSITIVE_QUESTION
             )
         html = html.replace("<!-- stub:extra-questions -->", extra)
+        if variant == "signin_step" and not self.signed_in:
+            return re.sub(r"<form\b.*?</form>", _SIGNIN_PAGE, html, count=1, flags=re.S)
         html = html.replace(
-            "<!-- stub:captcha -->", _CAPTCHA_HTML if variant == "captcha" else ""
+            "<!-- stub:captcha -->",
+            _CAPTCHA_HTML
+            if variant == "captcha"
+            else _CAPTCHA_STEP_HTML
+            if variant == "captcha_step"
+            else "",
         )
         hidden = f'<input type="hidden" name="variant" value="{variant}">'
         return re.sub(r"(<form\b[^>]*>)", lambda m: m.group(1) + hidden, html, count=1)
@@ -435,6 +498,10 @@ class AtsStub:
         status, data, headers = 404, _page("Not found", "<h1>Not found</h1>"), {}
         if parts.path == "/captcha-frame":
             status, data = 200, _CAPTCHA_FRAME.encode("utf-8")
+        elif parts.path == "/captcha-state":
+            status, data = 200, (b"solved" if self.captcha_solved else b"waiting")
+        elif parts.path == "/signin-state":
+            status, data = 200, (b"signed-in" if self.signed_in else b"waiting")
         elif parts.path in ("/blocked", "/rate-limited"):
             # A site that refuses automated visitors, as job boards with bot protection do
             status = 403 if parts.path == "/blocked" else 429
@@ -446,6 +513,11 @@ class AtsStub:
                 if variant in VARIANTS:
                     status = 200
                     data = self.form_page(ats, variant).encode("utf-8")
+                    if not _cookie(handler, "stub_session"):
+                        with self._lock:
+                            session = f"s{len(self.sessions_issued) + 1}"
+                            self.sessions_issued.append(session)
+                        headers["Set-Cookie"] = f"stub_session={session}; Path=/"
             elif action in ("confirmation", "thanks") and handler.command == "GET":
                 status, data = 200, self.confirmation_page(ats, query.get("ref", ""))
             elif action == "submit" and handler.command == "POST":
@@ -463,6 +535,14 @@ class AtsStub:
     ) -> tuple[int, bytes, dict[str, str]]:
         fields, files = _parse_body(handler.headers.get("Content-Type", ""), body)
         variant = (fields.pop("variant", None) or [""])[0]
+        if variant == "captcha_step" and not (
+            fields.get("g-recaptcha-response") or [""]
+        )[0].strip():
+            return (
+                400,
+                _page("Error", "<h1>Please complete the CAPTCHA</h1>"),
+                {},
+            )
         if variant == "fail_submit":
             return (
                 500,
@@ -475,7 +555,16 @@ class AtsStub:
             )
         with self._lock:
             reference = f"{REFERENCE_PREFIX[ats]}-{10001 + len(self.submissions)}"
-            self.submissions.append(Submission(ats, variant, reference, fields, files))
+            self.submissions.append(
+                Submission(
+                    ats,
+                    variant,
+                    reference,
+                    fields,
+                    files,
+                    _cookie(handler, "stub_session"),
+                )
+            )
         if variant == "no_marker":
             return (
                 200,
