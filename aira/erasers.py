@@ -1409,7 +1409,13 @@ def sweep(connection: sqlite3.Connection, person: Person) -> dict[str, int]:
     for table, column, kind in erasure.contact_columns(connection):
         if not person.keys and table in careers:
             continue  # a business erasing a customer leaves the account's own job search alone
-        rowids = matching(connection, table, person, **{kind: (column,)})
+        rowids = matching(
+            connection,
+            table,
+            person,
+            emails=(column,) if kind == "emails" else (),
+            phones=(column,) if kind == "phones" else (),
+        )
         if not rowids:
             continue
         try:

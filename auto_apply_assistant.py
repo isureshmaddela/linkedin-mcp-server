@@ -11437,11 +11437,11 @@ class RequestHandler(BaseHTTPRequestHandler):
         user: dict[str, Any] | None,
     ) -> None:
         # {skills?: [...]}: drafts from the resume's bullets; nothing is saved until the person saves one.
-        skills = (
-            payload.get("skills") if isinstance(payload.get("skills"), list) else []
-        )
+        raw_skills = payload.get("skills")
+        skills: list[Any] = raw_skills if isinstance(raw_skills, list) else []
+        settings = _profile_settings() or {}
         drafts = interview_prep.story_drafts(
-            str(_profile_settings()["resume"] or ""),
+            str(settings.get("resume") or ""),
             [str(skill)[:60] for skill in skills[:12]],
         )
         self._send_json(200, {"drafts": drafts})

@@ -465,7 +465,8 @@ def may_serve(sc: sqlite3.Connection, file_id: str, viewer_id: str = "") -> bool
     viewer = None
     if viewer_id:
         found = row(sc, "SELECT * FROM vi_channels WHERE id = ?", (viewer_id,))
-        viewer = viewer_of(_channel(found)) if found else None
+        channel = _channel(found) if found else None
+        viewer = viewer_of(channel) if channel else None
         if viewer is None or viewer.get("suspended_at"):
             return False
     for video in videos:

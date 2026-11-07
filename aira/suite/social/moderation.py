@@ -318,9 +318,8 @@ def self_harm_intent(text: str) -> bool:
 def mask(text: str, *, extra_words: Iterable[str] = ()) -> str:
     """The text with swear words (and a moderator's own words) starred out, everything else as written."""
     out = str(text or "")
-    for term in sorted(
-        {*PROFANITY, *[w.lower() for w in extra_words if w]}, key=len, reverse=True
-    ):
+    terms: set[str] = {*PROFANITY, *[str(w).lower() for w in extra_words if w]}
+    for term in sorted(terms, key=lambda t: len(t), reverse=True):
         out = _loose(term).sub(lambda hit: "*" * len(hit.group(0)), out)
     return out
 

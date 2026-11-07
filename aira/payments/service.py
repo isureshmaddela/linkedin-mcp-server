@@ -1016,7 +1016,8 @@ def _refund_event(
         "SELECT * FROM payment_refunds WHERE provider_ref = ? AND provider_ref != ''",
         (provider_ref,),
     )
-    notes = entity.get("notes") if isinstance(entity.get("notes"), Mapping) else {}
+    raw_notes = entity.get("notes")
+    notes: Mapping[str, Any] = raw_notes if isinstance(raw_notes, Mapping) else {}
     if found is None and notes.get("monosage_refund"):
         found = kit.fetch_one(
             connection,

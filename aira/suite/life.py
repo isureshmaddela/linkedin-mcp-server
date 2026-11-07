@@ -852,7 +852,8 @@ def set_controls(
         raise ValueError("Parental controls are for children and teens.")
     if not is_guardian(actor, target):
         raise PermissionError("Only a parent or guardian can change these.")
-    wanted = raw.get("apps") if isinstance(raw.get("apps"), dict) else {}
+    raw_apps = raw.get("apps")
+    wanted: dict[str, Any] = raw_apps if isinstance(raw_apps, dict) else {}
     current = controls(connection, target)["apps"]
     for app, value in wanted.items():
         if app in ALWAYS_OFF_FOR_YOUNG:

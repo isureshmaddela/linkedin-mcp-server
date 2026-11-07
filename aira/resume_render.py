@@ -601,8 +601,11 @@ def parse_resume(text: str) -> ResumeDoc:
         if bullet:
             indent = len(bullet.group(1))
             body = bullet.group(2).strip()
-            if target.kind == "skills" and _LABEL_RE.match(_strip_marks(body)):
-                label, rest = _LABEL_RE.match(_strip_marks(body)).groups()  # type: ignore[union-attr]
+            labelled = (
+                _LABEL_RE.match(_strip_marks(body)) if target.kind == "skills" else None
+            )
+            if labelled:
+                label, rest = labelled.groups()
                 target.blocks.append(
                     Block("skill", [Run(label + ": ", bold=True), *inline_runs(rest)])
                 )

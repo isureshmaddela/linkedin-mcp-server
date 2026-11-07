@@ -390,8 +390,10 @@ def mask_payout(text: str) -> str:
     if upi:
         return f"{upi.group(1)[:2]}•••@{upi.group(2)}"
     # an account number may be written in groups ("1234 5678 9012", an IBAN): one run, separators dropped
-    runs = [re.sub(r"\D", "", run) for run in re.findall(r"\d(?:[\d \-]*\d)?", value)]
-    longest = max(runs, key=len) if runs else ""
+    runs: list[str] = [
+        re.sub(r"\D", "", run) for run in re.findall(r"\d(?:[\d \-]*\d)?", value)
+    ]
+    longest: str = max(runs, key=lambda run: len(run)) if runs else ""
     if len(longest) >= 4:
         return f"•••• {longest[-4:]}"
     return f"{value[:2]}•••"

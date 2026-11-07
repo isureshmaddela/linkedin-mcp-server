@@ -561,7 +561,15 @@ def preview_customer(
         raise ValueError("Type the customer's email address or phone number.")
     found: dict[str, int] = {}
     for table, column, kind in contact_columns(connection):
-        hits = len(matching(connection, table, person, **{kind: (column,)}))
+        hits = len(
+            matching(
+                connection,
+                table,
+                person,
+                emails=(column,) if kind == "emails" else (),
+                phones=(column,) if kind == "phones" else (),
+            )
+        )
         if hits:
             found[table] = found.get(table, 0) + hits
     return dict(sorted(found.items()))
@@ -804,7 +812,8 @@ def scrub_names(
 ) -> str:
     """``text`` with each of ``names`` (whole words, any case) replaced."""
     out = str(text or "")
-    for name in sorted({n for n in names if len(n) >= 3}, key=len, reverse=True):
+    wanted: set[str] = {str(n) for n in names if len(str(n)) >= 3}
+    for name in sorted(wanted, key=lambda n: len(n), reverse=True):
         out = re.sub(
             rf"(?<!\w){re.escape(name)}(?!\w)", replacement, out, flags=re.IGNORECASE
         )
